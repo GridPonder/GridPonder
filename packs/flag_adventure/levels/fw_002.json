@@ -1,0 +1,52 @@
+{
+  "id": "fw_002",
+  "title": "Rocky Road",
+  "board": {
+    "size": [5, 5],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 0], "kind": "rock"},
+          {"position": [4, 1], "kind": "rock"},
+          {"position": [1, 1], "kind": "wood"},
+          {"position": [1, 2], "kind": "rock"},
+          {"position": [4, 2], "kind": "rock"},
+          {"position": [1, 3], "kind": "wood"},
+          {"position": [3, 3], "kind": "rock"},
+          {"position": [1, 4], "kind": "wood"},
+          {"position": [4, 4], "kind": "rock"}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [4, 0], "kind": "flag"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"}
+  },
+  "goals": [
+    {"id": "reach_flag", "type": "reach_target", "config": {"targetTag": "goal_target"}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"}
+    ],
+    "hintStops": [4, 7, 10]
+  }
+}

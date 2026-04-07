@@ -1,0 +1,46 @@
+{
+  "id": "ds_001",
+  "title": "Diagonal Swap",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 2], "kind": "num_8"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            [null, null, "num_8"],
+            [null, null, null],
+            [null, null, null]
+          ]
+        }
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "diagonal_swap", "direction": "up_right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "diagonal_swap", "direction": "up_right"}
+    ],
+    "hintStops": [2, 4]
+  }
+}

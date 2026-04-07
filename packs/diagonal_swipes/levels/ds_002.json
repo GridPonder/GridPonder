@@ -1,0 +1,44 @@
+{
+  "id": "ds_002",
+  "title": "Sum Strategy",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": [
+        ["num_3", "num_4", "num_1"],
+        ["num_7", "num_1", "num_4"],
+        ["num_9", "num_2", "num_5"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["num_3", "num_4", "num_5"],
+            ["num_7", "num_1", "num_4"],
+            ["num_9", "num_2", "num_1"]
+          ]
+        }
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "diagonal_swap", "direction": "up_left"},
+      {"action": "move", "direction": "up"},
+      {"action": "diagonal_swap", "direction": "up_right"}
+    ],
+    "hintStops": [2, 4]
+  }
+}

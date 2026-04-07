@@ -1,0 +1,122 @@
+{
+  "layers": [
+    {
+      "id": "ground",
+      "occupancy": "exactly_one",
+      "default": "empty"
+    },
+    {
+      "id": "objects",
+      "occupancy": "zero_or_one"
+    }
+  ],
+  "entityKinds": {
+    "empty": {
+      "layer": "ground",
+      "tags": [
+        "walkable"
+      ],
+      "sprite": null,
+      "symbol": "."
+    },
+    "void": {
+      "layer": "ground",
+      "tags": [
+        "void"
+      ],
+      "sprite": null,
+      "symbol": "_"
+    },
+    "pipe": {
+      "layer": "ground",
+      "tags": [],
+      "sprite": null,
+      "symbol": "│"
+    },
+    "number": {
+      "layer": "objects",
+      "tags": [
+        "mergeable"
+      ],
+      "sprite": null,
+      "symbol": "n",
+      "symbolParam": "value"
+    }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": {
+        "direction": {
+          "type": "direction",
+          "values": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        }
+      }
+    }
+  ],
+  "systems": [
+    {
+      "id": "slide_merge",
+      "type": "slide_merge",
+      "config": {
+        "slideAction": "move",
+        "affectedLayer": "objects",
+        "affectedTag": "mergeable",
+        "mergePredicate": "same_kind",
+        "mergeResult": "sum",
+        "mergeLimit": 1
+      }
+    },
+    {
+      "id": "queued_emitters",
+      "type": "queued_emitters",
+      "config": {
+        "emitterKind": "pipe"
+      }
+    }
+  ],
+  "rules": [],
+  "defaults": {
+    "avatar": {
+      "enabled": false
+    },
+    "maxCascadeDepth": 5
+  },
+  "ui": {
+    "showGoal": true,
+    "showGuide": true
+  },
+  "levelSequence": [
+    {
+      "type": "story",
+      "title": "Crunch Time",
+      "text": "These numbers have been sitting in a grid all day, bored out of their minds. They want to collide. They want to merge. They want to become something bigger.\n\nYour job: slide them together in just the right order. The sequence shown at the top is their destiny \u2014 don't let them down.\n",
+      "image": "assets/number_cells.png"
+    },
+    {
+      "type": "level",
+      "ref": "nc_001"
+    },
+    {
+      "type": "level",
+      "ref": "nc_002"
+    },
+    {
+      "type": "level",
+      "ref": "nc_003"
+    },
+    {
+      "type": "level",
+      "ref": "nc_004"
+    },
+    {
+      "type": "level",
+      "ref": "nc_005"
+    }
+  ]
+}

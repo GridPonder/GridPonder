@@ -1,0 +1,70 @@
+{
+  "layers": [
+    {
+      "id": "ground",
+      "occupancy": "exactly_one",
+      "default": "empty"
+    },
+    {
+      "id": "objects",
+      "occupancy": "zero_or_one"
+    }
+  ],
+  "entityKinds": {
+    "empty": {
+      "layer": "ground",
+      "tags": [
+        "walkable"
+      ],
+      "sprite": null,
+      "symbol": "."
+    },
+    "cell_blue": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "b"
+    },
+    "cell_green": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "g"
+    }
+  },
+  "actions": [
+    {
+      "id": "flood",
+      "params": {}
+    }
+  ],
+  "systems": [
+    {
+      "id": "flood_fill",
+      "type": "flood_fill",
+      "config": {
+        "floodAction": "flood",
+        "sourcePosition": "avatar",
+        "affectedLayer": "objects",
+        "matchBy": "kind",
+        "kindTransform": {
+          "cell_blue": "cell_green"
+        }
+      }
+    }
+  ],
+  "rules": [],
+  "defaults": {
+    "avatar": {
+      "enabled": true,
+      "facing": "right"
+    },
+    "maxCascadeDepth": 1
+  },
+  "levelSequence": [
+    {
+      "type": "level",
+      "ref": "fl_001"
+    }
+  ]
+}

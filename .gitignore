@@ -1,0 +1,37 @@
+# Dart/Flutter build artifacts
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.metadata
+
+# Dart pub
+.pub-cache/
+.pub/
+
+# Python virtual environments
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Test output artifacts
+tools/tile-gen/test-output/
+app/test/screenshots/
+
+# Claude Code local settings (developer-specific; skills in .claude/skills/ are shared)
+.claude/settings.json
+.claude/settings.local.json
+.claude/memory/

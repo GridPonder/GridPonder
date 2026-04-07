@@ -1,0 +1,41 @@
+{
+  "id": "fw_001",
+  "title": "First Steps",
+  "board": {
+    "size": [5, 3],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 0], "kind": "wood"},
+          {"position": [3, 1], "kind": "rock"}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [4, 0], "kind": "flag"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"}
+  },
+  "goals": [
+    {"id": "reach_flag", "type": "reach_target", "config": {"targetTag": "goal_target"}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "up"}
+    ],
+    "hintStops": [2, 5]
+  }
+}

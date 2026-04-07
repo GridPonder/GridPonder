@@ -1,0 +1,51 @@
+{
+  "id": "rf_002",
+  "title": "Flip and Rotate",
+  "board": {
+    "size": [4, 3],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "cell_red"},
+          {"position": [1, 0], "kind": "cell_blue"},
+          {"position": [2, 0], "kind": "cell_green"},
+          {"position": [0, 1], "kind": "cell_yellow"},
+          {"position": [1, 1], "kind": "cell_purple"},
+          {"position": [2, 1], "kind": "cell_orange"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["cell_blue", "cell_red", "cell_orange", null],
+            ["cell_purple", "cell_yellow", "cell_green", null],
+            [null, null, null, null]
+          ]
+        }
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "flip"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "flip"},
+      {"action": "rotate"},
+      {"action": "rotate"}
+    ],
+    "hintStops": [2, 4]
+  }
+}

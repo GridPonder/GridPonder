@@ -1,0 +1,41 @@
+{
+  "id": "fl_001",
+  "title": "Flood Fill",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "objects": [
+        ["cell_blue", "cell_blue", "cell_blue", "cell_blue"],
+        ["cell_blue", "cell_blue", "cell_blue", "cell_blue"],
+        ["cell_blue", "cell_blue", "cell_blue", "cell_blue"],
+        ["cell_blue", "cell_blue", "cell_blue", "cell_blue"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["cell_green", "cell_green", "cell_green", "cell_green"],
+            ["cell_green", "cell_green", "cell_green", "cell_green"],
+            ["cell_green", "cell_green", "cell_green", "cell_green"],
+            ["cell_green", "cell_green", "cell_green", "cell_green"]
+          ]
+        }
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "flood"}
+    ],
+    "hintStops": []
+  }
+}

@@ -1,0 +1,14 @@
+name: gridponder_engine
+description: Pure Dart engine for GridPonder DSL v0.1.0 game packs.
+version: 0.1.0
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  collection: ^1.18.0
+  http: ^1.2.0
+
+dev_dependencies:
+  test: ^1.24.0
+  lints: ^3.0.0

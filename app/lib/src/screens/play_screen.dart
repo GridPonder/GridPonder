@@ -1,0 +1,1048 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:gridponder_engine/engine.dart';
+import '../services/hint_service.dart';
+import '../services/pack_service.dart';
+import '../services/settings_service.dart';
+import '../widgets/board_renderer.dart';
+import '../widgets/controls_widget.dart';
+
+class PlayScreen extends StatefulWidget {
+  final PackService packService;
+  final SettingsService settings;
+  final String? startLevelId;
+
+  const PlayScreen({
+    super.key,
+    required this.packService,
+    required this.settings,
+    this.startLevelId,
+  });
+
+  @override
+  State<PlayScreen> createState() => _PlayScreenState();
+}
+
+class _PlayScreenState extends State<PlayScreen> {
+  late List<SequenceEntry> _sequence;
+  late int _seqIndex;
+  late List<String> _levelIds;
+  late LevelDefinition _levelDef;
+  late TurnEngine _engine;
+  late HintService _hintService;
+
+  SequenceEntry get _currentEntry => _sequence[_seqIndex];
+  bool get _isShowingStory => _currentEntry.type == 'story';
+
+  /// 0-based index of the current level among all levels (for status bar).
+  int get _levelIndex {
+    int count = 0;
+    for (int i = 0; i < _seqIndex; i++) {
+      if (_sequence[i].type == 'level') count++;
+    }
+    return count;
+  }
+
+  // Swipe detection (covers full screen)
+  Offset? _panStart;
+  static const double _swipeThreshold = 18.0;
+
+  // Periodic timer to refresh hint dot availability
+  Timer? _hintRefreshTimer;
+
+  // Animation state: non-null while an entity animation is playing.
+  LevelState? _preAnimState;
+  Map<Position, String>? _animOverlays;
+  bool _animating = false;
+
+  // AI play state
+  bool _aiRunning = false;
+  String? _lastThinking;
+  int _agentAttempt = 1;
+  StreamSubscription<AgentStepEvent>? _agentSub;
+  GridPonderAgent? _currentAgent;
+
+  /// Persistent memory per level ID — survives stop/start, cleared on level change.
+  final Map<String, String> _agentMemory = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _sequence = widget.packService.sequence;
+    _levelIds = widget.packService.levelIds;
+    final startId = widget.startLevelId;
+    if (startId != null) {
+      // For integration tests: jump directly to the requested level.
+      final idx = _sequence.indexWhere(
+          (e) => e.type == 'level' && e.ref == startId);
+      _seqIndex = idx >= 0 ? idx : 0;
+    } else {
+      _seqIndex = 0; // may start on a story entry
+    }
+    if (!_isShowingStory) _loadLevelById(_currentEntry.ref!);
+
+    // Refresh hint dots every 10 s so they light up promptly when time elapses
+    _hintRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  @override
+  void dispose() {
+    _hintRefreshTimer?.cancel();
+    _agentSub?.cancel();
+    super.dispose();
+  }
+
+  SettingsService get s => widget.settings;
+
+  void _loadLevelById(String levelId) {
+    _stopAgent();
+    _levelDef = widget.packService.level(levelId);
+    _engine = TurnEngine(widget.packService.game, _levelDef);
+    _hintService = HintService(hintStops: _levelDef.solution.hintStops);
+    _lastThinking = null;
+    _agentAttempt = 1;
+    _agentMemory.clear();
+  }
+
+  Future<void> _onAction(GameAction action) async {
+    if (_aiRunning || _animating) return;
+    final preState = _engine.state.copy();
+    final result = _engine.executeTurn(action);
+    if (!result.accepted) return;
+
+    final entityAnims = result.animations
+        .where((s) => s.type == 'entity_animation')
+        .toList();
+
+    if (entityAnims.isNotEmpty) {
+      setState(() => _animating = true);
+      for (final step in entityAnims) {
+        if (!mounted) return;
+        await _playEntityAnimation(preState, step);
+      }
+      if (!mounted) return;
+      setState(() {
+        _animating = false;
+        _preAnimState = null;
+        _animOverlays = null;
+      });
+    } else {
+      setState(() {});
+    }
+  }
+
+  Future<void> _playEntityAnimation(LevelState preState, AnimationStep step) async {
+    final kindDef = widget.packService.game.entityKinds[step.entityKind];
+    final animDef = kindDef?.animations[step.animationName!];
+    if (animDef == null || animDef.frames.isEmpty) return;
+
+    // Remove the entity from the board so frames render cleanly over the
+    // ground tile — no original sprite bleeding through transparent pixels.
+    final cleanState = preState.copy();
+    cleanState.board.setEntity('objects', step.position, null);
+
+    final frameMs = (animDef.durationMs / animDef.frames.length).round();
+    for (final framePath in animDef.frames) {
+      if (!mounted) return;
+      setState(() {
+        _preAnimState = cleanState;
+        _animOverlays = {step.position: widget.packService.resolveSprite(framePath)};
+      });
+      await Future.delayed(Duration(milliseconds: frameMs));
+    }
+  }
+
+  void _onUndo() {
+    if (_aiRunning) return;
+    setState(() => _engine.undo());
+  }
+
+  void _onReset() {
+    _stopAgent();
+    setState(() {
+      _engine.reset();
+      _lastThinking = null;
+    });
+  }
+
+  /// Advance to the next sequence entry. If it's a level, load it.
+  void _advance() {
+    setState(() {
+      _seqIndex = (_seqIndex + 1) % _sequence.length;
+      if (!_isShowingStory) _loadLevelById(_currentEntry.ref!);
+    });
+  }
+
+  /// Jump back one sequence entry (story or level).
+  void _prevEntry() {
+    setState(() {
+      if (_seqIndex > 0) {
+        _seqIndex--;
+        if (!_isShowingStory) _loadLevelById(_currentEntry.ref!);
+      }
+    });
+  }
+
+  /// Jump back to the previous level (skipping story entries).
+  void _prevLevel() {
+    setState(() {
+      var i = _seqIndex - 1;
+      while (i >= 0 && _sequence[i].type != 'level') i--;
+      if (i >= 0) {
+        _seqIndex = i;
+        _loadLevelById(_currentEntry.ref!);
+      }
+    });
+  }
+
+  void _onExit() => Navigator.pop(context);
+
+  // ---------------------------------------------------------------------------
+  // Swipe detection (full-screen)
+  // ---------------------------------------------------------------------------
+
+  bool get _hasDiagonalSwap =>
+      widget.packService.game.actions.any((a) => a.id == 'diagonal_swap');
+  bool get _hasMoveAction =>
+      widget.packService.game.actions.any((a) => a.id == 'move');
+
+  void _onPanStart(DragStartDetails d) => _panStart = d.globalPosition;
+  void _onPanCancel() => _panStart = null;
+  void _onPanEnd(DragEndDetails _) => _panStart = null;
+
+  void _onPanUpdate(DragUpdateDetails details) {
+    if (_panStart == null) return;
+    final delta = details.globalPosition - _panStart!;
+    if (delta.distance < _swipeThreshold) return;
+
+    final action = _detectSwipeAction(delta);
+    if (action == null) return;
+
+    _panStart = null;
+    _onAction(action);
+  }
+
+  GameAction? _detectSwipeAction(Offset delta) {
+    final ax = delta.dx.abs();
+    final ay = delta.dy.abs();
+    if (ax < _swipeThreshold && ay < _swipeThreshold) return null;
+
+    if (_hasDiagonalSwap &&
+        ax > _swipeThreshold * 0.5 &&
+        ay > _swipeThreshold * 0.5) {
+      final diagDir = _diagonalDir(delta);
+      if (diagDir != null) {
+        return GameAction('diagonal_swap', {'direction': diagDir});
+      }
+    }
+
+    if (!_hasMoveAction) return null;
+    final String dir;
+    if (ax > ay) {
+      dir = delta.dx > 0 ? 'right' : 'left';
+    } else {
+      dir = delta.dy > 0 ? 'down' : 'up';
+    }
+    return GameAction('move', {'direction': dir});
+  }
+
+  String? _diagonalDir(Offset delta) {
+    final ax = delta.dx.abs();
+    final ay = delta.dy.abs();
+    if (ax < ay * 0.35 || ay < ax * 0.35) return null;
+    if (delta.dx < 0 && delta.dy < 0) return 'up_left';
+    if (delta.dx > 0 && delta.dy < 0) return 'up_right';
+    if (delta.dx < 0 && delta.dy > 0) return 'down_left';
+    return 'down_right';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hint system
+  // ---------------------------------------------------------------------------
+
+  Future<void> _onHint() async {
+    final idx = _hintService.nextIndex;
+    if (idx < 0) return;
+
+    // If not at the starting state, confirm before resetting
+    if (_engine.undoDepth > 0) {
+      final proceed = await _showHintConfirmation();
+      if (!proceed) return;
+    }
+
+    await _playHint(idx);
+  }
+
+  Future<bool> _showHintConfirmation() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(Icons.lightbulb_outline,
+                color: Colors.amber.shade600, size: 26),
+            const SizedBox(width: 10),
+            const Text('Use Hint',
+                style:
+                    TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Hints replay the gold path from the start.',
+              style: TextStyle(fontSize: 15, height: 1.4),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.orange.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.refresh,
+                      color: Colors.orange.shade700, size: 18),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'The level will be reset to its starting state.',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: Text('Cancel',
+                style: TextStyle(color: Colors.grey.shade600)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.amber.shade600,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Reset & Play Hint',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
+      ),
+    );
+    return result == true;
+  }
+
+  Future<void> _playHint(int hintIndex) async {
+    _hintService.markUsed(hintIndex);
+    final stopCount = _levelDef.solution.hintStops[hintIndex];
+    final goldPath = _levelDef.solution.goldPath;
+
+    setState(() => _engine.reset());
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    for (int i = 0; i < stopCount && i < goldPath.length; i++) {
+      if (!mounted) return;
+      setState(() => _engine.executeTurn(goldPath[i]));
+      await Future.delayed(const Duration(milliseconds: 500));
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // AI play
+  // ---------------------------------------------------------------------------
+
+  GridPonderAgent _buildAgent() {
+    if (s.agentType == 'llm') {
+      final key = s.apiKey;
+      if (key == null || key.isEmpty) {
+        throw Exception('No API key set. Add it in Settings.');
+      }
+      return LlmAgent(
+        apiKey: key,
+        model: s.llmModel,
+        thinkingEnabled: s.thinkingEnabled,
+        initialMemory: _agentMemory[_currentEntry.ref] ?? '',
+      );
+    }
+    return RandomAgent();
+  }
+
+  void _startAgent() {
+    GridPonderAgent agent;
+    try {
+      agent = _buildAgent();
+    } catch (e) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.toString())));
+      return;
+    }
+
+    _engine.reset();
+    setState(() {
+      _aiRunning = true;
+      _lastThinking = null;
+      _agentAttempt = 1;
+      _currentAgent = agent;
+    });
+
+    final runner = AgentRunner();
+    final levelId = _currentEntry.ref!;
+    final stream = runner.run(
+      _engine,
+      agent,
+      stepDelay: Duration(
+          milliseconds:
+              s.playbackMode == 'continuous' ? s.stepDelayMs : 0),
+      autoResetMultiplier: s.autoResetMultiplier,
+    );
+
+    _agentSub = stream.listen(
+      (event) {
+        if (!mounted) return;
+        if (event is AgentStepThinking) {
+          setState(() => _lastThinking = (_lastThinking ?? '') + event.delta);
+        } else if (event is AgentStepActed) {
+          setState(() => _lastThinking = event.result.thinking);
+          if (s.playbackMode == 'step') _agentSub?.pause();
+        } else if (event is AgentStepMemoryUpdated) {
+          _agentMemory[levelId] = event.memory;
+        } else if (event is AgentStepReset) {
+          setState(() {
+            _agentAttempt = event.attempt;
+            _lastThinking = null;
+          });
+        } else if (event is AgentRunFinished) {
+          setState(() => _aiRunning = false);
+        }
+      },
+      onError: (e) {
+        if (!mounted) return;
+        setState(() => _aiRunning = false);
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Agent error: $e')));
+      },
+      onDone: () {
+        if (mounted) setState(() => _aiRunning = false);
+      },
+    );
+  }
+
+  void _stopAgent() {
+    _agentSub?.cancel();
+    _agentSub = null;
+    if (mounted) setState(() => _aiRunning = false);
+  }
+
+  void _showTextDialog(String title, String? content) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title,
+            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: SingleChildScrollView(
+            child: Text(
+              content?.isNotEmpty == true ? content! : '(empty)',
+              style: const TextStyle(fontSize: 12, height: 1.5,
+                  fontFamily: 'monospace'),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPrompt() {
+    final agent = _currentAgent;
+    String? prompt;
+    if (agent is LlmAgent) {
+      prompt = agent.lastPrompt;
+    }
+    _showTextDialog('Last Prompt', prompt ?? '(no prompt sent yet)');
+  }
+
+  void _showMemory() {
+    final levelId = _currentEntry.ref;
+    final agent = _currentAgent;
+    // Live memory from the running agent takes priority (may differ from saved map).
+    String? memory;
+    if (agent is LlmAgent) {
+      memory = agent.memory.isNotEmpty ? agent.memory : null;
+    }
+    memory ??= levelId != null ? _agentMemory[levelId] : null;
+    _showTextDialog('Agent Memory', memory);
+  }
+
+  void _stepAgent() {
+    if (_agentSub != null && _agentSub!.isPaused) {
+      setState(() => _lastThinking = null);
+      _agentSub!.resume();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    if (_isShowingStory) return _buildStoryScaffold(_currentEntry);
+
+    final state = _preAnimState ?? _engine.state;
+    final levelId = _currentEntry.ref!;
+    final hintStatuses = _hintService.statuses;
+    final hintAvailable = _hintService.hasAnyAvailable && !_aiRunning;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F0E8),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: Text(
+          _levelDef.title ?? levelId,
+          style: const TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+              color: Colors.black87),
+        ),
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.black54),
+          onPressed: _onExit,
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.navigate_before, color: Colors.black54),
+            onPressed: _prevLevel,
+          ),
+          IconButton(
+            icon: const Icon(Icons.navigate_next, color: Colors.black54),
+            onPressed: _advance,
+          ),
+        ],
+      ),
+      body: Focus(
+        autofocus: true,
+        onKeyEvent: (_, event) {
+          if (_aiRunning) return KeyEventResult.ignored;
+          if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          final String? dir = switch (event.logicalKey) {
+            LogicalKeyboardKey.arrowUp => 'up',
+            LogicalKeyboardKey.arrowDown => 'down',
+            LogicalKeyboardKey.arrowLeft => 'left',
+            LogicalKeyboardKey.arrowRight => 'right',
+            _ => null,
+          };
+          if (dir == null || !_hasMoveAction) return KeyEventResult.ignored;
+          _onAction(GameAction('move', {'direction': dir}));
+          return KeyEventResult.handled;
+        },
+        child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onPanStart: _aiRunning ? null : _onPanStart,
+        onPanUpdate: _aiRunning ? null : _onPanUpdate,
+        onPanEnd: _aiRunning ? null : _onPanEnd,
+        onPanCancel: _aiRunning ? null : _onPanCancel,
+        child: SafeArea(
+        child: Column(
+          children: [
+            _buildStatusBar(state),
+            if (widget.packService.game.ui.showGoal ||
+                widget.packService.game.ui.showGuide)
+              _buildGoalGuidePanel(state),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Center(
+                  child: BoardRenderer(
+                    state: state,
+                    game: widget.packService.game,
+                    packService: widget.packService,
+                    animationOverlays: _animOverlays,
+                  ),
+                ),
+              ),
+            ),
+            if (state.isWon) _buildWinBanner(),
+            if (s.aiPlayEnabled && !state.isWon && _aiRunning) _buildAiPanel(),
+            if (s.aiPlayEnabled && !state.isWon && !_aiRunning) _buildAiStartButton(),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: ControlsWidget(
+                game: widget.packService.game,
+                onAction: _onAction,
+                onUndo: _onUndo,
+                onReset: _onReset,
+                onExit: _onExit,
+                onHint: hintAvailable ? _onHint : null,
+                canUndo: _engine.undoDepth > 0 && !_aiRunning,
+                hintStatuses: hintStatuses,
+              ),
+            ),
+          ],
+        ),
+      ),
+      ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Goal / Guide panel
+  // ---------------------------------------------------------------------------
+
+  Widget _buildGoalGuidePanel(LevelState state) {
+    final ui = widget.packService.game.ui;
+    final showGoal = ui.showGoal && _levelDef.goals.isNotEmpty;
+    final showGuide = ui.showGuide && (_levelDef.guide?.isNotEmpty ?? false);
+
+    if (!showGoal && !showGuide) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (showGoal) ...[
+              Expanded(child: _buildGoalPanel(state)),
+              if (showGuide) const SizedBox(width: 10),
+            ],
+            if (showGuide) Expanded(child: _buildGuidePanel()),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGoalPanel(LevelState state) {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: Colors.grey.shade300),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Icon(Icons.flag_outlined, color: Colors.green.shade600, size: 14),
+            const SizedBox(width: 4),
+            Text('Goal',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade700)),
+          ]),
+          const SizedBox(height: 6),
+          _buildGoalContent(state),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildGoalContent(LevelState state) {
+    for (final goal in _levelDef.goals) {
+      if (goal.type == 'sequence_match') {
+        final sequence = (goal.config['sequence'] as List?)
+            ?.map((e) => e as int)
+            .toList();
+        if (sequence != null) {
+          final matched = state.sequenceIndices[goal.id] ?? 0;
+          return _buildSequenceGoal(sequence, matched);
+        }
+      }
+      if (goal.type == 'board_match') {
+        final targetLayers = goal.config['targetLayers'] as Map<String, dynamic>?;
+        if (targetLayers != null) {
+          return Center(
+            child: TargetBoardRenderer(
+                targetLayers: targetLayers, currentState: state),
+          );
+        }
+      }
+    }
+    // Fallback: show goal type as text
+    final goalType = _levelDef.goals.first.type.replaceAll('_', ' ');
+    return Text(goalType, style: const TextStyle(fontSize: 12));
+  }
+
+  Widget _buildSequenceGoal(List<int> sequence, int matched) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        for (int i = 0; i < sequence.length; i++) ...[
+          _buildGoalCircle(sequence[i], i < matched),
+          if (i < sequence.length - 1) ...[
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_forward,
+                size: 12, color: Colors.grey.shade500),
+            const SizedBox(width: 4),
+          ],
+        ],
+      ],
+    );
+  }
+
+  Widget _buildGoalCircle(int number, bool achieved) {
+    return Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: achieved ? Colors.amber.shade400 : Colors.white,
+        border: Border.all(
+          color: achieved ? Colors.amber.shade700 : Colors.grey.shade400,
+          width: achieved ? 2.5 : 1.5,
+        ),
+      ),
+      child: Center(
+        child: Text(
+          '$number',
+          style: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: achieved ? Colors.white : Colors.grey.shade700,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGuidePanel() {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.blue.shade50,
+        border: Border.all(color: Colors.blue.shade200),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(children: [
+            Icon(Icons.info_outline, color: Colors.blue.shade600, size: 14),
+            const SizedBox(width: 4),
+            Text('Guide',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue.shade700)),
+          ]),
+          const SizedBox(height: 6),
+          Text(
+            _levelDef.guide!,
+            style: TextStyle(
+                fontSize: 11, color: Colors.blue.shade900, height: 1.4),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Story view
+  // ---------------------------------------------------------------------------
+
+  Widget _buildStoryScaffold(SequenceEntry entry) {
+    final imageAsset = entry.image != null
+        ? widget.packService.resolvePackAsset(entry.image!)
+        : null;
+
+    return Scaffold(
+      backgroundColor: const Color(0xFFF5F0E8),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios, color: Colors.black54),
+          onPressed: _onExit,
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.navigate_before, color: Colors.black54),
+            onPressed: _prevEntry,
+          ),
+          IconButton(
+            icon: const Icon(Icons.navigate_next, color: Colors.black54),
+            onPressed: _advance,
+          ),
+        ],
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            if (imageAsset != null)
+              Expanded(
+                flex: 5,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
+                  child: Image.asset(imageAsset, fit: BoxFit.contain),
+                ),
+              ),
+            Expanded(
+              flex: 4,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(28, 16, 28, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (entry.title != null) ...[
+                      Text(
+                        entry.title!,
+                        style: const TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    if (entry.text != null)
+                      Text(
+                        entry.text!,
+                        style: TextStyle(
+                          fontSize: 15,
+                          color: Colors.grey.shade800,
+                          height: 1.55,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(28, 4, 28, 20),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _advance,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF4CAF50),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text("Let's go!",
+                      style: TextStyle(
+                          fontSize: 16, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusBar(LevelState state) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Row(
+        children: [
+          Text('${_levelIndex + 1}/${_levelIds.length}',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+          const Spacer(),
+          if (_aiRunning) ...[
+            Text('Attempt: $_agentAttempt',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+            const SizedBox(width: 12),
+          ],
+          Text('Moves: ${state.actionCount}',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+          const SizedBox(width: 4),
+          GestureDetector(
+            onTap: () {
+              final boardText = TextRenderer.render(state, widget.packService.game);
+              Clipboard.setData(ClipboardData(text: boardText));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                    content: Text('Grid copied to clipboard'),
+                    duration: Duration(seconds: 1)),
+              );
+            },
+            child: Icon(Icons.content_copy, size: 14, color: Colors.grey.shade400),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWinBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.green.shade400,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Level Complete!',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          ElevatedButton(
+            onPressed: _advance,
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
+                foregroundColor: Colors.green.shade700),
+            child: const Text('Next Level'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAiStartButton() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+      child: Align(
+        alignment: Alignment.centerRight,
+        child: TextButton.icon(
+          icon: const Icon(Icons.smart_toy_outlined, size: 18),
+          label: const Text('Start AI'),
+          onPressed: _startAgent,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAiPanel() {
+    final isPaused = _agentSub?.isPaused ?? false;
+    final isStep = s.playbackMode == 'step';
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.smart_toy_outlined,
+                  size: 16, color: Colors.indigo.shade400),
+              const SizedBox(width: 6),
+              Text(
+                isStep
+                    ? (isPaused ? 'AI ready' : 'AI thinking…')
+                    : 'AI playing…',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.indigo.shade700),
+              ),
+              const Spacer(),
+              if (_currentAgent is LlmAgent) ...[
+                _debugButton('P', _showPrompt),
+                const SizedBox(width: 4),
+                _debugButton('M', _showMemory),
+                const SizedBox(width: 4),
+              ],
+              if (isStep && isPaused) ...[
+                TextButton.icon(
+                  icon: const Icon(Icons.person_outline, size: 18),
+                  label: const Text('Take over'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.grey.shade700),
+                  onPressed: _stopAgent,
+                ),
+                TextButton.icon(
+                  icon: const Icon(Icons.skip_next, size: 18),
+                  label: const Text('Next Step'),
+                  onPressed: _stepAgent,
+                ),
+              ] else ...[
+                TextButton.icon(
+                  icon: const Icon(Icons.person_outline, size: 18),
+                  label: const Text('Take over'),
+                  style: TextButton.styleFrom(foregroundColor: Colors.grey.shade700),
+                  onPressed: _stopAgent,
+                ),
+              ],
+            ],
+          ),
+          if (_lastThinking != null && _lastThinking!.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.indigo.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              constraints: const BoxConstraints(maxHeight: 120),
+              child: SingleChildScrollView(
+                child: _buildThinkingText(_lastThinking!),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildThinkingText(String text) {
+    final parts = text.split('```');
+    final baseStyle = TextStyle(
+        fontSize: 12, color: Colors.indigo.shade800, height: 1.4);
+    final monoStyle = baseStyle.copyWith(fontFamily: 'Courier');
+
+    final spans = <TextSpan>[];
+    for (int i = 0; i < parts.length; i++) {
+      if (parts[i].isEmpty) continue;
+      spans.add(TextSpan(text: parts[i], style: i.isOdd ? monoStyle : baseStyle));
+    }
+    return RichText(text: TextSpan(children: spans));
+  }
+
+  Widget _debugButton(String label, VoidCallback onPressed) {
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(4),
+          color: Colors.grey.shade100,
+        ),
+        child: Text(label,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade600,
+                fontFamily: 'monospace')),
+      ),
+    );
+  }
+}

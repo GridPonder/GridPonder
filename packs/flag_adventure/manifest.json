@@ -1,0 +1,10 @@
+{
+  "dslVersion": "0.1.0",
+  "packVersion": 1,
+  "gameId": "flag_adventure",
+  "title": "Carrot Quest",
+  "description": "A famished rabbit on the hunt for every last carrot",
+  "coverImage": "assets/rabbit_reaching_for_carrot.png",
+  "version": "1.0.0",
+  "minEngineVersion": "0.1.0"
+}

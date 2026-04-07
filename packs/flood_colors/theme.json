@@ -1,0 +1,12 @@
+{
+  "primaryColor": "#FF9800",
+  "controls": {
+    "gestureMap": [
+      {
+        "gesture": "tap_cell",
+        "action": "flood",
+        "paramMapping": {"position": "tap_position"}
+      }
+    ]
+  }
+}

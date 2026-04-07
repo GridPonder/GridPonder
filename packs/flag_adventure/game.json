@@ -1,0 +1,309 @@
+{
+  "layers": [
+    {
+      "id": "ground",
+      "occupancy": "exactly_one",
+      "default": "empty"
+    },
+    {
+      "id": "objects",
+      "occupancy": "zero_or_one"
+    },
+    {
+      "id": "markers",
+      "occupancy": "zero_or_one"
+    }
+  ],
+  "entityKinds": {
+    "empty": {
+      "layer": "ground",
+      "tags": [
+        "walkable"
+      ],
+      "symbol": "."
+    },
+    "water": {
+      "layer": "ground",
+      "tags": [
+        "liquid",
+        "walkable"
+      ],
+      "sprite": "assets/sprites/water.png",
+      "symbol": "≈"
+    },
+    "bridge": {
+      "layer": "ground",
+      "tags": [
+        "walkable"
+      ],
+      "sprite": "assets/sprites/bridge.png",
+      "symbol": "="
+    },
+    "rock": {
+      "layer": "objects",
+      "tags": [
+        "solid",
+        "breakable"
+      ],
+      "sprite": "assets/sprites/rock.png",
+      "animations": {
+        "breaking": {
+          "frames": [
+            "assets/sprites/rock_with_cracks.png",
+            "assets/sprites/rock_broken.png"
+          ],
+          "duration": 800,
+          "mode": "once"
+        }
+      },
+      "symbol": "R"
+    },
+    "wood": {
+      "layer": "objects",
+      "tags": [
+        "solid",
+        "pushable",
+        "burnable"
+      ],
+      "sprite": "assets/sprites/wood.png",
+      "animations": {
+        "burning": {
+          "frames": [
+            "assets/sprites/wood_fire_ignites.png",
+            "assets/sprites/wood_full_burn.png",
+            "assets/sprites/wood_smoke_and_ash.png"
+          ],
+          "duration": 1200,
+          "mode": "once"
+        }
+      },
+      "symbol": "W"
+    },
+    "metal_crate": {
+      "layer": "objects",
+      "tags": [
+        "solid",
+        "pushable",
+        "sinkable"
+      ],
+      "sprite": "assets/sprites/metal_crate.png",
+      "symbol": "C"
+    },
+    "torch": {
+      "layer": "objects",
+      "tags": [
+        "pickup"
+      ],
+      "sprite": "assets/sprites/torch.png",
+      "symbol": "T"
+    },
+    "pickaxe": {
+      "layer": "objects",
+      "tags": [
+        "pickup"
+      ],
+      "sprite": "assets/sprites/pickaxe.png",
+      "symbol": "P"
+    },
+    "portal": {
+      "layer": "objects",
+      "tags": [
+        "teleport"
+      ],
+      "sprite": "assets/sprites/portal.png",
+      "params": {
+        "channel": {
+          "type": "string"
+        }
+      },
+      "symbol": "O"
+    },
+    "flag": {
+      "layer": "markers",
+      "tags": [
+        "goal_target"
+      ],
+      "symbol": "F"
+    }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": {
+        "direction": {
+          "type": "direction",
+          "values": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        }
+      }
+    }
+  ],
+  "systems": [
+    {
+      "id": "nav",
+      "type": "avatar_navigation",
+      "config": {
+        "solidHandling": "delegate"
+      }
+    },
+    {
+      "id": "push",
+      "type": "push_objects",
+      "config": {
+        "pushableTags": [
+          "pushable"
+        ],
+        "validTargetTags": [
+          "walkable"
+        ],
+        "toolInteractions": [
+          {
+            "item": "torch",
+            "targetTag": "burnable",
+            "consumeItem": false,
+            "animation": "burning"
+          },
+          {
+            "item": "pickaxe",
+            "targetTag": "breakable",
+            "consumeItem": true,
+            "animation": "breaking"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portals",
+      "type": "portals",
+      "config": {
+        "matchKey": "channel"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "pickup_item",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "objects",
+          "tag": "pickup"
+        }
+      },
+      "then": [
+        {
+          "set_inventory": {
+            "item": "$cell.objects.kind"
+          }
+        },
+        {
+          "destroy": {
+            "layer": "objects",
+            "position": "$event.position"
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_clears_items",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "liquid"
+        }
+      },
+      "if": {
+        "avatar": {
+          "hasItem": true
+        }
+      },
+      "then": [
+        {
+          "clear_inventory": {}
+        }
+      ]
+    },
+    {
+      "id": "crate_creates_bridge",
+      "on": "object_placed",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "liquid"
+        }
+      },
+      "if": {
+        "event": {
+          "kind": "metal_crate"
+        }
+      },
+      "then": [
+        {
+          "destroy": {
+            "layer": "objects",
+            "position": "$event.position"
+          }
+        },
+        {
+          "transform": {
+            "layer": "ground",
+            "position": "$event.position",
+            "toKind": "bridge"
+          }
+        }
+      ]
+    }
+  ],
+  "levelSequence": [
+    {
+      "type": "story",
+      "title": "The Great Carrot Shortage",
+      "text": "Pip the rabbit hasn't eaten a single carrot in THREE whole days. His tummy is making sounds that are frankly embarrassing.\n\nLegend has it that somewhere in these mazes, carrots are hiding \u2014 juicy, crunchy, and absolutely delicious. Only one brave (and very hungry) rabbit can find them all.\n\nHelp Pip sniff out every last one before he faints!",
+      "image": "assets/rabbit_reaching_for_carrot.png"
+    },
+    {
+      "type": "level",
+      "ref": "fw_001"
+    },
+    {
+      "type": "level",
+      "ref": "fw_002"
+    },
+    {
+      "type": "level",
+      "ref": "fw_003"
+    },
+    {
+      "type": "level",
+      "ref": "fw_004"
+    },
+    {
+      "type": "level",
+      "ref": "fw_005"
+    },
+    {
+      "type": "level",
+      "ref": "fw_006"
+    },
+    {
+      "type": "level",
+      "ref": "pw_001"
+    },
+    {
+      "type": "level",
+      "ref": "pw_003"
+    }
+  ],
+  "defaults": {
+    "maxCascadeDepth": 3,
+    "avatar": {
+      "enabled": true,
+      "facing": "right"
+    }
+  }
+}

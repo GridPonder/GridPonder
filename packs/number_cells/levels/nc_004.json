@@ -1,0 +1,64 @@
+{
+  "id": "nc_004",
+  "title": "Rolling Numbers",
+  "guide": "Each turn, if the pipe exit is empty, a new number drops in. Slide it into the grid to merge.",
+  "board": {
+    "size": [5, 4],
+    "layers": {
+      "ground": [
+        ["void", "void", "empty", "empty", "void"],
+        ["empty", "void", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty", "empty"],
+        ["empty", "void", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 1], "kind": "number", "value": 2},
+          {"position": [3, 3], "kind": "number", "value": 1},
+          {"position": [4, 3], "kind": "number", "value": 4}
+        ]
+      }
+    },
+    "multiCellObjects": [
+      {
+        "id": "pipe_1",
+        "kind": "pipe",
+        "cells": [
+          {"position": [0, 0], "sprite": "assets/pipe_end_r.png"},
+          {"position": [1, 0], "sprite": "assets/pipe_straight_h.png"},
+          {"position": [2, 0], "sprite": "assets/pipe_corner_ld.png"}
+        ],
+        "params": {
+          "exitPosition": [2, 0],
+          "exitDirection": "down",
+          "queue": [7, 5],
+          "currentIndex": 0
+        }
+      }
+    ]
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "seq",
+      "type": "sequence_match",
+      "config": {
+        "sequence": [3, 14],
+        "scanTrigger": "on_merge"
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "left"}
+    ],
+    "hintStops": [2]
+  }
+}

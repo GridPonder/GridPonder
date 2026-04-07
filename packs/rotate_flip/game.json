@@ -1,0 +1,151 @@
+{
+  "layers": [
+    {
+      "id": "ground",
+      "occupancy": "exactly_one",
+      "default": "empty"
+    },
+    {
+      "id": "objects",
+      "occupancy": "zero_or_one"
+    }
+  ],
+  "entityKinds": {
+    "empty": {
+      "layer": "ground",
+      "tags": [
+        "walkable"
+      ],
+      "sprite": null,
+      "symbol": "."
+    },
+    "cell_red": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "r"
+    },
+    "cell_blue": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "b"
+    },
+    "cell_green": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "g"
+    },
+    "cell_yellow": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "y"
+    },
+    "cell_purple": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "p"
+    },
+    "cell_orange": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "o"
+    }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": {
+        "direction": {
+          "type": "direction",
+          "values": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        }
+      }
+    },
+    {
+      "id": "rotate",
+      "params": {}
+    },
+    {
+      "id": "flip",
+      "params": {}
+    }
+  ],
+  "systems": [
+    {
+      "id": "avatar_nav",
+      "type": "avatar_navigation",
+      "config": {
+        "moveAction": "move",
+        "solidHandling": "block"
+      }
+    },
+    {
+      "id": "overlay_cursor",
+      "type": "overlay_cursor",
+      "config": {
+        "moveAction": "move",
+        "size": [
+          2,
+          2
+        ],
+        "anchorToAvatar": false
+      }
+    },
+    {
+      "id": "region_transform",
+      "type": "region_transform",
+      "config": {
+        "affectedLayers": [
+          "objects"
+        ],
+        "operations": {
+          "rotate_op": {
+            "action": "rotate",
+            "type": "rotate"
+          },
+          "flip_op": {
+            "action": "flip",
+            "type": "flip"
+          }
+        }
+      }
+    }
+  ],
+  "rules": [],
+  "ui": {
+    "showGoal": true
+  },
+  "defaults": {
+    "avatar": {
+      "enabled": true,
+      "facing": "right"
+    },
+    "maxCascadeDepth": 1
+  },
+  "levelSequence": [
+    {
+      "type": "story",
+      "title": "The Colour Scrambler",
+      "text": "A mischievous gust of wind has scrambled all the colour tiles!\n\nMove the glowing 2×2 frame across the grid and use Rotate or Flip to swap the tiles back into place.\n\nMatch the goal pattern shown above — every tile in the right spot — and you win!",
+      "image": "assets/rotate_flip_cover.png"
+    },
+    {
+      "type": "level",
+      "ref": "rf_001"
+    },
+    {
+      "type": "level",
+      "ref": "rf_002"
+    }
+  ]
+}

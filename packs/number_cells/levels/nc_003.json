@@ -1,0 +1,37 @@
+{
+  "id": "nc_003",
+  "title": "Chain Reaction",
+  "guide": "One swipe can produce multiple merges — each pair is resolved from the leading edge inward, so the order of collisions matters.",
+  "board": {
+    "size": [4, 2],
+    "layers": {
+      "objects": [
+        [{"kind": "number", "value": 2}, {"kind": "number", "value": 2}, {"kind": "number", "value": 4}, null],
+        [null, {"kind": "number", "value": 2}, null, null]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "seq",
+      "type": "sequence_match",
+      "config": {
+        "sequence": [6, 8],
+        "scanTrigger": "on_merge"
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 2}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"}
+    ],
+    "hintStops": [1]
+  }
+}

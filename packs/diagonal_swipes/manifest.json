@@ -1,0 +1,9 @@
+{
+  "dslVersion": "0.1.0",
+  "packVersion": 1,
+  "gameId": "diagonal_swipes",
+  "title": "Diagonal Swipes",
+  "description": "Swap cells diagonally within the overlay to solve the puzzles",
+  "version": "1.0.0",
+  "minEngineVersion": "0.1.0"
+}

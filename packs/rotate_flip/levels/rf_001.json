@@ -1,0 +1,44 @@
+{
+  "id": "rf_001",
+  "title": "Rotate Basics",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "cell_red"},
+          {"position": [1, 0], "kind": "cell_blue"},
+          {"position": [0, 1], "kind": "cell_green"},
+          {"position": [1, 1], "kind": "cell_yellow"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["cell_green", "cell_red", null],
+            ["cell_yellow", "cell_blue", null],
+            [null, null, null]
+          ]
+        }
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "rotate"}
+    ],
+    "hintStops": []
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "dslVersion": "0.1.0",
+  "packVersion": 1,
+  "gameId": "flood_colors",
+  "title": "Flood Colors",
+  "description": "Use flood fill to convert all cells to green",
+  "version": "1.0.0",
+  "minEngineVersion": "0.1.0"
+}

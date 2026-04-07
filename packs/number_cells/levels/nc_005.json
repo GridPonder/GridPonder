@@ -1,0 +1,64 @@
+{
+  "id": "nc_005",
+  "title": "Cross Current",
+  "guide": "The pipe exits sideways into a blocked lane. Merge the board numbers first — once the big pipe number arrives, it's too late to build the right chain.",
+  "board": {
+    "size": [5, 4],
+    "layers": {
+      "ground": [
+        ["void", "empty", "empty", "empty", "empty"],
+        ["void", "empty", "empty", "empty", "empty"],
+        ["void", "empty", "void",  "empty", "empty"],
+        ["void", "empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 0], "kind": "number", "value": 2},
+          {"position": [4, 3], "kind": "number", "value": 3}
+        ]
+      }
+    },
+    "multiCellObjects": [
+      {
+        "id": "pipe_1",
+        "kind": "pipe",
+        "cells": [
+          {"position": [0, 0], "sprite": "assets/pipe_end_d.png"},
+          {"position": [0, 1], "sprite": "assets/pipe_straight_v.png"},
+          {"position": [0, 2], "sprite": "assets/pipe_corner_ru.png"}
+        ],
+        "params": {
+          "exitPosition": [0, 2],
+          "exitDirection": "right",
+          "queue": [4, 7],
+          "currentIndex": 0
+        }
+      }
+    ]
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "seq",
+      "type": "sequence_match",
+      "config": {
+        "sequence": [5, 9, 16],
+        "scanTrigger": "on_merge"
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"}
+    ],
+    "hintStops": [3]
+  }
+}

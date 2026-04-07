@@ -1,0 +1,17 @@
+{
+  "primaryColor": "#F44336",
+  "controls": {
+    "gestureMap": [
+      {
+        "gesture": "swipe_cardinal",
+        "action": "move",
+        "paramMapping": {"direction": "swipe_direction"}
+      },
+      {
+        "gesture": "swipe_diagonal",
+        "action": "diagonal_swap",
+        "paramMapping": {"direction": "swipe_direction"}
+      }
+    ]
+  }
+}

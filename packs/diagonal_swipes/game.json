@@ -1,0 +1,156 @@
+{
+  "layers": [
+    {
+      "id": "ground",
+      "occupancy": "exactly_one",
+      "default": "empty"
+    },
+    {
+      "id": "objects",
+      "occupancy": "zero_or_one"
+    }
+  ],
+  "entityKinds": {
+    "empty": {
+      "layer": "ground",
+      "tags": [
+        "walkable"
+      ],
+      "sprite": null,
+      "symbol": "."
+    },
+    "num_1": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "1"
+    },
+    "num_2": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "2"
+    },
+    "num_3": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "3"
+    },
+    "num_4": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "4"
+    },
+    "num_5": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "5"
+    },
+    "num_7": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "7"
+    },
+    "num_8": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "8"
+    },
+    "num_9": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "9"
+    }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": {
+        "direction": {
+          "type": "direction",
+          "values": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
+        }
+      }
+    },
+    {
+      "id": "diagonal_swap",
+      "params": {
+        "direction": {
+          "type": "direction",
+          "values": [
+            "up_left",
+            "up_right",
+            "down_left",
+            "down_right"
+          ]
+        }
+      }
+    }
+  ],
+  "systems": [
+    {
+      "id": "avatar_nav",
+      "type": "avatar_navigation",
+      "config": {
+        "moveAction": "move",
+        "solidHandling": "block"
+      }
+    },
+    {
+      "id": "overlay_cursor",
+      "type": "overlay_cursor",
+      "config": {
+        "moveAction": "move",
+        "size": [
+          2,
+          2
+        ],
+        "anchorToAvatar": false
+      }
+    },
+    {
+      "id": "region_transform",
+      "type": "region_transform",
+      "config": {
+        "affectedLayers": [
+          "objects"
+        ],
+        "operations": {
+          "diag_swap": {
+            "action": "diagonal_swap",
+            "type": "diagonal_swap"
+          }
+        }
+      }
+    }
+  ],
+  "rules": [],
+  "defaults": {
+    "avatar": {
+      "enabled": true,
+      "facing": "right"
+    },
+    "maxCascadeDepth": 1
+  },
+  "levelSequence": [
+    {
+      "type": "level",
+      "ref": "ds_001"
+    },
+    {
+      "type": "level",
+      "ref": "ds_002"
+    }
+  ]
+}

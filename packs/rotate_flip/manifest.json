@@ -1,0 +1,10 @@
+{
+  "dslVersion": "0.1.0",
+  "packVersion": 1,
+  "gameId": "rotate_flip",
+  "title": "Rotate & Flip",
+  "description": "Move the 2x2 overlay and rotate or flip cells to match the goal",
+  "coverImage": "assets/rotate_flip_cover.png",
+  "version": "1.0.0",
+  "minEngineVersion": "0.1.0"
+}

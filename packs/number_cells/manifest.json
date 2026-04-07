@@ -1,0 +1,10 @@
+{
+  "dslVersion": "0.1.0",
+  "packVersion": 1,
+  "gameId": "number_cells",
+  "title": "Number Crunch",
+  "description": "Slide and merge your way to the perfect sequence",
+  "coverImage": "assets/number_cells.png",
+  "version": "1.0.0",
+  "minEngineVersion": "0.1.0"
+}
