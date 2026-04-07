@@ -12,7 +12,7 @@ This round focuses on the **big picture**:
 - the boundaries between the DSL, game packs, engine, and platform app
 - what should be built first versus later
 
-The DSL v0 formal specification has been completed and lives in `docs/dsl/formal/` (7 documents covering overview, manifest, game definition, levels, systems, rules, and theme/controls).
+The DSL v0 formal specification has been completed and lives in `docs/dsl/` (7 documents covering overview, manifest, game definition, levels, systems, rules, and theme/controls).
 
 ---
 
@@ -187,7 +187,7 @@ The DSL v0 covers:
 - **entities** — reusable entity kinds with tags and metadata, placed on layered grids
 - **layers** — named grid planes (terrain, objects, items, overlays) composing the board
 - **actions** — abstract player intents (move, tap, slide, rotate) mapped from gestures
-- **systems** — 10 built-in engine modules (navigation, pushing, portals, gravity, etc.) configured by data
+- **systems** — 9 built-in engine modules (navigation, pushing, portals, flood fill, region transforms, etc.) configured by data
 - **rules** — declarative event → condition → effect triples for game-specific interactions, with rule recipes for common patterns (inventory, tool use, liquid transitions)
 - **goals and lose conditions** — per-level win/loss criteria with partial progress tracking
 - **level sequences** — ordered progression with optional branches
@@ -274,7 +274,13 @@ It may include:
 - level editor
 - solver/analyzer tools
 
-The player app should remain simple even if creator tooling becomes powerful. One of the main avenues we are thinking about is to create skills for Claude Code. Such a skill would document the DSL allowing the creator to focus on specifying the needs in natural language. We also want to document how to perform image creation (given that it's a grid based game, image tiles are often of reasonably low resolution typically reaching from 16x16 to 96x96 which means that a smaller image creation model could be run locally to support image creation - we do not want to enforce a particualar setup but just document it to allow creators a smooth entry).
+The player app should remain simple even if creator tooling becomes powerful. Three Claude Code skills are already implemented in `.claude/skills/`:
+
+- **revise-level** — analyses, redesigns, or completes a level JSON; evaluates design quality including the "aha moment"
+- **test-level** — runs an integration test for a level by executing gold-path moves and taking screenshots after each step
+- **tile-gen** — generates game tile or sprite images from a natural language description using local AI (SDXL-Turbo + pixel-art LoRA) running on-device via MPS
+
+These skills document the DSL and tooling in a way that lets a creator focus on expressing intent in natural language. Local image generation is intentional: grid-based tiles are typically 16×96 px, small enough for a lightweight model to run on-device without cloud dependencies.
 
 ---
 
@@ -438,73 +444,3 @@ The engine should support:
 ## 8.5 Validation and error handling
 
 If a game pack is invalid, the engine/platform should fail gracefully with clear diagnostics for developers and safe error messages for players.
-
----
-
-## 9. Relationship to the Original Gridponder Concept
-
-This new platform idea should preserve the strongest parts of the original Gridponder concept while generalizing it.
-
-### 9.1 What remains the same
-
-- focus on mobile grid puzzles
-- avatar-driven charm
-- aha-moment design philosophy
-- visual rule/goal presentation
-- hint system based on action playback
-- lightweight and mostly offline operation
-- level editor / tooling as an important need
-
-### 9.2 What changes
-
-- “Gridponder” is no longer only a single game
-- universes/worlds become "games" (no nested structure anymore)
-- the platform app manages many games
-- creators can package and share their own games
-- the engine and DSL become explicit first-class concepts
-
-### 9.3 What this enables
-
-- a curated flagship experience still exists
-- experiments can live as separate games instead of bloating one monolith
-- community contribution becomes possible without giving away runtime control
-- AI-assisted content creation becomes much easier as game pack and DSL format are well document
-
----
-
-## 10. Suggested Technical Shape
-
-This section is deliberately high-level.
-
-## 10.1 App client
-
-Recommended role:
-
-- Flutter app for platform shell and gameplay UI
-- shared codebase for Android, iOS, and web
-
-## 10.2 Engine layer
-
-Can be implemented as:
-
-- a core domain/runtime module inside the Flutter codebase
-- or at some later stage a separate shared engine package consumed by the app and tooling
-
-A separate engine package is attractive because it would help with:
-
-- testing
-- local preview tooling
-- solver/analyzer integration
-- reuse in CLI or desktop tooling later
-
-However, we start with a single repository to keep things simple initially.
-
-## 10.3 Storage model
-
-Use local device storage for:
-
-- installed packs
-- progress state
-- settings
-
-Optional cloud or analytics integration can come later.
