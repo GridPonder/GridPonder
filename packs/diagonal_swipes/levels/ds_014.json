@@ -1,0 +1,43 @@
+{
+  "id": "ds_014",
+  "title": "Big Numbers",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": [
+        ["num_3", "num_2", "num_3"],
+        ["num_5", "num_1", "num_4"],
+        ["num_7", "num_7", "num_7"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "big_per_row",
+      "type": "count_constraint",
+      "config": {
+        "scope": "all_rows",
+        "predicate": "gte_7",
+        "target": 1,
+        "comparison": "eq"
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 8}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "up"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [1, 2]
+  }
+}

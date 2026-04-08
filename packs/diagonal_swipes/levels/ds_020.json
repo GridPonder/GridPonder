@@ -1,0 +1,68 @@
+{
+  "id": "ds_020",
+  "title": "Grand Balance",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 2], "kind": "void"}
+        ]
+      },
+      "objects": [
+        ["num_9", "num_3", "num_5"],
+        ["num_1", "num_6", "num_7"],
+        ["num_4", "num_8", null]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "odd_rows",
+      "type": "count_constraint",
+      "config": {
+        "scope": "all_rows",
+        "predicate": "odd",
+        "target": 1,
+        "comparison": "gte"
+      }
+    },
+    {
+      "id": "even_cols",
+      "type": "count_constraint",
+      "config": {
+        "scope": "all_cols",
+        "predicate": "even",
+        "target": 1,
+        "comparison": "gte"
+      }
+    },
+    {
+      "id": "row_sums_lte",
+      "type": "sum_constraint",
+      "config": {
+        "scope": "all_rows",
+        "target": 16,
+        "comparison": "lte"
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 10}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "down"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_left"}
+    ],
+    "hintStops": [0, 2]
+  }
+}

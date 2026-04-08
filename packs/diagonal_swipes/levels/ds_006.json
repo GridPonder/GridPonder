@@ -1,0 +1,52 @@
+{
+  "id": "ds_006",
+  "title": "Wider Field",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "objects": [
+        ["num_5", null, null, null],
+        [null, "num_2", null, null],
+        ["num_8", null, "num_3", null],
+        [null, "num_3", null, null]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["num_8", null, null, null],
+            [null, "num_2", null, null],
+            ["num_3", null, "num_5", null],
+            [null, "num_3", null, null]
+          ]
+        }
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 15}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "up"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [0, 3, 6]
+  }
+}

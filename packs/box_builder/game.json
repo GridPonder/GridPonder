@@ -1,0 +1,184 @@
+{
+  "layers": [
+    {
+      "id": "ground",
+      "occupancy": "exactly_one",
+      "default": "empty"
+    },
+    {
+      "id": "objects",
+      "occupancy": "zero_or_one"
+    },
+    {
+      "id": "markers",
+      "occupancy": "zero_or_one"
+    }
+  ],
+  "entityKinds": {
+    "empty": {
+      "layer": "ground",
+      "tags": ["walkable"],
+      "sprite": null,
+      "symbol": "."
+    },
+    "wall": {
+      "layer": "ground",
+      "tags": [],
+      "sprite": null,
+      "symbol": "#"
+    },
+    "void": {
+      "layer": "ground",
+      "tags": [],
+      "sprite": "cell_void.png",
+      "symbol": "v"
+    },
+    "box_fragment": {
+      "layer": "objects",
+      "tags": ["sided"],
+      "params": {
+        "sides": { "type": "integer" }
+      },
+      "sprite": null,
+      "symbol": "B",
+      "symbolParam": "sides"
+    },
+    "box_target": {
+      "layer": "markers",
+      "tags": ["goal_target"],
+      "sprite": null,
+      "symbol": "X"
+    },
+    "rock": {
+      "layer": "objects",
+      "tags": ["solid", "breakable"],
+      "sprite": "assets/sprites/rock.png",
+      "animations": {
+        "breaking": {
+          "frames": [
+            "assets/sprites/rock_with_cracks.png",
+            "assets/sprites/rock_broken.png"
+          ],
+          "duration": 800,
+          "mode": "once"
+        }
+      },
+      "symbol": "R"
+    },
+    "pickaxe": {
+      "layer": "objects",
+      "tags": ["pickup"],
+      "sprite": "assets/sprites/pickaxe.png",
+      "symbol": "P"
+    },
+    "portal": {
+      "layer": "objects",
+      "tags": ["teleport"],
+      "params": {
+        "channel": { "type": "string" }
+      },
+      "sprite": null,
+      "symbol": "O"
+    }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": {
+        "direction": {
+          "type": "direction",
+          "values": ["up", "down", "left", "right"]
+        }
+      }
+    }
+  ],
+  "systems": [
+    {
+      "id": "sided_box",
+      "type": "sided_box",
+      "config": {
+        "sidedTag": "sided",
+        "sidesParam": "sides",
+        "validGroundTags": ["walkable"],
+        "toolInteractions": [
+          {
+            "item": "pickaxe",
+            "targetTag": "breakable",
+            "consumeItem": true,
+            "animation": "breaking"
+          }
+        ]
+      }
+    },
+    {
+      "id": "portals",
+      "type": "portals",
+      "config": {
+        "matchKey": "channel"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "pickup_item",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "objects",
+          "tag": "pickup"
+        }
+      },
+      "then": [
+        {
+          "set_inventory": {
+            "item": "$cell.objects.kind"
+          }
+        },
+        {
+          "destroy": {
+            "position": "$event.position",
+            "layer": "objects"
+          }
+        }
+      ]
+    }
+  ],
+  "ui": {
+    "showGoal": false
+  },
+  "defaults": {
+    "avatar": {
+      "enabled": true,
+      "facing": "right"
+    },
+    "maxCascadeDepth": 1
+  },
+  "levelSequence": [
+    {
+      "type": "story",
+      "title": "The Box That Pip Built",
+      "text": "Pip the rabbit has found a pile of box fragments scattered across the workshop!\n\nPush the pieces together to build complete boxes on every target square. A box needs all four sides — top, right, bottom, and left — to be complete.\n\nBe careful: you can slip inside an open box, and when you push against a wall from the inside, you'll carry it with you!",
+      "image": "assets/rabbit_built_box.png"
+    },
+    {
+      "type": "level",
+      "ref": "bb_001"
+    },
+    {
+      "type": "level",
+      "ref": "bb_002"
+    },
+    {
+      "type": "level",
+      "ref": "bb_003"
+    },
+    {
+      "type": "level",
+      "ref": "bb_004"
+    },
+    {
+      "type": "level",
+      "ref": "bb_005"
+    }
+  ]
+}

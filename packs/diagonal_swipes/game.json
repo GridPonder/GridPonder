@@ -19,6 +19,12 @@
       "sprite": null,
       "symbol": "."
     },
+    "void": {
+      "layer": "ground",
+      "tags": [],
+      "sprite": null,
+      "symbol": "#"
+    },
     "num_1": {
       "layer": "objects",
       "tags": [],
@@ -48,6 +54,12 @@
       "tags": [],
       "sprite": null,
       "symbol": "5"
+    },
+    "num_6": {
+      "layer": "objects",
+      "tags": [],
+      "sprite": null,
+      "symbol": "6"
     },
     "num_7": {
       "layer": "objects",
@@ -160,6 +172,78 @@
     {
       "type": "level",
       "ref": "ds_002"
+    },
+    {
+      "type": "level",
+      "ref": "ds_003"
+    },
+    {
+      "type": "level",
+      "ref": "ds_004"
+    },
+    {
+      "type": "level",
+      "ref": "ds_005"
+    },
+    {
+      "type": "level",
+      "ref": "ds_006"
+    },
+    {
+      "type": "level",
+      "ref": "ds_007"
+    },
+    {
+      "type": "level",
+      "ref": "ds_008"
+    },
+    {
+      "type": "level",
+      "ref": "ds_009"
+    },
+    {
+      "type": "level",
+      "ref": "ds_010"
+    },
+    {
+      "type": "level",
+      "ref": "ds_011"
+    },
+    {
+      "type": "level",
+      "ref": "ds_012"
+    },
+    {
+      "type": "level",
+      "ref": "ds_013"
+    },
+    {
+      "type": "level",
+      "ref": "ds_014"
+    },
+    {
+      "type": "level",
+      "ref": "ds_015"
+    },
+    {
+      "type": "level",
+      "ref": "ds_016"
+    },
+    {
+      "type": "level",
+      "ref": "ds_017"
+    },
+    {
+      "type": "level",
+      "ref": "ds_018"
+    },
+    {
+      "type": "level",
+      "ref": "ds_019"
+    },
+    {
+      "type": "level",
+      "ref": "ds_020"
     }
   ]
 }

@@ -1,0 +1,54 @@
+{
+  "id": "ds_019",
+  "title": "Staircase",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": [
+        ["num_7", "num_3", "num_8"],
+        ["num_5", "num_4", "num_6"],
+        ["num_1", "num_2", "num_9"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "row0_low",
+      "type": "sum_constraint",
+      "config": {
+        "scope": "row",
+        "index": 0,
+        "target": 8,
+        "comparison": "lte"
+      }
+    },
+    {
+      "id": "row2_high",
+      "type": "sum_constraint",
+      "config": {
+        "scope": "row",
+        "index": 2,
+        "target": 18,
+        "comparison": "gte"
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 12}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "down"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_left"}
+    ],
+    "hintStops": [0, 2]
+  }
+}

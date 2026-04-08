@@ -61,7 +61,7 @@ void main() {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../packs/number_cells'));
 
-    for (final id in ['nc_001','nc_002','nc_003','nc_004','nc_005']) {
+    for (final id in ['nc_001','nc_002','nc_003','nc_004','nc_005','nc_006','nc_007','nc_008','nc_009','nc_010','nc_011','nc_012','nc_013']) {
       test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
     }
   });

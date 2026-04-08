@@ -79,6 +79,15 @@ class QueuedEmittersSystem extends GameSystem {
     return events;
   }
 
+  /// Physical slot-based bidirectional pipe emission.
+  ///
+  /// Items occupy cells within the pipe and move one step per turn toward
+  /// their nearest exit.  An item only exits when it is already at the exit
+  /// cell at the start of the turn.
+  ///
+  /// State is stored in `mco.params['pipeSlots']` — a list of length
+  /// `pipeLength` (== mco.cells.length) where each entry is a queue value
+  /// (int) or null.  Initialised on first call from the `queue` param.
   void _emitBidirectional(
     Board board,
     MultiCellObjectInstance mco,
@@ -89,64 +98,90 @@ class QueuedEmittersSystem extends GameSystem {
     Position exit2Pos,
     Position spawn2Pos,
   ) {
-    final n = queue.length;
-    final e1 = mco.params['currentIndex'] as int? ?? 0;
-    final e2 = mco.params['exit2Index'] as int? ?? 0;
-    final remaining = n - e1 - e2;
+    final pipeLen = mco.cells.length;
 
-    if (remaining <= 0) return;
+    // Initialise pipeSlots on first invocation.
+    if (mco.params['pipeSlots'] == null) {
+      final slots = List<int?>.filled(pipeLen, null);
+      for (int i = 0; i < queue.length && i < pipeLen; i++) {
+        slots[i] = queue[i] as int?;
+      }
+      mco.params['pipeSlots'] = slots;
+    }
+
+    final slots = (mco.params['pipeSlots'] as List<dynamic>)
+        .map((e) => e as int?)
+        .toList();
+    final last = pipeLen - 1;
+
+    // Check whether anything remains.
+    if (slots.every((v) => v == null)) return;
 
     // A spawn cell is considered clear when it carries no object entity.
-    bool _clear(Position exit, Position spawn) =>
+    bool clear(Position exit, Position spawn) =>
         board.getEntity('objects', exit) == null &&
         (spawn == exit || board.getEntity('objects', spawn) == null);
 
-    final can1 = _clear(exit1Pos, spawn1Pos);
-    final can2 = _clear(exit2Pos, spawn2Pos);
+    final can1 = clear(exit1Pos, spawn1Pos);
+    final can2 = clear(exit2Pos, spawn2Pos);
 
-    if (!can1 && !can2) return;
-
-    void emitFrom1(dynamic val) {
+    // ── Phase 1: Emit items already at exit cells ───────────────────────
+    if (slots[0] != null && can1) {
+      final val = slots[0]!;
       final p = <String, dynamic>{'value': val};
       board.setEntity('objects', spawn1Pos, EntityInstance('number', p));
-      mco.params['currentIndex'] = e1 + 1;
       events.add(GameEvent.itemReleased(mco.id, 'number', spawn1Pos, p));
+      slots[0] = null;
     }
-
-    void emitFrom2(dynamic val) {
+    if (slots[last] != null && can2) {
+      final val = slots[last]!;
       final p = <String, dynamic>{'value': val};
       board.setEntity('objects', spawn2Pos, EntityInstance('number', p));
-      mco.params['exit2Index'] = e2 + 1;
       events.add(GameEvent.itemReleased(mco.id, 'number', spawn2Pos, p));
+      slots[last] = null;
     }
 
-    if (remaining == 1) {
-      // Single number left; its position in the pipe = e1 (== n-1-e2).
-      // dist to exit1 = e1, dist to exit2 = e2.
-      final val = queue[e1];
-      if (e1 < e2) {
-        // Closer to exit 1 — prefer exit 1, fall back to exit 2.
-        if (can1) { emitFrom1(val); } else { emitFrom2(val); }
-      } else if (e2 < e1) {
-        // Closer to exit 2 — prefer exit 2, fall back to exit 1.
-        if (can2) { emitFrom2(val); } else { emitFrom1(val); }
+    // ── Phase 2: Move remaining items one step toward their nearest exit ─
+    // Process from both ends inward so moves don't collide.
+    // Left-moving items (closer to exit1): process left-to-right.
+    // Right-moving items (closer to exit2): process right-to-left.
+    // Midpoint items: apply stuck rule.
+    final newSlots = List<int?>.filled(pipeLen, null);
+
+    // Mark occupied destinations to prevent collisions.
+    for (int i = 0; i < pipeLen; i++) {
+      if (slots[i] == null) continue;
+
+      final distToE1 = i;
+      final distToE2 = last - i;
+
+      int target;
+      if (distToE1 < distToE2) {
+        // Closer to exit1 → move left.
+        target = i - 1;
+      } else if (distToE2 < distToE1) {
+        // Closer to exit2 → move right.
+        target = i + 1;
       } else {
-        // Equidistant (midpoint of odd-length pipe): stuck if both clear.
-        if (can1 && !can2) { emitFrom1(val); }
-        else if (can2 && !can1) { emitFrom2(val); }
-        // Both clear or both blocked → no emission this turn (stuck).
+        // Equidistant (midpoint). Apply stuck rule.
+        if (can1 && !can2) {
+          target = i - 1; // move toward open exit1
+        } else if (can2 && !can1) {
+          target = i + 1; // move toward open exit2
+        } else {
+          target = i; // stuck (both open or both blocked)
+        }
       }
-    } else {
-      // Multiple remaining: pick the candidate closest to its respective exit.
-      // e1 candidate: queue[e1], dist from exit1 = e1.
-      // e2 candidate: queue[n-1-e2], dist from exit2 = e2.
-      // Prefer exit 1 on tie.
-      final useE1 = can1 && (!can2 || e1 <= e2);
-      if (useE1) {
-        emitFrom1(queue[e1]);
-      } else {
-        emitFrom2(queue[n - 1 - e2]);
-      }
+
+      // Clamp to pipe bounds and avoid collisions.
+      if (target < 0) target = 0;
+      if (target > last) target = last;
+      if (newSlots[target] != null) target = i; // blocked by another item
+
+      newSlots[target] = slots[i];
     }
+
+    // Write back.
+    mco.params['pipeSlots'] = newSlots;
   }
 }

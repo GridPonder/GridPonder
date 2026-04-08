@@ -1,0 +1,52 @@
+{
+  "id": "bb_003",
+  "title": "Carry",
+  "board": {
+    "size": [4, 3],
+    "layers": {
+      "ground": [
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 1], "kind": "box_fragment", "sides": 14},
+          {"position": [3, 1], "kind": "box_fragment", "sides": 1}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 1], "kind": "box_target"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [1, 0], "facing": "down"}
+  },
+  "goals": [
+    {
+      "id": "complete_boxes",
+      "type": "param_match",
+      "config": {
+        "markerLayer": "markers",
+        "markerKind": "box_target",
+        "checkLayer": "objects",
+        "checkKind": "box_fragment",
+        "checkParam": "sides",
+        "checkValue": 15
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
+    ],
+    "hintStops": [1]
+  }
+}

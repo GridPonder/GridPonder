@@ -4,6 +4,7 @@
   "gameId": "diagonal_swipes",
   "title": "Diagonal Swipes",
   "description": "Swap cells diagonally within the overlay to solve the puzzles",
+  "coverImage": "assets/rabbit_diagonal_swipes.png",
   "version": "1.0.0",
   "minEngineVersion": "0.1.0"
 }

@@ -1,0 +1,52 @@
+{
+  "id": "bb_002",
+  "title": "Two Halves",
+  "board": {
+    "size": [5, 3],
+    "layers": {
+      "ground": [
+        ["empty", "empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 1], "kind": "box_fragment", "sides": 10},
+          {"position": [4, 1], "kind": "box_fragment", "sides": 5}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [4, 1], "kind": "box_target"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 1], "facing": "right"}
+  },
+  "goals": [
+    {
+      "id": "complete_boxes",
+      "type": "param_match",
+      "config": {
+        "markerLayer": "markers",
+        "markerKind": "box_target",
+        "checkLayer": "objects",
+        "checkKind": "box_fragment",
+        "checkParam": "sides",
+        "checkValue": 15
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
+    ],
+    "hintStops": [1]
+  }
+}

@@ -8,6 +8,7 @@ import 'portals_system.dart';
 import 'push_objects_system.dart';
 import 'queued_emitters_system.dart';
 import 'region_transform_system.dart';
+import 'sided_box_system.dart';
 import 'slide_merge_system.dart';
 
 /// Creates a GameSystem instance from a SystemDef.
@@ -23,6 +24,7 @@ class SystemRegistry {
     'queued_emitters': (id, _) => QueuedEmittersSystem(id: id),
     'overlay_cursor': (id, _) => OverlayCursorSystem(id: id),
     'region_transform': (id, _) => RegionTransformSystem(id: id),
+    'sided_box': (id, _) => SidedBoxSystem(id: id),
     'flood_fill': (id, _) => FloodFillSystem(id: id),
   };
 

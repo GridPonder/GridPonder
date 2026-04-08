@@ -1,0 +1,62 @@
+{
+  "id": "ds_009",
+  "title": "Void Maze",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 0], "kind": "void"},
+          {"position": [0, 1], "kind": "void"},
+          {"position": [0, 3], "kind": "void"}
+        ]
+      },
+      "objects": [
+        [null, null, null, "num_9"],
+        [null, null, null, null],
+        ["num_9", null, null, null],
+        [null, "num_3", null, "num_4"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [1, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            [null, null, null, "num_9"],
+            [null, null, null, null],
+            ["num_4", null, null, null],
+            [null, "num_9", null, "num_3"]
+          ]
+        }
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 18}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [3, 5, 7]
+  }
+}

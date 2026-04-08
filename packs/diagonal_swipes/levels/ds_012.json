@@ -1,0 +1,43 @@
+{
+  "id": "ds_012",
+  "title": "Odd Columns",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": [
+        ["num_1", "num_7", "num_4"],
+        ["num_7", "num_3", "num_2"],
+        ["num_9", "num_7", "num_6"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "odd_cols",
+      "type": "count_constraint",
+      "config": {
+        "scope": "all_cols",
+        "predicate": "odd",
+        "target": 2,
+        "comparison": "eq"
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 8}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [1, 2]
+  }
+}

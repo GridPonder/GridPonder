@@ -38,13 +38,16 @@ class NCState:
 
     grid          — frozenset of (x, y, value) triples; one entry per tile.
     pipe_e1_idxs  — tuple of exit-1 emission counters, one per pipe.
-    pipe_e2_idxs  — tuple of exit-2 emission counters, one per pipe.
-                    Always 0 for unidirectional pipes.
+                    Used for unidirectional pipes only.
+    pipe_slots    — tuple of slot-tuples, one per pipe.  For bidirectional
+                    pipes each inner tuple has length == pipe_length and
+                    contains (int | None) per cell.  For unidirectional pipes
+                    the inner tuple is empty.
     seq_idx       — how many steps of the goal sequence have been completed.
     """
     grid: FrozenSet[Tuple[int, int, int]]
     pipe_e1_idxs: Tuple[int, ...]
-    pipe_e2_idxs: Tuple[int, ...]
+    pipe_slots: Tuple[Tuple[Optional[int], ...], ...]
     seq_idx: int
 
 
@@ -56,6 +59,7 @@ class PipeSpec:
     exit2_pos: Optional[Tuple[int, int]]   # None for unidirectional pipes
     spawn2_pos: Optional[Tuple[int, int]]  # None for unidirectional pipes
     queue: List[int]
+    pipe_length: int              # number of cells in the pipe MCO
 
 
 @dataclass
@@ -133,12 +137,14 @@ def load(level_json: Dict[str, Any]) -> Tuple[NCState, LevelInfo]:
             else:
                 spawn2 = exit2
         queue = [int(v) for v in params.get("queue", [])]
+        pipe_length = len(mco.get("cells", []))
         pipes.append(PipeSpec(
             exit_pos=(ex, ey),
             spawn_pos=spawn,
             exit2_pos=exit2,
             spawn2_pos=spawn2,
             queue=queue,
+            pipe_length=pipe_length,
         ))
 
     # Goals → goal sequence (sequence_match with on_merge trigger)
@@ -155,10 +161,22 @@ def load(level_json: Dict[str, Any]) -> Tuple[NCState, LevelInfo]:
             max_turns = int(lc["config"]["limit"])
             break
 
+    # Build initial pipe_slots for bidirectional pipes.
+    initial_slots: List[Tuple[Optional[int], ...]] = []
+    for pipe in pipes:
+        if pipe.exit2_pos is not None:
+            slots = [None] * pipe.pipe_length
+            for j, v in enumerate(pipe.queue):
+                if j < pipe.pipe_length:
+                    slots[j] = v
+            initial_slots.append(tuple(slots))
+        else:
+            initial_slots.append(())  # empty for unidirectional
+
     initial_state = NCState(
         grid=initial_grid,
         pipe_e1_idxs=tuple(0 for _ in pipes),
-        pipe_e2_idxs=tuple(0 for _ in pipes),
+        pipe_slots=tuple(initial_slots),
         seq_idx=0,
     )
     info = LevelInfo(
@@ -200,17 +218,15 @@ def apply(
         if seq_idx < len(info.sequence) and merged_val == info.sequence[seq_idx]:
             seq_idx += 1
 
-    # Phase 6: queued_emitters — emit one item per pipe
+    # Phase 6: queued_emitters — emit items from pipes
     new_e1_idxs = list(state.pipe_e1_idxs)
-    new_e2_idxs = list(state.pipe_e2_idxs)
+    new_pipe_slots = [list(s) for s in state.pipe_slots]
 
     for i, pipe in enumerate(info.pipes):
-        e1 = new_e1_idxs[i]
-        e2 = new_e2_idxs[i]
-        n = len(pipe.queue)
-
         if pipe.exit2_pos is None:
-            # ── Unidirectional ───────────────────────────────────────────────
+            # ── Unidirectional (counter model, unchanged) ────────────────────
+            e1 = new_e1_idxs[i]
+            n = len(pipe.queue)
             if e1 >= n:
                 continue
             exit_clear  = not _has_tile(new_grid, pipe.exit_pos)
@@ -220,65 +236,59 @@ def apply(
                 new_grid = new_grid | frozenset([(sx, sy, pipe.queue[e1])])
                 new_e1_idxs[i] += 1
         else:
-            # ── Bidirectional ────────────────────────────────────────────────
-            remaining = n - e1 - e2
-            if remaining <= 0:
+            # ── Bidirectional (slot model) ───────────────────────────────────
+            slots = new_pipe_slots[i]
+            pl = len(slots)
+            last = pl - 1
+
+            if all(v is None for v in slots):
                 continue
 
-            e1_clear = (not _has_tile(new_grid, pipe.exit_pos) and
-                        not _has_tile(new_grid, pipe.spawn_pos))
-            e2_clear = (not _has_tile(new_grid, pipe.exit2_pos) and
-                        not _has_tile(new_grid, pipe.spawn2_pos))
+            can1 = (not _has_tile(new_grid, pipe.exit_pos) and
+                    not _has_tile(new_grid, pipe.spawn_pos))
+            can2 = (not _has_tile(new_grid, pipe.exit2_pos) and
+                    not _has_tile(new_grid, pipe.spawn2_pos))
 
-            if not e1_clear and not e2_clear:
-                continue
+            # Phase 1: emit items at exit cells.
+            if slots[0] is not None and can1:
+                sx, sy = pipe.spawn_pos
+                new_grid = new_grid | frozenset([(sx, sy, slots[0])])
+                slots[0] = None
+            if slots[last] is not None and can2:
+                sx, sy = pipe.spawn2_pos
+                new_grid = new_grid | frozenset([(sx, sy, slots[last])])
+                slots[last] = None
 
-            if remaining == 1:
-                # Single number left at position e1 (== N-1-e2)
-                val = pipe.queue[e1]
-                if e1 < e2:
-                    # Closer to exit 1
-                    if e1_clear:
-                        new_grid = new_grid | frozenset([(pipe.spawn_pos[0], pipe.spawn_pos[1], val)])
-                        new_e1_idxs[i] += 1
-                    else:
-                        new_grid = new_grid | frozenset([(pipe.spawn2_pos[0], pipe.spawn2_pos[1], val)])
-                        new_e2_idxs[i] += 1
-                elif e2 < e1:
-                    # Closer to exit 2
-                    if e2_clear:
-                        new_grid = new_grid | frozenset([(pipe.spawn2_pos[0], pipe.spawn2_pos[1], val)])
-                        new_e2_idxs[i] += 1
-                    else:
-                        new_grid = new_grid | frozenset([(pipe.spawn_pos[0], pipe.spawn_pos[1], val)])
-                        new_e1_idxs[i] += 1
+            # Phase 2: move remaining items one step toward nearest exit.
+            moved = [None] * pl
+            for j in range(pl):
+                if slots[j] is None:
+                    continue
+                dist_e1 = j
+                dist_e2 = last - j
+                if dist_e1 < dist_e2:
+                    target = j - 1
+                elif dist_e2 < dist_e1:
+                    target = j + 1
                 else:
-                    # Equidistant (odd-length midpoint): stuck if both clear or both blocked
-                    if e1_clear and not e2_clear:
-                        new_grid = new_grid | frozenset([(pipe.spawn_pos[0], pipe.spawn_pos[1], val)])
-                        new_e1_idxs[i] += 1
-                    elif e2_clear and not e1_clear:
-                        new_grid = new_grid | frozenset([(pipe.spawn2_pos[0], pipe.spawn2_pos[1], val)])
-                        new_e2_idxs[i] += 1
-                    # else: stuck — no emission
-            else:
-                # Multiple remaining: e1 candidate vs e2 candidate
-                # e1 candidate: queue[e1], distance from exit1 = e1
-                # e2 candidate: queue[n-1-e2], distance from exit2 = e2
-                emit_e1 = e1_clear and (not e2_clear or e1 <= e2)
-                if emit_e1:
-                    sx, sy = pipe.spawn_pos
-                    new_grid = new_grid | frozenset([(sx, sy, pipe.queue[e1])])
-                    new_e1_idxs[i] += 1
-                else:
-                    sx, sy = pipe.spawn2_pos
-                    new_grid = new_grid | frozenset([(sx, sy, pipe.queue[n - 1 - e2])])
-                    new_e2_idxs[i] += 1
+                    # Equidistant — midpoint stuck rule.
+                    if can1 and not can2:
+                        target = j - 1
+                    elif can2 and not can1:
+                        target = j + 1
+                    else:
+                        target = j  # stuck
+                target = max(0, min(last, target))
+                if moved[target] is not None:
+                    target = j  # blocked by another item
+                moved[target] = slots[j]
+
+            new_pipe_slots[i] = moved
 
     new_state = NCState(
         grid=new_grid,
         pipe_e1_idxs=tuple(new_e1_idxs),
-        pipe_e2_idxs=tuple(new_e2_idxs),
+        pipe_slots=tuple(tuple(s) for s in new_pipe_slots),
         seq_idx=seq_idx,
     )
     won = seq_idx >= len(info.sequence)

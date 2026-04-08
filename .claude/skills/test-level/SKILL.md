@@ -35,6 +35,7 @@ Each level is a standalone JSON file. Map the level ID prefix to its pack:
 | `ds_` | `platform/packs/diagonal_swipes/levels/` |
 | `rf_` | `platform/packs/rotate_flip/levels/` |
 | `fl_` | `platform/packs/flood_colors/levels/` |
+| `bb_` | `platform/packs/box_builder/levels/` |
 
 Read `platform/packs/<pack>/levels/<level_id>.json`. The fields you need:
 
@@ -81,28 +82,16 @@ cd platform/app && flutter test integration_test/app_test.dart -d macos 2>&1
 
 The test will print one line per screenshot as it runs:
 ```
-Screenshot step 00: /Users/.../tmp/gridponder_new_<pack>_<level>_step00.png
-Screenshot step 01: /Users/.../tmp/gridponder_new_<pack>_<level>_step01.png
+Screenshot step 00: /Users/.../Containers/com.gridponder.gridponderApp/Data/test/screenshots/gridponder_new_<pack>_<level>_step00.png
+Screenshot step 01: /Users/.../Containers/com.gridponder.gridponderApp/Data/test/screenshots/gridponder_new_<pack>_<level>_step01.png
 ...
 ```
 
 Step 00 is the initial state (before any moves). Steps 01–N are after each move.
+Screenshots are written to the app's sandbox data directory (no permission prompt needed).
+Parse the exact paths from the test output and read them directly from there.
 
 If the test fails, report the error and stop — do not proceed to analysis.
-
-## 5. Copy screenshots to the project folder
-
-Parse the screenshot paths printed by the test, then copy them all at once.
-Create the destination directory if it doesn't exist:
-
-```bash
-mkdir -p platform/app/test/screenshots
-cp /Users/.../tmp/gridponder_new_<pack>_<level>_step*.png \
-   platform/app/test/screenshots/
-```
-
-Use the actual paths printed by the test — the tmp directory is inside the
-macOS app sandbox and the exact path varies.
 
 ## 6. Analyse the screenshots
 

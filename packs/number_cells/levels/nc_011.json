@@ -1,0 +1,67 @@
+{
+  "id": "nc_011",
+  "title": "Five Lane",
+  "guide": "The 5 in the middle of this pipe will never leave on its own — you need to seal one exit first. The merge IS the key.",
+  "board": {
+    "size": [7, 3],
+    "layers": {
+      "ground": [
+        ["empty", "void", "void", "void", "void", "void", "empty"],
+        ["empty", "empty", "empty", "empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty", "empty", "empty", "void"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 1], "kind": "number", "value": 2}
+        ]
+      }
+    },
+    "multiCellObjects": [
+      {
+        "id": "pipe_1",
+        "kind": "pipe",
+        "cells": [
+          {"position": [1, 0], "sprite": "assets/pipe_straight_h.png"},
+          {"position": [2, 0], "sprite": "assets/pipe_straight_h.png"},
+          {"position": [3, 0], "sprite": "assets/pipe_straight_h.png"},
+          {"position": [4, 0], "sprite": "assets/pipe_straight_h.png"},
+          {"position": [5, 0], "sprite": "assets/pipe_straight_h.png"}
+        ],
+        "params": {
+          "exitPosition":   [1, 0],
+          "exitDirection":  "left",
+          "exit2Position":  [5, 0],
+          "exit2Direction": "right",
+          "queue": [3, 2, 5],
+          "currentIndex": 0,
+          "exit2Index": 0
+        }
+      }
+    ]
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "seq",
+      "type": "sequence_match",
+      "config": {
+        "sequence": [5, 7, 12],
+        "scanTrigger": "on_merge"
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "up"}
+    ],
+    "hintStops": [1, 4]
+  }
+}

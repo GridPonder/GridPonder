@@ -1,0 +1,52 @@
+{
+  "id": "bb_006",
+  "title": "Twin Shafts",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "ground": [
+        ["void", "empty", "empty", "void"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["void", "empty", "empty", "void"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 1], "kind": "box_fragment", "sides": 3},
+          {"position": [1, 2], "kind": "box_fragment", "sides": 12},
+          {"position": [2, 1], "kind": "box_fragment", "sides": 5},
+          {"position": [2, 2], "kind": "box_fragment", "sides": 10}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 3], "kind": "box_target"},
+          {"position": [2, 3], "kind": "box_target"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [2, 0], "facing": "down"}
+  },
+  "goals": [
+    {
+      "id": "complete_boxes",
+      "type": "param_match",
+      "config": {
+        "markerLayer": "markers",
+        "markerKind": "box_target",
+        "checkLayer": "objects",
+        "checkKind": "box_fragment",
+        "checkParam": "sides",
+        "checkValue": 15
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [],
+    "hintStops": [3]
+  }
+}

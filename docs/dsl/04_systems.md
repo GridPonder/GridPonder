@@ -172,29 +172,23 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 
 **Behavior — bidirectional pipe** (`exit2Position` present):
 
-A bidirectional pipe has two open exits. Numbers are conceptually arranged in the pipe from exit 1 to exit 2: `queue[0]` is adjacent to exit 1, `queue[N-1]` adjacent to exit 2. The pipe tracks two emission counters:
-- `currentIndex` (`e1`) — items emitted from exit 1 side
-- `exit2Index` (`e2`) — items emitted from exit 2 side
+A bidirectional pipe has two open exits. Numbers occupy physical **slots** (cells) within the pipe. Initially, `queue[0]` is placed in cell 0 (the exit-1 cell), `queue[1]` in cell 1, and so on. The runtime state is stored in `pipeSlots` — an array of length `pipe_length` (one entry per cell, each `int | null`).
 
-Remaining items occupy positions `queue[e1 .. N-1-e2]`. Each turn, at most one item is emitted:
+Each turn the pipe runs two phases:
 
-1. **No remaining items** (`e1 + e2 >= N`): nothing to emit.
-2. **Multiple remaining** (`N - e1 - e2 >= 2`): two candidates exist —
-   - Exit-1 candidate: `queue[e1]`, at distance `e1` from exit 1.
-   - Exit-2 candidate: `queue[N-1-e2]`, at distance `e2` from exit 2.
-   - If only exit 1 is available (spawn cell clear): emit exit-1 candidate from exit 1.
-   - If only exit 2 is available: emit exit-2 candidate from exit 2.
-   - If both available: emit whichever candidate has the smaller distance; tie → prefer exit 1.
-3. **One remaining** (`N - e1 - e2 == 1`): single number at position `e1 = N-1-e2`.
-   - Distance to exit 1 = `e1`; distance to exit 2 = `e2`.
-   - If `e1 < e2`: closer to exit 1 — emit from exit 1 if available, else exit 2.
-   - If `e2 < e1`: closer to exit 2 — emit from exit 2 if available, else exit 1.
-   - If `e1 == e2` (midpoint of an odd-length pipe):
-     - If only exit 1 clear → emit from exit 1.
-     - If only exit 2 clear → emit from exit 2.
-     - If **both** clear or both blocked → **stuck**: no emission this turn; the number is rendered visibly at the midpoint pipe cell.
+1. **Emit phase:** For each exit, if an item occupies the exit cell and the exit's spawn cell is clear, emit it (place it on the board, set the slot to `null`). Both exits can emit simultaneously.
 
-**Even vs. odd pipe length:** In an even-length pipe every position has a strictly nearer exit, so the stuck condition (`e1 == e2` with exactly one item remaining) never arises. It is exclusive to odd-length pipes.
+2. **Move phase:** Each remaining item moves **one step** toward its nearest exit:
+   - Distance to exit 1 = cell index; distance to exit 2 = `(pipe_length - 1) - cell index`.
+   - Closer to exit 1 → shift one cell toward exit 1 (index − 1).
+   - Closer to exit 2 → shift one cell toward exit 2 (index + 1).
+   - **Equidistant** (midpoint of an odd-length pipe):
+     - If only exit 1 is clear → move toward exit 1.
+     - If only exit 2 is clear → move toward exit 2.
+     - If **both** clear or both blocked → **stuck**: no movement this turn.
+   - An item arriving at an exit cell does **not** emit on the same turn — it exits on the next turn's emit phase.
+
+**Even vs. odd pipe length:** In an even-length pipe every cell has a strictly nearer exit, so the stuck condition never arises. It is exclusive to odd-length pipes.
 
 ---
 

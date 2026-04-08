@@ -1,0 +1,44 @@
+{
+  "id": "ds_016",
+  "title": "Tens",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": [
+        ["num_6", "num_2", "num_4"],
+        ["num_2", "num_6", "num_3"],
+        ["num_4", "num_2", "num_1"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "row_sums",
+      "type": "sum_constraint",
+      "config": {
+        "scope": "all_rows",
+        "target": 10,
+        "comparison": "eq"
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 12}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "up"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [2, 4]
+  }
+}

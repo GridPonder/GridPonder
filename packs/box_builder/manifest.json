@@ -1,0 +1,11 @@
+{
+  "dslVersion": "0.1.0",
+  "packVersion": 1,
+  "gameId": "box_builder",
+  "title": "The Box That Pip Built",
+  "description": "Push, carry, and assemble box fragments to fill every target",
+  "coverImage": "assets/rabbit_built_box.png",
+  "version": "1.0.0",
+  "minEngineVersion": "0.1.0",
+  "sharedAssets": ["rabbit-character"]
+}

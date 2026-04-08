@@ -1,0 +1,63 @@
+{
+  "id": "ds_010",
+  "title": "Mirror Swap",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 1], "kind": "void"},
+          {"position": [3, 3], "kind": "void"}
+        ]
+      },
+      "objects": [
+        [null, null, "num_8", "num_6"],
+        [null, null, null, null],
+        [null, null, "num_6", "num_8"],
+        [null, null, "num_1", null]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            [null, null, "num_6", "num_8"],
+            [null, null, null, null],
+            [null, null, "num_8", "num_6"],
+            [null, null, "num_1", null]
+          ]
+        }
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 20}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "down"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "up"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "down"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "up"},
+      {"action": "diagonal_swap", "direction": "down_left"}
+    ],
+    "hintStops": [1, 5, 9]
+  }
+}

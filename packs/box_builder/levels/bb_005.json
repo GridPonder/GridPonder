@@ -1,0 +1,56 @@
+{
+  "id": "bb_005",
+  "title": "Clear the Way",
+  "board": {
+    "size": [4, 3],
+    "layers": {
+      "ground": [
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 1], "kind": "rock"},
+          {"position": [1, 1], "kind": "box_fragment", "sides": 15},
+          {"position": [2, 0], "kind": "pickaxe"}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 1], "kind": "box_target"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [3, 0], "facing": "left"}
+  },
+  "goals": [
+    {
+      "id": "complete_boxes",
+      "type": "param_match",
+      "config": {
+        "markerLayer": "markers",
+        "markerKind": "box_target",
+        "checkLayer": "objects",
+        "checkKind": "box_fragment",
+        "checkParam": "sides",
+        "checkValue": 15
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
+    ],
+    "hintStops": [1]
+  }
+}

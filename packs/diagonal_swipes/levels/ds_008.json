@@ -1,0 +1,60 @@
+{
+  "id": "ds_008",
+  "title": "Mind the Gap",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 0], "kind": "void"},
+          {"position": [0, 3], "kind": "void"}
+        ]
+      },
+      "objects": [
+        [null, null, null, null],
+        [null, "num_4", null, "num_9"],
+        [null, null, "num_1", null],
+        [null, null, null, "num_5"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            [null, null, null, null],
+            [null, "num_5", null, "num_9"],
+            [null, null, "num_1", null],
+            [null, null, null, "num_4"]
+          ]
+        }
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 16}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [2, 5, 8]
+  }
+}

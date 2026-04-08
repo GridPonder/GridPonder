@@ -1,0 +1,49 @@
+{
+  "id": "ds_003",
+  "title": "Corner Swap",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": [
+        ["num_7", null, null],
+        [null, "num_5", null],
+        [null, null, "num_2"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["num_2", null, null],
+            [null, "num_5", null],
+            [null, null, "num_7"]
+          ]
+        }
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 12}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [0, 3, 6]
+  }
+}

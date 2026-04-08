@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional
 sys.path.insert(0, str(Path(__file__).parent))
 import games.number_crunch as nc
 import games.rotate_flip as rf
+import games.box_builder as bb
 
 
 # ---------------------------------------------------------------------------
@@ -52,6 +53,8 @@ def _detect_game(level_path: Path) -> str:
             return "number_crunch"
         if part == "rotate_flip":
             return "rotate_flip"
+        if part == "box_builder":
+            return "box_builder"
     return "number_crunch"
 
 
@@ -232,6 +235,111 @@ def _solve_rotate_flip(
 
 
 # ---------------------------------------------------------------------------
+# Box Builder solver
+# ---------------------------------------------------------------------------
+
+def _solve_box_builder(
+    path: Path,
+    level_json: Dict[str, Any],
+    max_depth: int,
+    all_solutions: bool,
+) -> None:
+    from collections import deque as _deque
+
+    initial, info = bb.load(level_json)
+    level_id = info.level_id or path.stem
+    print(f"Solving  {level_id}   (max depth {max_depth})")
+    print(f"  Game:   Box Builder")
+    print(f"  Board:  {info.width}×{info.height}  "
+          f"({len(info.walls)} wall cells,  {len(info.targets)} target(s))")
+    print(f"  Mode:   {'DFS — all solutions' if all_solutions else 'BFS — shortest solution'}")
+    print()
+
+    solutions: List[List[str]] = []
+    shortest: Optional[int] = None
+
+    if not all_solutions:
+        # BFS with deduplication
+        queue: _deque = _deque([(initial, [])])
+        visited: Dict = {initial: 0}
+
+        while queue:
+            state, path_so_far = queue.popleft()
+            depth = len(path_so_far)
+            if shortest is not None and depth >= shortest:
+                continue
+            if depth >= max_depth:
+                continue
+            for direction in bb.ACTIONS:
+                ns, won = bb.apply(state, direction, info)
+                new_depth = depth + 1
+                new_path = path_so_far + [direction]
+                if won:
+                    solutions.append(new_path)
+                    if shortest is None:
+                        shortest = new_depth
+                    continue
+                if bb.can_prune(ns, info, new_depth, max_depth):
+                    continue
+                prev = visited.get(ns)
+                if prev is not None and prev <= new_depth:
+                    continue
+                visited[ns] = new_depth
+                queue.append((ns, new_path))
+    else:
+        # DFS without cross-path deduplication
+        def _dfs(state: bb.BBState, path_so_far: List[str], path_states: set) -> None:
+            depth = len(path_so_far)
+            for direction in bb.ACTIONS:
+                ns, won = bb.apply(state, direction, info)
+                new_depth = depth + 1
+                new_path = path_so_far + [direction]
+                if won:
+                    solutions.append(new_path)
+                    continue
+                if new_depth >= max_depth:
+                    continue
+                if bb.can_prune(ns, info, new_depth, max_depth):
+                    continue
+                if ns in path_states:
+                    continue
+                _dfs(ns, new_path, path_states | {ns})
+
+        _dfs(initial, [], {initial})
+
+    if not solutions:
+        print(f"No solution found within {max_depth} moves.")
+        return
+
+    solutions.sort(key=len)
+    min_len = len(solutions[0])
+    print(f"Solutions found: {len(solutions)}  (shortest: {min_len} move{'s' if min_len != 1 else ''})")
+    print()
+    for sol in solutions:
+        marker = "★" if len(sol) == min_len else " "
+        print(f"  {marker} {len(sol)} moves: {sol}")
+    print()
+
+    gold_raw = level_json.get("solution", {}).get("goldPath", [])
+    if gold_raw:
+        gold = [m["direction"] for m in gold_raw if m.get("action") == "move"]
+        gold_str = " ".join(d.upper() for d in gold)
+        if gold in solutions:
+            print(f"  Gold path: ✓  {gold_str}")
+        else:
+            print(f"  Gold path: ✗  {gold_str}  (not among the {len(solutions)} solutions found)")
+
+    if gold_raw and min_len < len(gold_raw):
+        print(f"\n  ⚠  WARNING: a {min_len}-move solution exists "
+              f"— shorter than the declared gold path ({len(gold_raw)} moves)!")
+    elif len([s for s in solutions if len(s) == min_len]) == 1:
+        print(f"\n  ✓  UNIQUE: exactly one {min_len}-move solution exists.")
+    else:
+        count = len([s for s in solutions if len(s) == min_len])
+        print(f"\n  ✗  NOT UNIQUE: {count} solutions at depth {min_len}.")
+
+
+# ---------------------------------------------------------------------------
 # Main solver
 # ---------------------------------------------------------------------------
 
@@ -247,6 +355,10 @@ def solve(
     game = _detect_game(path)
     if game == "rotate_flip":
         _solve_rotate_flip(path, level_json, max_depth, all_solutions)
+        return
+
+    if game == "box_builder":
+        _solve_box_builder(path, level_json, max_depth, all_solutions)
         return
 
     if game != "number_crunch":

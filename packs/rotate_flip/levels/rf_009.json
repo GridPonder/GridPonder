@@ -65,6 +65,6 @@
       {"action": "rotate"},
       {"action": "flip"}
     ],
-    "hintStops": [4]
+    "hintStops": [2, 4, 6]
   }
 }

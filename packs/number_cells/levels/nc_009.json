@@ -1,0 +1,65 @@
+{
+  "id": "nc_009",
+  "title": "Third Wheel",
+  "guide": "Three numbers, two exits — one gets left out in the middle until you make room.",
+  "board": {
+    "size": [5, 3],
+    "layers": {
+      "ground": [
+        ["empty", "void",  "void",  "void",  "empty"],
+        ["empty", "empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 2], "kind": "number", "value": 1},
+          {"position": [2, 2], "kind": "number", "value": 3}
+        ]
+      }
+    },
+    "multiCellObjects": [
+      {
+        "id": "pipe_1",
+        "kind": "pipe",
+        "cells": [
+          {"position": [1, 0], "sprite": "assets/pipe_straight_h.png"},
+          {"position": [2, 0], "sprite": "assets/pipe_straight_h.png"},
+          {"position": [3, 0], "sprite": "assets/pipe_straight_h.png"}
+        ],
+        "params": {
+          "exitPosition":   [1, 0],
+          "exitDirection":  "left",
+          "exit2Position":  [3, 0],
+          "exit2Direction": "right",
+          "queue": [3, 2],
+          "currentIndex": 0,
+          "exit2Index": 0
+        }
+      }
+    ]
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "seq",
+      "type": "sequence_match",
+      "config": {
+        "sequence": [4, 5, 9],
+        "scanTrigger": "on_merge"
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "left"}
+    ],
+    "hintStops": [1, 3]
+  }
+}

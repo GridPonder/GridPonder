@@ -138,6 +138,15 @@ class GameEvent {
   static GameEvent cellsFlooded(List<Position> cells) =>
       GameEvent('cells_flooded', {'cells': cells});
 
+  static GameEvent boxesMerged(
+          Position pos, int resultSides, int aSides, int bSides) =>
+      GameEvent('boxes_merged', {
+        'position': pos,
+        'resultSides': resultSides,
+        'aSides': aSides,
+        'bSides': bSides,
+      });
+
   @override
   String toString() => '$type($payload)';
 }

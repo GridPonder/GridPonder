@@ -1,0 +1,13 @@
+{
+  "primaryColor": "#8B5E3C",
+  "backgroundColor": "#1A1A2E",
+  "controls": {
+    "gestureMap": [
+      {
+        "gesture": "swipe_cardinal",
+        "action": "move",
+        "paramMapping": {"direction": "swipe_direction"}
+      }
+    ]
+  }
+}

@@ -49,6 +49,6 @@
       {"action": "move", "direction": "down"},
       {"action": "flip"}
     ],
-    "hintStops": [3]
+    "hintStops": [2, 4]
   }
 }

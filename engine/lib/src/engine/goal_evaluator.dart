@@ -56,6 +56,10 @@ class GoalEvaluator {
         return _allCleared(goal, state, game);
       case 'sum_constraint':
         return _sumConstraint(goal, state);
+      case 'count_constraint':
+        return _countConstraint(goal, state);
+      case 'param_match':
+        return _paramMatch(goal, state);
       default:
         return (false, 0.0);
     }
@@ -291,6 +295,99 @@ class GoalEvaluator {
     }
   }
 
+  /// Evaluates row/column count constraints based on a cell predicate.
+  ///
+  /// Config fields:
+  ///   layer      — layer id to scan (default "objects")
+  ///   scope      — "all_rows" | "all_cols" | "row" | "col"
+  ///   index      — row or col index (required for "row" / "col" scopes)
+  ///   predicate  — "even" | "odd" | "gte_N" | "lte_N" | "eq_N"
+  ///   target     — expected count (num)
+  ///   comparison — "eq" (default) | "gte" | "lte"
+  (bool, double) _countConstraint(GoalDef goal, LevelState state) {
+    final layerId = (goal.config['layer'] as String?) ?? 'objects';
+    final scope = (goal.config['scope'] as String?) ?? 'all_rows';
+    final predicate = (goal.config['predicate'] as String?) ?? 'even';
+    final target = goal.config['target'] as num;
+    final comparison = (goal.config['comparison'] as String?) ?? 'eq';
+    final index = goal.config['index'] as int?;
+
+    final layer = state.board.layers[layerId];
+    if (layer == null) return (false, 0.0);
+
+    final w = state.board.width;
+    final h = state.board.height;
+
+    int cellValue(Position pos) {
+      final entity = layer.getAt(pos);
+      if (entity == null) return 0;
+      final kind = entity.kind;
+      if (kind.startsWith('num_')) return int.tryParse(kind.substring(4)) ?? 0;
+      if (kind == 'number') return (entity.param('value') as int?) ?? 0;
+      return 0;
+    }
+
+    bool matchesPredicate(int value) {
+      if (predicate == 'even') return value % 2 == 0;
+      if (predicate == 'odd') return value % 2 != 0;
+      if (predicate.startsWith('gte_')) {
+        return value >= int.parse(predicate.substring(4));
+      }
+      if (predicate.startsWith('lte_')) {
+        return value <= int.parse(predicate.substring(4));
+      }
+      if (predicate.startsWith('eq_')) {
+        return value == int.parse(predicate.substring(3));
+      }
+      return false;
+    }
+
+    bool hasEntity(Position pos) => layer.getAt(pos) != null;
+
+    int rowCount(int y) {
+      int count = 0;
+      for (int x = 0; x < w; x++) {
+        final pos = Position(x, y);
+        if (hasEntity(pos) && matchesPredicate(cellValue(pos))) count++;
+      }
+      return count;
+    }
+
+    int colCount(int x) {
+      int count = 0;
+      for (int y = 0; y < h; y++) {
+        final pos = Position(x, y);
+        if (hasEntity(pos) && matchesPredicate(cellValue(pos))) count++;
+      }
+      return count;
+    }
+
+    bool satisfies(int count) => switch (comparison) {
+          'gte' => count >= target,
+          'lte' => count <= target,
+          _ => count == target,
+        };
+
+    switch (scope) {
+      case 'row':
+        if (index == null) return (false, 0.0);
+        final ok = satisfies(rowCount(index));
+        return (ok, ok ? 1.0 : 0.0);
+      case 'col':
+        if (index == null) return (false, 0.0);
+        final ok = satisfies(colCount(index));
+        return (ok, ok ? 1.0 : 0.0);
+      case 'all_rows':
+        final satisfied = List.generate(h, rowCount).where(satisfies).length;
+        return (satisfied == h, satisfied / h);
+      case 'all_cols':
+        final satisfied = List.generate(w, colCount).where(satisfies).length;
+        return (satisfied == w, satisfied / w);
+      default:
+        return (false, 0.0);
+    }
+  }
+
   (bool, double) _allCleared(
       GoalDef goal, LevelState state, GameDefinition game) {
     final kind = goal.config['kind'] as String?;
@@ -305,5 +402,36 @@ class GoalEvaluator {
     }
 
     return (remaining == 0, remaining == 0 ? 1.0 : 0.0);
+  }
+
+  /// Checks that every marker position has an entity with a specific param value.
+  (bool, double) _paramMatch(GoalDef goal, LevelState state) {
+    final markerLayerId = goal.config['markerLayer'] as String? ?? 'markers';
+    final markerKind = goal.config['markerKind'] as String?;
+    final checkLayerId = goal.config['checkLayer'] as String? ?? 'objects';
+    final checkKind = goal.config['checkKind'] as String?;
+    final checkParam = goal.config['checkParam'] as String?;
+    final checkValue = goal.config['checkValue'];
+
+    if (checkParam == null || checkValue == null) return (false, 0.0);
+
+    final markerLayer = state.board.layers[markerLayerId];
+    final checkLayer = state.board.layers[checkLayerId];
+    if (markerLayer == null) return (false, 0.0);
+
+    int total = 0;
+    int matched = 0;
+    for (final entry in markerLayer.entries()) {
+      if (markerKind != null && entry.value.kind != markerKind) continue;
+      total++;
+      if (checkLayer == null) continue;
+      final entity = checkLayer.getAt(entry.key);
+      if (entity == null) continue;
+      if (checkKind != null && entity.kind != checkKind) continue;
+      if (entity.param(checkParam) == checkValue) matched++;
+    }
+
+    if (total == 0) return (false, 0.0);
+    return (matched == total, matched / total);
   }
 }

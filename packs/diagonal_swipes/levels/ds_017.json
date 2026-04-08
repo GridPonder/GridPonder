@@ -1,0 +1,53 @@
+{
+  "id": "ds_017",
+  "title": "Parity Balance",
+  "board": {
+    "size": [3, 3],
+    "layers": {
+      "objects": [
+        ["num_5", "num_9", "num_9"],
+        ["num_5", "num_1", "num_2"],
+        ["num_9", "num_6", "num_8"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "even_rows",
+      "type": "count_constraint",
+      "config": {
+        "scope": "all_rows",
+        "predicate": "even",
+        "target": 1,
+        "comparison": "eq"
+      }
+    },
+    {
+      "id": "even_cols",
+      "type": "count_constraint",
+      "config": {
+        "scope": "all_cols",
+        "predicate": "even",
+        "target": 1,
+        "comparison": "eq"
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 9}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [1, 4]
+  }
+}

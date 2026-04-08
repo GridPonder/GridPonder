@@ -1,0 +1,54 @@
+{
+  "id": "ds_007",
+  "title": "Scattered Tiles",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "objects": [
+        [null, "num_5", null, "num_1"],
+        [null, null, null, null],
+        ["num_4", null, null, null],
+        [null, "num_9", null, "num_3"]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            [null, "num_5", null, "num_1"],
+            [null, null, null, null],
+            ["num_3", null, null, null],
+            [null, "num_4", null, "num_9"]
+          ]
+        }
+      }
+    }
+  ],
+  "loseConditions": [
+    {"type": "max_actions", "config": {"limit": 18}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "right"},
+      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "move", "direction": "left"},
+      {"action": "diagonal_swap", "direction": "down_right"}
+    ],
+    "hintStops": [3, 5, 7]
+  }
+}

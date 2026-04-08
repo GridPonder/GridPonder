@@ -86,6 +86,12 @@ class RegionTransformSystem extends GameSystem {
         action.direction,
       );
 
+      // Remove swap pairs that involve void ground cells — void positions
+      // cannot participate in swaps, but other corners of the overlay may
+      // still be swapped (e.g. void at bottom-left does not block a ↘ swap).
+      mapping.removeWhere((src, dst) =>
+          board.isVoid(src) || board.isVoid(dst));
+
       if (mapping.isEmpty) continue;
 
       // Read source values from snapshot and write to destination atomically.
