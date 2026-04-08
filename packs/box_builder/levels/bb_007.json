@@ -5,18 +5,19 @@
     "size": [5, 4],
     "layers": {
       "ground": [
-        ["empty", "empty", "void",  "empty", "empty"],
-        ["empty", "empty", "void",  "empty", "empty"],
+        ["empty", "empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty", "empty"],
         ["empty", "empty", "empty", "empty", "empty"],
         ["void",  "empty", "empty", "empty", "void"]
       ],
       "objects": {
         "format": "sparse",
         "entries": [
-          {"position": [0, 0], "kind": "box_fragment", "sides": 3},
-          {"position": [1, 1], "kind": "box_fragment", "sides": 12},
-          {"position": [3, 0], "kind": "box_fragment", "sides": 5},
-          {"position": [4, 1], "kind": "box_fragment", "sides": 10}
+          {"position": [1, 1], "kind": "box_fragment", "sides": 3},
+          {"position": [1, 2], "kind": "box_fragment", "sides": 12},
+          {"position": [3, 1], "kind": "box_fragment", "sides": 5},
+          {"position": [3, 2], "kind": "box_fragment", "sides": 10},
+          {"position": [2, 1], "kind": "rock"}
         ]
       },
       "markers": {
@@ -29,7 +30,7 @@
     }
   },
   "state": {
-    "avatar": {"enabled": true, "position": [2, 2], "facing": "down"}
+    "avatar": {"enabled": true, "position": [2, 0], "facing": "down"}
   },
   "goals": [
     {
@@ -47,6 +48,6 @@
   ],
   "solution": {
     "goldPath": [],
-    "hintStops": [5]
+    "hintStops": [4]
   }
 }
