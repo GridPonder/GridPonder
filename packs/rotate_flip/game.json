@@ -19,6 +19,12 @@
       "sprite": null,
       "symbol": "."
     },
+    "void": {
+      "layer": "ground",
+      "tags": [],
+      "sprite": "cell_void.png",
+      "symbol": "v"
+    },
     "cell_red": {
       "layer": "objects",
       "tags": [],
@@ -49,11 +55,11 @@
       "sprite": null,
       "symbol": "p"
     },
-    "cell_orange": {
+    "cell_lime": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "o"
+      "symbol": "l"
     }
   },
   "actions": [
@@ -105,6 +111,7 @@
       "id": "region_transform",
       "type": "region_transform",
       "config": {
+        "blockOnVoid": true,
         "affectedLayers": [
           "objects"
         ],
@@ -145,7 +152,35 @@
     },
     {
       "type": "level",
+      "ref": "rf_003"
+    },
+    {
+      "type": "level",
       "ref": "rf_002"
+    },
+    {
+      "type": "level",
+      "ref": "rf_004"
+    },
+    {
+      "type": "level",
+      "ref": "rf_005"
+    },
+    {
+      "type": "level",
+      "ref": "rf_006"
+    },
+    {
+      "type": "level",
+      "ref": "rf_007"
+    },
+    {
+      "type": "level",
+      "ref": "rf_008"
+    },
+    {
+      "type": "level",
+      "ref": "rf_009"
     }
   ]
 }

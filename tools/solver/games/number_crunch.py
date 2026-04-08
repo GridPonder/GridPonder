@@ -1,0 +1,417 @@
+"""
+Number Crunch game simulator for the GridPonder puzzle solver.
+
+Faithfully implements the slide_merge and queued_emitters DSL systems,
+plus the sequence_match (on_merge) goal evaluator, from the Dart engine source.
+
+State is immutable (frozen dataclass) so BFS can hash/deduplicate it.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
+
+
+# ---------------------------------------------------------------------------
+# Direction vectors
+# ---------------------------------------------------------------------------
+
+DIRS: Dict[str, Tuple[int, int]] = {
+    "up":    (0, -1),
+    "down":  (0,  1),
+    "left":  (-1, 0),
+    "right": ( 1, 0),
+}
+
+ACTIONS: List[str] = ["up", "down", "left", "right"]
+
+
+# ---------------------------------------------------------------------------
+# Data types
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class NCState:
+    """
+    Immutable snapshot of one Number Crunch turn.
+
+    grid          — frozenset of (x, y, value) triples; one entry per tile.
+    pipe_e1_idxs  — tuple of exit-1 emission counters, one per pipe.
+    pipe_e2_idxs  — tuple of exit-2 emission counters, one per pipe.
+                    Always 0 for unidirectional pipes.
+    seq_idx       — how many steps of the goal sequence have been completed.
+    """
+    grid: FrozenSet[Tuple[int, int, int]]
+    pipe_e1_idxs: Tuple[int, ...]
+    pipe_e2_idxs: Tuple[int, ...]
+    seq_idx: int
+
+
+@dataclass
+class PipeSpec:
+    """Static pipe descriptor extracted from the level JSON."""
+    exit_pos: Tuple[int, int]
+    spawn_pos: Tuple[int, int]    # exitPos + one step in exitDirection
+    exit2_pos: Optional[Tuple[int, int]]   # None for unidirectional pipes
+    spawn2_pos: Optional[Tuple[int, int]]  # None for unidirectional pipes
+    queue: List[int]
+
+
+@dataclass
+class LevelInfo:
+    """Static (immutable) data derived from a level JSON."""
+    level_id: str
+    width: int
+    height: int
+    void_cells: FrozenSet[Tuple[int, int]]
+    pipes: List[PipeSpec]
+    sequence: List[int]          # goal sequence (sequence_match / on_merge)
+    max_turns: Optional[int]     # from loseConditions, or None
+
+
+# ---------------------------------------------------------------------------
+# Level loader
+# ---------------------------------------------------------------------------
+
+def load(level_json: Dict[str, Any]) -> Tuple[NCState, LevelInfo]:
+    """Parse a level JSON dict into (initial_state, static_info)."""
+    board = level_json["board"]
+    w, h = board["size"]
+
+    # Ground layer → void cells (layer is optional; absent means no voids)
+    ground = board["layers"].get("ground", [])
+    void_cells: FrozenSet[Tuple[int, int]] = frozenset(
+        (x, y)
+        for y, row in enumerate(ground)
+        for x, cell in enumerate(row)
+        if cell == "void"
+    )
+
+    # Objects layer → initial number tiles
+    obj_layer = board["layers"].get("objects", {})
+    grid_tiles: List[Tuple[int, int, int]] = []
+
+    if isinstance(obj_layer, list):
+        # Dense format: [[{kind, value}, ...], ...]
+        for y, row in enumerate(obj_layer):
+            for x, cell in enumerate(row):
+                if cell and cell.get("kind") == "number":
+                    grid_tiles.append((x, y, int(cell["value"])))
+    elif isinstance(obj_layer, dict):
+        if obj_layer.get("format") == "sparse":
+            for entry in obj_layer.get("entries", []):
+                if entry.get("kind") == "number":
+                    px, py = entry["position"]
+                    grid_tiles.append((px, py, int(entry["value"])))
+
+    initial_grid: FrozenSet[Tuple[int, int, int]] = frozenset(grid_tiles)
+
+    # Multi-cell objects → pipes
+    pipes: List[PipeSpec] = []
+    for mco in board.get("multiCellObjects", []):
+        if mco.get("kind") != "pipe":
+            continue
+        params = mco.get("params", {})
+        ex, ey = params["exitPosition"]
+        exit_dir = params.get("exitDirection")
+        if exit_dir:
+            ddx, ddy = DIRS[exit_dir]
+            spawn = (ex + ddx, ey + ddy)
+        else:
+            spawn = (ex, ey)
+        # Bidirectional exit (optional)
+        exit2: Optional[Tuple[int, int]] = None
+        spawn2: Optional[Tuple[int, int]] = None
+        if "exit2Position" in params:
+            e2x, e2y = params["exit2Position"]
+            exit2 = (e2x, e2y)
+            exit2_dir = params.get("exit2Direction")
+            if exit2_dir:
+                d2x, d2y = DIRS[exit2_dir]
+                spawn2 = (e2x + d2x, e2y + d2y)
+            else:
+                spawn2 = exit2
+        queue = [int(v) for v in params.get("queue", [])]
+        pipes.append(PipeSpec(
+            exit_pos=(ex, ey),
+            spawn_pos=spawn,
+            exit2_pos=exit2,
+            spawn2_pos=spawn2,
+            queue=queue,
+        ))
+
+    # Goals → goal sequence (sequence_match with on_merge trigger)
+    sequence: List[int] = []
+    for goal in level_json.get("goals", []):
+        if goal.get("type") == "sequence_match":
+            sequence = [int(v) for v in goal["config"].get("sequence", [])]
+            break  # assume one sequence goal per level
+
+    # Lose conditions → optional move cap (max_turns or max_actions)
+    max_turns: Optional[int] = None
+    for lc in level_json.get("loseConditions", []):
+        if lc.get("type") in ("max_turns", "max_actions"):
+            max_turns = int(lc["config"]["limit"])
+            break
+
+    initial_state = NCState(
+        grid=initial_grid,
+        pipe_e1_idxs=tuple(0 for _ in pipes),
+        pipe_e2_idxs=tuple(0 for _ in pipes),
+        seq_idx=0,
+    )
+    info = LevelInfo(
+        level_id=level_json.get("id", ""),
+        width=w,
+        height=h,
+        void_cells=void_cells,
+        pipes=pipes,
+        sequence=sequence,
+        max_turns=max_turns,
+    )
+    return initial_state, info
+
+
+# ---------------------------------------------------------------------------
+# Simulation
+# ---------------------------------------------------------------------------
+
+def apply(
+    state: NCState,
+    direction: str,
+    info: LevelInfo,
+) -> Tuple[NCState, bool]:
+    """
+    Apply one move and return (new_state, won).
+
+    Turn phases (mirrors the Dart engine):
+      1. slide_merge  (Action Resolution, Phase 2)
+      2. sequence_match on_merge check  (Goal Evaluation, Phase 7)
+      3. queued_emitters  (NPC Resolution, Phase 6 — fires once after slides)
+      4. Win check
+    """
+    # Phase 2: slide_merge
+    new_grid, merge_events = _slide_merge(state.grid, direction, info)
+
+    # Phase 7: advance sequence index for every matching merge event
+    seq_idx = state.seq_idx
+    for merged_val in merge_events:
+        if seq_idx < len(info.sequence) and merged_val == info.sequence[seq_idx]:
+            seq_idx += 1
+
+    # Phase 6: queued_emitters — emit one item per pipe
+    new_e1_idxs = list(state.pipe_e1_idxs)
+    new_e2_idxs = list(state.pipe_e2_idxs)
+
+    for i, pipe in enumerate(info.pipes):
+        e1 = new_e1_idxs[i]
+        e2 = new_e2_idxs[i]
+        n = len(pipe.queue)
+
+        if pipe.exit2_pos is None:
+            # ── Unidirectional ───────────────────────────────────────────────
+            if e1 >= n:
+                continue
+            exit_clear  = not _has_tile(new_grid, pipe.exit_pos)
+            spawn_clear = not _has_tile(new_grid, pipe.spawn_pos)
+            if exit_clear and spawn_clear:
+                sx, sy = pipe.spawn_pos
+                new_grid = new_grid | frozenset([(sx, sy, pipe.queue[e1])])
+                new_e1_idxs[i] += 1
+        else:
+            # ── Bidirectional ────────────────────────────────────────────────
+            remaining = n - e1 - e2
+            if remaining <= 0:
+                continue
+
+            e1_clear = (not _has_tile(new_grid, pipe.exit_pos) and
+                        not _has_tile(new_grid, pipe.spawn_pos))
+            e2_clear = (not _has_tile(new_grid, pipe.exit2_pos) and
+                        not _has_tile(new_grid, pipe.spawn2_pos))
+
+            if not e1_clear and not e2_clear:
+                continue
+
+            if remaining == 1:
+                # Single number left at position e1 (== N-1-e2)
+                val = pipe.queue[e1]
+                if e1 < e2:
+                    # Closer to exit 1
+                    if e1_clear:
+                        new_grid = new_grid | frozenset([(pipe.spawn_pos[0], pipe.spawn_pos[1], val)])
+                        new_e1_idxs[i] += 1
+                    else:
+                        new_grid = new_grid | frozenset([(pipe.spawn2_pos[0], pipe.spawn2_pos[1], val)])
+                        new_e2_idxs[i] += 1
+                elif e2 < e1:
+                    # Closer to exit 2
+                    if e2_clear:
+                        new_grid = new_grid | frozenset([(pipe.spawn2_pos[0], pipe.spawn2_pos[1], val)])
+                        new_e2_idxs[i] += 1
+                    else:
+                        new_grid = new_grid | frozenset([(pipe.spawn_pos[0], pipe.spawn_pos[1], val)])
+                        new_e1_idxs[i] += 1
+                else:
+                    # Equidistant (odd-length midpoint): stuck if both clear or both blocked
+                    if e1_clear and not e2_clear:
+                        new_grid = new_grid | frozenset([(pipe.spawn_pos[0], pipe.spawn_pos[1], val)])
+                        new_e1_idxs[i] += 1
+                    elif e2_clear and not e1_clear:
+                        new_grid = new_grid | frozenset([(pipe.spawn2_pos[0], pipe.spawn2_pos[1], val)])
+                        new_e2_idxs[i] += 1
+                    # else: stuck — no emission
+            else:
+                # Multiple remaining: e1 candidate vs e2 candidate
+                # e1 candidate: queue[e1], distance from exit1 = e1
+                # e2 candidate: queue[n-1-e2], distance from exit2 = e2
+                emit_e1 = e1_clear and (not e2_clear or e1 <= e2)
+                if emit_e1:
+                    sx, sy = pipe.spawn_pos
+                    new_grid = new_grid | frozenset([(sx, sy, pipe.queue[e1])])
+                    new_e1_idxs[i] += 1
+                else:
+                    sx, sy = pipe.spawn2_pos
+                    new_grid = new_grid | frozenset([(sx, sy, pipe.queue[n - 1 - e2])])
+                    new_e2_idxs[i] += 1
+
+    new_state = NCState(
+        grid=new_grid,
+        pipe_e1_idxs=tuple(new_e1_idxs),
+        pipe_e2_idxs=tuple(new_e2_idxs),
+        seq_idx=seq_idx,
+    )
+    won = seq_idx >= len(info.sequence)
+    return new_state, won
+
+
+def _has_tile(grid: FrozenSet[Tuple[int, int, int]], pos: Tuple[int, int]) -> bool:
+    px, py = pos
+    return any(x == px and y == py for x, y, _ in grid)
+
+
+def _slide_merge(
+    grid: FrozenSet[Tuple[int, int, int]],
+    direction: str,
+    info: LevelInfo,
+) -> Tuple[FrozenSet[Tuple[int, int, int]], List[int]]:
+    """
+    Simulate the slide_merge system for one swipe direction.
+
+    Algorithm (faithful to SlideMergeSystem.dart):
+      - Sort tiles from the leading edge inward (so the tile nearest the wall
+        in the swipe direction is processed first).
+      - For each tile, slide it forward until it hits a boundary, void, or
+        another tile.  On meeting another tile: if neither has already merged
+        this action (mergeLimit=1), merge them into their sum.
+      - Commit the working board to the new grid.
+
+    Returns (new_grid, merge_events) where merge_events is a list of merged
+    result values in the order they were produced (used for on_merge goal
+    checking).
+    """
+    dx, dy = DIRS[direction]
+
+    # Sort from leading edge first
+    def _sort_key(t: Tuple[int, int, int]) -> int:
+        x, y, _ = t
+        if direction == "right": return -x
+        if direction == "left":  return  x
+        if direction == "down":  return -y
+        return y  # up
+
+    tiles = sorted(grid, key=_sort_key)
+
+    # Working board: (x, y) → value  (reflects committed moves so far)
+    working: Dict[Tuple[int, int], int] = {(x, y): v for x, y, v in tiles}
+
+    # Positions that have already been the *target* of a merge this action.
+    # A position in this set cannot receive another merge (mergeLimit = 1).
+    merge_targets: set = set()
+    merge_events: List[int] = []
+
+    for x0, y0, _ in tiles:
+        if (x0, y0) not in working:
+            continue  # this tile was consumed as the source of an earlier merge
+
+        val = working[(x0, y0)]
+        cx, cy = x0, y0          # current sliding position
+        nx, ny = cx + dx, cy + dy
+
+        did_merge = False
+
+        while True:
+            # Boundary check
+            if not (0 <= nx < info.width and 0 <= ny < info.height):
+                break
+            # Void check
+            if (nx, ny) in info.void_cells:
+                break
+
+            if (nx, ny) in working:
+                # Another tile is here.
+                if (nx, ny) in merge_targets:
+                    break  # mergeLimit exceeded at this destination
+                # same_kind predicate: always true (all objects are "number")
+                result = val + working[(nx, ny)]
+                del working[(x0, y0)]
+                working[(nx, ny)] = result
+                merge_targets.add((nx, ny))
+                merge_events.append(result)
+                did_merge = True
+                break
+            else:
+                # Free cell — keep sliding
+                cx, cy = nx, ny
+                nx, ny = cx + dx, cy + dy
+
+        if not did_merge and (cx, cy) != (x0, y0):
+            # Tile slid without merging; commit to new position
+            working[(cx, cy)] = working.pop((x0, y0))
+
+    new_grid = frozenset((x, y, v) for (x, y), v in working.items())
+    return new_grid, merge_events
+
+
+# ---------------------------------------------------------------------------
+# Pruning hints
+# ---------------------------------------------------------------------------
+
+def can_prune(
+    state: NCState,
+    info: LevelInfo,
+    depth: int,
+    max_depth: int,
+) -> bool:
+    """
+    Return True if this branch is provably unsolvable and can be cut.
+
+    Three checks (all conservative — they never prune valid solutions):
+
+    1. Deadline: remaining sequence steps > remaining moves.
+       Every goal step requires at least one merge, so we need at least
+       (len(sequence) - seq_idx) more moves.
+
+    2. Empty grid: no tiles on the board but sequence not done.
+       No tiles → no merges possible → can never reach any more targets.
+
+    3. Min-value: the smallest tile value exceeds the next sequence target.
+       Merges only produce values ≥ (a + b) > max(a, b) ≥ min(grid).
+       So if min(grid) > next_target, we can never produce next_target.
+    """
+    remaining_steps = len(info.sequence) - state.seq_idx
+    remaining_moves = max_depth - depth
+
+    if remaining_steps > remaining_moves:
+        return True
+
+    if not state.grid and remaining_steps > 0:
+        return True
+
+    if state.grid and remaining_steps > 0:
+        min_val = min(v for _, _, v in state.grid)
+        next_target = info.sequence[state.seq_idx]
+        if min_val > next_target:
+            return True
+
+    return False

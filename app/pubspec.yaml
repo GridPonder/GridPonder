@@ -71,6 +71,7 @@ flutter:
     - assets/packs/rotate_flip/assets/
     - assets/packs/flood_colors/
     - assets/packs/flood_colors/levels/
+    - assets/packs/flood_colors/assets/
     - assets/packs/diagonal_swipes/
     - assets/packs/diagonal_swipes/levels/
     - assets/packs/gridponder-base/sprites/tiles/

@@ -1,12 +1,12 @@
 {
-  "primaryColor": "#FF9800",
-  "controls": {
-    "gestureMap": [
-      {
-        "gesture": "tap_cell",
-        "action": "flood",
-        "paramMapping": {"position": "tap_position"}
-      }
-    ]
+  "primaryColor": "#4CAF50",
+  "entityColors": {
+    "cell_red":     "#E53935",
+    "cell_blue":    "#1E88E5",
+    "cell_yellow":  "#FFD600",
+    "cell_orange":  "#FB8C00",
+    "cell_purple":  "#8E24AA",
+    "cell_teal":    "#00897B",
+    "cell_flooded": "#4CAF50"
   }
 }

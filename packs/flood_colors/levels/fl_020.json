@@ -1,0 +1,226 @@
+{
+  "id": "fl_020",
+  "title": "Flood Finale",
+  "board": {
+    "size": [
+      10,
+      10
+    ],
+    "layers": {
+      "objects": [
+        [
+          "cell_flooded",
+          "cell_flooded",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_teal",
+          "cell_teal"
+        ],
+        [
+          "cell_blue",
+          "cell_blue",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_red",
+          "cell_teal",
+          "cell_teal"
+        ],
+        [
+          "cell_blue",
+          "cell_blue",
+          "cell_blue",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple"
+        ],
+        [
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_purple",
+          "cell_yellow",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple"
+        ],
+        [
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple",
+          "cell_purple"
+        ],
+        [
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_purple",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_blue",
+          "cell_blue",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_blue",
+          "cell_blue",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_orange",
+          "cell_orange",
+          "cell_red",
+          "cell_red",
+          "cell_orange"
+        ],
+        [
+          "cell_blue",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_orange",
+          "cell_orange",
+          "cell_red",
+          "cell_red",
+          "cell_red",
+          "cell_orange"
+        ]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {
+      "enabled": false,
+      "position": [
+        0,
+        0
+      ],
+      "facing": "right"
+    },
+    "variables": {}
+  },
+  "goals": [
+    {
+      "id": "no_blue",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_blue"
+      }
+    },
+    {
+      "id": "no_orange",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_orange"
+      }
+    },
+    {
+      "id": "no_purple",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_purple"
+      }
+    },
+    {
+      "id": "no_red",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_red"
+      }
+    },
+    {
+      "id": "no_teal",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_teal"
+      }
+    },
+    {
+      "id": "no_yellow",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_yellow"
+      }
+    }
+  ],
+  "loseConditions": [
+    {
+      "type": "max_actions",
+      "config": {
+        "limit": 6
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {
+        "action": "flood_yellow"
+      },
+      {
+        "action": "flood_purple"
+      },
+      {
+        "action": "flood_teal"
+      },
+      {
+        "action": "flood_orange"
+      },
+      {
+        "action": "flood_blue"
+      },
+      {
+        "action": "flood_red"
+      }
+    ],
+    "hintStops": [
+      3
+    ]
+  },
+  "metadata": {
+    "description": "10x10 board, 6 colours, opt=6, mc=2.9%",
+    "difficulty": 20
+  }
+}

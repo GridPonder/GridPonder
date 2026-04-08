@@ -12,7 +12,7 @@ Color cellNamedColor(String name) => switch (name) {
       'green' => const Color(0xFF43A047),
       'yellow' => const Color(0xFFFFD600),
       'purple' => const Color(0xFF8E24AA),
-      'orange' => const Color(0xFFFF9800),
+      'lime' => const Color(0xFF7CB342),
       'teal' => const Color(0xFF00897B),
       'pink' => const Color(0xFFE91E63),
       _ => const Color(0xFF9E9E9E),
@@ -25,6 +25,11 @@ class BoardRenderer extends StatelessWidget {
   /// Optional overlay sprites rendered on top of the objects layer, used during
   /// entity destruction animations. Maps cell position → resolved asset path.
   final Map<Position, String>? animationOverlays;
+  /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
+  final void Function(int x, int y)? onCellTap;
+  /// When set, cell_flooded entities are rendered in this color instead of
+  /// their default color — used by Flood Colors to show the last chosen color.
+  final Color? floodedColorOverride;
 
   const BoardRenderer({
     super.key,
@@ -32,6 +37,8 @@ class BoardRenderer extends StatelessWidget {
     required this.game,
     required this.packService,
     this.animationOverlays,
+    this.onCellTap,
+    this.floodedColorOverride,
   });
 
   @override
@@ -70,15 +77,31 @@ class BoardRenderer extends StatelessWidget {
                     top: y * cellSize,
                     width: cellSize,
                     height: cellSize,
-                    child: _Cell(
-                      x: x,
-                      y: y,
-                      state: state,
-                      game: game,
-                      packService: packService,
-                      cellSize: cellSize,
-                      skipGround: mcoPosSet.contains(Position(x, y)),
-                    ),
+                    child: onCellTap != null
+                        ? GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTap: () => onCellTap!(x, y),
+                            child: _Cell(
+                              x: x,
+                              y: y,
+                              state: state,
+                              game: game,
+                              packService: packService,
+                              cellSize: cellSize,
+                              skipGround: mcoPosSet.contains(Position(x, y)),
+                              floodedColorOverride: floodedColorOverride,
+                            ),
+                          )
+                        : _Cell(
+                            x: x,
+                            y: y,
+                            state: state,
+                            game: game,
+                            packService: packService,
+                            cellSize: cellSize,
+                            skipGround: mcoPosSet.contains(Position(x, y)),
+                            floodedColorOverride: floodedColorOverride,
+                          ),
                   ),
               if (animationOverlays != null)
                 for (final entry in animationOverlays!.entries)
@@ -295,6 +318,7 @@ class _Cell extends StatelessWidget {
   final PackService packService;
   final double cellSize;
   final bool skipGround;
+  final Color? floodedColorOverride;
 
   const _Cell({
     required this.x,
@@ -304,6 +328,7 @@ class _Cell extends StatelessWidget {
     required this.packService,
     required this.cellSize,
     this.skipGround = false,
+    this.floodedColorOverride,
   });
 
   @override
@@ -431,6 +456,9 @@ class _Cell extends StatelessWidget {
   }
 
   Color _color(String kind, EntityInstance entity) {
+    if (kind == 'cell_flooded' && floodedColorOverride != null) {
+      return floodedColorOverride!;
+    }
     if (kind.startsWith('cell_')) return _namedColor(kind.substring(5));
     if (kind == 'number') {
       final v = (entity.param('value') as int?) ?? 0;

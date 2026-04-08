@@ -1,0 +1,285 @@
+{
+  "id": "fl_024",
+  "title": "Deep Maze",
+  "board": {
+    "size": [
+      11,
+      11
+    ],
+    "layers": {
+      "objects": [
+        [
+          "cell_flooded",
+          "cell_blue",
+          "cell_purple",
+          "cell_yellow",
+          "cell_purple",
+          "cell_purple",
+          "cell_teal",
+          "cell_blue",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal"
+        ],
+        [
+          "cell_teal",
+          "cell_yellow",
+          "cell_purple",
+          "cell_blue",
+          "cell_blue",
+          "cell_orange",
+          "cell_blue",
+          "cell_yellow",
+          "cell_red",
+          "cell_purple",
+          "cell_red"
+        ],
+        [
+          "cell_teal",
+          "cell_purple",
+          "cell_yellow",
+          "cell_purple",
+          "cell_yellow",
+          "cell_blue",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_red",
+          "cell_purple",
+          "cell_purple",
+          "cell_yellow",
+          "cell_teal",
+          "cell_red",
+          "cell_blue",
+          "cell_blue",
+          "cell_blue",
+          "cell_yellow",
+          "cell_red"
+        ],
+        [
+          "cell_red",
+          "cell_teal",
+          "cell_purple",
+          "cell_blue",
+          "cell_blue",
+          "cell_orange",
+          "cell_orange",
+          "cell_teal",
+          "cell_red",
+          "cell_yellow",
+          "cell_orange"
+        ],
+        [
+          "cell_yellow",
+          "cell_yellow",
+          "cell_orange",
+          "cell_yellow",
+          "cell_purple",
+          "cell_orange",
+          "cell_red",
+          "cell_orange",
+          "cell_teal",
+          "cell_purple",
+          "cell_teal"
+        ],
+        [
+          "cell_yellow",
+          "cell_red",
+          "cell_teal",
+          "cell_red",
+          "cell_teal",
+          "cell_yellow",
+          "cell_orange",
+          "cell_teal",
+          "cell_yellow",
+          "cell_purple",
+          "cell_blue"
+        ],
+        [
+          "cell_teal",
+          "cell_orange",
+          "cell_orange",
+          "cell_red",
+          "cell_purple",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_teal",
+          "cell_orange",
+          "cell_blue"
+        ],
+        [
+          "cell_blue",
+          "cell_teal",
+          "cell_purple",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_red",
+          "cell_purple",
+          "cell_teal",
+          "cell_yellow",
+          "cell_blue"
+        ],
+        [
+          "cell_yellow",
+          "cell_orange",
+          "cell_purple",
+          "cell_teal",
+          "cell_blue",
+          "cell_orange",
+          "cell_teal",
+          "cell_orange",
+          "cell_purple",
+          "cell_yellow",
+          "cell_orange"
+        ],
+        [
+          "cell_orange",
+          "cell_red",
+          "cell_yellow",
+          "cell_teal",
+          "cell_yellow",
+          "cell_red",
+          "cell_yellow",
+          "cell_teal",
+          "cell_blue",
+          "cell_orange",
+          "cell_red"
+        ]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {
+      "enabled": false,
+      "position": [
+        0,
+        0
+      ],
+      "facing": "right"
+    },
+    "variables": {}
+  },
+  "goals": [
+    {
+      "id": "no_blue",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_blue"
+      }
+    },
+    {
+      "id": "no_orange",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_orange"
+      }
+    },
+    {
+      "id": "no_purple",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_purple"
+      }
+    },
+    {
+      "id": "no_red",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_red"
+      }
+    },
+    {
+      "id": "no_teal",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_teal"
+      }
+    },
+    {
+      "id": "no_yellow",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_yellow"
+      }
+    }
+  ],
+  "loseConditions": [
+    {
+      "type": "max_actions",
+      "config": {
+        "limit": 18
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {
+        "action": "flood_teal"
+      },
+      {
+        "action": "flood_purple"
+      },
+      {
+        "action": "flood_blue"
+      },
+      {
+        "action": "flood_orange"
+      },
+      {
+        "action": "flood_yellow"
+      },
+      {
+        "action": "flood_teal"
+      },
+      {
+        "action": "flood_orange"
+      },
+      {
+        "action": "flood_purple"
+      },
+      {
+        "action": "flood_blue"
+      },
+      {
+        "action": "flood_red"
+      },
+      {
+        "action": "flood_yellow"
+      },
+      {
+        "action": "flood_teal"
+      },
+      {
+        "action": "flood_orange"
+      },
+      {
+        "action": "flood_red"
+      },
+      {
+        "action": "flood_purple"
+      },
+      {
+        "action": "flood_teal"
+      },
+      {
+        "action": "flood_blue"
+      },
+      {
+        "action": "flood_yellow"
+      }
+    ],
+    "hintStops": [
+      9
+    ]
+  },
+  "metadata": {
+    "description": "11x11 board, 6 colours, opt=18, mc=0.1%",
+    "difficulty": 24
+  }
+}

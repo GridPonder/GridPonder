@@ -13,58 +13,178 @@
   "entityKinds": {
     "empty": {
       "layer": "ground",
-      "tags": [
-        "walkable"
-      ],
+      "tags": ["walkable"],
       "sprite": null,
       "symbol": "."
     },
+    "cell_red": {
+      "layer": "objects",
+      "tags": ["floodable"],
+      "sprite": null,
+      "symbol": "r"
+    },
     "cell_blue": {
       "layer": "objects",
-      "tags": [],
+      "tags": ["floodable"],
       "sprite": null,
       "symbol": "b"
     },
-    "cell_green": {
+    "cell_yellow": {
       "layer": "objects",
-      "tags": [],
+      "tags": ["floodable"],
       "sprite": null,
-      "symbol": "g"
+      "symbol": "y"
+    },
+    "cell_orange": {
+      "layer": "objects",
+      "tags": ["floodable"],
+      "sprite": null,
+      "symbol": "o"
+    },
+    "cell_purple": {
+      "layer": "objects",
+      "tags": ["floodable"],
+      "sprite": null,
+      "symbol": "p"
+    },
+    "cell_teal": {
+      "layer": "objects",
+      "tags": ["floodable"],
+      "sprite": null,
+      "symbol": "t"
+    },
+    "cell_flooded": {
+      "layer": "objects",
+      "tags": ["flooded"],
+      "sprite": null,
+      "symbol": "F"
     }
   },
   "actions": [
-    {
-      "id": "flood",
-      "params": {}
-    }
+    { "id": "flood_red",    "params": {} },
+    { "id": "flood_blue",   "params": {} },
+    { "id": "flood_yellow", "params": {} },
+    { "id": "flood_orange", "params": {} },
+    { "id": "flood_purple", "params": {} },
+    { "id": "flood_teal",   "params": {} }
   ],
   "systems": [
     {
-      "id": "flood_fill",
+      "id": "flood_red",
       "type": "flood_fill",
       "config": {
-        "floodAction": "flood",
-        "sourcePosition": "avatar",
+        "floodAction": "flood_red",
+        "sourcePosition": "all_of_kind",
+        "sourceKind": "cell_flooded",
         "affectedLayer": "objects",
         "matchBy": "kind",
-        "kindTransform": {
-          "cell_blue": "cell_green"
-        }
+        "kindTransform": { "cell_red": "cell_flooded" }
+      }
+    },
+    {
+      "id": "flood_blue",
+      "type": "flood_fill",
+      "config": {
+        "floodAction": "flood_blue",
+        "sourcePosition": "all_of_kind",
+        "sourceKind": "cell_flooded",
+        "affectedLayer": "objects",
+        "matchBy": "kind",
+        "kindTransform": { "cell_blue": "cell_flooded" }
+      }
+    },
+    {
+      "id": "flood_yellow",
+      "type": "flood_fill",
+      "config": {
+        "floodAction": "flood_yellow",
+        "sourcePosition": "all_of_kind",
+        "sourceKind": "cell_flooded",
+        "affectedLayer": "objects",
+        "matchBy": "kind",
+        "kindTransform": { "cell_yellow": "cell_flooded" }
+      }
+    },
+    {
+      "id": "flood_orange",
+      "type": "flood_fill",
+      "config": {
+        "floodAction": "flood_orange",
+        "sourcePosition": "all_of_kind",
+        "sourceKind": "cell_flooded",
+        "affectedLayer": "objects",
+        "matchBy": "kind",
+        "kindTransform": { "cell_orange": "cell_flooded" }
+      }
+    },
+    {
+      "id": "flood_purple",
+      "type": "flood_fill",
+      "config": {
+        "floodAction": "flood_purple",
+        "sourcePosition": "all_of_kind",
+        "sourceKind": "cell_flooded",
+        "affectedLayer": "objects",
+        "matchBy": "kind",
+        "kindTransform": { "cell_purple": "cell_flooded" }
+      }
+    },
+    {
+      "id": "flood_teal",
+      "type": "flood_fill",
+      "config": {
+        "floodAction": "flood_teal",
+        "sourcePosition": "all_of_kind",
+        "sourceKind": "cell_flooded",
+        "affectedLayer": "objects",
+        "matchBy": "kind",
+        "kindTransform": { "cell_teal": "cell_flooded" }
       }
     }
   ],
   "rules": [],
   "defaults": {
     "avatar": {
-      "enabled": true,
-      "facing": "right"
+      "enabled": false
     },
     "maxCascadeDepth": 1
   },
   "levelSequence": [
     {
-      "type": "level",
-      "ref": "fl_001"
-    }
+      "type": "story",
+      "title": "The Rogue Rainbow Incident",
+      "text": "Last Tuesday, a rogue rainbow sneezed directly onto Pip's garden. The result was catastrophic: blazing reds next to screaming oranges next to purples that have absolutely no business being near a vegetable patch.\n\nPip has located a bucket of sensible green paint. Starting from the top-left corner, choose a colour each turn — any region of that colour touching the flooded area joins it. Clear the whole board within the move limit!\n\nThe catch: the bucket only has so many splashes. Plan ahead — the order matters!",
+      "image": "assets/rabbit_color_flood.png"
+    },
+    { "type": "level", "ref": "fl_001" },
+    { "type": "level", "ref": "fl_002" },
+    { "type": "level", "ref": "fl_003" },
+    { "type": "level", "ref": "fl_004" },
+    { "type": "level", "ref": "fl_005" },
+    { "type": "level", "ref": "fl_006" },
+    { "type": "level", "ref": "fl_007" },
+    { "type": "level", "ref": "fl_008" },
+    { "type": "level", "ref": "fl_009" },
+    { "type": "level", "ref": "fl_010" },
+    { "type": "level", "ref": "fl_011" },
+    { "type": "level", "ref": "fl_012" },
+    { "type": "level", "ref": "fl_013" },
+    { "type": "level", "ref": "fl_014" },
+    { "type": "level", "ref": "fl_015" },
+    { "type": "level", "ref": "fl_016" },
+    { "type": "level", "ref": "fl_017" },
+    { "type": "level", "ref": "fl_018" },
+    { "type": "level", "ref": "fl_019" },
+    { "type": "level", "ref": "fl_020" },
+    { "type": "level", "ref": "fl_021" },
+    { "type": "level", "ref": "fl_022" },
+    { "type": "level", "ref": "fl_023" },
+    { "type": "level", "ref": "fl_024" },
+    { "type": "level", "ref": "fl_025" },
+    { "type": "level", "ref": "fl_026" },
+    { "type": "level", "ref": "fl_027" },
+    { "type": "level", "ref": "fl_028" },
+    { "type": "level", "ref": "fl_029" },
+    { "type": "level", "ref": "fl_030" }
   ]
 }

@@ -1,41 +1,121 @@
 {
   "id": "fl_001",
-  "title": "Flood Fill",
+  "title": "First Splash",
   "board": {
-    "size": [4, 4],
+    "size": [
+      5,
+      5
+    ],
     "layers": {
       "objects": [
-        ["cell_blue", "cell_blue", "cell_blue", "cell_blue"],
-        ["cell_blue", "cell_blue", "cell_blue", "cell_blue"],
-        ["cell_blue", "cell_blue", "cell_blue", "cell_blue"],
-        ["cell_blue", "cell_blue", "cell_blue", "cell_blue"]
+        [
+          "cell_flooded",
+          "cell_red",
+          "cell_red",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_red",
+          "cell_red",
+          "cell_red",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_red",
+          "cell_red",
+          "cell_yellow",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_orange",
+          "cell_orange",
+          "cell_blue",
+          "cell_blue",
+          "cell_yellow"
+        ],
+        [
+          "cell_orange",
+          "cell_orange",
+          "cell_blue",
+          "cell_yellow",
+          "cell_yellow"
+        ]
       ]
     }
   },
   "state": {
-    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"}
+    "avatar": {
+      "enabled": false,
+      "position": [
+        0,
+        0
+      ],
+      "facing": "right"
+    },
+    "variables": {}
   },
   "goals": [
     {
-      "id": "match",
-      "type": "board_match",
+      "id": "no_blue",
+      "type": "all_cleared",
       "config": {
-        "matchMode": "exact_non_null",
-        "targetLayers": {
-          "objects": [
-            ["cell_green", "cell_green", "cell_green", "cell_green"],
-            ["cell_green", "cell_green", "cell_green", "cell_green"],
-            ["cell_green", "cell_green", "cell_green", "cell_green"],
-            ["cell_green", "cell_green", "cell_green", "cell_green"]
-          ]
-        }
+        "kind": "cell_blue"
+      }
+    },
+    {
+      "id": "no_orange",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_orange"
+      }
+    },
+    {
+      "id": "no_red",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_red"
+      }
+    },
+    {
+      "id": "no_yellow",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_yellow"
+      }
+    }
+  ],
+  "loseConditions": [
+    {
+      "type": "max_actions",
+      "config": {
+        "limit": 5
       }
     }
   ],
   "solution": {
     "goldPath": [
-      {"action": "flood"}
+      {
+        "action": "flood_red"
+      },
+      {
+        "action": "flood_orange"
+      },
+      {
+        "action": "flood_blue"
+      },
+      {
+        "action": "flood_yellow"
+      }
     ],
-    "hintStops": []
+    "hintStops": [
+      2
+    ]
+  },
+  "metadata": {
+    "description": "5x5 board, 4 colours, opt=4, mc=100.0%",
+    "difficulty": 1
   }
 }

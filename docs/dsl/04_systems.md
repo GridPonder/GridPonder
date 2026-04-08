@@ -165,10 +165,36 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 |-------|------|---------|-------------|
 | `emitterKind` | string | `"pipe"` | Multi-cell object kind that acts as an emitter. |
 
-**Behavior:**
-1. For each MCO of `emitterKind`, check whether the exit cell (from `mco.params.exitPosition`) is empty.
-2. If empty and the queue has remaining items: dequeue next item, spawn at exit, emit `item_released`.
+**Behavior — unidirectional pipe** (no `exit2Position`):
+1. Check whether the exit cell (`exitPosition`) and the spawn cell (one step in `exitDirection`) are both empty.
+2. If both empty and the queue has remaining items: spawn the next item at the spawn cell, increment `currentIndex`, emit `item_released`.
 3. Only one item is released per emitter per turn.
+
+**Behavior — bidirectional pipe** (`exit2Position` present):
+
+A bidirectional pipe has two open exits. Numbers are conceptually arranged in the pipe from exit 1 to exit 2: `queue[0]` is adjacent to exit 1, `queue[N-1]` adjacent to exit 2. The pipe tracks two emission counters:
+- `currentIndex` (`e1`) — items emitted from exit 1 side
+- `exit2Index` (`e2`) — items emitted from exit 2 side
+
+Remaining items occupy positions `queue[e1 .. N-1-e2]`. Each turn, at most one item is emitted:
+
+1. **No remaining items** (`e1 + e2 >= N`): nothing to emit.
+2. **Multiple remaining** (`N - e1 - e2 >= 2`): two candidates exist —
+   - Exit-1 candidate: `queue[e1]`, at distance `e1` from exit 1.
+   - Exit-2 candidate: `queue[N-1-e2]`, at distance `e2` from exit 2.
+   - If only exit 1 is available (spawn cell clear): emit exit-1 candidate from exit 1.
+   - If only exit 2 is available: emit exit-2 candidate from exit 2.
+   - If both available: emit whichever candidate has the smaller distance; tie → prefer exit 1.
+3. **One remaining** (`N - e1 - e2 == 1`): single number at position `e1 = N-1-e2`.
+   - Distance to exit 1 = `e1`; distance to exit 2 = `e2`.
+   - If `e1 < e2`: closer to exit 1 — emit from exit 1 if available, else exit 2.
+   - If `e2 < e1`: closer to exit 2 — emit from exit 2 if available, else exit 1.
+   - If `e1 == e2` (midpoint of an odd-length pipe):
+     - If only exit 1 clear → emit from exit 1.
+     - If only exit 2 clear → emit from exit 2.
+     - If **both** clear or both blocked → **stuck**: no emission this turn; the number is rendered visibly at the midpoint pipe cell.
+
+**Even vs. odd pipe length:** In an even-length pipe every position has a strictly nearer exit, so the stuck condition (`e1 == e2` with exactly one item remaining) never arises. It is exclusive to odd-length pipes.
 
 ---
 

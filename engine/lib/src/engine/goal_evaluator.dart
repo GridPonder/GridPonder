@@ -54,6 +54,8 @@ class GoalEvaluator {
         return _variableThreshold(goal, state);
       case 'all_cleared':
         return _allCleared(goal, state, game);
+      case 'sum_constraint':
+        return _sumConstraint(goal, state);
       default:
         return (false, 0.0);
     }
@@ -217,6 +219,76 @@ class GoalEvaluator {
         ? 1.0
         : (numCurrent / target).clamp(0.0, 1.0).toDouble();
     return (done, prog);
+  }
+
+  /// Evaluates row/column/board numeric sum constraints.
+  ///
+  /// Config fields:
+  ///   layer      — layer id to scan (default "objects")
+  ///   scope      — "row" | "col" | "all_rows" | "all_cols" | "board"
+  ///   index      — row or col index (required for "row" / "col" scopes)
+  ///   target     — expected sum (num)
+  ///   comparison — "eq" (default) | "gte" | "lte"
+  ///
+  /// Numeric value is extracted from `num_<n>` kind or `number` kind with
+  /// a `value` parameter. Non-numeric entities contribute 0.
+  (bool, double) _sumConstraint(GoalDef goal, LevelState state) {
+    final layerId = (goal.config['layer'] as String?) ?? 'objects';
+    final scope = (goal.config['scope'] as String?) ?? 'board';
+    final target = goal.config['target'] as num;
+    final comparison = (goal.config['comparison'] as String?) ?? 'eq';
+    final index = goal.config['index'] as int?;
+
+    final layer = state.board.layers[layerId];
+    if (layer == null) return (false, 0.0);
+
+    final w = state.board.width;
+    final h = state.board.height;
+
+    int cellValue(Position pos) {
+      final entity = layer.getAt(pos);
+      if (entity == null) return 0;
+      final kind = entity.kind;
+      if (kind.startsWith('num_')) return int.tryParse(kind.substring(4)) ?? 0;
+      if (kind == 'number') return (entity.param('value') as int?) ?? 0;
+      return 0;
+    }
+
+    int rowSum(int y) =>
+        List.generate(w, (x) => cellValue(Position(x, y))).fold(0, (a, b) => a + b);
+    int colSum(int x) =>
+        List.generate(h, (y) => cellValue(Position(x, y))).fold(0, (a, b) => a + b);
+
+    bool satisfies(int sum) => switch (comparison) {
+          'gte' => sum >= target,
+          'lte' => sum <= target,
+          _ => sum == target,
+        };
+
+    switch (scope) {
+      case 'row':
+        if (index == null) return (false, 0.0);
+        final ok = satisfies(rowSum(index));
+        return (ok, ok ? 1.0 : 0.0);
+      case 'col':
+        if (index == null) return (false, 0.0);
+        final ok = satisfies(colSum(index));
+        return (ok, ok ? 1.0 : 0.0);
+      case 'all_rows':
+        final satisfied = List.generate(h, rowSum).where(satisfies).length;
+        return (satisfied == h, satisfied / h);
+      case 'all_cols':
+        final satisfied = List.generate(w, colSum).where(satisfies).length;
+        return (satisfied == w, satisfied / w);
+      case 'board':
+        int total = 0;
+        for (int y = 0; y < h; y++)
+          for (int x = 0; x < w; x++) total += cellValue(Position(x, y));
+        final ok = satisfies(total);
+        return (ok, ok ? 1.0 : 0.0);
+      default:
+        return (false, 0.0);
+    }
   }
 
   (bool, double) _allCleared(

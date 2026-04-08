@@ -12,7 +12,7 @@
           {"position": [2, 0], "kind": "cell_green"},
           {"position": [0, 1], "kind": "cell_yellow"},
           {"position": [1, 1], "kind": "cell_purple"},
-          {"position": [2, 1], "kind": "cell_orange"}
+          {"position": [2, 1], "kind": "cell_lime"}
         ]
       }
     }
@@ -29,7 +29,7 @@
         "matchMode": "exact_non_null",
         "targetLayers": {
           "objects": [
-            ["cell_blue", "cell_red", "cell_orange", null],
+            ["cell_blue", "cell_red", "cell_lime", null],
             ["cell_purple", "cell_yellow", "cell_green", null],
             [null, null, null, null]
           ]

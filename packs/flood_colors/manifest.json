@@ -3,7 +3,8 @@
   "packVersion": 1,
   "gameId": "flood_colors",
   "title": "Flood Colors",
-  "description": "Use flood fill to convert all cells to green",
+  "description": "Tap any colored region to flood it green. Clear the whole board within the move limit.",
+  "coverImage": "assets/rabbit_color_flood.png",
   "version": "1.0.0",
   "minEngineVersion": "0.1.0"
 }

@@ -12,4 +12,4 @@ See `README.md` for repo structure, `docs/gridponder_platform_overview.md` for a
 ## Instructions
 
 - use skills to test levels when needed before declaring that your work is done (usually involves writing an integration test, starting the app, taking screenshots and analysing correctness)
-- do not declare Anthropic Haiku/Sonnet/Opus as co-author in git commits
+- do not declare AI models as co-author in git commits

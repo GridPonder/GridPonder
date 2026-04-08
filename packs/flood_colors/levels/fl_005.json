@@ -1,0 +1,134 @@
+{
+  "id": "fl_005",
+  "title": "Patchwork",
+  "board": {
+    "size": [
+      6,
+      6
+    ],
+    "layers": {
+      "objects": [
+        [
+          "cell_flooded",
+          "cell_flooded",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_flooded",
+          "cell_flooded",
+          "cell_blue",
+          "cell_orange",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_flooded",
+          "cell_blue",
+          "cell_blue",
+          "cell_red",
+          "cell_orange",
+          "cell_orange"
+        ],
+        [
+          "cell_flooded",
+          "cell_blue",
+          "cell_blue",
+          "cell_red",
+          "cell_red",
+          "cell_red"
+        ],
+        [
+          "cell_yellow",
+          "cell_blue",
+          "cell_blue",
+          "cell_blue",
+          "cell_red",
+          "cell_red"
+        ],
+        [
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_blue",
+          "cell_orange",
+          "cell_orange"
+        ]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {
+      "enabled": false,
+      "position": [
+        0,
+        0
+      ],
+      "facing": "right"
+    },
+    "variables": {}
+  },
+  "goals": [
+    {
+      "id": "no_blue",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_blue"
+      }
+    },
+    {
+      "id": "no_orange",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_orange"
+      }
+    },
+    {
+      "id": "no_red",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_red"
+      }
+    },
+    {
+      "id": "no_yellow",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_yellow"
+      }
+    }
+  ],
+  "loseConditions": [
+    {
+      "type": "max_actions",
+      "config": {
+        "limit": 4
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {
+        "action": "flood_blue"
+      },
+      {
+        "action": "flood_orange"
+      },
+      {
+        "action": "flood_red"
+      },
+      {
+        "action": "flood_yellow"
+      }
+    ],
+    "hintStops": [
+      2
+    ]
+  },
+  "metadata": {
+    "description": "6x6 board, 4 colours, opt=4, mc=50.1%",
+    "difficulty": 5
+  }
+}

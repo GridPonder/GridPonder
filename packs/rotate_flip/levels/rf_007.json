@@ -1,0 +1,66 @@
+{
+  "id": "rf_007",
+  "title": "Spin & Flip",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "ground": [
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "cell_green"},
+          {"position": [1, 0], "kind": "cell_yellow"},
+          {"position": [2, 0], "kind": "cell_green"},
+          {"position": [3, 0], "kind": "cell_blue"},
+          {"position": [0, 1], "kind": "cell_green"},
+          {"position": [1, 1], "kind": "cell_red"},
+          {"position": [2, 1], "kind": "cell_red"},
+          {"position": [3, 1], "kind": "cell_blue"},
+          {"position": [0, 2], "kind": "cell_blue"},
+          {"position": [1, 2], "kind": "cell_yellow"},
+          {"position": [2, 2], "kind": "cell_yellow"},
+          {"position": [3, 2], "kind": "cell_red"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["cell_red",   "cell_green", "cell_blue",  "cell_yellow"],
+            ["cell_green", "cell_red",   "cell_yellow", "cell_blue" ],
+            ["cell_blue",  "cell_yellow","cell_red",   "cell_green" ],
+            [null,          null,          null,          null       ]
+          ]
+        }
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "flip"},
+      {"action": "rotate"},
+      {"action": "move", "direction": "right"},
+      {"action": "flip"},
+      {"action": "move", "direction": "right"},
+      {"action": "flip"},
+      {"action": "move", "direction": "down"},
+      {"action": "rotate"}
+    ],
+    "hintStops": [4]
+  }
+}

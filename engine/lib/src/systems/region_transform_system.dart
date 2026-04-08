@@ -49,6 +49,16 @@ class RegionTransformSystem extends GameSystem {
     final overlayWidth = overlay.width;
     final overlayHeight = overlay.height;
 
+    // If blockOnVoid is enabled, abort if any overlay cell sits on void ground.
+    final blockOnVoid = (config['blockOnVoid'] as bool?) ?? false;
+    if (blockOnVoid) {
+      for (int dy = 0; dy < overlayHeight; dy++) {
+        for (int dx = 0; dx < overlayWidth; dx++) {
+          if (board.isVoid(Position(ox + dx, oy + dy))) return const [];
+        }
+      }
+    }
+
     final List<GameEvent> events = [];
 
     for (final layerId in affectedLayers) {

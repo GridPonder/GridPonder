@@ -295,12 +295,18 @@ Multi-cell objects (e.g., pipes) referenced in level `multiCellObjects` arrays s
   "tags": ["emitter"],
   "sprite": "assets/sprites/pipe.png",
   "params": {
-    "queue": { "type": "array", "required": true },
-    "exitPosition": { "type": "position", "required": true },
-    "exitDirection": { "type": "string" }
+    "queue":          { "type": "array",    "required": true },
+    "currentIndex":   { "type": "integer" },
+    "exitPosition":   { "type": "position", "required": true },
+    "exitDirection":  { "type": "string" },
+    "exit2Position":  { "type": "position" },
+    "exit2Direction": { "type": "string" },
+    "exit2Index":     { "type": "integer" }
   }
 }
 ```
+
+When `exit2Position` is present the pipe is **bidirectional**: it has two open exits and routes numbers toward the nearer open exit each turn. See [§2.5 queued\_emitters](04_systems.md#25-queued_emitters) for the full routing rules.
 
 ---
 

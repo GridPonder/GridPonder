@@ -1,7 +1,7 @@
 {
   "id": "nc_005",
-  "title": "Cross Current",
-  "guide": "The pipe exits sideways into a blocked lane. Merge the board numbers first — once the big pipe number arrives, it's too late to build the right chain.",
+  "title": "Double Drop",
+  "guide": "The 5 at the bottom is waiting for company. Slide down to send the 2 to meet it — then keep the left channel open for what the pipe drops next.",
   "board": {
     "size": [5, 4],
     "layers": {
@@ -15,6 +15,7 @@
         "format": "sparse",
         "entries": [
           {"position": [3, 0], "kind": "number", "value": 2},
+          {"position": [2, 3], "kind": "number", "value": 5},
           {"position": [4, 3], "kind": "number", "value": 3}
         ]
       }
@@ -31,7 +32,7 @@
         "params": {
           "exitPosition": [0, 2],
           "exitDirection": "right",
-          "queue": [4, 7],
+          "queue": [2, 8],
           "currentIndex": 0
         }
       }
@@ -45,7 +46,7 @@
       "id": "seq",
       "type": "sequence_match",
       "config": {
-        "sequence": [5, 9, 16],
+        "sequence": [7, 9, 11],
         "scanTrigger": "on_merge"
       }
     }
@@ -53,12 +54,11 @@
   "solution": {
     "goldPath": [
       {"action": "move", "direction": "down"},
-      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "left"},
       {"action": "move", "direction": "up"},
-      {"action": "move", "direction": "right"},
-      {"action": "move", "direction": "down"},
-      {"action": "move", "direction": "right"}
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"}
     ],
-    "hintStops": [3]
+    "hintStops": [2, 4]
   }
 }

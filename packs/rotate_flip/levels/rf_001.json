@@ -1,6 +1,6 @@
 {
   "id": "rf_001",
-  "title": "Rotate Basics",
+  "title": "Twist and Mirror",
   "board": {
     "size": [3, 3],
     "layers": {
@@ -27,8 +27,8 @@
         "matchMode": "exact_non_null",
         "targetLayers": {
           "objects": [
-            ["cell_green", "cell_red", null],
-            ["cell_yellow", "cell_blue", null],
+            ["cell_red", "cell_green", null],
+            ["cell_blue", "cell_yellow", null],
             [null, null, null]
           ]
         }
@@ -37,8 +37,9 @@
   ],
   "solution": {
     "goldPath": [
-      {"action": "rotate"}
+      {"action": "rotate"},
+      {"action": "flip"}
     ],
-    "hintStops": []
+    "hintStops": [1]
   }
 }

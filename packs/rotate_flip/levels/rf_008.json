@@ -1,0 +1,66 @@
+{
+  "id": "rf_008",
+  "title": "Rainbow Rush",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "ground": [
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "cell_green"},
+          {"position": [1, 0], "kind": "cell_red"},
+          {"position": [2, 0], "kind": "cell_blue"},
+          {"position": [3, 0], "kind": "cell_yellow"},
+          {"position": [0, 1], "kind": "cell_green"},
+          {"position": [1, 1], "kind": "cell_lime"},
+          {"position": [2, 1], "kind": "cell_lime"},
+          {"position": [3, 1], "kind": "cell_red"},
+          {"position": [0, 2], "kind": "cell_blue"},
+          {"position": [1, 2], "kind": "cell_purple"},
+          {"position": [2, 2], "kind": "cell_yellow"},
+          {"position": [3, 2], "kind": "cell_purple"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["cell_red",    "cell_green", "cell_blue",   "cell_yellow"],
+            ["cell_purple", "cell_lime",  "cell_red",    "cell_green" ],
+            ["cell_blue",   "cell_yellow","cell_purple", "cell_lime"  ],
+            [null,           null,          null,          null       ]
+          ]
+        }
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "flip"},
+      {"action": "move", "direction": "down"},
+      {"action": "flip"},
+      {"action": "rotate"},
+      {"action": "move", "direction": "right"},
+      {"action": "flip"},
+      {"action": "move", "direction": "right"},
+      {"action": "flip"}
+    ],
+    "hintStops": [4]
+  }
+}

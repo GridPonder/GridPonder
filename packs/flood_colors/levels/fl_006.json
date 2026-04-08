@@ -1,0 +1,144 @@
+{
+  "id": "fl_006",
+  "title": "Tangle",
+  "board": {
+    "size": [
+      6,
+      6
+    ],
+    "layers": {
+      "objects": [
+        [
+          "cell_flooded",
+          "cell_blue",
+          "cell_blue",
+          "cell_blue",
+          "cell_blue",
+          "cell_blue"
+        ],
+        [
+          "cell_flooded",
+          "cell_blue",
+          "cell_blue",
+          "cell_blue",
+          "cell_blue",
+          "cell_blue"
+        ],
+        [
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_orange",
+          "cell_purple",
+          "cell_purple"
+        ],
+        [
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_orange",
+          "cell_purple",
+          "cell_purple"
+        ],
+        [
+          "cell_yellow",
+          "cell_yellow",
+          "cell_yellow",
+          "cell_blue",
+          "cell_blue",
+          "cell_purple"
+        ],
+        [
+          "cell_red",
+          "cell_red",
+          "cell_red",
+          "cell_orange",
+          "cell_purple",
+          "cell_purple"
+        ]
+      ]
+    }
+  },
+  "state": {
+    "avatar": {
+      "enabled": false,
+      "position": [
+        0,
+        0
+      ],
+      "facing": "right"
+    },
+    "variables": {}
+  },
+  "goals": [
+    {
+      "id": "no_blue",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_blue"
+      }
+    },
+    {
+      "id": "no_orange",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_orange"
+      }
+    },
+    {
+      "id": "no_purple",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_purple"
+      }
+    },
+    {
+      "id": "no_red",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_red"
+      }
+    },
+    {
+      "id": "no_yellow",
+      "type": "all_cleared",
+      "config": {
+        "kind": "cell_yellow"
+      }
+    }
+  ],
+  "loseConditions": [
+    {
+      "type": "max_actions",
+      "config": {
+        "limit": 5
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {
+        "action": "flood_yellow"
+      },
+      {
+        "action": "flood_blue"
+      },
+      {
+        "action": "flood_orange"
+      },
+      {
+        "action": "flood_purple"
+      },
+      {
+        "action": "flood_red"
+      }
+    ],
+    "hintStops": [
+      2
+    ]
+  },
+  "metadata": {
+    "description": "6x6 board, 5 colours, opt=5, mc=33.7%",
+    "difficulty": 6
+  }
+}

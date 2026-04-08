@@ -1,0 +1,61 @@
+{
+  "id": "rf_005",
+  "title": "The Sweep",
+  "board": {
+    "size": [4, 4],
+    "layers": {
+      "ground": [
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "cell_yellow"},
+          {"position": [1, 0], "kind": "cell_red"},
+          {"position": [2, 0], "kind": "cell_green"},
+          {"position": [3, 0], "kind": "cell_blue"},
+          {"position": [0, 1], "kind": "cell_yellow"},
+          {"position": [1, 1], "kind": "cell_green"},
+          {"position": [2, 1], "kind": "cell_red"},
+          {"position": [3, 1], "kind": "cell_blue"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"},
+    "overlay": {"position": [0, 0], "size": [2, 2]}
+  },
+  "goals": [
+    {
+      "id": "match",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "objects": [
+            ["cell_red",   "cell_green", "cell_blue",   "cell_yellow"],
+            ["cell_green", "cell_red",   "cell_yellow", "cell_blue"  ],
+            [null,          null,          null,          null        ],
+            [null,          null,          null,          null        ]
+          ]
+        }
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "flip"},
+      {"action": "move", "direction": "right"},
+      {"action": "flip"},
+      {"action": "move", "direction": "right"},
+      {"action": "flip"},
+      {"action": "move", "direction": "down"},
+      {"action": "flip"}
+    ],
+    "hintStops": [3]
+  }
+}

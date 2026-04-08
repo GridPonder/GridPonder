@@ -41,7 +41,82 @@ class FloodFillSystem extends GameSystem {
     final layer = board.layers[affectedLayer];
     if (layer == null) return const [];
 
-    // Determine source position.
+    final cardinalDirections = [
+      Direction.up,
+      Direction.down,
+      Direction.left,
+      Direction.right,
+    ];
+
+    // ── "all_of_kind" source mode ────────────────────────────────────────────
+    // The source is every existing cell of `sourceKind` (e.g. "cell_flooded").
+    // The BFS expands outward from that region into adjacent cells whose kind
+    // appears as a key in `kindTransform`.  Useful for "growing region" games
+    // such as Classic Flood-It.
+    if (sourcePositionMode == 'all_of_kind') {
+      final sourceKind = config['sourceKind'] as String? ?? 'cell_flooded';
+      final targetKinds = kindTransform.keys.toSet();
+
+      // Mark every existing source-kind cell as visited (they are already the
+      // flood region — we never re-enter them).
+      final visited = <Position>{};
+      for (int y = 0; y < board.height; y++) {
+        for (int x = 0; x < board.width; x++) {
+          final pos = Position(x, y);
+          if (layer.getAt(pos)?.kind == sourceKind) visited.add(pos);
+        }
+      }
+      if (visited.isEmpty) return const [];
+
+      // Seed BFS: target-kind cells that border the flood region.
+      final frontier = visited.toList(); // snapshot before growing
+      final queue = Queue<Position>();
+      for (final src in frontier) {
+        for (final dir in cardinalDirections) {
+          final nb = src.moved(dir);
+          if (visited.contains(nb) || !board.isInBounds(nb)) continue;
+          final entity = layer.getAt(nb);
+          if (entity != null && targetKinds.contains(entity.kind)) {
+            visited.add(nb);
+            queue.add(nb);
+          }
+        }
+      }
+      if (queue.isEmpty) return const []; // no adjacent target cells → rejected
+
+      // BFS through connected target-kind cells.
+      final toTransform = <Position>[];
+      while (queue.isNotEmpty) {
+        final current = queue.removeFirst();
+        toTransform.add(current);
+        final currentKind = layer.getAt(current)!.kind;
+        for (final dir in cardinalDirections) {
+          final nb = current.moved(dir);
+          if (visited.contains(nb) || !board.isInBounds(nb)) continue;
+          final entity = layer.getAt(nb);
+          if (entity != null && entity.kind == currentKind) {
+            visited.add(nb);
+            queue.add(nb);
+          }
+        }
+      }
+
+      // Apply transformations.
+      final affectedPositions = <Position>[];
+      for (final pos in toTransform) {
+        final entity = layer.getAt(pos);
+        if (entity == null) continue;
+        final nextKind = kindTransform[entity.kind];
+        if (nextKind != null) {
+          layer.setAt(pos, entity.copyWith(kind: nextKind));
+          affectedPositions.add(pos);
+        }
+      }
+      if (affectedPositions.isEmpty) return const [];
+      return [GameEvent.cellsFlooded(affectedPositions)];
+    }
+
+    // ── Single-position source modes ─────────────────────────────────────────
     final Position sourcePos;
     if (sourcePositionMode == 'overlay_center') {
       final overlay = state.overlay;
@@ -50,6 +125,15 @@ class FloodFillSystem extends GameSystem {
         overlay.x + overlay.width ~/ 2,
         overlay.y + overlay.height ~/ 2,
       );
+    } else if (sourcePositionMode == 'action_param') {
+      final posRaw = action.params['position'];
+      if (posRaw == null) return const [];
+      final List<dynamic> posArr = posRaw as List<dynamic>;
+      sourcePos = Position(posArr[0] as int, posArr[1] as int);
+      // Move avatar to tapped position for visual feedback.
+      if (state.avatar.position != null) {
+        state.avatar = state.avatar.copyWith(position: sourcePos);
+      }
     } else {
       // Default: "avatar"
       final avatarPos = state.avatar.position;
@@ -74,13 +158,6 @@ class FloodFillSystem extends GameSystem {
       // matchBy == 'kind'
       matchValue = sourceEntity.kind;
     }
-
-    final cardinalDirections = [
-      Direction.up,
-      Direction.down,
-      Direction.left,
-      Direction.right,
-    ];
 
     while (queue.isNotEmpty) {
       final current = queue.removeFirst();

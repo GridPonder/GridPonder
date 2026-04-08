@@ -1,0 +1,63 @@
+{
+  "id": "nc_007",
+  "title": "Two Ways",
+  "guide": "The pipe delivers to whichever exit is open. Block one end and the number finds another way out. Both deliveries need to land.",
+  "board": {
+    "size": [5, 3],
+    "layers": {
+      "ground": [
+        ["empty", "void",  "void",  "void",  "empty"],
+        ["empty", "empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 1], "kind": "number", "value": 1}
+        ]
+      }
+    },
+    "multiCellObjects": [
+      {
+        "id": "pipe_1",
+        "kind": "pipe",
+        "cells": [
+          {"position": [1, 0], "sprite": "assets/pipe_end_l.png"},
+          {"position": [2, 0], "sprite": "assets/pipe_straight_h.png"},
+          {"position": [3, 0], "sprite": "assets/pipe_end_r.png"}
+        ],
+        "params": {
+          "exitPosition":   [1, 0],
+          "exitDirection":  "left",
+          "exit2Position":  [3, 0],
+          "exit2Direction": "right",
+          "queue": [3, 2],
+          "currentIndex": 0,
+          "exit2Index": 0
+        }
+      }
+    ]
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "seq",
+      "type": "sequence_match",
+      "config": {
+        "sequence": [4, 6],
+        "scanTrigger": "on_merge"
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "left"}
+    ],
+    "hintStops": [1, 3]
+  }
+}

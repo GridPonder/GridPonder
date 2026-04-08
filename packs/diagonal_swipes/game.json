@@ -143,7 +143,16 @@
     },
     "maxCascadeDepth": 1
   },
+  "ui": {
+    "showGoal": true
+  },
   "levelSequence": [
+    {
+      "type": "story",
+      "title": "The Diagonal Dilemma",
+      "text": "Pip's number tiles have got themselves into a terrible muddle. They refuse to slide left or right like sensible tiles — instead they only swap diagonally, two at a time.\n\nMove Pip around the grid to position the 2×2 swap cursor, then swipe diagonally to swap the corner tiles. Reach the target arrangement before you run out of moves!\n\nSome puzzles ask you to match a pattern. Others ask you to balance row sums. Either way, think before you swipe — each swap changes four tiles at once.",
+      "image": "assets/rabbit_diagonal_swipes.png"
+    },
     {
       "type": "level",
       "ref": "ds_001"

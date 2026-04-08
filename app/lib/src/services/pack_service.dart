@@ -36,6 +36,8 @@ class PackService {
 
   PackService._(this.pack, this.info);
 
+  ThemeDef? get theme => pack.theme;
+
   /// Reads only manifest.json + theme.json for a pack — fast, used by the
   /// library screen to populate cards without loading the full game.
   static Future<PackInfo> loadInfo(String packId) async {
@@ -85,6 +87,7 @@ class PackService {
     final loadedPack = PackLoader.load(
       manifestJson: manifest,
       gameJson: game,
+      themeJson: theme,
       levelJsons: levelJsons,
     );
 

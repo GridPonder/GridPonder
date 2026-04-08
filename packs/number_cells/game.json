@@ -31,7 +31,7 @@
       "layer": "ground",
       "tags": [],
       "sprite": null,
-      "symbol": "│"
+      "symbol": "\u2502"
     },
     "number": {
       "layer": "objects",
@@ -117,6 +117,14 @@
     {
       "type": "level",
       "ref": "nc_005"
+    },
+    {
+      "type": "level",
+      "ref": "nc_006"
+    },
+    {
+      "type": "level",
+      "ref": "nc_007"
     }
   ]
 }

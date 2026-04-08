@@ -13,18 +13,20 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // ---------------------------------------------------------------------------
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
-const String kPackId = 'flag_adventure';
-const String kLevelId = 'pw_001';
-// Gold-path moves: (dx, dy) offsets for dragFrom — right=(100,0), left=(-100,0),
-// down=(0,100), up=(0,-100).
-const List<(double, double)> kMoves = [
-  (0, 100),    // down → [0,1]
-  (0, 100),    // down → [0,2]
-  (0, 100),    // down → [0,3]
-  (100, 0),    // right → [1,3] picks up pickaxe
-  (100, 0),    // right → [2,3] enters portal, exits at [5,1]
-  (-100, 0),   // left  → [4,1] breaks rock
-  (-100, 0),   // left  → [3,1] reaches carrot
+const String kPackId = 'rotate_flip';
+const String kLevelId = 'rf_008';
+// Gold-path moves: a direction string or button label.
+//   Swipes:  'right' | 'left' | 'up' | 'down'
+//   Buttons: 'rotate' | 'flip' | 'flood'  (taps the labelled button)
+const List<String> kMoves = [
+  'flip',    // flip@(0,0)
+  'down',    // overlay to (0,1)
+  'flip',    // flip@(0,1)
+  'rotate',  // rotate@(0,1) — combined with flip above = column swap
+  'right',   // overlay to (1,1)
+  'flip',    // flip@(1,1)
+  'right',   // overlay to (2,1)
+  'flip',    // flip@(2,1)
 ];
 // ---------------------------------------------------------------------------
 
@@ -34,6 +36,23 @@ Future<void> _saveScreenshot(WidgetTester tester, String path) async {
   final image = await boundary.toImage(pixelRatio: 2.0);
   final byteData = await image.toByteData(format: ui.ImageByteFormat.png);
   await File(path).writeAsBytes(byteData!.buffer.asUint8List());
+}
+
+Future<void> _executeMove(WidgetTester tester, String move, Offset center) async {
+  switch (move) {
+    case 'right':
+      await tester.dragFrom(center, const Offset(100, 0));
+    case 'left':
+      await tester.dragFrom(center, const Offset(-100, 0));
+    case 'down':
+      await tester.dragFrom(center, const Offset(0, 100));
+    case 'up':
+      await tester.dragFrom(center, const Offset(0, -100));
+    default:
+      // Button tap: find by capitalised label
+      final label = move[0].toUpperCase() + move.substring(1);
+      await tester.tap(find.text(label));
+  }
 }
 
 void main() {
@@ -74,8 +93,7 @@ void main() {
 
     // Execute moves, screenshotting after each
     for (int i = 0; i < kMoves.length; i++) {
-      final (dx, dy) = kMoves[i];
-      await tester.dragFrom(center, Offset(dx, dy));
+      await _executeMove(tester, kMoves[i], center);
       await tester.pumpAndSettle(const Duration(milliseconds: 800));
 
       final step = (i + 1).toString().padLeft(2, '0');

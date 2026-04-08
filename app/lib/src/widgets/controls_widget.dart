@@ -1,6 +1,8 @@
+import 'dart:math' show pi;
 import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
 import '../services/hint_service.dart';
+import 'board_renderer.dart' show cellNamedColor;
 
 typedef ActionCallback = void Function(GameAction action);
 
@@ -16,6 +18,9 @@ class ControlsWidget extends StatefulWidget {
   final bool canUndo;
   final GameDefinition game;
   final List<HintStatus> hintStatuses;
+  /// If non-null, only these action IDs are currently applicable.
+  /// Others are rendered grayed out (but still tappable — engine rejects them).
+  final Set<String>? availableActionIds;
 
   const ControlsWidget({
     super.key,
@@ -27,6 +32,7 @@ class ControlsWidget extends StatefulWidget {
     required this.canUndo,
     required this.game,
     this.hintStatuses = const [],
+    this.availableActionIds,
   });
 
   @override
@@ -37,6 +43,9 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   List<ActionDef> get _buttonActions => widget.game.actions
       .where((a) => a.id != 'move' && a.id != 'diagonal_swap')
       .toList();
+
+  bool get _hasDiagonalSwap =>
+      widget.game.actions.any((a) => a.id == 'diagonal_swap');
 
   @override
   Widget build(BuildContext context) {
@@ -60,13 +69,28 @@ class _ControlsWidgetState extends State<ControlsWidget> {
       ],
     );
 
-    if (actions.isEmpty) return controls;
+    final diagBtns = _hasDiagonalSwap
+        ? _DiagonalSwapBtns(
+            onTap: (dir) =>
+                widget.onAction(GameAction('diagonal_swap', {'direction': dir})),
+          )
+        : null;
+
+    if (actions.isEmpty && diagBtns == null) return controls;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(mainAxisAlignment: MainAxisAlignment.center, children: actions),
-        const SizedBox(height: 6),
+        if (diagBtns != null) ...[diagBtns, const SizedBox(height: 6)],
+        if (actions.isNotEmpty) ...[
+          Wrap(
+            alignment: WrapAlignment.center,
+            spacing: 6,
+            runSpacing: 6,
+            children: actions,
+          ),
+          const SizedBox(height: 6),
+        ],
         controls,
       ],
     );
@@ -74,16 +98,27 @@ class _ControlsWidgetState extends State<ControlsWidget> {
 
   Widget _actionButton(ActionDef actionDef) {
     if (actionDef.params.isEmpty) {
+      // Colour-flood actions: "flood_red", "flood_blue", etc.
+      if (actionDef.id.startsWith('flood_')) {
+        final colorName = actionDef.id.substring(6); // e.g. "red"
+        final color = _floodColor(colorName);
+        final available = widget.availableActionIds == null ||
+            widget.availableActionIds!.contains(actionDef.id);
+        return _ColorBtn(
+          color: color,
+          available: available,
+          onTap: () => widget.onAction(GameAction(actionDef.id, {})),
+        );
+      }
+
       final icon = switch (actionDef.id) {
         'rotate' => Icons.rotate_right,
         'flip' => Icons.flip,
-        'flood' => Icons.water_drop_outlined,
         _ => Icons.play_arrow_outlined,
       };
       final label = switch (actionDef.id) {
         'rotate' => 'Rotate',
         'flip' => 'Flip',
-        'flood' => 'Flood',
         _ => actionDef.id,
       };
       return _CtrlBtn(
@@ -94,6 +129,9 @@ class _ControlsWidgetState extends State<ControlsWidget> {
     }
     return const SizedBox.shrink();
   }
+
+  /// Map a colour name (e.g. "red") to a display Color.
+  Color _floodColor(String name) => cellNamedColor(name);
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +205,94 @@ class _HintBtn extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(left: 2),
       child: Icon(icon, size: 11, color: color),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/// Coloured drop button for flood_<colour> actions.
+/// Uses a pill shape matching the other control buttons, with a water-drop
+/// icon tinted in the flood colour — works well both available and grayed.
+class _ColorBtn extends StatelessWidget {
+  final Color color;
+  final bool available;
+  final VoidCallback onTap;
+
+  const _ColorBtn({required this.color, required this.available, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final fg = available ? color : color.withAlpha(80);
+    final bg = available ? color.withAlpha(30) : Colors.grey.shade100;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(8),
+          border: available
+              ? Border.all(color: color.withAlpha(120), width: 1.5)
+              : Border.all(color: Colors.grey.shade300),
+        ),
+        child: Icon(Icons.water_drop, size: 22, color: fg),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+
+/// 2×2 grid of diagonal-direction buttons for the diagonal_swap action.
+class _DiagonalSwapBtns extends StatelessWidget {
+  final void Function(String direction) onTap;
+  const _DiagonalSwapBtns({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _diagBtn('up_left',    -pi * 3 / 4),
+            const SizedBox(width: 6),
+            _diagBtn('up_right',   -pi / 4),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _diagBtn('down_left',  pi * 3 / 4),
+            const SizedBox(width: 6),
+            _diagBtn('down_right', pi / 4),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _diagBtn(String direction, double angle) {
+    return GestureDetector(
+      onTap: () => onTap(direction),
+      child: Container(
+        width: 48,
+        height: 48,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade200,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Transform.rotate(
+            angle: angle,
+            child: Icon(Icons.arrow_upward,
+                size: 22, color: Colors.grey.shade700),
+          ),
+        ),
+      ),
     );
   }
 }

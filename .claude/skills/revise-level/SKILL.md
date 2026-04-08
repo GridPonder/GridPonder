@@ -40,6 +40,31 @@ Do this analysis internally (do not write it out). Check:
 - Does the goldPath actually reach the goal? (simulate mentally)
 - Are there cheap alternative solutions that bypass the intended approach?
 
+## 3b. Run the solver (if available for this game)
+
+For **number_cells** levels, the solver at `tools/solver/solve.py` can enumerate
+all solutions and verify gold-path uniqueness. Run it before redesigning:
+
+```bash
+# From the repo root — finds shortest solutions (fast, BFS)
+python3 tools/solver/solve.py packs/number_cells/levels/<level-id>.json
+
+# Finds all solutions up to depth N (complete, DFS — use for final verification)
+python3 tools/solver/solve.py packs/number_cells/levels/<level-id>.json \
+    --max-depth <gold_path_length + 2> --all-solutions
+```
+
+Interpret the output:
+- **⚠ WARNING shorter solution exists** → gold path is not the shortest; redesign
+  the board to block the shorter route or accept a new gold path.
+- **✗ NOT UNIQUE** → multiple solutions of equal length; add obstacles or numbers
+  to funnel play toward a single path.
+- **✓ UNIQUE** → design goal met; proceed to editing the level.
+
+After editing the level JSON, re-run the solver on the revised version to
+confirm the constraints are satisfied before moving on to step 7 (integration
+test).
+
 ## 4. Simulate the gold path
 
 Simulate the gold path mentally. Do **not** write out ASCII grid tables —

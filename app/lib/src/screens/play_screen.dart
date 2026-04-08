@@ -5,7 +5,7 @@ import 'package:gridponder_engine/engine.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
 import '../services/settings_service.dart';
-import '../widgets/board_renderer.dart';
+import '../widgets/board_renderer.dart' show BoardRenderer, TargetBoardRenderer, cellNamedColor;
 import '../widgets/controls_widget.dart';
 
 class PlayScreen extends StatefulWidget {
@@ -56,6 +56,9 @@ class _PlayScreenState extends State<PlayScreen> {
   Map<Position, String>? _animOverlays;
   bool _animating = false;
 
+  // Flood Colors: color of the last successfully applied flood action.
+  Color? _lastFloodColor;
+
   // AI play state
   bool _aiRunning = false;
   String? _lastThinking;
@@ -105,6 +108,7 @@ class _PlayScreenState extends State<PlayScreen> {
     _lastThinking = null;
     _agentAttempt = 1;
     _agentMemory.clear();
+    _lastFloodColor = null;
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -112,6 +116,11 @@ class _PlayScreenState extends State<PlayScreen> {
     final preState = _engine.state.copy();
     final result = _engine.executeTurn(action);
     if (!result.accepted) return;
+
+    if (action.actionId.startsWith('flood_')) {
+      final colorName = action.actionId.substring(6); // e.g. "red"
+      _lastFloodColor = cellNamedColor(colorName);
+    }
 
     final entityAnims = result.animations
         .where((s) => s.type == 'entity_animation')
@@ -165,6 +174,7 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() {
       _engine.reset();
       _lastThinking = null;
+      _lastFloodColor = null;
     });
   }
 
@@ -208,6 +218,56 @@ class _PlayScreenState extends State<PlayScreen> {
       widget.packService.game.actions.any((a) => a.id == 'diagonal_swap');
   bool get _hasMoveAction =>
       widget.packService.game.actions.any((a) => a.id == 'move');
+  bool get _hasCellTapGesture =>
+      widget.packService.theme?.controls?.gestureMap
+          .any((b) => b.gesture == 'tap_cell') ??
+      false;
+
+  /// Action IDs whose colour is currently adjacent to the flood region.
+  /// Only computed when the game has flood_<colour> actions.
+  Set<String>? _availableFloodActions(LevelState state) {
+    final hasFloodActions =
+        widget.packService.game.actions.any((a) => a.id.startsWith('flood_'));
+    if (!hasFloodActions) return null;
+
+    final layer = state.board.layers['objects'];
+    if (layer == null) return null;
+
+    final available = <String>{};
+    for (int y = 0; y < state.board.height; y++) {
+      for (int x = 0; x < state.board.width; x++) {
+        final entity = layer.getAt(Position(x, y));
+        if (entity?.kind != 'cell_flooded') continue;
+        for (final delta in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
+          final nx = x + delta.$1, ny = y + delta.$2;
+          if (nx < 0 || ny < 0 ||
+              nx >= state.board.width || ny >= state.board.height) continue;
+          final nb = layer.getAt(Position(nx, ny));
+          final kind = nb?.kind;
+          if (kind != null && kind.startsWith('cell_') &&
+              kind != 'cell_flooded' && kind != 'cell_wall') {
+            available.add('flood_${kind.substring(5)}');
+          }
+        }
+      }
+    }
+    return available;
+  }
+
+  void _onCellTap(int x, int y) {
+    final gestureMap =
+        widget.packService.theme?.controls?.gestureMap ?? const [];
+    for (final binding in gestureMap) {
+      if (binding.gesture != 'tap_cell') continue;
+      final params = <String, dynamic>{};
+      binding.paramMapping?.forEach((key, value) {
+        params[key] = value == 'tap_position' ? [x, y] : value;
+      });
+      if (binding.params != null) params.addAll(binding.params!);
+      _onAction(GameAction(binding.action, params));
+      break;
+    }
+  }
 
   void _onPanStart(DragStartDetails d) => _panStart = d.globalPosition;
   void _onPanCancel() => _panStart = null;
@@ -358,7 +418,7 @@ class _PlayScreenState extends State<PlayScreen> {
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
       if (!mounted) return;
       setState(() => _engine.executeTurn(goldPath[i]));
-      await Future.delayed(const Duration(milliseconds: 500));
+      await Future.delayed(const Duration(milliseconds: 900));
     }
   }
 
@@ -580,13 +640,16 @@ class _PlayScreenState extends State<PlayScreen> {
                     game: widget.packService.game,
                     packService: widget.packService,
                     animationOverlays: _animOverlays,
+                    onCellTap: _hasCellTapGesture ? _onCellTap : null,
+                    floodedColorOverride: _lastFloodColor,
                   ),
                 ),
               ),
             ),
             if (state.isWon) _buildWinBanner(),
-            if (s.aiPlayEnabled && !state.isWon && _aiRunning) _buildAiPanel(),
-            if (s.aiPlayEnabled && !state.isWon && !_aiRunning) _buildAiStartButton(),
+            if (state.isLost) _buildLossBanner(),
+            if (s.aiPlayEnabled && !state.isWon && !state.isLost && _aiRunning) _buildAiPanel(),
+            if (s.aiPlayEnabled && !state.isWon && !state.isLost && !_aiRunning) _buildAiStartButton(),
             Padding(
               padding: const EdgeInsets.symmetric(vertical: 10),
               child: ControlsWidget(
@@ -598,6 +661,7 @@ class _PlayScreenState extends State<PlayScreen> {
                 onHint: hintAvailable ? _onHint : null,
                 canUndo: _engine.undoDepth > 0 && !_aiRunning,
                 hintStatuses: hintStatuses,
+                availableActionIds: _availableFloodActions(state),
               ),
             ),
           ],
@@ -684,6 +748,9 @@ class _PlayScreenState extends State<PlayScreen> {
           );
         }
       }
+      if (goal.type == 'sum_constraint') {
+        return _buildSumConstraintGoal(goal, state);
+      }
     }
     // Fallback: show goal type as text
     final goalType = _levelDef.goals.first.type.replaceAll('_', ' ');
@@ -730,6 +797,94 @@ class _PlayScreenState extends State<PlayScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildSumConstraintGoal(GoalDef goal, LevelState state) {
+    final layerId = (goal.config['layer'] as String?) ?? 'objects';
+    final scope = (goal.config['scope'] as String?) ?? 'board';
+    final target = goal.config['target'] as num;
+    final comparison = (goal.config['comparison'] as String?) ?? 'eq';
+    final index = goal.config['index'] as int?;
+    final layer = state.board.layers[layerId];
+
+    int cellValue(int x, int y) {
+      if (layer == null) return 0;
+      final entity = layer.getAt(Position(x, y));
+      if (entity == null) return 0;
+      final kind = entity.kind;
+      if (kind.startsWith('num_')) return int.tryParse(kind.substring(4)) ?? 0;
+      return 0;
+    }
+
+    int rowSum(int y) => List.generate(state.board.width, (x) => cellValue(x, y))
+        .fold(0, (a, b) => a + b);
+    int colSum(int x) => List.generate(state.board.height, (y) => cellValue(x, y))
+        .fold(0, (a, b) => a + b);
+
+    bool satisfies(int sum) => switch (comparison) {
+          'gte' => sum >= target,
+          'lte' => sum <= target,
+          _ => sum == target,
+        };
+
+    String targetLabel() => switch (comparison) {
+          'gte' => '≥${target.toInt()}',
+          'lte' => '≤${target.toInt()}',
+          _ => '=${target.toInt()}',
+        };
+
+    Widget chip(String label, int current, bool ok) {
+      return Container(
+        margin: const EdgeInsets.only(right: 6, bottom: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: ok ? Colors.green.shade100 : Colors.orange.shade50,
+          border: Border.all(
+              color: ok ? Colors.green.shade400 : Colors.orange.shade300),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: Text(
+          '$label: $current${targetLabel()}',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: ok ? Colors.green.shade800 : Colors.orange.shade900,
+          ),
+        ),
+      );
+    }
+
+    final chips = <Widget>[];
+    switch (scope) {
+      case 'all_rows':
+        for (int y = 0; y < state.board.height; y++) {
+          final s = rowSum(y);
+          chips.add(chip('R${y + 1}', s, satisfies(s)));
+        }
+      case 'all_cols':
+        for (int x = 0; x < state.board.width; x++) {
+          final s = colSum(x);
+          chips.add(chip('C${x + 1}', s, satisfies(s)));
+        }
+      case 'row':
+        if (index != null) {
+          final s = rowSum(index);
+          chips.add(chip('Row ${index + 1}', s, satisfies(s)));
+        }
+      case 'col':
+        if (index != null) {
+          final s = colSum(index);
+          chips.add(chip('Col ${index + 1}', s, satisfies(s)));
+        }
+      case 'board':
+        int total = 0;
+        for (int y = 0; y < state.board.height; y++)
+          for (int x = 0; x < state.board.width; x++)
+            total += cellValue(x, y);
+        chips.add(chip('Total', total, satisfies(total)));
+    }
+
+    return Wrap(children: chips);
   }
 
   Widget _buildGuidePanel() {
@@ -860,6 +1015,16 @@ class _PlayScreenState extends State<PlayScreen> {
     );
   }
 
+  /// Returns "Moves: 13/25" if there is a max_actions limit, else "Moves: 13".
+  String _movesLabel(LevelState state) {
+    final limitCond = _levelDef.loseConditions
+        .where((c) => c.type == 'max_actions')
+        .firstOrNull;
+    final limit = limitCond?.config['limit'] as int?;
+    final count = state.actionCount;
+    return limit != null ? 'Moves: $count/$limit' : 'Moves: $count';
+  }
+
   Widget _buildStatusBar(LevelState state) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -873,8 +1038,12 @@ class _PlayScreenState extends State<PlayScreen> {
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
             const SizedBox(width: 12),
           ],
-          Text('Moves: ${state.actionCount}',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+          Text(_movesLabel(state),
+              style: TextStyle(
+                color: state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
+                fontSize: 13,
+                fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
+              )),
           const SizedBox(width: 4),
           GestureDetector(
             onTap: () {
@@ -917,6 +1086,50 @@ class _PlayScreenState extends State<PlayScreen> {
                 backgroundColor: Colors.white,
                 foregroundColor: Colors.green.shade700),
             child: const Text('Next Level'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLossBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      decoration: BoxDecoration(
+        color: Colors.red.shade400,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text('Out of Moves!',
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold)),
+          const SizedBox(height: 4),
+          const Text('Plan the order more carefully.',
+              style: TextStyle(color: Colors.white70, fontSize: 13)),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton(
+                onPressed: _onReset,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.red.shade700),
+                child: const Text('Try Again'),
+              ),
+              const SizedBox(width: 12),
+              TextButton(
+                onPressed: _advance,
+                style: TextButton.styleFrom(foregroundColor: Colors.white70),
+                child: const Text('Skip Level'),
+              ),
+            ],
           ),
         ],
       ),
