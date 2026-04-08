@@ -1,0 +1,109 @@
+---
+import Base from '../layouts/Base.astro';
+---
+<Base
+  title="AI Leaderboard"
+  description="Which AI models can solve GridPonder puzzles, and how efficiently? Rankings across packs and levels."
+>
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-16">
+    <!-- Header -->
+    <div class="max-w-3xl mb-12">
+      <div class="flex items-center gap-2 text-amber-600 font-mono text-sm mb-4">
+        <span>🏆</span>
+        <span>AI Benchmarks</span>
+      </div>
+      <h1 class="text-4xl sm:text-5xl font-black text-gray-900 mb-5 leading-tight">
+        AI Leaderboard
+      </h1>
+      <p class="text-xl text-gray-600 leading-relaxed">
+        GridPonder levels are fully deterministic and gold-path verified, making them a clean benchmark
+        for evaluating AI reasoning and planning capabilities.
+      </p>
+    </div>
+
+    <!-- What is this -->
+    <div class="grid sm:grid-cols-3 gap-6 mb-16">
+      {[
+        {
+          icon: '🧩',
+          title: 'What is measured',
+          desc: 'Whether an AI model can solve a given puzzle level using only the DSL spec and level JSON — no hints, no iterative feedback.',
+        },
+        {
+          icon: '📊',
+          title: 'How scores work',
+          desc: 'A model scores a level by finding a valid gold path. Efficiency (moves used vs. minimum) and reasoning quality are noted.',
+        },
+        {
+          icon: '🤖',
+          title: 'Which models',
+          desc: 'Any model that can read JSON and produce a sequence of moves. Results are submitted via GitHub issue with a standardised format.',
+        },
+      ].map(({ icon, title, desc }) => (
+        <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
+          <div class="text-3xl mb-3">{icon}</div>
+          <h2 class="font-bold text-gray-900 mb-2">{title}</h2>
+          <p class="text-sm text-gray-500 leading-relaxed">{desc}</p>
+        </div>
+      ))}
+    </div>
+
+    <!-- Leaderboard table placeholder -->
+    <div class="rounded-2xl border border-gray-200 overflow-hidden">
+      <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+        <h2 class="font-bold text-gray-900">Rankings</h2>
+        <span class="text-xs text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full">
+          No entries yet
+        </span>
+      </div>
+
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            {['#', 'Model', 'Pack', 'Level', 'Moves', 'Efficiency', 'Date'].map(col => (
+              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">{col}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colspan={7} class="px-6 py-20 text-center">
+              <div class="flex flex-col items-center gap-4 text-gray-400">
+                <span class="text-5xl">🤖</span>
+                <div>
+                  <p class="font-semibold text-gray-500 mb-1">No entries yet</p>
+                  <p class="text-sm">
+                    Submit a result via{' '}
+                    <a href="https://github.com/Gridponder" class="text-brand-600 hover:underline" target="_blank" rel="noopener noreferrer">
+                      GitHub
+                    </a>
+                    {' '}— coming soon.
+                  </p>
+                </div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- How to submit -->
+    <div class="mt-12 p-8 bg-amber-50 rounded-2xl border border-amber-100">
+      <h2 class="font-bold text-gray-900 text-lg mb-2">How to submit a result</h2>
+      <p class="text-gray-600 text-sm leading-relaxed mb-4">
+        Open a GitHub issue in the GridPonder platform repository with the following information:
+      </p>
+      <ul class="space-y-1 text-sm text-gray-600 list-disc list-inside">
+        <li>Model name and version</li>
+        <li>Pack and level ID</li>
+        <li>The move sequence used</li>
+        <li>Whether the level was solved (reached goal state)</li>
+        <li>Optional: transcript or reasoning trace</li>
+      </ul>
+      <a href="https://github.com/Gridponder" target="_blank" rel="noopener noreferrer"
+         class="mt-5 inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors text-sm">
+        Open an issue on GitHub →
+      </a>
+    </div>
+  </div>
+</Base>

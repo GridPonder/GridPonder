@@ -1,0 +1,106 @@
+---
+import Base from '../../layouts/Base.astro';
+import { marked } from 'marked';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const dslDir = path.resolve(__dirname, '../../../../docs/dsl');
+
+export function getStaticPaths() {
+  const dir = path.resolve(
+    path.dirname(fileURLToPath(import.meta.url)),
+    '../../../../docs/dsl'
+  );
+  const files = fs.readdirSync(dir)
+    .filter(f => f.endsWith('.md') && /^\d/.test(f))
+    .sort();
+
+  return files.map((file, idx) => {
+    const slug = file.replace('.md', '');
+    const content = fs.readFileSync(path.join(dir, file), 'utf-8');
+    const titleLine = content.split('\n').find(l => l.startsWith('# ')) ?? '';
+    const title = titleLine.replace(/^#+\s*/, '');
+    const prev = idx > 0 ? files[idx - 1].replace('.md', '') : null;
+    const next = idx < files.length - 1 ? files[idx + 1].replace('.md', '') : null;
+    return {
+      params: { slug },
+      props: { file, title, prev, next },
+    };
+  });
+}
+
+const { file, title, prev, next } = Astro.props;
+const rawContent = fs.readFileSync(path.join(dslDir, file), 'utf-8');
+const html = await marked.parse(rawContent, { gfm: true, breaks: false });
+
+// Derive short title for nav (strip "Gridponder DSL v0 —" prefix)
+const shortTitle = (t: string) => t.replace(/^Gridponder DSL v0\s*[—–-]\s*/i, '').trim();
+
+function slugTitle(slug: string): string {
+  try {
+    const dir = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      '../../../../docs/dsl'
+    );
+    const content = fs.readFileSync(path.join(dir, `${slug}.md`), 'utf-8');
+    const line = content.split('\n').find(l => l.startsWith('# ')) ?? '';
+    return shortTitle(line.replace(/^#+\s*/, ''));
+  } catch {
+    return slug;
+  }
+}
+---
+<Base title={shortTitle(title)} description={`GridPonder DSL specification: ${title}`}>
+  <div class="max-w-4xl mx-auto px-4 sm:px-6 py-12">
+    <!-- Breadcrumb -->
+    <nav class="flex items-center gap-2 text-sm text-gray-400 mb-8">
+      <a href="/" class="hover:text-brand-600 transition-colors">Home</a>
+      <span>›</span>
+      <a href="/dsl" class="hover:text-brand-600 transition-colors">DSL</a>
+      <span>›</span>
+      <span class="text-gray-600">{shortTitle(title)}</span>
+    </nav>
+
+    <!-- Content -->
+    <article class="prose prose-gray max-w-none
+      prose-headings:font-bold prose-headings:text-gray-900
+      prose-h1:text-3xl prose-h1:mb-6
+      prose-h2:text-2xl prose-h2:mt-12 prose-h2:mb-4
+      prose-h3:text-xl prose-h3:mt-8 prose-h3:mb-3
+      prose-p:text-gray-600 prose-p:leading-relaxed
+      prose-a:text-brand-600 prose-a:no-underline hover:prose-a:underline
+      prose-code:text-brand-700 prose-code:bg-brand-50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:before:content-none prose-code:after:content-none
+      prose-pre:bg-gray-900 prose-pre:text-gray-100
+      prose-blockquote:border-brand-300 prose-blockquote:text-gray-500
+      prose-table:text-sm
+      prose-th:bg-gray-50 prose-th:font-semibold
+      prose-strong:text-gray-900
+      prose-li:text-gray-600"
+      set:html={html}
+    />
+
+    <!-- Prev / Next -->
+    <div class="mt-16 pt-8 border-t border-gray-100 grid grid-cols-2 gap-4">
+      <div>
+        {prev && (
+          <a href={`/dsl/${prev}`}
+             class="group flex flex-col gap-1 p-4 rounded-xl border border-gray-200 hover:border-brand-300 hover:bg-brand-50 transition-all">
+            <span class="text-xs text-gray-400 group-hover:text-brand-500">← Previous</span>
+            <span class="font-medium text-gray-700 group-hover:text-brand-700 text-sm">{slugTitle(prev)}</span>
+          </a>
+        )}
+      </div>
+      <div class="flex justify-end">
+        {next && (
+          <a href={`/dsl/${next}`}
+             class="group flex flex-col gap-1 p-4 rounded-xl border border-gray-200 hover:border-brand-300 hover:bg-brand-50 transition-all text-right">
+            <span class="text-xs text-gray-400 group-hover:text-brand-500">Next →</span>
+            <span class="font-medium text-gray-700 group-hover:text-brand-700 text-sm">{slugTitle(next)}</span>
+          </a>
+        )}
+      </div>
+    </div>
+  </div>
+</Base>
