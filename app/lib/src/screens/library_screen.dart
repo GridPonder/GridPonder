@@ -1,13 +1,60 @@
 import 'package:flutter/material.dart';
+import '../services/pack_registry.dart';
 import '../services/pack_service.dart';
 import '../services/settings_service.dart';
+import 'manage_packs_sheet.dart';
 import 'play_screen.dart';
 import 'settings_screen.dart';
 
-class LibraryScreen extends StatelessWidget {
+class LibraryScreen extends StatefulWidget {
   final SettingsService settings;
+  final PackRegistry registry;
 
-  const LibraryScreen({super.key, required this.settings});
+  const LibraryScreen({
+    super.key,
+    required this.settings,
+    required this.registry,
+  });
+
+  @override
+  State<LibraryScreen> createState() => _LibraryScreenState();
+}
+
+class _LibraryScreenState extends State<LibraryScreen> {
+  late Future<List<(PackEntry, PackInfo)>> _packsFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _packsFuture = _loadPacks();
+  }
+
+  Future<List<(PackEntry, PackInfo)>> _loadPacks() async {
+    final entries = await widget.registry.listAll();
+    return Future.wait(
+      entries.map((e) async {
+        final info = await PackService.loadInfoFromEntry(e);
+        return (e, info);
+      }),
+    );
+  }
+
+  void _refresh() => setState(() => _packsFuture = _loadPacks());
+
+  void _openManagePacks() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => ManagePacksSheet(
+        registry: widget.registry,
+        onChanged: _refresh,
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -16,36 +63,40 @@ class LibraryScreen extends StatelessWidget {
       body: SafeArea(
         child: Column(
           children: [
-            _Header(settings: settings),
+            _Header(
+              settings: widget.settings,
+              onManagePacks: _openManagePacks,
+            ),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: GridView.builder(
-                  padding: const EdgeInsets.only(top: 12, bottom: 16),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
-                    childAspectRatio: 1.1,
-                  ),
-                  itemCount: kAvailablePacks.length,
-                  itemBuilder: (context, i) {
-                    final packId = kAvailablePacks[i];
-                    return FutureBuilder<PackInfo>(
-                      future: PackService.loadInfo(packId),
-                      builder: (context, snap) {
-                        final info = snap.data ??
-                            PackInfo(
-                              id: packId,
-                              title: packId,
-                              description: '',
-                              color: 0xFF607D8B,
-                            );
-                        return _PackCard(info: info, settings: settings);
-                      },
-                    );
-                  },
-                ),
+              child: FutureBuilder<List<(PackEntry, PackInfo)>>(
+                future: _packsFuture,
+                builder: (context, snap) {
+                  final packs = snap.data ?? [];
+                  if (snap.connectionState == ConnectionState.waiting &&
+                      packs.isEmpty) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+                  return GridView.builder(
+                    padding: const EdgeInsets.symmetric(horizontal: 16)
+                        .copyWith(top: 12, bottom: 16),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                      childAspectRatio: 1.1,
+                    ),
+                    itemCount: packs.length,
+                    itemBuilder: (context, i) {
+                      final (entry, info) = packs[i];
+                      return _PackCard(
+                        entry: entry,
+                        info: info,
+                        settings: widget.settings,
+                      );
+                    },
+                  );
+                },
               ),
             ),
           ],
@@ -55,9 +106,13 @@ class LibraryScreen extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------------------
+
 class _Header extends StatelessWidget {
   final SettingsService settings;
-  const _Header({required this.settings});
+  final VoidCallback onManagePacks;
+
+  const _Header({required this.settings, required this.onManagePacks});
 
   @override
   Widget build(BuildContext context) {
@@ -107,6 +162,12 @@ class _Header extends StatelessWidget {
                 ),
               ],
             ),
+          ),
+          IconButton(
+            icon: Icon(Icons.inventory_2_outlined,
+                color: Colors.grey.shade600),
+            tooltip: 'Manage Packs',
+            onPressed: onManagePacks,
           ),
           IconButton(
             icon: Icon(Icons.help_outline, color: Colors.grey.shade600),
@@ -196,10 +257,15 @@ class _Header extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 class _PackCard extends StatefulWidget {
+  final PackEntry entry;
   final PackInfo info;
   final SettingsService settings;
 
-  const _PackCard({required this.info, required this.settings});
+  const _PackCard({
+    required this.entry,
+    required this.info,
+    required this.settings,
+  });
 
   @override
   State<_PackCard> createState() => _PackCardState();
@@ -212,7 +278,7 @@ class _PackCardState extends State<_PackCard> {
     if (_loading) return;
     setState(() => _loading = true);
     try {
-      final pack = await PackService.load(widget.info.id);
+      final pack = await PackService.loadFromEntry(widget.entry);
       if (!mounted) return;
       await Navigator.push(
         context,
@@ -224,7 +290,9 @@ class _PackCardState extends State<_PackCard> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to load ${widget.info.title}: $e')),
+          SnackBar(
+              content:
+                  Text('Failed to load ${widget.info.title}: $e')),
         );
       }
     } finally {
@@ -234,10 +302,9 @@ class _PackCardState extends State<_PackCard> {
 
   @override
   Widget build(BuildContext context) {
-    // Lighten the pack color for the card background.
     final base = Color(widget.info.color);
     final color = Color.lerp(base, Colors.white, 0.45)!;
-    final coverAsset = widget.info.coverImageAsset;
+    final coverImage = widget.info.coverImage;
 
     return GestureDetector(
       onTap: _open,
@@ -258,7 +325,6 @@ class _PackCardState extends State<_PackCard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Title (top, centered)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 6, 10, 2),
                 child: Row(
@@ -277,36 +343,38 @@ class _PackCardState extends State<_PackCard> {
                       ),
                     ),
                     if (_loading)
-                      SizedBox(
+                      const SizedBox(
                         width: 14,
                         height: 14,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.black38),
+                            strokeWidth: 2, color: Colors.black38),
                       ),
                   ],
                 ),
               ),
-
-              // Image (middle, expanded)
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: coverAsset != null
-                      ? Image.asset(coverAsset, fit: BoxFit.contain)
+                  child: coverImage != null
+                      ? Image(
+                          image: coverImage,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) => Center(
+                            child: Icon(Icons.grid_view,
+                                color: Colors.black26, size: 36),
+                          ),
+                        )
                       : Center(
                           child: Icon(Icons.grid_view,
                               color: Colors.black26, size: 36),
                         ),
                 ),
               ),
-
-              // Description (bottom)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
                 child: Text(
                   widget.info.description,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: Colors.black54,
                     fontSize: 10,
                   ),

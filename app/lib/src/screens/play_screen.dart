@@ -729,6 +729,12 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   Widget _buildGoalContent(LevelState state) {
+    // Sum and count constraint goals are rendered together (rows + cols in one view).
+    final constraintGoals = _levelDef.goals
+        .where((g) => g.type == 'sum_constraint' || g.type == 'count_constraint')
+        .toList();
+    if (constraintGoals.isNotEmpty) return _buildConstraintGoals(constraintGoals, state);
+
     for (final goal in _levelDef.goals) {
       if (goal.type == 'sequence_match') {
         final sequence = (goal.config['sequence'] as List?)
@@ -748,9 +754,6 @@ class _PlayScreenState extends State<PlayScreen> {
           );
         }
       }
-      if (goal.type == 'sum_constraint') {
-        return _buildSumConstraintGoal(goal, state);
-      }
     }
     // Fallback: show goal type as text
     final goalType = _levelDef.goals.first.type.replaceAll('_', ' ');
@@ -758,17 +761,19 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   Widget _buildSequenceGoal(List<int> sequence, int matched) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      runSpacing: 4,
       children: [
         for (int i = 0; i < sequence.length; i++) ...[
           _buildGoalCircle(sequence[i], i < matched),
-          if (i < sequence.length - 1) ...[
-            const SizedBox(width: 4),
-            Icon(Icons.arrow_forward,
-                size: 12, color: Colors.grey.shade500),
-            const SizedBox(width: 4),
-          ],
+          if (i < sequence.length - 1)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Icon(Icons.arrow_forward,
+                  size: 12, color: Colors.grey.shade500),
+            ),
         ],
       ],
     );
@@ -799,92 +804,259 @@ class _PlayScreenState extends State<PlayScreen> {
     );
   }
 
-  Widget _buildSumConstraintGoal(GoalDef goal, LevelState state) {
-    final layerId = (goal.config['layer'] as String?) ?? 'objects';
-    final scope = (goal.config['scope'] as String?) ?? 'board';
-    final target = goal.config['target'] as num;
-    final comparison = (goal.config['comparison'] as String?) ?? 'eq';
-    final index = goal.config['index'] as int?;
-    final layer = state.board.layers[layerId];
+  /// Renders all sum_constraint and count_constraint goals together:
+  /// a natural-language header, the current board as a mini-grid, and live
+  /// row/column annotations that turn green when the constraint is satisfied.
+  Widget _buildConstraintGoals(List<GoalDef> goals, LevelState state) {
+    final layer = state.board.layers['objects'];
+    final w = state.board.width;
+    final h = state.board.height;
 
-    int cellValue(int x, int y) {
-      if (layer == null) return 0;
-      final entity = layer.getAt(Position(x, y));
+    int cellVal(int x, int y) {
+      final entity = layer?.getAt(Position(x, y));
       if (entity == null) return 0;
       final kind = entity.kind;
       if (kind.startsWith('num_')) return int.tryParse(kind.substring(4)) ?? 0;
       return 0;
     }
 
-    int rowSum(int y) => List.generate(state.board.width, (x) => cellValue(x, y))
-        .fold(0, (a, b) => a + b);
-    int colSum(int x) => List.generate(state.board.height, (y) => cellValue(x, y))
-        .fold(0, (a, b) => a + b);
+    // Each annotation slot holds: (computeValue, checkSatisfied) per index.
+    // We store a list of checkers per row/col so multiple constraints can apply.
+    final rowCheckers = <int, List<(String Function(int y), bool Function(int y))>>{};
+    final colCheckers = <int, List<(String Function(int x), bool Function(int x))>>{};
+    final descriptions = <String>[];
 
-    bool satisfies(int sum) => switch (comparison) {
-          'gte' => sum >= target,
-          'lte' => sum <= target,
-          _ => sum == target,
+    for (final goal in goals) {
+      final scope = (goal.config['scope'] as String?) ?? 'board';
+      final target = goal.config['target'] as num;
+      final cmp = (goal.config['comparison'] as String?) ?? 'eq';
+      final op = switch (cmp) { 'gte' => '≥', 'lte' => '≤', _ => '=' };
+      final t = target.toInt();
+
+      if (goal.type == 'sum_constraint') {
+        int rowSum(int y) =>
+            List.generate(w, (x) => cellVal(x, y)).fold(0, (a, b) => a + b);
+        int colSum(int x) =>
+            List.generate(h, (y) => cellVal(x, y)).fold(0, (a, b) => a + b);
+        bool checkSum(int sum) => switch (cmp) {
+              'gte' => sum >= target,
+              'lte' => sum <= target,
+              _ => sum == target,
+            };
+
+        switch (scope) {
+          case 'all_rows':
+            for (int y = 0; y < h; y++) {
+              rowCheckers.putIfAbsent(y, () => []).add((
+                (int y) => '${rowSum(y)}',
+                (int y) => checkSum(rowSum(y)),
+              ));
+            }
+            descriptions.add('All rows $op $t');
+          case 'all_cols':
+            for (int x = 0; x < w; x++) {
+              colCheckers.putIfAbsent(x, () => []).add((
+                (int x) => '${colSum(x)}',
+                (int x) => checkSum(colSum(x)),
+              ));
+            }
+            descriptions.add('All columns $op $t');
+          case 'row':
+            final idx = (goal.config['index'] as int?) ?? 0;
+            rowCheckers.putIfAbsent(idx, () => []).add((
+              (int y) => '${rowSum(y)}',
+              (int y) => checkSum(rowSum(y)),
+            ));
+            descriptions.add('Row ${idx + 1} $op $t');
+          case 'col':
+            final idx = (goal.config['index'] as int?) ?? 0;
+            colCheckers.putIfAbsent(idx, () => []).add((
+              (int x) => '${colSum(x)}',
+              (int x) => checkSum(colSum(x)),
+            ));
+            descriptions.add('Column ${idx + 1} $op $t');
+        }
+      } else if (goal.type == 'count_constraint') {
+        final predicate = (goal.config['predicate'] as String?) ?? 'even';
+        final predLabel = switch (predicate) {
+          'even' => 'even',
+          'odd' => 'odd',
+          String p when p.startsWith('gte_') => '≥${p.substring(4)}',
+          String p when p.startsWith('lte_') => '≤${p.substring(4)}',
+          _ => predicate,
         };
 
-    String targetLabel() => switch (comparison) {
-          'gte' => '≥${target.toInt()}',
-          'lte' => '≤${target.toInt()}',
-          _ => '=${target.toInt()}',
-        };
+        bool matchesPred(int value) {
+          if (predicate == 'even') return value % 2 == 0;
+          if (predicate == 'odd') return value % 2 != 0;
+          if (predicate.startsWith('gte_')) return value >= int.parse(predicate.substring(4));
+          if (predicate.startsWith('lte_')) return value <= int.parse(predicate.substring(4));
+          if (predicate.startsWith('eq_')) return value == int.parse(predicate.substring(3));
+          return false;
+        }
 
-    Widget chip(String label, int current, bool ok) {
-      return Container(
-        margin: const EdgeInsets.only(right: 6, bottom: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: ok ? Colors.green.shade100 : Colors.orange.shade50,
-          border: Border.all(
-              color: ok ? Colors.green.shade400 : Colors.orange.shade300),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          '$label: $current${targetLabel()}',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: ok ? Colors.green.shade800 : Colors.orange.shade900,
+        int rowCount(int y) {
+          int c = 0;
+          for (int x = 0; x < w; x++) if (matchesPred(cellVal(x, y))) c++;
+          return c;
+        }
+        int colCount(int x) {
+          int c = 0;
+          for (int y = 0; y < h; y++) if (matchesPred(cellVal(x, y))) c++;
+          return c;
+        }
+        bool checkCount(int count) => switch (cmp) {
+              'gte' => count >= target,
+              'lte' => count <= target,
+              _ => count == target,
+            };
+
+        switch (scope) {
+          case 'all_rows':
+            for (int y = 0; y < h; y++) {
+              rowCheckers.putIfAbsent(y, () => []).add((
+                (int y) => '${rowCount(y)}$predLabel',
+                (int y) => checkCount(rowCount(y)),
+              ));
+            }
+            descriptions.add('Each row: $op $t $predLabel');
+          case 'all_cols':
+            for (int x = 0; x < w; x++) {
+              colCheckers.putIfAbsent(x, () => []).add((
+                (int x) => '${colCount(x)}$predLabel',
+                (int x) => checkCount(colCount(x)),
+              ));
+            }
+            descriptions.add('Each col: $op $t $predLabel');
+          case 'row':
+            final idx = (goal.config['index'] as int?) ?? 0;
+            rowCheckers.putIfAbsent(idx, () => []).add((
+              (int y) => '${rowCount(y)}$predLabel',
+              (int y) => checkCount(rowCount(y)),
+            ));
+            descriptions.add('Row ${idx + 1}: $op $t $predLabel');
+          case 'col':
+            final idx = (goal.config['index'] as int?) ?? 0;
+            colCheckers.putIfAbsent(idx, () => []).add((
+              (int x) => '${colCount(x)}$predLabel',
+              (int x) => checkCount(colCount(x)),
+            ));
+            descriptions.add('Col ${idx + 1}: $op $t $predLabel');
+        }
+      }
+    }
+
+    const cellSz = 22.0;
+    const annotW = 28.0;
+
+    Widget miniCell(int val) => Container(
+          width: cellSz,
+          height: cellSz,
+          margin: const EdgeInsets.all(1.5),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            borderRadius: BorderRadius.circular(3),
           ),
+          child: Center(
+            child: Text('$val',
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade800)),
+          ),
+        );
+
+    Widget annotation(String label, bool? satisfied) {
+      final color = satisfied == null
+          ? Colors.grey.shade400
+          : satisfied
+              ? Colors.green.shade700
+              : Colors.orange.shade800;
+      return SizedBox(
+        width: annotW,
+        height: cellSz + 3,
+        child: Center(
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
+                  color: color)),
         ),
       );
     }
 
-    final chips = <Widget>[];
-    switch (scope) {
-      case 'all_rows':
-        for (int y = 0; y < state.board.height; y++) {
-          final s = rowSum(y);
-          chips.add(chip('R${y + 1}', s, satisfies(s)));
-        }
-      case 'all_cols':
-        for (int x = 0; x < state.board.width; x++) {
-          final s = colSum(x);
-          chips.add(chip('C${x + 1}', s, satisfies(s)));
-        }
-      case 'row':
-        if (index != null) {
-          final s = rowSum(index);
-          chips.add(chip('Row ${index + 1}', s, satisfies(s)));
-        }
-      case 'col':
-        if (index != null) {
-          final s = colSum(index);
-          chips.add(chip('Col ${index + 1}', s, satisfies(s)));
-        }
-      case 'board':
-        int total = 0;
-        for (int y = 0; y < state.board.height; y++)
-          for (int x = 0; x < state.board.width; x++)
-            total += cellValue(x, y);
-        chips.add(chip('Total', total, satisfies(total)));
-    }
+    // Build row annotations: combine labels from all checkers.
+    String rowLabel(int y) => rowCheckers[y]!.map((c) => c.$1(y)).join(' ');
+    bool rowSatisfied(int y) => rowCheckers[y]!.every((c) => c.$2(y));
+    String colLabel(int x) => colCheckers[x]!.map((c) => c.$1(x)).join(' ');
+    bool colSatisfied(int x) => colCheckers[x]!.every((c) => c.$2(x));
 
-    return Wrap(children: chips);
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          descriptions.join(' · '),
+          style: TextStyle(
+              fontSize: 11,
+              color: Colors.grey.shade600,
+              fontStyle: FontStyle.italic),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (int y = 0; y < h; y++)
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (int x = 0; x < w; x++) miniCell(cellVal(x, y)),
+                      if (rowCheckers.isNotEmpty) ...[
+                        const SizedBox(width: 2),
+                        annotation(
+                          rowCheckers.containsKey(y) ? rowLabel(y) : '',
+                          rowCheckers.containsKey(y) ? rowSatisfied(y) : null,
+                        ),
+                      ],
+                    ],
+                  ),
+                if (colCheckers.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      for (int x = 0; x < w; x++)
+                        SizedBox(
+                          width: cellSz + 3,
+                          child: Center(
+                            child: Text(
+                              colCheckers.containsKey(x) ? colLabel(x) : '',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: colCheckers.containsKey(x)
+                                    ? (colSatisfied(x)
+                                        ? Colors.green.shade700
+                                        : Colors.orange.shade800)
+                                    : Colors.grey.shade400,
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   Widget _buildGuidePanel() {
@@ -924,8 +1096,8 @@ class _PlayScreenState extends State<PlayScreen> {
   // ---------------------------------------------------------------------------
 
   Widget _buildStoryScaffold(SequenceEntry entry) {
-    final imageAsset = entry.image != null
-        ? widget.packService.resolvePackAsset(entry.image!)
+    final imageProvider = entry.image != null
+        ? widget.packService.resolvePackImage(entry.image!)
         : null;
 
     return Scaffold(
@@ -951,12 +1123,12 @@ class _PlayScreenState extends State<PlayScreen> {
       body: SafeArea(
         child: Column(
           children: [
-            if (imageAsset != null)
+            if (imageProvider != null)
               Expanded(
                 flex: 5,
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
-                  child: Image.asset(imageAsset, fit: BoxFit.contain),
+                  child: Image(image: imageProvider, fit: BoxFit.contain),
                 ),
               ),
             Expanded(

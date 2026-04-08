@@ -244,33 +244,21 @@ class _ColorBtn extends StatelessWidget {
 
 // ---------------------------------------------------------------------------
 
-/// 2×2 grid of diagonal-direction buttons for the diagonal_swap action.
+/// Two diagonal-swap buttons: one per distinct diagonal of the 2×2 overlay.
+/// up_left/down_right swap the same pair (top-left ↔ bottom-right, "\" diag).
+/// up_right/down_left swap the same pair (top-right ↔ bottom-left, "/" diag).
 class _DiagonalSwapBtns extends StatelessWidget {
   final void Function(String direction) onTap;
   const _DiagonalSwapBtns({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _diagBtn('up_left',    -pi * 3 / 4),
-            const SizedBox(width: 6),
-            _diagBtn('up_right',   -pi / 4),
-          ],
-        ),
-        const SizedBox(height: 6),
-        Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _diagBtn('down_left',  pi * 3 / 4),
-            const SizedBox(width: 6),
-            _diagBtn('down_right', pi / 4),
-          ],
-        ),
+        _diagBtn('down_right', pi / 4),    // ↘  top-left ↔ bottom-right
+        const SizedBox(width: 10),
+        _diagBtn('down_left',  3 * pi / 4), // ↙  top-right ↔ bottom-left
       ],
     );
   }
@@ -279,18 +267,30 @@ class _DiagonalSwapBtns extends StatelessWidget {
     return GestureDetector(
       onTap: () => onTap(direction),
       child: Container(
-        width: 48,
-        height: 48,
+        margin: const EdgeInsets.symmetric(horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 20),
         decoration: BoxDecoration(
           color: Colors.grey.shade200,
           borderRadius: BorderRadius.circular(8),
         ),
-        child: Center(
-          child: Transform.rotate(
-            angle: angle,
-            child: Icon(Icons.arrow_upward,
-                size: 22, color: Colors.grey.shade700),
-          ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Transform.rotate(
+              angle: angle,
+              child: Icon(Icons.arrow_forward,
+                  size: 22, color: Colors.grey.shade700),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'Swap',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+                color: Colors.grey.shade700,
+              ),
+            ),
+          ],
         ),
       ),
     );

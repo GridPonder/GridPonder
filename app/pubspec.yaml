@@ -34,6 +34,9 @@ dependencies:
     path: ../engine
   cupertino_icons: ^1.0.8
   shared_preferences: ^2.3.0
+  file_picker: ^8.0.0
+  path_provider: ^2.1.0
+  archive: ^3.6.0
 
 dev_dependencies:
   flutter_test:
@@ -74,6 +77,10 @@ flutter:
     - assets/packs/flood_colors/assets/
     - assets/packs/diagonal_swipes/
     - assets/packs/diagonal_swipes/levels/
+    - assets/packs/diagonal_swipes/assets/
+    - assets/packs/box_builder/
+    - assets/packs/box_builder/levels/
+    - assets/packs/box_builder/assets/
     - assets/packs/gridponder-base/sprites/tiles/
     - assets/packs/rabbit-character/sprites/avatar/
 

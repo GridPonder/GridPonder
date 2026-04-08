@@ -1,6 +1,10 @@
 import 'dart:convert';
+import 'dart:typed_data';
+import 'package:flutter/painting.dart';
 import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
+import 'pack_file_reader.dart';
+import 'pack_registry.dart';
 
 /// Metadata for a pack shown in the library screen.
 class PackInfo {
@@ -8,68 +12,93 @@ class PackInfo {
   final String title;
   final String description;
   final int color; // ARGB — primaryColor from theme.json
-  final String? coverImageAsset; // resolved Flutter asset path, from manifest
+  final ImageProvider? coverImage; // AssetImage (bundled) or MemoryImage (installed)
+  final bool isInstalled;
+
   const PackInfo({
     required this.id,
     required this.title,
     required this.description,
     required this.color,
-    this.coverImageAsset,
+    this.coverImage,
+    this.isInstalled = false,
   });
 }
 
-/// IDs of packs bundled in the app. All other metadata (title, description,
-/// cover image, primary color) is loaded from the pack's manifest/theme files.
-const kAvailablePacks = [
-  'flag_adventure',
-  'number_cells',
-  'rotate_flip',
-  'flood_colors',
-  'diagonal_swipes',
-];
-
-/// Loads a game pack from the Flutter asset bundle and provides
-/// sprite path resolution.
+/// Loads a game pack and provides asset resolution for both bundled and
+/// user-installed packs.
 class PackService {
   final LoadedPack pack;
   final PackInfo info;
+  final PackFileReader _reader;
+  // Pre-loaded image bytes for installed packs (pack-relative path → bytes).
+  final Map<String, Uint8List> _assetCache;
 
-  PackService._(this.pack, this.info);
+  PackService._(this.pack, this.info, this._reader, this._assetCache);
 
   ThemeDef? get theme => pack.theme;
+  List<String> get levelIds => pack.orderedLevels.map((l) => l.id).toList();
+  List<SequenceEntry> get sequence => pack.game.levelSequence;
+  LevelDefinition level(String id) => pack.levels[id]!;
+  GameDefinition get game => pack.game;
 
-  /// Reads only manifest.json + theme.json for a pack — fast, used by the
-  /// library screen to populate cards without loading the full game.
-  static Future<PackInfo> loadInfo(String packId) async {
-    final base = 'assets/packs/$packId';
-    final manifestStr = await rootBundle.loadString('$base/manifest.json');
+  // ---------------------------------------------------------------------------
+  // Loading
+  // ---------------------------------------------------------------------------
+
+  /// Loads metadata only (fast — for library cards). Uses the bundled reader.
+  static Future<PackInfo> loadInfo(String packId) =>
+      _loadInfoFromReader(packId, BundledPackFileReader(packId));
+
+  /// Loads metadata for any pack entry (bundled or installed).
+  static Future<PackInfo> loadInfoFromEntry(PackEntry entry) =>
+      _loadInfoFromReader(entry.id, entry.reader,
+          isInstalled: entry.isInstalled);
+
+  /// Loads the full pack for gameplay. Uses the bundled reader.
+  static Future<PackService> load(String packId) =>
+      _loadFromReader(packId, BundledPackFileReader(packId));
+
+  /// Loads the full pack for any pack entry (bundled or installed).
+  static Future<PackService> loadFromEntry(PackEntry entry) =>
+      _loadFromReader(entry.id, entry.reader, isInstalled: entry.isInstalled);
+
+  // ---------------------------------------------------------------------------
+  // Private loading helpers
+  // ---------------------------------------------------------------------------
+
+  static Future<PackInfo> _loadInfoFromReader(
+    String packId,
+    PackFileReader reader, {
+    bool isInstalled = false,
+  }) async {
+    final manifestStr = await reader.readString('manifest.json');
     final manifest = jsonDecode(manifestStr) as Map<String, dynamic>;
 
     String? themeStr;
     try {
-      themeStr = await rootBundle.loadString('$base/theme.json');
-    } catch (_) {
-      // theme.json is optional
-    }
+      themeStr = await reader.readString('theme.json');
+    } catch (_) {}
     final theme =
         themeStr != null ? jsonDecode(themeStr) as Map<String, dynamic> : null;
 
-    return _infoFromManifestAndTheme(packId, manifest, theme);
+    return _buildInfo(packId, manifest, theme, reader,
+        isInstalled: isInstalled);
   }
 
-  /// Loads the full pack (manifest + theme + game + levels) for gameplay.
-  static Future<PackService> load(String packId) async {
-    final base = 'assets/packs/$packId';
-
-    final manifestStr = await rootBundle.loadString('$base/manifest.json');
-    final gameStr = await rootBundle.loadString('$base/game.json');
-
+  static Future<PackService> _loadFromReader(
+    String packId,
+    PackFileReader reader, {
+    bool isInstalled = false,
+  }) async {
+    final manifestStr = await reader.readString('manifest.json');
+    final gameStr = await reader.readString('game.json');
     final manifest = jsonDecode(manifestStr) as Map<String, dynamic>;
     final game = jsonDecode(gameStr) as Map<String, dynamic>;
 
     String? themeStr;
     try {
-      themeStr = await rootBundle.loadString('$base/theme.json');
+      themeStr = await reader.readString('theme.json');
     } catch (_) {}
     final theme =
         themeStr != null ? jsonDecode(themeStr) as Map<String, dynamic> : null;
@@ -80,7 +109,7 @@ class PackService {
       final map = entry as Map<String, dynamic>;
       if (map['type'] != 'level') continue;
       final ref = map['ref'] as String;
-      final levelStr = await rootBundle.loadString('$base/levels/$ref.json');
+      final levelStr = await reader.readString('levels/$ref.json');
       levelJsons[ref] = jsonDecode(levelStr) as Map<String, dynamic>;
     }
 
@@ -91,19 +120,37 @@ class PackService {
       levelJsons: levelJsons,
     );
 
-    return PackService._(
-        loadedPack, _infoFromManifestAndTheme(packId, manifest, theme));
+    final info = await _buildInfo(packId, manifest, theme, reader,
+        isInstalled: isInstalled);
+
+    // Pre-load all image assets for installed packs so resolvePackImage()
+    // can be called synchronously inside widget build methods.
+    final assetCache = isInstalled
+        ? await reader.preloadAssets()
+        : <String, Uint8List>{};
+
+    return PackService._(loadedPack, info, reader, assetCache);
   }
 
-  static PackInfo _infoFromManifestAndTheme(
+  static Future<PackInfo> _buildInfo(
     String packId,
     Map<String, dynamic> manifest,
     Map<String, dynamic>? theme,
-  ) {
-    final base = 'assets/packs/$packId';
-    final coverImageDsl = manifest['coverImage'] as String?;
+    PackFileReader reader, {
+    bool isInstalled = false,
+  }) async {
+    final coverImagePath = manifest['coverImage'] as String?;
 
-    // primaryColor from theme.json, with a neutral fallback.
+    ImageProvider? coverImage;
+    if (coverImagePath != null) {
+      if (!isInstalled) {
+        coverImage = AssetImage('assets/packs/$packId/$coverImagePath');
+      } else {
+        final bytes = await reader.readBytes(coverImagePath);
+        if (bytes != null) coverImage = MemoryImage(bytes);
+      }
+    }
+
     final colorHex = theme?['primaryColor'] as String?;
     final color = _parseColor(colorHex) ?? 0xFF607D8B;
 
@@ -112,27 +159,30 @@ class PackService {
       title: manifest['title'] as String? ?? packId,
       description: manifest['description'] as String? ?? '',
       color: color,
-      coverImageAsset:
-          coverImageDsl != null ? '$base/$coverImageDsl' : null,
+      coverImage: coverImage,
+      isInstalled: isInstalled,
     );
   }
 
-  /// Parses a CSS hex color string ("#RRGGBB" or "#AARRGGBB") to ARGB int.
-  static int? _parseColor(String? hex) {
-    if (hex == null) return null;
-    final s = hex.startsWith('#') ? hex.substring(1) : hex;
-    if (s.length == 6) return int.tryParse('FF$s', radix: 16);
-    if (s.length == 8) return int.tryParse(s, radix: 16);
-    return null;
+  // ---------------------------------------------------------------------------
+  // Asset resolution
+  // ---------------------------------------------------------------------------
+
+  /// Returns an [ImageProvider] for a pack-relative asset path.
+  /// Synchronous — safe to call inside widget build methods.
+  /// Bundled packs → [AssetImage]. Installed packs → [MemoryImage] from cache.
+  ImageProvider resolvePackImage(String packRelativePath) {
+    if (!info.isInstalled) {
+      return AssetImage('assets/packs/${info.id}/$packRelativePath');
+    }
+    final bytes = _assetCache[packRelativePath];
+    if (bytes != null) return MemoryImage(bytes);
+    // Asset not in cache — return transparent 1×1 pixel placeholder.
+    return MemoryImage(Uint8List.fromList(_kTransparentPixelPng));
   }
 
-  List<String> get levelIds => pack.orderedLevels.map((l) => l.id).toList();
-  List<SequenceEntry> get sequence => pack.game.levelSequence;
-  LevelDefinition level(String id) => pack.levels[id]!;
-  GameDefinition get game => pack.game;
-
-  /// Resolve a pack-relative asset path (e.g. from a story entry's image field)
-  /// to a Flutter asset path.
+  /// Legacy path-based resolver — still used by the shared sprite systems
+  /// (gridponder-base and rabbit-character) which are always bundled.
   String resolvePackAsset(String packRelativePath) =>
       'assets/packs/${info.id}/$packRelativePath';
 
@@ -143,4 +193,24 @@ class PackService {
 
   String resolveAvatarSprite(String filename) =>
       'assets/packs/rabbit-character/sprites/avatar/$filename';
+
+  // ---------------------------------------------------------------------------
+
+  static int? _parseColor(String? hex) {
+    if (hex == null) return null;
+    final s = hex.startsWith('#') ? hex.substring(1) : hex;
+    if (s.length == 6) return int.tryParse('FF$s', radix: 16);
+    if (s.length == 8) return int.tryParse(s, radix: 16);
+    return null;
+  }
 }
+
+/// A 1×1 transparent PNG — fallback for missing installed-pack assets.
+const _kTransparentPixelPng = <int>[
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+  0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+  0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+  0x0b, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x62, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+  0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+];

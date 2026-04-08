@@ -127,23 +127,35 @@ class BoardRenderer extends StatelessWidget {
             .toList() ??
         [];
     final currentIndex = (mco.params['currentIndex'] as int?) ?? 0;
-    final remaining = queue.skip(currentIndex).toList();
 
-    // Assign queued values to all cells ordered from exit inward:
-    // exitPos gets remaining[0] (next to drop), then cells further back.
-    final orderedCells = mco.cells.toList()
-      ..sort((a, b) {
-        final da = exitPos != null
-            ? (a.x - exitPos.x).abs() + (a.y - exitPos.y).abs()
-            : 0;
-        final db = exitPos != null
-            ? (b.x - exitPos.x).abs() + (b.y - exitPos.y).abs()
-            : 0;
-        return da.compareTo(db);
-      });
+    // Assign queued values to pipe cells.
     final bodyValues = <Position, int>{};
-    for (int i = 0; i < orderedCells.length && i < remaining.length; i++) {
-      bodyValues[orderedCells[i]] = remaining[i];
+    final pipeSlots = mco.params['pipeSlots'] as List?;
+    if (pipeSlots != null) {
+      // Bidirectional (slot model): pipeSlots[i] maps directly to mco.cells[i].
+      final cells = mco.cells.toList();
+      for (int i = 0; i < cells.length && i < pipeSlots.length; i++) {
+        final v = pipeSlots[i];
+        if (v != null) bodyValues[cells[i]] = v as int;
+      }
+    } else {
+      // Unidirectional (counter model): exit cell gets next-to-drop, then cells further back.
+      final remaining = queue.skip(currentIndex).toList();
+      if (remaining.isNotEmpty) {
+        final orderedCells = mco.cells.toList()
+          ..sort((a, b) {
+            final da = exitPos != null
+                ? (a.x - exitPos.x).abs() + (a.y - exitPos.y).abs()
+                : 0;
+            final db = exitPos != null
+                ? (b.x - exitPos.x).abs() + (b.y - exitPos.y).abs()
+                : 0;
+            return da.compareTo(db);
+          });
+        for (int i = 0; i < orderedCells.length && i < remaining.length; i++) {
+          bodyValues[orderedCells[i]] = remaining[i];
+        }
+      }
     }
 
     return mco.cells.map((pos) {
@@ -152,8 +164,8 @@ class BoardRenderer extends StatelessWidget {
 
       Widget background;
       if (sprite != null) {
-        background = Image.asset(
-          packService.resolvePackAsset(sprite),
+        background = Image(
+          image: packService.resolvePackImage(sprite),
           width: cellSize,
           height: cellSize,
           fit: BoxFit.cover,
@@ -427,6 +439,27 @@ class _Cell extends StatelessWidget {
       return Container(color: cellColor);
     }
 
+    if (kind == 'box_fragment') {
+      final sides = (entity.param('sides') as int?) ?? 0;
+      return CustomPaint(
+        size: Size(cellSize, cellSize),
+        painter: _BoxFragmentPainter(sides: sides, cellSize: cellSize),
+      );
+    }
+
+    if (kind == 'box_target') {
+      return Container(
+        margin: EdgeInsets.all(cellSize * 0.15),
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: const Color(0xFF8B5E3C).withValues(alpha: 0.5),
+            width: 2,
+          ),
+          borderRadius: BorderRadius.circular(cellSize * 0.08),
+        ),
+      );
+    }
+
     if (kind.startsWith('cell_')) {
       return Container(
         margin: EdgeInsets.all(cellSize * 0.1),
@@ -487,6 +520,66 @@ class _Cell extends StatelessWidget {
 
   Color _numberColor(int v) =>
       HSLColor.fromAHSL(1.0, (v * 37 % 360).toDouble(), 0.6, 0.45).toColor();
+}
+
+// ---------------------------------------------------------------------------
+// Box fragment painter — draws sides as thick coloured walls
+// ---------------------------------------------------------------------------
+
+class _BoxFragmentPainter extends CustomPainter {
+  final int sides;
+  final double cellSize;
+
+  // Side bit constants matching the engine.
+  static const int _sU = 1, _sR = 2, _sD = 4, _sL = 8;
+
+  _BoxFragmentPainter({required this.sides, required this.cellSize});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final full = sides == (_sU | _sR | _sD | _sL);
+    final m = cellSize * 0.1; // margin
+    final rect = Rect.fromLTRB(m, m, size.width - m, size.height - m);
+
+    // Body fill
+    final bodyPaint = Paint()
+      ..color = full
+          ? const Color(0xFF8B5E3C) // solid brown for complete box
+          : const Color(0xFF8B5E3C).withValues(alpha: 0.15);
+    final rr = RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.08));
+    canvas.drawRRect(rr, bodyPaint);
+
+    // Draw active sides as thick lines
+    final wallPaint = Paint()
+      ..color = const Color(0xFF8B5E3C)
+      ..strokeWidth = cellSize * 0.12
+      ..strokeCap = StrokeCap.round;
+
+    if (sides & _sU != 0) {
+      canvas.drawLine(rect.topLeft, rect.topRight, wallPaint);
+    }
+    if (sides & _sR != 0) {
+      canvas.drawLine(rect.topRight, rect.bottomRight, wallPaint);
+    }
+    if (sides & _sD != 0) {
+      canvas.drawLine(rect.bottomLeft, rect.bottomRight, wallPaint);
+    }
+    if (sides & _sL != 0) {
+      canvas.drawLine(rect.topLeft, rect.bottomLeft, wallPaint);
+    }
+
+    // Full-box indicator: a small check or star in the center
+    if (full) {
+      final iconPaint = Paint()..color = Colors.white.withValues(alpha: 0.8);
+      final center = rect.center;
+      final r = cellSize * 0.12;
+      canvas.drawCircle(center, r, iconPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_BoxFragmentPainter old) =>
+      old.sides != sides || old.cellSize != cellSize;
 }
 
 // ---------------------------------------------------------------------------
@@ -584,19 +677,35 @@ class _TargetCell extends StatelessWidget {
         border: const Border.fromBorderSide(
             BorderSide(color: Colors.black12, width: 0.5)),
       ),
-      child: kind != null
-          ? Container(
-              margin: const EdgeInsets.all(_cellSize * 0.1),
-              decoration: BoxDecoration(
-                color: _cellColor(kind),
-                borderRadius: BorderRadius.circular(_cellSize * 0.1),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.2),
-                    blurRadius: 2,
-                    offset: const Offset(1, 1),
-                  ),
-                ],
+      child: kind != null ? _buildTargetCell(kind) : null,
+    );
+  }
+
+  Widget _buildTargetCell(String kind) {
+    final color = _cellColor(kind);
+    final label = kind.startsWith('num_') ? kind.substring(4) : null;
+    return Container(
+      margin: const EdgeInsets.all(_cellSize * 0.1),
+      decoration: BoxDecoration(
+        color: color,
+        borderRadius: BorderRadius.circular(_cellSize * 0.1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 2,
+            offset: const Offset(1, 1),
+          ),
+        ],
+      ),
+      child: label != null
+          ? Center(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontSize: _cellSize * 0.42,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
               ),
             )
           : null,
