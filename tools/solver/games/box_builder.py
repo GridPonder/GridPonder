@@ -84,7 +84,7 @@ def load(level_json: Dict[str, Any]) -> Tuple[BBState, LevelInfo]:
         # Dense format: list of rows, each row is a list of kind strings
         for row_idx, row in enumerate(ground):
             for col_idx, kind in enumerate(row):
-                if kind != "empty" and kind != "void":
+                if kind != "empty":
                     walls.append((col_idx, row_idx))
     elif isinstance(ground, dict):
         # Sparse format (unusual for ground but handle it)

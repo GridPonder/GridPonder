@@ -664,6 +664,10 @@ class _PlayScreenState extends State<PlayScreen> {
         onKeyEvent: (_, event) {
           if (_aiRunning) return KeyEventResult.ignored;
           if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+            _onUndo();
+            return KeyEventResult.handled;
+          }
           final String? dir = switch (event.logicalKey) {
             LogicalKeyboardKey.arrowUp => 'up',
             LogicalKeyboardKey.arrowDown => 'down',
