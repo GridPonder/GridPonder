@@ -1,0 +1,84 @@
+{
+  "id": "bb_015",
+  "title": "Single File",
+  "board": {
+    "size": [4, 5],
+    "layers": {
+      "ground": [
+        ["empty", "empty", "void",  "void"],
+        ["empty", "empty", "void",  "void"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "empty", "empty"],
+        ["empty", "empty", "void",  "void"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "box_fragment", "sides": 5},
+          {"position": [0, 1], "kind": "box_fragment", "sides": 10},
+          {"position": [1, 2], "kind": "box_fragment", "sides": 6},
+          {"position": [2, 3], "kind": "box_fragment", "sides": 9}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "box_target"},
+          {"position": [0, 4], "kind": "box_target"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [1, 3], "facing": "right"}
+  },
+  "goals": [
+    {
+      "id": "complete_boxes",
+      "type": "param_match",
+      "config": {
+        "markerLayer": "markers",
+        "markerKind": "box_target",
+        "checkLayer": "objects",
+        "checkKind": "box_fragment",
+        "checkParam": "sides",
+        "checkValue": 15
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "up"}
+    ],
+    "hintStops": [11]
+  }
+}

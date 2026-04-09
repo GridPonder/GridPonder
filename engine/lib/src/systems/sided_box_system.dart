@@ -88,6 +88,11 @@ class SidedBoxSystem extends GameSystem {
 
     final outBit = _sideBit(direction); // side we exit through
     final inBit = _sideBit(direction.opposite); // side we enter through
+    // Sides perpendicular to the push direction — two boxes cannot share these
+    // when merging, as their parallel walls would physically overlap.
+    final perpMask = (outBit == _sideU || outBit == _sideD)
+        ? (_sideL | _sideR)
+        : (_sideU | _sideD);
 
     // ---------------------------------------------------------------
     // CASE 1: Carry — avatar is on a cell with a sided box and exits
@@ -112,6 +117,8 @@ class SidedBoxSystem extends GameSystem {
       if (isSided(entityAtTarget)) {
         // The destination box's inward side blocks entry, same as walking.
         if ((sides(entityAtTarget!) & inBit) != 0) return const [];
+        // Parallel walls on both boxes would physically overlap — merge blocked.
+        if ((sides(entityAtPos) & sides(entityAtTarget!) & perpMask) != 0) return const [];
         final merged = sides(entityAtPos) | sides(entityAtTarget);
         final mergedEntity = EntityInstance(
           entityAtPos.kind,
@@ -167,6 +174,8 @@ class SidedBoxSystem extends GameSystem {
 
         // Push destination has a sided box → push + merge.
         if (isSided(entityAtPushDest)) {
+          // Parallel walls on both boxes would physically overlap — merge blocked.
+          if ((sides(entityAtTarget) & sides(entityAtPushDest!) & perpMask) != 0) return const [];
           final merged = sides(entityAtTarget) | sides(entityAtPushDest!);
           final mergedEntity = EntityInstance(
             entityAtTarget.kind,
