@@ -1,0 +1,45 @@
+{
+  "generated": "2026-04-09T13:09:32.442909+00:00",
+  "models": [
+    {
+      "id": "qwen3-0.8b-think",
+      "display_name": "Qwen 3.5 0.8B",
+      "local": true,
+      "reasoning": true,
+      "overall": {
+        "levels_run": 1,
+        "success_rate": 0.0,
+        "avg_efficiency": null,
+        "p50_latency_ms": 10269.373416999997
+      },
+      "by_pack": {
+        "number_cells": {
+          "levels_run": 1,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "p50_latency_ms": 10269.373416999997
+        }
+      }
+    },
+    {
+      "id": "qwen3-0.8b",
+      "display_name": "Qwen 3.5 0.8B",
+      "local": true,
+      "reasoning": false,
+      "overall": {
+        "levels_run": 1,
+        "success_rate": 0.0,
+        "avg_efficiency": null,
+        "p50_latency_ms": 11635.918292
+      },
+      "by_pack": {
+        "number_cells": {
+          "levels_run": 1,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "p50_latency_ms": 11635.918292
+        }
+      }
+    }
+  ]
+}

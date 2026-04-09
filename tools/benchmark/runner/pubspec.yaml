@@ -1,0 +1,11 @@
+name: gridponder_benchmark_runner
+description: CLI game-loop runner for benchmarking AI agents against GridPonder levels.
+version: 0.1.0
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  gridponder_engine:
+    path: ../../../engine
+  args: ^2.4.0

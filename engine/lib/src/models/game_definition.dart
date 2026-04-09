@@ -17,13 +17,20 @@ class ActionParamDef {
 class ActionDef {
   final String id;
   final Map<String, ActionParamDef> params;
-  const ActionDef({required this.id, required this.params});
+
+  /// If set, this action is only offered when this entity kind is present on
+  /// the current board. Used to suppress inapplicable actions in the LLM
+  /// prompt (e.g. flood_purple when no purple cells are on the board).
+  final String? entityKind;
+
+  const ActionDef({required this.id, required this.params, this.entityKind});
   factory ActionDef.fromJson(Map<String, dynamic> j) {
     final rawParams = j['params'] as Map<String, dynamic>? ?? {};
     return ActionDef(
       id: j['id'] as String,
       params: rawParams.map((k, v) =>
           MapEntry(k, ActionParamDef.fromJson(v as Map<String, dynamic>))),
+      entityKind: j['entityKind'] as String?,
     );
   }
 }

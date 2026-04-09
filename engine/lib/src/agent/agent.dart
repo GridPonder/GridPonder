@@ -87,11 +87,19 @@ class AgentObservation {
     String? previousBoardText,
     String? previousInventory,
   }) {
+    // Collect entity kinds currently present on the board for action filtering.
+    final presentKinds = <String>{};
+    for (final layer in state.board.layers.values) {
+      for (final entry in layer.entries()) {
+        presentKinds.add(entry.value.kind);
+      }
+    }
+
     return AgentObservation(
       game: game,
       level: level,
       state: state,
-      validActions: _enumerateActions(game),
+      validActions: _enumerateActions(game, presentKinds),
       boardText: TextRenderer.render(state, game),
       attemptNumber: attemptNumber,
       totalActionsAllAttempts: totalActionsAllAttempts,
@@ -101,9 +109,15 @@ class AgentObservation {
     );
   }
 
-  static List<GameAction> _enumerateActions(GameDefinition game) {
+  static List<GameAction> _enumerateActions(
+      GameDefinition game, Set<String> presentKinds) {
     final actions = <GameAction>[];
     for (final actionDef in game.actions) {
+      // Skip actions whose required entity kind is absent from the board.
+      if (actionDef.entityKind != null &&
+          !presentKinds.contains(actionDef.entityKind)) {
+        continue;
+      }
       if (actionDef.params.isEmpty) {
         actions.add(GameAction(actionDef.id, {}));
       } else {

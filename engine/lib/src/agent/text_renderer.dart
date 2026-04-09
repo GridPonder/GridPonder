@@ -163,7 +163,8 @@ class TextRenderer {
         if (!seen.containsKey(sym)) {
           final label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
           final suffix = kindDef.symbolParam != null ? ' (0–9)' : '';
-          seen[sym] = '$label$suffix';
+          final desc = kindDef.description != null ? ' (${kindDef.description})' : '';
+          seen[sym] = '$label$suffix$desc';
         }
       }
     }

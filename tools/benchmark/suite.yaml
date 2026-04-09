@@ -1,0 +1,50 @@
+# GridPonder Benchmark — Curated level suite
+#
+# Used with: python bench.py --suite curated
+# Designed to give representative coverage across all packs
+# in a manageable runtime (~30 levels per model variant).
+#
+# Update level IDs here as new packs/levels are added.
+
+levels:
+  number_cells:
+    - nc_001
+    - nc_002
+    - nc_003
+    - nc_004
+    - nc_005
+
+  flag_adventure:
+    - fw_001
+    - fw_002
+    - fw_003
+    - pw_001
+    - pw_003
+
+  rotate_flip:
+    - rf_001
+    - rf_002
+    - rf_003
+    - rf_004
+    - rf_005
+
+  flood_colors:
+    - fl_001
+    - fl_002
+    - fl_003
+    - fl_004
+    - fl_005
+
+  diagonal_swipes:
+    - ds_001
+    - ds_002
+    - ds_003
+    - ds_004
+    - ds_005
+
+  box_builder:
+    - bb_001
+    - bb_002
+    - bb_003
+    - bb_004
+    - bb_005

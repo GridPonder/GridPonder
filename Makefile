@@ -2,7 +2,8 @@ SFTP_HOST = 51636171.ssh.w1.strato.hosting
 SFTP_USER = stu135248240
 SFTP_REMOTE = .
 
-.PHONY: build-game build-site build deploy deploy-site ship setup-deploy
+.PHONY: build-game build-site build deploy deploy-site ship setup-deploy \
+        benchmark benchmark-suite benchmark-build benchmark-agg
 
 ## Install deploy tooling (lftp)
 setup-deploy:
@@ -55,3 +56,20 @@ deploy-site: build-site deploy
 
 ## Build everything and deploy
 ship: build deploy
+
+## Compile the Dart game-loop runner binary (required before benchmarking)
+benchmark-build:
+	cd tools/benchmark/runner && dart pub get && \
+	dart compile exe bin/runner.dart -o runner
+
+## Run the curated level suite across all configured models (fast, ~30 levels)
+benchmark-suite: benchmark-build
+	cd tools/benchmark && python bench.py --suite curated
+
+## Run the full benchmark across all models and all levels (overnight)
+benchmark: benchmark-build
+	cd tools/benchmark && python bench.py --all
+
+## Aggregate run results into leaderboard.json (commit the result, then make ship)
+benchmark-agg:
+	cd tools/benchmark && python aggregate.py

@@ -72,7 +72,7 @@ class LlmAgent implements GridPonderAgent {
 
   @override
   Stream<AgentActEvent> act(AgentObservation obs) async* {
-    final prompt = _buildPrompt(obs);
+    final prompt = LlmAgent.buildPrompt(obs, memory: _memory);
     lastPrompt = prompt;
     final useThinking =
         thinkingEnabled && AnthropicModel.supportsThinking(model);
@@ -168,16 +168,26 @@ class LlmAgent implements GridPonderAgent {
     );
   }
 
-  String _buildPrompt(AgentObservation obs) {
-    final goalDescriptions = obs.level.goals.map((g) {
+  /// Builds the LLM prompt for the given observation.
+  ///
+  /// Public and static so external tools (e.g. the benchmark runner) can
+  /// produce identical prompts without instantiating an [LlmAgent].
+  static String buildPrompt(AgentObservation obs, {String memory = ''}) {
+    final goalParts = <String>[];
+    for (final g in obs.level.goals) {
       switch (g.type) {
         case 'reach_target':
           final name = _resolveEntityName(
               obs.game, g.config['targetKind'] as String?,
               g.config['targetTag'] as String?);
-          return 'Reach the $name';
+          goalParts.add('Reach the $name');
         case 'board_match':
-          return 'Arrange tiles to match the target pattern';
+          final targetGrid = _renderTargetGrid(obs.game, g.config);
+          if (targetGrid != null) {
+            goalParts.add('Arrange tiles to match the target pattern:\n$targetGrid');
+          } else {
+            goalParts.add('Arrange tiles to match the target pattern');
+          }
         case 'sequence_match':
           final sequence = (g.config['sequence'] as List?)
               ?.map((e) => e as int)
@@ -186,16 +196,23 @@ class LlmAgent implements GridPonderAgent {
           final done = sequence.take(matched).map((n) => '✓$n').join(', ');
           final pending = sequence.skip(matched).map((n) => '$n').join(', ');
           final progress = [if (done.isNotEmpty) done, if (pending.isNotEmpty) pending].join(', ');
-          return 'Merge numbers in sequence [$progress] ($matched/${sequence.length} done)';
+          goalParts.add('Merge numbers in sequence [$progress] ($matched/${sequence.length} done)');
         case 'all_cleared':
           final name = _resolveEntityName(
               obs.game, g.config['kind'] as String?,
               g.config['tag'] as String?);
-          return 'Clear all ${name}s from the board';
+          goalParts.add('Clear all ${name}s from the board');
+        case 'sum_constraint':
+          goalParts.add(_describeSumConstraint(g.config));
+        case 'count_constraint':
+          goalParts.add(_describeCountConstraint(g.config));
+        case 'param_match':
+          goalParts.add(_describeParamMatch(obs.game, g.config));
         default:
-          return g.type;
+          goalParts.add(g.type);
       }
-    }).join('; ');
+    }
+    final goalDescriptions = goalParts.join('; ');
 
     final actionsDesc = obs.validActions
         .map((a) => jsonEncode(a.toJson()))
@@ -208,8 +225,8 @@ class LlmAgent implements GridPonderAgent {
         ? '\nMoves this attempt: ${obs.state.actionCount}'
         : '';
 
-    final memorySection = _memory.isNotEmpty
-        ? '\nMEMORY FROM PREVIOUS ACTION:\n$_memory\n'
+    final memorySection = memory.isNotEmpty
+        ? '\nMEMORY FROM PREVIOUS ACTION:\n$memory\n'
         : '';
 
     final prevInventoryLine = obs.previousInventory != null
@@ -258,6 +275,119 @@ Examples:
 Choose the action most likely to reach the goal in fewest total actions (summed across attempts).''';
   }
 
+  /// Renders the targetLayers config of a board_match goal as an ASCII grid.
+  /// Returns null if the config has no renderable target.
+  static String? _renderTargetGrid(
+      GameDefinition game, Map<String, dynamic> config) {
+    final targetLayers = config['targetLayers'] as Map<String, dynamic>?;
+    if (targetLayers == null || targetLayers.isEmpty) return null;
+
+    // Collect the dimensions from any layer.
+    int? height;
+    int? width;
+    for (final rows in targetLayers.values) {
+      final rowList = rows as List;
+      height = rowList.length;
+      width = (rowList.first as List).length;
+      break;
+    }
+    if (height == null || width == null) return null;
+
+    final grid = List.generate(height, (_) => List.filled(width!, '.'));
+
+    for (final layerEntry in targetLayers.entries) {
+      final rows = layerEntry.value as List;
+      for (int y = 0; y < rows.length; y++) {
+        final row = rows[y] as List;
+        for (int x = 0; x < row.length; x++) {
+          final kindId = row[x] as String?;
+          if (kindId == null) continue;
+          final sym = game.entityKinds[kindId]?.symbol ?? kindId[0];
+          grid[y][x] = sym;
+        }
+      }
+    }
+
+    return grid.map((row) => row.join()).join('\n');
+  }
+
+  static String _describeSumConstraint(Map<String, dynamic> config) {
+    final scope = config['scope'] as String? ?? 'board';
+    final target = config['target'];
+    final comparison = config['comparison'] as String? ?? 'eq';
+    final index = config['index'];
+
+    final scopeLabel = switch (scope) {
+      'all_rows' => 'every row',
+      'all_cols' => 'every column',
+      'row' => 'row ${index ?? '?'}',
+      'col' => 'column ${index ?? '?'}',
+      _ => scope,
+    };
+    final opLabel = switch (comparison) {
+      'eq' => '= $target',
+      'gte' => '≥ $target',
+      'lte' => '≤ $target',
+      _ => '$comparison $target',
+    };
+    return '$scopeLabel sums to $opLabel';
+  }
+
+  static String _describeCountConstraint(Map<String, dynamic> config) {
+    final scope = config['scope'] as String? ?? 'board';
+    final predicate = config['predicate'] as String? ?? '';
+    final target = config['target'];
+    final comparison = config['comparison'] as String? ?? 'eq';
+    final index = config['index'];
+
+    final scopeLabel = switch (scope) {
+      'all_rows' => 'every row',
+      'all_cols' => 'every column',
+      'row' => 'row ${index ?? '?'}',
+      'col' => 'column ${index ?? '?'}',
+      _ => scope,
+    };
+    final predicateLabel = switch (predicate) {
+      'even' => 'even',
+      'odd' => 'odd',
+      _ when predicate.startsWith('gte_') => '≥ ${predicate.substring(4)}',
+      _ when predicate.startsWith('lte_') => '≤ ${predicate.substring(4)}',
+      _ when predicate.startsWith('eq_') => '${predicate.substring(3)}',
+      _ => predicate,
+    };
+    final n = target is int ? target : int.tryParse('$target') ?? 0;
+    final countLabel = switch (comparison) {
+      'eq' => 'exactly $n',
+      'gte' => 'at least $n',
+      'lte' => 'at most $n',
+      _ => '$comparison $n',
+    };
+    final tileWord = n == 1 ? 'tile' : 'tiles';
+    return 'In $scopeLabel: $countLabel $predicateLabel $tileWord';
+  }
+
+  static String _describeParamMatch(
+      GameDefinition game, Map<String, dynamic> config) {
+    final markerKind = config['markerKind'] as String?;
+    final checkKind = config['checkKind'] as String?;
+    final checkParam = config['checkParam'] as String?;
+    final checkValue = config['checkValue'];
+
+    final markerName = markerKind != null
+        ? (game.entityKinds[markerKind]?.uiName ??
+            markerKind.replaceAll('_', ' '))
+        : 'target';
+    final checkName = checkKind != null
+        ? (game.entityKinds[checkKind]?.uiName ??
+            checkKind.replaceAll('_', ' '))
+        : 'piece';
+
+    if (checkParam == 'sides' && checkValue == 15) {
+      return 'Fill every $markerName cell with a complete $checkName (all 4 sides connected)';
+    }
+    return 'Place a $checkName on every $markerName where $checkParam = $checkValue';
+  }
+
   GameAction _extractAction(String text, AgentObservation obs) {
     final jsonMatch = RegExp(r'\{[^}]+\}').firstMatch(text);
     if (jsonMatch != null) {
@@ -285,12 +415,13 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
   static String _resolveEntityName(
       GameDefinition game, String? kindId, String? tag) {
     if (kindId != null) {
-      return game.entityKinds[kindId]?.uiName ?? kindId;
+      return game.entityKinds[kindId]?.uiName ??
+          kindId.replaceAll('_', ' ');
     }
     if (tag != null) {
       for (final entry in game.entityKinds.entries) {
         if (entry.value.tags.contains(tag)) {
-          return entry.value.uiName ?? entry.key;
+          return entry.value.uiName ?? entry.key.replaceAll('_', ' ');
         }
       }
       return tag;

@@ -1,0 +1,157 @@
+# GridPonder AI Benchmark — Model Registry
+#
+# Each model entry has one or more variants (reasoning on/off, effort level).
+# The effective benchmark ID is "{id}{variant.suffix}", e.g. "gemma4-e2b-think".
+#
+# local: true  → Ollama, latency is hardware-comparable
+# local: false → cloud API, latency excluded from Pareto chart
+#
+# Ollama tags: update when new models land in the Ollama library.
+# HuggingFace source is noted for reference.
+
+models:
+
+  # ── Local models (Ollama) ──────────────────────────────────────────────────
+
+  - id: gemma4-e2b
+    display_name: "Gemma 4 E2B"
+    # https://huggingface.co/google/gemma-4-E2B
+    litellm_model: "ollama_chat/gemma4:e2b"
+    local: true
+    variants:
+      - suffix: ""
+        reasoning: false
+        params:
+          think: false
+      - suffix: "-think"
+        reasoning: true
+        params:
+          think: true
+
+  - id: gemma4-e4b
+    display_name: "Gemma 4 E4B"
+    # https://huggingface.co/google/gemma-4-E4B
+    litellm_model: "ollama_chat/gemma4:e4b"
+    local: true
+    variants:
+      - suffix: ""
+        reasoning: false
+        params:
+          think: false
+      - suffix: "-think"
+        reasoning: true
+        params:
+          think: true
+
+  # Qwen 3.5 thinking variants omitted: these models emit 8K–32K reasoning
+  # tokens per action on Apple MPS, making them ~120s/action and impractical
+  # on this hardware. Run no-think only.
+
+  - id: qwen3.5-0.8b
+    display_name: "Qwen 3.5 0.8B"
+    litellm_model: "ollama_chat/qwen3.5:0.8b"
+    local: true
+    variants:
+      - suffix: ""
+        reasoning: false
+        params:
+          think: false
+
+  - id: qwen3.5-2b
+    display_name: "Qwen 3.5 2B"
+    litellm_model: "ollama_chat/qwen3.5:2b"
+    local: true
+    variants:
+      - suffix: ""
+        reasoning: false
+        params:
+          think: false
+
+  - id: qwen3.5-4b
+    display_name: "Qwen 3.5 4B"
+    litellm_model: "ollama_chat/qwen3.5:4b"
+    local: true
+    variants:
+      - suffix: ""
+        reasoning: false
+        params:
+          think: false
+
+  - id: qwen3.5-9b
+    display_name: "Qwen 3.5 9B"
+    litellm_model: "ollama_chat/qwen3.5:9b"
+    local: true
+    variants:
+      - suffix: ""
+        reasoning: false
+        params:
+          think: false
+
+  - id: gpt-oss-20b
+    display_name: "GPT-OSS 20B"
+    # https://huggingface.co/openai/gpt-oss-20b
+    # Always uses reasoning; cannot be run without it.
+    litellm_model: "ollama_chat/gpt-oss:20b"
+    local: true
+    variants:
+      - suffix: "-low"
+        reasoning: true
+        params:
+          reasoning_effort: "low"
+      - suffix: "-med"
+        reasoning: true
+        params:
+          reasoning_effort: "medium"
+      - suffix: "-high"
+        reasoning: true
+        params:
+          reasoning_effort: "high"
+
+  # ── API models ─────────────────────────────────────────────────────────────
+  # Latency is recorded but tagged local=false and excluded from Pareto charts.
+
+  - id: claude-haiku
+    display_name: "Claude Haiku 4.5"
+    litellm_model: "anthropic/claude-haiku-4-5-20251001"
+    local: false
+    variants:
+      - suffix: ""
+        reasoning: false
+
+  - id: claude-sonnet
+    display_name: "Claude Sonnet 4.6"
+    litellm_model: "anthropic/claude-sonnet-4-6"
+    local: false
+    variants:
+      - suffix: ""
+        reasoning: false
+      - suffix: "-think"
+        reasoning: true
+        params:
+          thinking:
+            type: "enabled"
+            budget_tokens: 8000
+
+  - id: gpt-4o
+    display_name: "GPT-4o"
+    litellm_model: "openai/gpt-4o"
+    local: false
+    variants:
+      - suffix: ""
+        reasoning: false
+
+  - id: gemini-2-flash
+    display_name: "Gemini 2.0 Flash"
+    litellm_model: "gemini/gemini-2.0-flash"
+    local: false
+    variants:
+      - suffix: ""
+        reasoning: false
+
+  - id: grok-3
+    display_name: "Grok 3"
+    litellm_model: "xai/grok-3"
+    local: false
+    variants:
+      - suffix: ""
+        reasoning: false
