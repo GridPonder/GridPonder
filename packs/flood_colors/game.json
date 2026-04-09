@@ -153,7 +153,7 @@
     {
       "type": "story",
       "title": "The Rogue Rainbow Incident",
-      "text": "Last Tuesday, a rogue rainbow sneezed directly onto Pip's garden. The result was catastrophic: blazing reds next to screaming oranges next to purples that have absolutely no business being near a vegetable patch.\n\nPip has located a bucket of sensible green paint. Starting from the top-left corner, choose a colour each turn — any region of that colour touching the flooded area joins it. Clear the whole board within the move limit!\n\nThe catch: the bucket only has so many splashes. Plan ahead — the order matters!",
+      "text": "A rogue rainbow has exploded across Pip's garden, leaving reds crashing into oranges and purples where no purple should ever be.\n\nPip has located a bucket of paint. Starting from the top-left corner, choose a colour each turn — any region of that colour touching the flooded area joins it. Clear the whole board within the move limit!\n\nThe catch: the bucket only has so many splashes. Plan ahead — the order matters!",
       "image": "assets/rabbit_color_flood.png"
     },
     { "type": "level", "ref": "fl_001" },
