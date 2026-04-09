@@ -38,6 +38,11 @@ class PhaseRunner {
       _collectAnimations(events, state, animations);
     }
 
+    // If a system explicitly vetoed the action, reject without counting a move.
+    if (allEvents.any((e) => e.type == 'action_vetoed')) {
+      return TurnResult.rejected(state);
+    }
+
     // Phase 3: Movement resolution
     for (final sys in systems) {
       final events = sys.executeMovementResolution(state, _game);

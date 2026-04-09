@@ -11,6 +11,7 @@ Color cellNamedColor(String name) => switch (name) {
       'blue' => const Color(0xFF1E88E5),
       'green' => const Color(0xFF43A047),
       'yellow' => const Color(0xFFFFD600),
+      'orange' => const Color(0xFFFB8C00),
       'purple' => const Color(0xFF8E24AA),
       'lime' => const Color(0xFF7CB342),
       'teal' => const Color(0xFF00897B),

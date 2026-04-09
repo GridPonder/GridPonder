@@ -61,7 +61,7 @@ void main() {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../packs/number_cells'));
 
-    for (final id in ['nc_001','nc_002','nc_003','nc_004','nc_005','nc_006','nc_007','nc_008','nc_009','nc_010','nc_011','nc_012','nc_013']) {
+    for (final id in ['nc_001','nc_002','nc_003','nc_004','nc_005','nc_006','nc_007','nc_008','nc_009','nc_010','nc_011','nc_012','nc_013','nc_014','nc_015','nc_016']) {
       test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
     }
   });
@@ -82,6 +82,8 @@ void main() {
     setUpAll(() => pack = _loadPack('../packs/flood_colors'));
 
     test('fl_001', () => _replayAndExpectWin(_engineForLevel(pack, 'fl_001'), _goldPath(pack, 'fl_001')));
+    test('fl_002', () => _replayAndExpectWin(_engineForLevel(pack, 'fl_002'), _goldPath(pack, 'fl_002')));
+    test('fl_003', () => _replayAndExpectWin(_engineForLevel(pack, 'fl_003'), _goldPath(pack, 'fl_003')));
   });
 
   // --- diagonal_swipes ---

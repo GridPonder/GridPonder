@@ -82,7 +82,7 @@ class FloodFillSystem extends GameSystem {
           }
         }
       }
-      if (queue.isEmpty) return const []; // no adjacent target cells → rejected
+      if (queue.isEmpty) return [GameEvent.actionVetoed()]; // no adjacent target cells
 
       // BFS through connected target-kind cells.
       final toTransform = <Position>[];
@@ -112,7 +112,7 @@ class FloodFillSystem extends GameSystem {
           affectedPositions.add(pos);
         }
       }
-      if (affectedPositions.isEmpty) return const [];
+      if (affectedPositions.isEmpty) return [GameEvent.actionVetoed()];
       return [GameEvent.cellsFlooded(affectedPositions)];
     }
 

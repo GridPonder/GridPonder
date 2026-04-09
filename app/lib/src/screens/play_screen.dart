@@ -173,7 +173,10 @@ class _PlayScreenState extends State<PlayScreen> {
 
   void _onUndo() {
     if (_aiRunning) return;
-    setState(() => _engine.undo());
+    setState(() {
+      _engine.undo();
+      _lastFloodColor = null;
+    });
   }
 
   void _onReset() {

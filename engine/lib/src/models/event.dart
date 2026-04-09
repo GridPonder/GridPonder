@@ -138,6 +138,10 @@ class GameEvent {
   static GameEvent cellsFlooded(List<Position> cells) =>
       GameEvent('cells_flooded', {'cells': cells});
 
+  /// Signals that a system explicitly rejects the action (turn should not
+  /// count as a move). Used by flood_fill when no adjacent target cells exist.
+  static GameEvent actionVetoed() => const GameEvent('action_vetoed', {});
+
   static GameEvent boxesMerged(
           Position pos, int resultSides, int aSides, int bSides) =>
       GameEvent('boxes_merged', {
