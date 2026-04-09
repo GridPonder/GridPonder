@@ -1,5 +1,32 @@
 ---
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import Base from '../layouts/Base.astro';
+
+// Read leaderboard.json from the benchmark tool directory.
+// process.cwd() is the website/ directory during `npm run build`.
+const leaderboardPath = resolve(process.cwd(), '../tools/benchmark/leaderboard.json');
+const leaderboard = JSON.parse(readFileSync(leaderboardPath, 'utf-8'));
+const models = leaderboard.models ?? [];
+const generated = leaderboard.generated
+  ? new Date(leaderboard.generated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+  : null;
+
+// All pack IDs that appear in any model's by_pack.
+const allPacks = [...new Set(models.flatMap((m: any) => Object.keys(m.by_pack ?? {})))].sort();
+
+function pct(v: number | null | undefined) {
+  if (v == null) return '—';
+  return (v * 100).toFixed(0) + '%';
+}
+function eff(v: number | null | undefined) {
+  if (v == null) return '—';
+  return v.toFixed(2);
+}
+function lat(v: number | null | undefined) {
+  if (v == null) return '—';
+  return v < 1000 ? `${v.toFixed(0)} ms` : `${(v / 1000).toFixed(1)} s`;
+}
 ---
 <Base
   title="AI Leaderboard"
@@ -37,88 +64,156 @@ import Base from '../layouts/Base.astro';
       <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
         <div class="text-3xl mb-3">📊</div>
         <h2 class="font-bold text-gray-900 mb-2">How scores work</h2>
-        <p class="text-sm text-gray-500 leading-relaxed">
-          Two metrics per run:
-        </p>
-        <ul class="mt-2 space-y-1.5 text-sm text-gray-500">
-          <li><strong class="text-gray-700">Accuracy</strong> — did the model solve the level within the step limit? Any valid solution counts, not just the gold path.</li>
-          <li><strong class="text-gray-700">Efficiency</strong> — total actions across all attempts (including restarts) divided by the gold path length. Lower is better.</li>
+        <ul class="mt-2 space-y-2 text-sm text-gray-500">
+          <li><strong class="text-gray-700">Accuracy</strong> — fraction of levels solved within the total action budget.</li>
+          <li><strong class="text-gray-700">Efficiency</strong> — gold path length ÷ total actions used (1.0 = perfect). Give-up counts as 1 action toward the budget, rewarding early resets over wasted moves.</li>
+          <li><strong class="text-gray-700">Latency</strong> — median ms per action (local models only; cloud API latency excluded).</li>
         </ul>
-        <p class="mt-2 text-sm text-gray-500">
-          The model can give up and restart an attempt at any time. An auto-reset triggers if it
-          exceeds 3× the gold path length in a single attempt.
+        <p class="mt-3 text-sm text-gray-500">
+          Auto-reset triggers at 3× gold path length per attempt; total budget is 5× gold path across all attempts.
         </p>
       </div>
       <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
         <div class="text-3xl mb-3">🤖</div>
         <h2 class="font-bold text-gray-900 mb-2">Which models</h2>
         <p class="text-sm text-gray-500 leading-relaxed">
-          The built-in agent supports <strong class="text-gray-700">Claude Haiku, Sonnet, and Opus</strong>
-          (with optional extended thinking for Sonnet and Opus). The agent interface is open — any model
-          that reads a text prompt and outputs a JSON action object can be wired up. The prompt is plain
-          text; no vision or special modalities required.
+          Local models (Gemma 4, Qwen 3.5, GPT-OSS) run via <strong class="text-gray-700">Ollama</strong>.
+          API models (Claude, GPT-4o, Gemini, Grok) are included for accuracy comparison but excluded
+          from the latency Pareto chart. The prompt is plain text — no vision or special modalities required.
         </p>
       </div>
     </div>
 
-    <!-- Leaderboard table -->
-    <div class="rounded-2xl border border-gray-200 overflow-hidden">
+    <!-- Overall leaderboard table -->
+    <div class="rounded-2xl border border-gray-200 overflow-hidden mb-12">
       <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 flex items-center justify-between">
-        <h2 class="font-bold text-gray-900">Rankings</h2>
-        <span class="text-xs text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full">
-          No entries yet
-        </span>
+        <h2 class="font-bold text-gray-900">Overall Rankings</h2>
+        {generated
+          ? <span class="text-xs text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full">Updated {generated}</span>
+          : <span class="text-xs text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full">No data yet</span>
+        }
       </div>
 
-      <table class="w-full text-sm">
-        <thead class="bg-gray-50 border-b border-gray-200">
-          <tr>
-            {['#', 'Model', 'Pack', 'Level', 'Solved', 'Total actions', 'Gold path', 'Efficiency', 'Date'].map(col => (
-              <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">{col}</th>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 border-b border-gray-200">
+            <tr>
+              {['#', 'Model', 'Type', 'Accuracy', 'Efficiency', 'Latency (p50)', 'Levels'].map(col => (
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100">
+            {models.length === 0 ? (
+              <tr>
+                <td colspan={7} class="px-6 py-20 text-center">
+                  <div class="flex flex-col items-center gap-4 text-gray-400">
+                    <span class="text-5xl">🤖</span>
+                    <div>
+                      <p class="font-semibold text-gray-500 mb-1">No results yet</p>
+                      <p class="text-sm">Run <code class="bg-gray-100 px-1 rounded">make benchmark-suite</code> to generate data.</p>
+                    </div>
+                  </div>
+                </td>
+              </tr>
+            ) : models.map((m: any, i: number) => (
+              <tr class="hover:bg-gray-50 transition-colors">
+                <td class="px-4 py-3 text-gray-400 font-mono">{i + 1}</td>
+                <td class="px-4 py-3">
+                  <span class="font-semibold text-gray-900">{m.display_name}</span>
+                  {m.reasoning && <span class="ml-2 text-xs bg-purple-100 text-purple-700 px-1.5 py-0.5 rounded font-medium">thinking</span>}
+                </td>
+                <td class="px-4 py-3">
+                  {m.local
+                    ? <span class="text-xs bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">local</span>
+                    : <span class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">API</span>
+                  }
+                </td>
+                <td class="px-4 py-3 font-mono font-semibold text-gray-900">
+                  {pct(m.overall?.success_rate)}
+                </td>
+                <td class="px-4 py-3 font-mono text-gray-700">
+                  {eff(m.overall?.avg_efficiency)}
+                </td>
+                <td class="px-4 py-3 font-mono text-gray-500">
+                  {m.local ? lat(m.overall?.p50_latency_ms) : '—'}
+                </td>
+                <td class="px-4 py-3 text-gray-400 text-xs">
+                  {m.overall?.levels_run ?? 0}
+                </td>
+              </tr>
             ))}
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td colspan={9} class="px-6 py-20 text-center">
-              <div class="flex flex-col items-center gap-4 text-gray-400">
-                <span class="text-5xl">🤖</span>
-                <div>
-                  <p class="font-semibold text-gray-500 mb-1">No entries yet</p>
-                  <p class="text-sm">
-                    Submit a result via{' '}
-                    <a href="https://github.com/Gridponder" class="text-brand-600 hover:underline" target="_blank" rel="noopener noreferrer">
-                      GitHub
-                    </a>.
-                  </p>
-                </div>
-              </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+          </tbody>
+        </table>
+      </div>
     </div>
 
-    <!-- How to submit -->
-    <div class="mt-12 p-8 bg-amber-50 rounded-2xl border border-amber-100">
-      <h2 class="font-bold text-gray-900 text-lg mb-2">How to submit a result</h2>
+    <!-- Per-pack breakdown (only when there is data) -->
+    {models.length > 0 && allPacks.length > 0 && (
+      <div class="mb-12">
+        <h2 class="font-bold text-gray-900 text-lg mb-4">Breakdown by Pack</h2>
+        <div class="rounded-2xl border border-gray-200 overflow-hidden overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 border-b border-gray-200">
+              <tr>
+                <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide sticky left-0 bg-gray-50 whitespace-nowrap">Model</th>
+                {allPacks.map((pack: string) => (
+                  <th class="text-center px-3 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{pack.replace(/_/g, ' ')}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              {models.map((m: any) => (
+                <tr class="hover:bg-gray-50 transition-colors">
+                  <td class="px-4 py-3 sticky left-0 bg-white font-semibold text-gray-800 whitespace-nowrap">
+                    {m.display_name}
+                    {m.reasoning && <span class="ml-1 text-xs text-purple-500">✦</span>}
+                  </td>
+                  {allPacks.map((pack: string) => {
+                    const ps = m.by_pack?.[pack];
+                    return (
+                      <td class="px-3 py-3 text-center">
+                        {ps
+                          ? <span class={`font-mono text-xs ${(ps.success_rate ?? 0) >= 0.8 ? 'text-green-700 font-semibold' : (ps.success_rate ?? 0) >= 0.5 ? 'text-amber-700' : 'text-red-600'}`}>
+                              {pct(ps.success_rate)}
+                            </span>
+                          : <span class="text-gray-300">—</span>
+                        }
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-2 text-xs text-gray-400">Values show accuracy (% levels solved). ✦ = thinking/reasoning enabled.</p>
+      </div>
+    )}
+
+    <!-- How to run -->
+    <div class="mt-4 p-8 bg-amber-50 rounded-2xl border border-amber-100">
+      <h2 class="font-bold text-gray-900 text-lg mb-2">Running the benchmark</h2>
       <p class="text-gray-600 text-sm leading-relaxed mb-4">
-        Run the built-in agent from the settings screen in the GridPonder app, or wire up your own model
-        via the <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">GridPonderAgent</code> interface in the engine.
-        Then open a GitHub issue with:
+        The benchmark tool lives in <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">tools/benchmark/</code>.
+        Requires <a href="https://ollama.com" class="text-brand-600 hover:underline" target="_blank">Ollama</a> for local models,
+        and API keys in <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">.env</code> for cloud models.
       </p>
-      <ul class="space-y-1 text-sm text-gray-600 list-disc list-inside">
-        <li>Model name and version (e.g. <em>claude-sonnet-4-6</em>, extended thinking on/off)</li>
-        <li>Pack ID and level ID</li>
-        <li>Whether the level was solved</li>
-        <li>Total actions taken across all attempts</li>
-        <li>Gold path length for reference</li>
-        <li>Optional: step-by-step transcript or memory trace</li>
-      </ul>
-      <a href="https://github.com/Gridponder" target="_blank" rel="noopener noreferrer"
-         class="mt-5 inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors text-sm">
-        Open an issue on GitHub →
-      </a>
+      <div class="space-y-2">
+        {[
+          ['Build the runner', 'make benchmark-build'],
+          ['Install Python deps', 'cd tools/benchmark && pip install -r requirements.txt'],
+          ['Run curated suite (all models)', 'make benchmark-suite'],
+          ['Run overnight (all models × all levels)', 'make benchmark'],
+          ['Aggregate results', 'make benchmark-agg'],
+          ['Ship to website', 'make ship'],
+        ].map(([label, code]) => (
+          <div class="flex items-start gap-3">
+            <span class="text-gray-500 text-sm min-w-[180px] pt-1.5">{label}</span>
+            <code class="block bg-gray-900 text-green-400 font-mono text-xs px-3 py-2 rounded-lg flex-1">{code}</code>
+          </div>
+        ))}
+      </div>
     </div>
   </div>
 </Base>
