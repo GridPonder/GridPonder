@@ -34,16 +34,39 @@ Also read 1–2 existing levels in the same pack for format reference.
 
 ## 3. Use a solver if available
 
-Check `tools/solver/games/` for a solver matching this pack. If one exists:
-- For **rotate_flip**: run `python3 tools/solver/gen_rotate_flip.py` to generate
-  a configuration meeting the target depth, then verify with
-  `python3 tools/solver/solve.py packs/<pack_id>/levels/<level_id>.json`.
-- For **number_cells**: run `python3 tools/solver/solve.py` after designing.
-- If no solver exists, simulate the gold path manually step by step.
+Check `tools/solver/games/` for a solver matching this pack. If one exists,
+run it after designing the level to verify the gold path is reachable. If no
+solver exists for this pack yet, simulate the gold path manually step by step.
+(For a new game, consider writing a solver — see the create-game skill.)
 
-A level is only accepted when the solver (or manual simulation) confirms:
+A level is accepted when the solver (or manual simulation) confirms:
   - The gold path reaches the goal.
-  - No shorter solution exists (shortest = declared gold path length).
+  - No significantly shorter solution exists (a few equivalent move orderings
+    are fine; a solution half the length is not).
+
+**Difficulty: design for subgoal decomposition, not BFS resistance**
+
+From level 3 onward, the goal is _not_ "make BFS fail by enlarging the search
+space". The goal is to design a level where the correct approach is to identify
+good intermediate targets (subgoals) and then work out how to reach each one
+without locking out the next. A flat BFS that ignores subgoal structure should
+struggle — but a human or AI that reasons about intermediate states should be
+able to crack it with genuine insight.
+
+Concretely:
+- The level should have at least one **critical ordering constraint**: doing the
+  obvious first step in the obvious way blocks a later step. The player must
+  realise they need to set up for step B _while_ executing step A.
+- Prefer constrained geometry over large open boards. Restricted space forces
+  the player to think about order and positioning simultaneously, which is where
+  real difficulty comes from.
+- Two or three nearly-equivalent movement paths to achieve a subgoal are fine
+  (they all require the same insight). Many independent routes to the _goal_ are
+  a signal the level is too loose — redesign to close them off.
+- After designing, ask: "Could I solve this by trying all move sequences up to
+  depth N?" If yes for small N, the level probably lacks a strong subgoal
+  structure. Add a constraint that forces the player to commit to an
+  intermediate configuration before the final steps become available.
 
 ## 4. Design the level
 
@@ -56,9 +79,10 @@ Every level must have an **aha moment** — a non-obvious realisation the player
 needs to make. State it explicitly before writing the JSON.
 
 Tightness goals:
-- Prefer a unique shortest solution (or a very small equivalence class).
 - No wasted cells: every tile serves a purpose.
 - No cheap escapes: obvious wrong moves should fail instructively.
+- Prefer a small number of routes to the goal (not necessarily unique) — many
+  independent paths signal the level lacks a strong subgoal structure.
 
 ## 5. Write the level JSON
 
