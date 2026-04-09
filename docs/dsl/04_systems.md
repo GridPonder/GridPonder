@@ -1,4 +1,6 @@
-# Gridponder DSL v0 — System Catalog
+# Gridponder DSL v0.5 — System Catalog
+
+The ten built-in engine systems, their execution order, and the per-system configuration reference.
 
 ## 1. System Architecture
 
@@ -11,7 +13,7 @@ Each system declares which phase(s) it participates in. During a turn, phases ex
 | 1 | `input_validation` | Engine validates action legality. No system runs here — this is engine-internal. |
 | 2 | `action_resolution` | Primary action executes (avatar moves, tiles slide, overlay shifts, etc.). |
 | 3 | `movement_resolution` | Secondary movement triggered by the primary action (pushing, teleporting). |
-| 4 | `interaction_resolution` | Reserved for future systems. In v0, item/environment interactions are handled by rules in phase 5. |
+| 4 | `interaction_resolution` | Reserved for future systems. In v0.5, item/environment interactions are handled by rules in phase 5. |
 | 5 | `cascade_resolution` | Chain effects: rules evaluate, emitters fire, gravity settles. Repeats up to `maxCascadeDepth`. |
 | 6 | `npc_resolution` | Autonomous NPC behavior executes. |
 | 7 | `goal_evaluation` | Win and lose conditions are checked. |

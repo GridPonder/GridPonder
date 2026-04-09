@@ -1,4 +1,6 @@
-# Gridponder DSL v0 — Manifest Schema
+# Gridponder DSL v0.5 — Manifest Schema
+
+The pack's entry point: declares identity, version, compatibility requirements, and presentation metadata without loading any gameplay content.
 
 ## Purpose
 

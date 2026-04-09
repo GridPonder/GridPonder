@@ -27,30 +27,30 @@
   .phone-frame {
     position: relative;
     display: inline-block;
-    border-radius: 44px;
+    border-radius: 54px;
     background: #1c1917;
-    padding: 14px 12px;
+    padding: 18px 14px;
     box-shadow:
       0 0 0 2px #3a3533,
-      0 30px 80px rgba(0,0,0,0.4),
+      0 40px 100px rgba(0,0,0,0.45),
       inset 0 0 0 1px #4a4846;
   }
 
   .phone-frame::before {
     content: '';
     position: absolute;
-    top: 22px;
+    top: 26px;
     left: 50%;
     transform: translateX(-50%);
-    width: 60px;
-    height: 6px;
+    width: 80px;
+    height: 7px;
     background: #3a3533;
-    border-radius: 3px;
+    border-radius: 4px;
     z-index: 1;
   }
 
   .phone-screen {
-    border-radius: 34px;
+    border-radius: 42px;
     overflow: hidden;
     display: block;
   }

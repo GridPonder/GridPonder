@@ -1,4 +1,6 @@
-# Gridponder DSL v0 — Level Schema
+# Gridponder DSL v0.5 — Level Schema
+
+Each level file specifies one puzzle instance: board layout, initial entity state, goals, hints, and the gold-path solution.
 
 ## Purpose
 
@@ -394,7 +396,7 @@ The gold path and hint system.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `goldPath` | array | **yes** | Sequence of actions forming the intended solution. |
-| `hintStops` | array of integers | no | Action counts for each hint level. Strictly increasing. Max: 3 in v0. |
+| `hintStops` | array of integers | no | Action counts for each hint level. Strictly increasing. Max: 3 in v0.5. |
 
 ### Gold Path Entry
 
@@ -417,7 +419,7 @@ Each entry is an action with its parameters:
 
 1. `hintStops` must be strictly increasing: `stops[i] < stops[i+1]`.
 2. Every stop must be `<= goldPath.length`.
-3. Maximum 3 hint stops in v0.
+3. Maximum 3 hint stops in v0.5.
 4. Each gold path action must be a valid action type for this game.
 5. Replaying the gold path from the initial state must reach a goal state.
 

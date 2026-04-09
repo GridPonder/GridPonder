@@ -36,7 +36,7 @@ const rawContent = fs.readFileSync(path.join(dslDir, file), 'utf-8');
 const html = await marked.parse(rawContent, { gfm: true, breaks: false });
 
 // Derive short title for nav (strip "Gridponder DSL v0 —" prefix)
-const shortTitle = (t: string) => t.replace(/^Gridponder DSL v0\s*[—–-]\s*/i, '').trim();
+const shortTitle = (t: string) => t.replace(/^Gridponder DSL v0(\.\d+)?\s*[—–-]\s*/i, '').trim();
 
 function slugTitle(slug: string): string {
   try {
@@ -72,7 +72,8 @@ function slugTitle(slug: string): string {
       prose-p:text-gray-600 prose-p:leading-relaxed
       prose-a:text-brand-600 prose-a:no-underline hover:prose-a:underline
       prose-code:text-brand-700 prose-code:bg-brand-50 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded prose-code:text-sm prose-code:before:content-none prose-code:after:content-none
-      prose-pre:bg-gray-900 prose-pre:text-gray-100
+      prose-pre:bg-gray-50 prose-pre:text-gray-800 prose-pre:border prose-pre:border-gray-200
+      [&_pre_code]:bg-transparent [&_pre_code]:text-inherit [&_pre_code]:p-0
       prose-blockquote:border-brand-300 prose-blockquote:text-gray-500
       prose-table:text-sm
       prose-th:bg-gray-50 prose-th:font-semibold

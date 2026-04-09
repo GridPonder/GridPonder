@@ -16,39 +16,52 @@ import Base from '../layouts/Base.astro';
         AI Leaderboard
       </h1>
       <p class="text-xl text-gray-600 leading-relaxed">
-        GridPonder levels are fully deterministic and gold-path verified, making them a clean benchmark
-        for evaluating AI reasoning and planning capabilities.
+        GridPonder levels are fully deterministic with verified gold paths, making them a clean benchmark
+        for evaluating AI planning and spatial reasoning.
       </p>
     </div>
 
-    <!-- What is this -->
+    <!-- How it works -->
     <div class="grid sm:grid-cols-3 gap-6 mb-16">
-      {[
-        {
-          icon: '🧩',
-          title: 'What is measured',
-          desc: 'Whether an AI model can solve a given puzzle level using only the DSL spec and level JSON — no hints, no iterative feedback.',
-        },
-        {
-          icon: '📊',
-          title: 'How scores work',
-          desc: 'A model scores a level by finding a valid gold path. Efficiency (moves used vs. minimum) and reasoning quality are noted.',
-        },
-        {
-          icon: '🤖',
-          title: 'Which models',
-          desc: 'Any model that can read JSON and produce a sequence of moves. Results are submitted via GitHub issue with a standardised format.',
-        },
-      ].map(({ icon, title, desc }) => (
-        <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
-          <div class="text-3xl mb-3">{icon}</div>
-          <h2 class="font-bold text-gray-900 mb-2">{title}</h2>
-          <p class="text-sm text-gray-500 leading-relaxed">{desc}</p>
-        </div>
-      ))}
+      <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
+        <div class="text-3xl mb-3">🧩</div>
+        <h2 class="font-bold text-gray-900 mb-2">What is measured</h2>
+        <p class="text-sm text-gray-500 leading-relaxed">
+          Each turn the model receives a <strong class="text-gray-700">text-based board</strong> rendered
+          with Unicode symbols and a legend, the goal description, the last action taken and how the board
+          changed, and the full list of valid actions. The model can also maintain a
+          <strong class="text-gray-700">persistent memory</strong> string it updates freely across turns
+          — its only way to retain knowledge between steps.
+        </p>
+      </div>
+      <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
+        <div class="text-3xl mb-3">📊</div>
+        <h2 class="font-bold text-gray-900 mb-2">How scores work</h2>
+        <p class="text-sm text-gray-500 leading-relaxed">
+          Two metrics per run:
+        </p>
+        <ul class="mt-2 space-y-1.5 text-sm text-gray-500">
+          <li><strong class="text-gray-700">Accuracy</strong> — did the model solve the level within the step limit? Any valid solution counts, not just the gold path.</li>
+          <li><strong class="text-gray-700">Efficiency</strong> — total actions across all attempts (including restarts) divided by the gold path length. Lower is better.</li>
+        </ul>
+        <p class="mt-2 text-sm text-gray-500">
+          The model can give up and restart an attempt at any time. An auto-reset triggers if it
+          exceeds 3× the gold path length in a single attempt.
+        </p>
+      </div>
+      <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
+        <div class="text-3xl mb-3">🤖</div>
+        <h2 class="font-bold text-gray-900 mb-2">Which models</h2>
+        <p class="text-sm text-gray-500 leading-relaxed">
+          The built-in agent supports <strong class="text-gray-700">Claude Haiku, Sonnet, and Opus</strong>
+          (with optional extended thinking for Sonnet and Opus). The agent interface is open — any model
+          that reads a text prompt and outputs a JSON action object can be wired up. The prompt is plain
+          text; no vision or special modalities required.
+        </p>
+      </div>
     </div>
 
-    <!-- Leaderboard table placeholder -->
+    <!-- Leaderboard table -->
     <div class="rounded-2xl border border-gray-200 overflow-hidden">
       <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 flex items-center justify-between">
         <h2 class="font-bold text-gray-900">Rankings</h2>
@@ -60,14 +73,14 @@ import Base from '../layouts/Base.astro';
       <table class="w-full text-sm">
         <thead class="bg-gray-50 border-b border-gray-200">
           <tr>
-            {['#', 'Model', 'Pack', 'Level', 'Moves', 'Efficiency', 'Date'].map(col => (
+            {['#', 'Model', 'Pack', 'Level', 'Solved', 'Total actions', 'Gold path', 'Efficiency', 'Date'].map(col => (
               <th class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide">{col}</th>
             ))}
           </tr>
         </thead>
         <tbody>
           <tr>
-            <td colspan={7} class="px-6 py-20 text-center">
+            <td colspan={9} class="px-6 py-20 text-center">
               <div class="flex flex-col items-center gap-4 text-gray-400">
                 <span class="text-5xl">🤖</span>
                 <div>
@@ -76,8 +89,7 @@ import Base from '../layouts/Base.astro';
                     Submit a result via{' '}
                     <a href="https://github.com/Gridponder" class="text-brand-600 hover:underline" target="_blank" rel="noopener noreferrer">
                       GitHub
-                    </a>
-                    {' '}— coming soon.
+                    </a>.
                   </p>
                 </div>
               </div>
@@ -91,14 +103,17 @@ import Base from '../layouts/Base.astro';
     <div class="mt-12 p-8 bg-amber-50 rounded-2xl border border-amber-100">
       <h2 class="font-bold text-gray-900 text-lg mb-2">How to submit a result</h2>
       <p class="text-gray-600 text-sm leading-relaxed mb-4">
-        Open a GitHub issue in the GridPonder platform repository with the following information:
+        Run the built-in agent from the settings screen in the GridPonder app, or wire up your own model
+        via the <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">GridPonderAgent</code> interface in the engine.
+        Then open a GitHub issue with:
       </p>
       <ul class="space-y-1 text-sm text-gray-600 list-disc list-inside">
-        <li>Model name and version</li>
-        <li>Pack and level ID</li>
-        <li>The move sequence used</li>
-        <li>Whether the level was solved (reached goal state)</li>
-        <li>Optional: transcript or reasoning trace</li>
+        <li>Model name and version (e.g. <em>claude-sonnet-4-6</em>, extended thinking on/off)</li>
+        <li>Pack ID and level ID</li>
+        <li>Whether the level was solved</li>
+        <li>Total actions taken across all attempts</li>
+        <li>Gold path length for reference</li>
+        <li>Optional: step-by-step transcript or memory trace</li>
       </ul>
       <a href="https://github.com/Gridponder" target="_blank" rel="noopener noreferrer"
          class="mt-5 inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors text-sm">

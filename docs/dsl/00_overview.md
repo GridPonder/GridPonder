@@ -1,4 +1,6 @@
-# Gridponder DSL v0 — Overview
+# Gridponder DSL v0.5 — Overview
+
+A high-level map of the DSL: scope, design principles, file structure, and the turn execution pipeline.
 
 ## 1. Scope
 
@@ -101,7 +103,7 @@ When the player performs one action, the engine executes a **turn**:
    └─ Secondary movement (objects pushed, portals trigger)
 
 4. Interaction Resolution
-   └─ Reserved for future systems (v0 handles interactions via rules in phase 5)
+   └─ Reserved for future systems (v0.5 handles interactions via rules in phase 5)
 
 5. Cascade Resolution (repeats up to max_cascade_depth)
    ├─ Rules evaluate against accumulated events
@@ -134,7 +136,7 @@ Systems never call each other directly. Coordination happens through state and e
 
 ## 8. Versioning
 
-- `manifest.json` and `game.json` declare `dslVersion` (v0 uses `"0.1.0"`)
+- `manifest.json` and `game.json` declare `dslVersion` (v0.5 uses `"0.1.0"`)
 - The engine supports specific DSL versions explicitly — no implicit guessing
 - If a pack uses an unsupported version, import fails with a clear error
 - New mechanics are introduced by adding new system types or new fields to existing structures
@@ -149,6 +151,6 @@ Systems never call each other directly. Coordination happens through state and e
 | [01_manifest.md](01_manifest.md) | Pack manifest schema |
 | [02_game.md](02_game.md) | Game definition: entity kinds, animations, actions, systems, level sequence |
 | [03_levels.md](03_levels.md) | Level definition: board model, state, goals, lose conditions, solution |
-| [04_systems.md](04_systems.md) | System architecture and complete v0 system catalog (10 systems) |
+| [04_systems.md](04_systems.md) | System architecture and complete v0.5 system catalog (10 systems) |
 | [05_rules.md](05_rules.md) | Rules model: events, conditions, effects, cascade semantics, rule recipes |
 | [06_theme.md](06_theme.md) | Theme & controls: visual presentation, input bindings, avatar sprite map |

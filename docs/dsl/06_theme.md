@@ -1,4 +1,6 @@
-# Gridponder DSL v0 — Theme & Controls Schema
+# Gridponder DSL v0.5 — Theme & Controls Schema
+
+Defines visual presentation and input bindings — colors, rendering, and gesture-to-action mapping — without affecting gameplay semantics.
 
 ## Purpose
 

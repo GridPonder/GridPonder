@@ -1,4 +1,6 @@
-# Gridponder DSL v0 — Game Schema
+# Gridponder DSL v0.5 — Game Schema
+
+Defines all gameplay content shared across levels: entity kinds, systems, actions, rules, and the level sequence.
 
 ## Purpose
 
@@ -265,7 +267,7 @@ The animation name is scoped to the entity kind at the target position. For exam
 
 Tags are simple semantic labels. They do not carry behavior on their own — systems read tags to decide what to do.
 
-Standard tags for v0:
+Standard tags for v0.5:
 
 | Tag | Meaning |
 |-----|---------|

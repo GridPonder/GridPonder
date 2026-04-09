@@ -9,85 +9,84 @@ const dslDir = path.resolve(process.cwd(), '../docs/dsl');
 const sections = fs.readdirSync(dslDir)
   .filter(f => f.endsWith('.md') && /^\d/.test(f))
   .sort()
-  .map(file => {
+  .map((file, idx) => {
     const slug = file.replace('.md', '');
     const content = fs.readFileSync(path.join(dslDir, file), 'utf-8');
-    const firstLine = content.split('\n').find(l => l.startsWith('# ')) ?? '';
-    const title = firstLine.replace(/^#+\s*/, '');
-    // Extract first paragraph after the heading
+    const fullTitle = (content.split('\n').find(l => l.startsWith('# ')) ?? '').replace(/^#+\s*/, '');
+    // Strip "Gridponder DSL v0.5 — " prefix for display
+    const title = fullTitle.replace(/^Gridponder DSL v0(\.\d+)?\s*[—–-]\s*/i, '').trim();
+    // First non-empty, non-heading paragraph after the H1
     const lines = content.split('\n');
-    const headingIdx = lines.findIndex(l => l.startsWith('# '));
-    const afterHeading = lines.slice(headingIdx + 1).filter(l => l.trim() !== '');
-    const excerpt = afterHeading.slice(0, 3).join(' ').replace(/^#+\s*/gm, '').slice(0, 200);
-    return { slug, title, excerpt };
+    const h1Idx = lines.findIndex(l => l.startsWith('# '));
+    const body = lines.slice(h1Idx + 1).filter(l => l.trim() && !l.startsWith('#'));
+    const excerpt = body[0]?.replace(/[`*_>]/g, '').slice(0, 160) ?? '';
+    const num = String(idx + 1).padStart(2, '0');
+    return { slug, title, excerpt, num };
   });
-
-const sectionIcons = ['📐', '📋', '🎮', '🗺', '⚙️', '📏', '🎨'];
 ---
 <Base
   title="DSL Reference"
-  description="The GridPonder Domain-Specific Language — a declarative JSON spec for designing grid puzzle games."
+  description="The GridPonder DSL v0.5 — a declarative JSON spec for designing grid puzzle games."
 >
-  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-16">
+  <div class="max-w-3xl mx-auto px-4 sm:px-6 py-16">
     <!-- Header -->
-    <div class="max-w-3xl mb-16">
-      <div class="flex items-center gap-2 text-brand-600 font-mono text-sm mb-4">
-        <span class="font-bold">⊞</span>
-        <span>GridPonder DSL v0</span>
+    <div class="mb-12">
+      <div class="inline-flex items-center gap-2 bg-brand-50 text-brand-700 font-mono text-xs font-semibold px-3 py-1.5 rounded-full border border-brand-100 mb-5">
+        <span>⊞</span>
+        <span>GridPonder DSL v0.5</span>
       </div>
-      <h1 class="text-4xl sm:text-5xl font-black text-gray-900 mb-6 leading-tight">
-        The GridPonder<br />Domain-Specific Language
+      <h1 class="text-4xl sm:text-5xl font-black text-gray-900 mb-5 leading-tight">
+        Domain-Specific Language
       </h1>
-      <p class="text-xl text-gray-600 leading-relaxed mb-4">
+      <p class="text-lg text-gray-600 leading-relaxed mb-3">
         A declarative JSON format for defining deterministic, discrete, single-player, turn-based 2D grid puzzle games.
       </p>
       <p class="text-base text-gray-500 leading-relaxed">
-        Games are defined as structured data — entities, boards, systems, and rules — and run by a fixed engine.
-        Game packs contain only data and assets, never executable code.
+        Games are defined as structured data — entities, boards, systems, and rules — and interpreted by a fixed engine.
+        Packs contain only data and assets, never executable code.
         The spec is designed to be readable by both humans and AI assistants.
       </p>
     </div>
 
-    <!-- Quick summary box -->
-    <div class="grid sm:grid-cols-3 gap-6 mb-16">
+    <!-- Quick facts -->
+    <div class="grid grid-cols-3 gap-4 mb-12">
       {[
-        { label: 'Format', value: 'JSON', desc: 'Pure data, no code' },
-        { label: 'Entry point', value: 'manifest.json', desc: 'Pack identity and metadata' },
-        { label: 'Game definition', value: 'game.json', desc: 'Entities, systems, rules' },
-      ].map(({ label, value, desc }) => (
-        <div class="bg-gray-50 rounded-xl p-5 border border-gray-100">
+        { label: 'Format', value: 'JSON' },
+        { label: 'Entry point', value: 'manifest.json' },
+        { label: 'Game definition', value: 'game.json' },
+      ].map(({ label, value }) => (
+        <div class="bg-gray-50 rounded-xl p-4 border border-gray-100">
           <div class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">{label}</div>
-          <div class="font-mono font-bold text-brand-700 text-lg">{value}</div>
-          <div class="text-sm text-gray-500 mt-1">{desc}</div>
+          <div class="font-mono font-bold text-brand-700 text-sm">{value}</div>
         </div>
       ))}
     </div>
 
-    <!-- Spec sections -->
-    <h2 class="text-2xl font-bold text-gray-900 mb-8">Specification Sections</h2>
-    <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-      {sections.map(({ slug, title, excerpt }, i) => (
-        <a href={`/dsl/${slug}`}
-           class="group block p-6 bg-white rounded-2xl border border-gray-200 hover:border-brand-300 hover:shadow-md transition-all">
-          <div class="text-3xl mb-3">{sectionIcons[i] ?? '📄'}</div>
-          <h3 class="font-bold text-gray-900 group-hover:text-brand-700 transition-colors mb-2 leading-snug">
-            {title}
-          </h3>
-          <p class="text-sm text-gray-500 leading-relaxed line-clamp-3">{excerpt}</p>
-          <span class="mt-4 inline-flex items-center text-sm text-brand-600 font-medium group-hover:gap-2 gap-1 transition-all">
-            Read section →
-          </span>
-        </a>
-      ))}
+    <!-- Section list -->
+    <div class="mb-12">
+      <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Specification</h2>
+      <div class="divide-y divide-gray-100 border border-gray-200 rounded-xl overflow-hidden">
+        {sections.map(({ slug, title, excerpt, num }) => (
+          <a href={`/dsl/${slug}`}
+             class="group flex items-start gap-4 px-5 py-4 bg-white hover:bg-brand-50 transition-colors">
+            <span class="flex-shrink-0 font-mono text-xs text-gray-300 pt-0.5 w-5 text-right">{num}</span>
+            <div class="flex-1 min-w-0">
+              <div class="font-semibold text-gray-900 group-hover:text-brand-700 transition-colors">{title}</div>
+              {excerpt && <div class="text-sm text-gray-500 mt-0.5 leading-relaxed">{excerpt}</div>}
+            </div>
+            <span class="flex-shrink-0 text-gray-300 group-hover:text-brand-500 transition-colors pt-0.5">→</span>
+          </a>
+        ))}
+      </div>
     </div>
 
     <!-- CTA -->
-    <div class="mt-16 p-8 bg-gray-50 rounded-2xl border border-gray-200">
-      <h2 class="text-xl font-bold text-gray-900 mb-2">Ready to create a game?</h2>
-      <p class="text-gray-500 mb-4">
-        The DSL is designed to be worked with using AI tooling. Clone the repo and start a Claude Code session.
+    <div class="p-6 bg-gray-50 rounded-xl border border-gray-200">
+      <p class="font-semibold text-gray-900 mb-1">Ready to create a game?</p>
+      <p class="text-gray-500 text-sm mb-4">
+        The DSL is designed to be used with AI tooling. Clone the repo and start a Claude Code session.
       </p>
-      <a href="/play#create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-semibold px-5 py-2.5 rounded-lg transition-colors text-sm">
+      <a href="/play#create" class="inline-flex items-center gap-2 bg-brand-600 hover:bg-brand-700 text-white font-semibold px-4 py-2 rounded-lg transition-colors text-sm">
         See the creator guide →
       </a>
     </div>
