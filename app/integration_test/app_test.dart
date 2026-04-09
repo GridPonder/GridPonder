@@ -14,17 +14,21 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
 const String kPackId = 'box_builder';
-const String kLevelId = 'bb_005';
+const String kLevelId = 'bb_009';
 // Gold-path moves: a direction string or button label.
 //   Swipes:  'right' | 'left' | 'up' | 'down'
 //   Buttons: 'rotate' | 'flip' | 'flood'  (taps the labelled button)
 const List<String> kMoves = [
-  'left',   // (3,0) → (2,0) — picks up pickaxe
-  'left',   // (2,0) → (1,0)
-  'left',   // (1,0) → (0,0)
-  'down',   // (0,0) → (0,1) — breaks rock at (0,1) with pickaxe
-  'right',  // (0,1) → push box (1,1) to (2,1), avatar to (1,1)
-  'right',  // push box (2,1) to (3,1) — target, win
+  'left',  // (3,3)→(2,3)
+  'left',  // (2,3)→(1,3)
+  'up',    // (1,3)→(1,2) — picks up pickaxe
+  'left',  // (1,2)→(0,2) — breaks rock
+  'right', // (0,2)→(1,2)
+  'up',    // (1,2)→(1,1)
+  'up',    // (1,1)→(1,0)
+  'left',  // (1,0)→(0,0)
+  'down',  // push A(3) from (0,1) to (0,2)
+  'down',  // push A to (0,3) where B(12) is → merge 15 = target WIN
 ];
 // ---------------------------------------------------------------------------
 
@@ -69,6 +73,12 @@ void main() {
     // Wait for LibraryScreen to load
     await tester.pumpAndSettle(const Duration(seconds: 3));
 
+    // Screenshot the library screen (shows DEV badges in debug mode / progress bars in release)
+    final screenshotDir0 = '${Directory.current.path}/test/screenshots';
+    await Directory(screenshotDir0).create(recursive: true);
+    await _saveScreenshot(tester,
+        '$screenshotDir0/gridponder_new_library_screen.png');
+
     // Navigate directly to the target level
     final ctx = tester.element(find.byType(LibraryScreen));
     final settings = await SettingsService.create();
@@ -85,8 +95,7 @@ void main() {
     );
     await tester.pumpAndSettle(const Duration(seconds: 2));
 
-    final screenshotDir = '${Directory.current.path}/test/screenshots';
-    await Directory(screenshotDir).create(recursive: true);
+    final screenshotDir = screenshotDir0;
     final screenSize = tester.view.physicalSize / tester.view.devicePixelRatio;
     final center = Offset(screenSize.width / 2, screenSize.height / 2);
 

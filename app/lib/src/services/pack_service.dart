@@ -14,6 +14,9 @@ class PackInfo {
   final int color; // ARGB — primaryColor from theme.json
   final ImageProvider? coverImage; // AssetImage (bundled) or MemoryImage (installed)
   final bool isInstalled;
+  /// Ordered IDs of all playable levels in this pack (from game.json levelSequence).
+  /// Used for progress tracking without loading individual level files.
+  final List<String> levelIds;
 
   const PackInfo({
     required this.id,
@@ -22,6 +25,7 @@ class PackInfo {
     required this.color,
     this.coverImage,
     this.isInstalled = false,
+    this.levelIds = const [],
   });
 }
 
@@ -82,8 +86,21 @@ class PackService {
     final theme =
         themeStr != null ? jsonDecode(themeStr) as Map<String, dynamic> : null;
 
+    // Read game.json to extract the ordered level ID list for progress tracking.
+    List<String> levelIds = const [];
+    try {
+      final gameStr = await reader.readString('game.json');
+      final game = jsonDecode(gameStr) as Map<String, dynamic>;
+      final sequence = game['levelSequence'] as List<dynamic>? ?? [];
+      levelIds = sequence
+          .whereType<Map<String, dynamic>>()
+          .where((e) => e['type'] == 'level' && e['ref'] != null)
+          .map((e) => e['ref'] as String)
+          .toList();
+    } catch (_) {}
+
     return _buildInfo(packId, manifest, theme, reader,
-        isInstalled: isInstalled);
+        isInstalled: isInstalled, levelIds: levelIds);
   }
 
   static Future<PackService> _loadFromReader(
@@ -138,6 +155,7 @@ class PackService {
     Map<String, dynamic>? theme,
     PackFileReader reader, {
     bool isInstalled = false,
+    List<String> levelIds = const [],
   }) async {
     final coverImagePath = manifest['coverImage'] as String?;
 
@@ -161,6 +179,7 @@ class PackService {
       color: color,
       coverImage: coverImage,
       isInstalled: isInstalled,
+      levelIds: levelIds,
     );
   }
 

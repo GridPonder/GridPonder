@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
+import '../services/progress_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/board_renderer.dart' show BoardRenderer, TargetBoardRenderer, cellNamedColor;
 import '../widgets/controls_widget.dart';
@@ -11,12 +12,14 @@ import '../widgets/controls_widget.dart';
 class PlayScreen extends StatefulWidget {
   final PackService packService;
   final SettingsService settings;
+  final ProgressService? progress;
   final String? startLevelId;
 
   const PlayScreen({
     super.key,
     required this.packService,
     required this.settings,
+    this.progress,
     this.startLevelId,
   });
 
@@ -58,6 +61,9 @@ class _PlayScreenState extends State<PlayScreen> {
 
   // Flood Colors: color of the last successfully applied flood action.
   Color? _lastFloodColor;
+
+  // True once the current level's win has been recorded to ProgressService.
+  bool _wonHandled = false;
 
   // AI play state
   bool _aiRunning = false;
@@ -109,6 +115,7 @@ class _PlayScreenState extends State<PlayScreen> {
     _agentAttempt = 1;
     _agentMemory.clear();
     _lastFloodColor = null;
+    _wonHandled = false;
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -179,9 +186,45 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   /// Advance to the next sequence entry. If it's a level, load it.
+  // ---------------------------------------------------------------------------
+  // Progress / unlock helpers
+  // ---------------------------------------------------------------------------
+
+  /// Returns the next sequence entry that is a playable level, or null.
+  SequenceEntry? get _nextLevelEntry {
+    for (int i = _seqIndex + 1; i < _sequence.length; i++) {
+      if (_sequence[i].type == 'level') return _sequence[i];
+    }
+    return null;
+  }
+
+  /// True when the next level in the sequence is locked.
+  bool get _nextIsLocked {
+    final progress = widget.progress;
+    if (progress == null) return false;
+    final next = _nextLevelEntry;
+    if (next == null) return false;
+    return !progress.isUnlocked(next.ref!, _sequence);
+  }
+
   void _advance() {
+    if (_seqIndex >= _sequence.length - 1) return; // already at end
+
+    // Check lock: if the next *level* entry is locked, block navigation.
+    final nextEntry = _sequence[_seqIndex + 1];
+    if (nextEntry.type == 'level' && _nextIsLocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Complete this level to continue.'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
     setState(() {
-      _seqIndex = (_seqIndex + 1) % _sequence.length;
+      _seqIndex++;
       if (!_isShowingStory) _loadLevelById(_currentEntry.ref!);
     });
   }
@@ -572,6 +615,15 @@ class _PlayScreenState extends State<PlayScreen> {
 
     final state = _preAnimState ?? _engine.state;
     final levelId = _currentEntry.ref!;
+
+    // Record win the first time it is detected (post-frame to avoid
+    // calling async work inside a synchronous build call).
+    if (state.isWon && !_wonHandled && widget.progress != null) {
+      _wonHandled = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) widget.progress!.markCompleted(levelId);
+      });
+    }
     final hintStatuses = _hintService.statuses;
     final hintAvailable = _hintService.hasAnyAvailable && !_aiRunning;
 
@@ -597,7 +649,12 @@ class _PlayScreenState extends State<PlayScreen> {
             onPressed: _prevLevel,
           ),
           IconButton(
-            icon: const Icon(Icons.navigate_next, color: Colors.black54),
+            icon: Icon(
+              _nextIsLocked ? Icons.lock_outline : Icons.navigate_next,
+              color: _nextIsLocked
+                  ? Colors.black26
+                  : Colors.black54,
+            ),
             onPressed: _advance,
           ),
         ],

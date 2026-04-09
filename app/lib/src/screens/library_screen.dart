@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../services/pack_registry.dart';
 import '../services/pack_service.dart';
+import '../services/progress_service.dart';
 import '../services/settings_service.dart';
 import 'manage_packs_sheet.dart';
 import 'play_screen.dart';
@@ -9,11 +10,13 @@ import 'settings_screen.dart';
 class LibraryScreen extends StatefulWidget {
   final SettingsService settings;
   final PackRegistry registry;
+  final ProgressService progress;
 
   const LibraryScreen({
     super.key,
     required this.settings,
     required this.registry,
+    required this.progress,
   });
 
   @override
@@ -93,6 +96,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                         entry: entry,
                         info: info,
                         settings: widget.settings,
+                        progress: widget.progress,
                       );
                     },
                   );
@@ -260,11 +264,13 @@ class _PackCard extends StatefulWidget {
   final PackEntry entry;
   final PackInfo info;
   final SettingsService settings;
+  final ProgressService progress;
 
   const _PackCard({
     required this.entry,
     required this.info,
     required this.settings,
+    required this.progress,
   });
 
   @override
@@ -283,8 +289,11 @@ class _PackCardState extends State<_PackCard> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) =>
-              PlayScreen(packService: pack, settings: widget.settings),
+          builder: (_) => PlayScreen(
+            packService: pack,
+            settings: widget.settings,
+            progress: widget.progress,
+          ),
         ),
       );
     } catch (e) {
@@ -355,38 +364,125 @@ class _PackCardState extends State<_PackCard> {
               Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
-                  child: coverImage != null
-                      ? Image(
-                          image: coverImage,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, __, ___) => Center(
-                            child: Icon(Icons.grid_view,
-                                color: Colors.black26, size: 36),
-                          ),
-                        )
-                      : Center(
-                          child: Icon(Icons.grid_view,
-                              color: Colors.black26, size: 36),
-                        ),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 2, 10, 8),
-                child: Text(
-                  widget.info.description,
-                  style: const TextStyle(
-                    color: Colors.black54,
-                    fontSize: 10,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      coverImage != null
+                          ? Image(
+                              image: coverImage,
+                              fit: BoxFit.contain,
+                              errorBuilder: (_, __, ___) => Center(
+                                child: Icon(Icons.grid_view,
+                                    color: Colors.black26, size: 36),
+                              ),
+                            )
+                          : Center(
+                              child: Icon(Icons.grid_view,
+                                  color: Colors.black26, size: 36),
+                            ),
+                      _buildCoverBadge(base),
+                    ],
                   ),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
               ),
+              _buildProgressFooter(base),
             ],
           ),
         ),
       ),
+    );
+  }
+
+  /// Small badge overlaid on the top-right of the cover image.
+  /// Shows "DEV" in dev mode, or "done\ntotal" in normal mode.
+  Widget _buildCoverBadge(Color baseColor) {
+    final levelIds = widget.info.levelIds;
+    final isDev = widget.progress.isDeveloperMode;
+
+    if (isDev) {
+      return Positioned(
+        top: 4,
+        right: 0,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+          decoration: BoxDecoration(
+            color: Colors.orange.shade300.withOpacity(0.92),
+            borderRadius: BorderRadius.circular(5),
+          ),
+          child: const Text(
+            'DEV',
+            style: TextStyle(
+                fontSize: 8, fontWeight: FontWeight.bold, color: Colors.white),
+          ),
+        ),
+      );
+    }
+
+    if (levelIds.isEmpty) return const SizedBox.shrink();
+
+    final total = levelIds.length;
+    final done = widget.progress.completedCount(levelIds);
+    final complete = done == total;
+    final badgeColor = complete
+        ? Colors.green.shade600.withOpacity(0.90)
+        : Colors.black.withOpacity(0.45);
+
+    return Positioned(
+      top: 4,
+      right: 0,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
+        decoration: BoxDecoration(
+          color: badgeColor,
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(
+          '$done\n/$total',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+              fontSize: 8,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+              height: 1.2),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProgressFooter(Color baseColor) {
+    final levelIds = widget.info.levelIds;
+
+    // Description at full width; progress bar below if levels are known.
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(10, 2, 10, 4),
+          child: Text(
+            widget.info.description,
+            style: const TextStyle(color: Colors.black54, fontSize: 10),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        if (levelIds.isNotEmpty && !widget.progress.isDeveloperMode)
+          ClipRRect(
+            borderRadius: const BorderRadius.only(
+              bottomLeft: Radius.circular(16),
+              bottomRight: Radius.circular(16),
+            ),
+            child: LinearProgressIndicator(
+              value: widget.progress.completedCount(levelIds) / levelIds.length,
+              minHeight: 4,
+              backgroundColor: Colors.black12,
+              valueColor: AlwaysStoppedAnimation<Color>(
+                  Color.lerp(baseColor, Colors.black, 0.3)!),
+            ),
+          )
+        else
+          const SizedBox(height: 6),
+      ],
     );
   }
 }
