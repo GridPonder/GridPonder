@@ -118,8 +118,11 @@ class SlideMergeSystem extends GameSystem {
               break;
             }
           }
-          // Cell is free — keep sliding.
+          // Stop ON teleporter cells (ground layer entity with "teleport" tag).
           currentPos = nextPos;
+          final groundAtNext = board.getEntity('ground', nextPos);
+          if (groundAtNext != null &&
+              game.hasTag(groundAtNext.kind, 'teleport')) break;
           nextPos = _wrapOrMove(currentPos, direction, board, wrapAround);
           continue;
         }

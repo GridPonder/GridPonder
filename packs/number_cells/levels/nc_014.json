@@ -23,11 +23,11 @@
         "id": "pipe_1",
         "kind": "pipe",
         "cells": [
-          {"position": [1, 0], "sprite": "assets/pipe_end_l.png"},
+          {"position": [1, 0], "sprite": "assets/pipe_end_r.png"},
           {"position": [2, 0], "sprite": "assets/pipe_straight_h.png"},
           {"position": [3, 0], "sprite": "assets/pipe_corner_ld.png"},
           {"position": [3, 1], "sprite": "assets/pipe_straight_v.png"},
-          {"position": [3, 2], "sprite": "assets/pipe_end_d.png"}
+          {"position": [3, 2], "sprite": "assets/pipe_end_u.png"}
         ],
         "params": {
           "exitPosition":   [1, 0],

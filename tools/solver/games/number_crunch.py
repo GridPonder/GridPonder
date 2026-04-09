@@ -1,8 +1,9 @@
 """
 Number Crunch game simulator for the GridPonder puzzle solver.
 
-Faithfully implements the slide_merge and queued_emitters DSL systems,
-plus the sequence_match (on_merge) goal evaluator, from the Dart engine source.
+Faithfully implements the slide_merge, queued_emitters, and tile_teleport DSL
+systems, plus the sequence_match (on_merge) goal evaluator, from the Dart
+engine source.
 
 State is immutable (frozen dataclass) so BFS can hash/deduplicate it.
 """
@@ -69,6 +70,7 @@ class LevelInfo:
     width: int
     height: int
     void_cells: FrozenSet[Tuple[int, int]]
+    teleporters: List[Tuple[Tuple[int, int], Tuple[int, int]]]  # list of (from, to) pairs
     pipes: List[PipeSpec]
     sequence: List[int]          # goal sequence (sequence_match / on_merge)
     max_turns: Optional[int]     # from loseConditions, or None
@@ -83,13 +85,40 @@ def load(level_json: Dict[str, Any]) -> Tuple[NCState, LevelInfo]:
     board = level_json["board"]
     w, h = board["size"]
 
-    # Ground layer → void cells (layer is optional; absent means no voids)
-    ground = board["layers"].get("ground", [])
-    void_cells: FrozenSet[Tuple[int, int]] = frozenset(
-        (x, y)
-        for y, row in enumerate(ground)
-        for x, cell in enumerate(row)
-        if cell == "void"
+    # Ground layer → void cells and portal pairs (supports dense and sparse)
+    ground_data = board["layers"].get("ground", [])
+    void_cells_list: List[Tuple[int, int]] = []
+    portal_by_channel: Dict[str, List[Tuple[int, int]]] = {}
+
+    if isinstance(ground_data, list):
+        # Dense format: 2D array of kind strings
+        for y, row in enumerate(ground_data):
+            for x, cell in enumerate(row):
+                if cell == "void":
+                    void_cells_list.append((x, y))
+                elif cell == "portal":
+                    # Dense format has no channel param — treat all as channel ""
+                    portal_by_channel.setdefault("", []).append((x, y))
+    elif isinstance(ground_data, dict) and ground_data.get("format") == "sparse":
+        for entry in ground_data.get("entries", []):
+            px, py = entry["position"]
+            kind = entry.get("kind", "empty")
+            if kind == "void":
+                void_cells_list.append((px, py))
+            elif kind == "portal":
+                channel = entry.get("channel", "")
+                portal_by_channel.setdefault(channel, []).append((px, py))
+
+    void_cells: FrozenSet[Tuple[int, int]] = frozenset(void_cells_list)
+
+    # Teleporters → list of (pos1, pos2) pairs (one per channel with 2 portals)
+    teleporter_pairs: List[Tuple[Tuple[int, int], Tuple[int, int]]] = [
+        (tuple(positions[0]), tuple(positions[1]))  # type: ignore[misc]
+        for positions in portal_by_channel.values()
+        if len(positions) == 2
+    ]
+    teleporter_set: FrozenSet[Tuple[int, int]] = frozenset(
+        pos for pair in teleporter_pairs for pos in pair
     )
 
     # Objects layer → initial number tiles
@@ -184,6 +213,7 @@ def load(level_json: Dict[str, Any]) -> Tuple[NCState, LevelInfo]:
         width=w,
         height=h,
         void_cells=void_cells,
+        teleporters=teleporter_pairs,
         pipes=pipes,
         sequence=sequence,
         max_turns=max_turns,
@@ -204,10 +234,11 @@ def apply(
     Apply one move and return (new_state, won).
 
     Turn phases (mirrors the Dart engine):
-      1. slide_merge  (Action Resolution, Phase 2)
-      2. sequence_match on_merge check  (Goal Evaluation, Phase 7)
-      3. queued_emitters  (NPC Resolution, Phase 6 — fires once after slides)
-      4. Win check
+      1. slide_merge     (Action Resolution, Phase 2)
+      2. sequence_match  (Goal Evaluation, Phase 7 — on_merge)
+      3. queued_emitters (NPC Resolution, Phase 6)
+      4. tile_teleport   (NPC Resolution, Phase 6 — after queued_emitters)
+      5. Win check
     """
     # Phase 2: slide_merge
     new_grid, merge_events = _slide_merge(state.grid, direction, info)
@@ -285,6 +316,9 @@ def apply(
 
             new_pipe_slots[i] = moved
 
+    # Phase 6b: tile_teleport — one pass per teleporter pair
+    new_grid = _apply_teleporters(new_grid, info.teleporters)
+
     new_state = NCState(
         grid=new_grid,
         pipe_e1_idxs=tuple(new_e1_idxs),
@@ -293,6 +327,34 @@ def apply(
     )
     won = seq_idx >= len(info.sequence)
     return new_state, won
+
+
+def _apply_teleporters(
+    grid: FrozenSet[Tuple[int, int, int]],
+    teleporters: List[Tuple[Tuple[int, int], Tuple[int, int]]],
+) -> FrozenSet[Tuple[int, int, int]]:
+    """
+    Single-pass bidirectional tile teleportation (mirrors TileTeleportSystem).
+
+    For each teleporter pair: if a tile is on one endpoint and the other is
+    empty, move the tile to the other endpoint.  One pass only — no cascades.
+    """
+    if not teleporters:
+        return grid
+
+    working: Dict[Tuple[int, int], int] = {(x, y): v for x, y, v in grid}
+
+    for (fx, fy), (tx, ty) in teleporters:
+        from_val = working.get((fx, fy))
+        to_val   = working.get((tx, ty))
+        if from_val is not None and to_val is None:
+            del working[(fx, fy)]
+            working[(tx, ty)] = from_val
+        elif to_val is not None and from_val is None:
+            del working[(tx, ty)]
+            working[(fx, fy)] = to_val
+
+    return frozenset((x, y, v) for (x, y), v in working.items())
 
 
 def _has_tile(grid: FrozenSet[Tuple[int, int, int]], pos: Tuple[int, int]) -> bool:
@@ -311,9 +373,10 @@ def _slide_merge(
     Algorithm (faithful to SlideMergeSystem.dart):
       - Sort tiles from the leading edge inward (so the tile nearest the wall
         in the swipe direction is processed first).
-      - For each tile, slide it forward until it hits a boundary, void, or
-        another tile.  On meeting another tile: if neither has already merged
-        this action (mergeLimit=1), merge them into their sum.
+      - For each tile, slide it forward until it hits a boundary, void,
+        teleporter endpoint, or another tile.  On meeting another tile: if
+        neither has already merged this action (mergeLimit=1), merge them into
+        their sum.
       - Commit the working board to the new grid.
 
     Returns (new_grid, merge_events) where merge_events is a list of merged
@@ -321,6 +384,12 @@ def _slide_merge(
     checking).
     """
     dx, dy = DIRS[direction]
+
+    # Build a fast set of all teleporter endpoint positions.
+    teleporter_positions: set = set()
+    for (fx, fy), (tx, ty) in info.teleporters:
+        teleporter_positions.add((fx, fy))
+        teleporter_positions.add((tx, ty))
 
     # Sort from leading edge first
     def _sort_key(t: Tuple[int, int, int]) -> int:
@@ -371,8 +440,10 @@ def _slide_merge(
                 did_merge = True
                 break
             else:
-                # Free cell — keep sliding
+                # Move to next cell; stop ON teleporter endpoints.
                 cx, cy = nx, ny
+                if (cx, cy) in teleporter_positions:
+                    break
                 nx, ny = cx + dx, cy + dy
 
         if not did_merge and (cx, cy) != (x0, y0):

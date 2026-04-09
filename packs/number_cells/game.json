@@ -41,6 +41,19 @@
       "sprite": null,
       "symbol": "n",
       "symbolParam": "value"
+    },
+    "portal": {
+      "layer": "ground",
+      "tags": [
+        "teleport"
+      ],
+      "sprite": "assets/sprites/portal.png",
+      "symbol": "O",
+      "params": {
+        "channel": {
+          "type": "string"
+        }
+      }
     }
   },
   "actions": [
@@ -77,6 +90,13 @@
       "type": "queued_emitters",
       "config": {
         "emitterKind": "pipe"
+      }
+    },
+    {
+      "id": "tile_teleport",
+      "type": "tile_teleport",
+      "config": {
+        "layer": "objects"
       }
     }
   ],
@@ -130,10 +150,53 @@
       "type": "level",
       "ref": "nc_008"
     },
-    {"type": "level", "ref": "nc_009"},
-    {"type": "level", "ref": "nc_010"},
-    {"type": "level", "ref": "nc_011"},
-    {"type": "level", "ref": "nc_012"},
-    {"type": "level", "ref": "nc_013"}
+    {
+      "type": "level",
+      "ref": "nc_009"
+    },
+    {
+      "type": "level",
+      "ref": "nc_010"
+    },
+    {
+      "type": "level",
+      "ref": "nc_011"
+    },
+    {
+      "type": "level",
+      "ref": "nc_012"
+    },
+    {
+      "type": "level",
+      "ref": "nc_013"
+    },
+    {
+      "type": "level",
+      "ref": "nc_014"
+    },
+    {
+      "type": "level",
+      "ref": "nc_015"
+    },
+    {
+      "type": "level",
+      "ref": "nc_016"
+    },
+    {
+      "type": "level",
+      "ref": "nc_017"
+    },
+    {
+      "type": "level",
+      "ref": "nc_018"
+    },
+    {
+      "type": "level",
+      "ref": "nc_019"
+    },
+    {
+      "type": "level",
+      "ref": "nc_020"
+    }
   ]
 }

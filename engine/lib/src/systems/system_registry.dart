@@ -10,6 +10,7 @@ import 'queued_emitters_system.dart';
 import 'region_transform_system.dart';
 import 'sided_box_system.dart';
 import 'slide_merge_system.dart';
+import 'tile_teleport_system.dart';
 
 /// Creates a GameSystem instance from a SystemDef.
 typedef SystemFactory = GameSystem Function(String id, Map<String, dynamic> config);
@@ -26,6 +27,7 @@ class SystemRegistry {
     'region_transform': (id, _) => RegionTransformSystem(id: id),
     'sided_box': (id, _) => SidedBoxSystem(id: id),
     'flood_fill': (id, _) => FloodFillSystem(id: id),
+    'tile_teleport': (id, _) => TileTeleportSystem(id: id),
   };
 
   /// Instantiate all enabled systems from a GameDefinition,
