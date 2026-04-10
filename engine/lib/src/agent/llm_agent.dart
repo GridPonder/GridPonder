@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:http/http.dart' as http;
+import 'package:llm_dart/llm_dart.dart';
 
 import 'agent.dart';
 import '../models/game_action.dart';
@@ -32,131 +32,141 @@ class AnthropicModel {
       modelId == sonnet || modelId == opus;
 }
 
-/// Agent that calls the Anthropic Messages API to choose actions.
-///
-/// Maintains a persistent [_memory] string across level resets that survives
-/// as long as this agent instance is alive. The memory is injected into every
-/// prompt and can be updated by the model by including a "memory" field in its
-/// JSON response.
-class LlmAgent implements GridPonderAgent {
-  final String apiKey;
-  final String model;
-  final bool thinkingEnabled;
-  final int maxTokens;
+/// Available OpenAI model IDs for the LLM agent.
+class OpenAIModel {
+  static const gpt4oMini = 'gpt-4o-mini';
+  static const gpt4o = 'gpt-4o';
+  static const o4Mini = 'o4-mini';
+  static const o3 = 'o3';
 
-  /// Seed memory from a previous session on the same level.
+  static const all = [gpt4oMini, gpt4o, o4Mini, o3];
+
+  static String displayName(String modelId) => switch (modelId) {
+        gpt4oMini => 'GPT-4o Mini',
+        gpt4o     => 'GPT-4o',
+        o4Mini    => 'o4-mini (reasoning)',
+        o3        => 'o3 (reasoning)',
+        _         => modelId,
+      };
+
+  static bool supportsThinking(String modelId) =>
+      modelId == o4Mini || modelId == o3;
+}
+
+/// Available Google Gemini model IDs for the LLM agent.
+class GoogleModel {
+  static const flash2 = 'gemini-2.0-flash';
+  static const flash25 = 'gemini-2.5-flash-preview-05-20';
+  static const pro25 = 'gemini-2.5-pro-preview-06-05';
+
+  static const all = [flash2, flash25, pro25];
+
+  static String displayName(String modelId) => switch (modelId) {
+        flash2  => 'Gemini 2.0 Flash',
+        flash25 => 'Gemini 2.5 Flash (thinking)',
+        pro25   => 'Gemini 2.5 Pro (thinking)',
+        _       => modelId,
+      };
+
+  static bool supportsThinking(String modelId) =>
+      modelId == flash25 || modelId == pro25;
+}
+
+/// Available Ollama model tags.
+class OllamaModel {
+  static const gemma4e2b = 'gemma4:e2b';
+  static const gemma4e4b = 'gemma4:e4b';
+  static const qwen35_0_8b = 'qwen3.5:0.8b';
+  static const qwen35_2b = 'qwen3.5:2b';
+  static const qwen35_4b = 'qwen3.5:4b';
+  static const qwen35_9b = 'qwen3.5:9b';
+  static const gptOss20b = 'gpt-oss:20b';
+
+  static const all = [
+    gemma4e2b, gemma4e4b,
+    qwen35_0_8b, qwen35_2b, qwen35_4b, qwen35_9b,
+    gptOss20b,
+  ];
+
+  static String displayName(String modelId) => switch (modelId) {
+        gemma4e2b    => 'Gemma 4 E2B',
+        gemma4e4b    => 'Gemma 4 E4B',
+        qwen35_0_8b  => 'Qwen 3.5 0.8B',
+        qwen35_2b    => 'Qwen 3.5 2B',
+        qwen35_4b    => 'Qwen 3.5 4B',
+        qwen35_9b    => 'Qwen 3.5 9B',
+        gptOss20b    => 'GPT-OSS 20B',
+        _            => modelId,
+      };
+
+  static bool supportsThinking(String modelId) =>
+      modelId == gemma4e2b || modelId == gemma4e4b || modelId == gptOss20b;
+}
+
+/// A game-playing agent backed by any [ChatCapability] from llm_dart.
+///
+/// The caller is responsible for constructing the provider (Anthropic, Ollama,
+/// or any other llm_dart backend) and passing it in. This class only handles
+/// the game-playing logic: prompt building, streaming, action extraction, and
+/// persistent memory across resets.
+class LlmAgent implements GridPonderAgent {
+  final ChatCapability _provider;
+  final String _displayName;
+
   String _memory;
 
-  /// The most recent prompt sent to the API. Null before the first call.
+  /// The most recent prompt sent to the LLM. Null before the first call.
   String? lastPrompt;
 
   LlmAgent({
-    required this.apiKey,
-    this.model = AnthropicModel.haiku,
-    this.thinkingEnabled = false,
-    this.maxTokens = 1024,
+    required ChatCapability provider,
+    required String displayName,
     String initialMemory = '',
-  }) : _memory = initialMemory;
+  })  : _provider = provider,
+        _displayName = displayName,
+        _memory = initialMemory;
 
   @override
-  String get name {
-    final modelShort = AnthropicModel.displayName(model);
-    final thinkTag = thinkingEnabled && AnthropicModel.supportsThinking(model)
-        ? ' + thinking'
-        : '';
-    return 'LLM ($modelShort$thinkTag)';
-  }
+  String get name => _displayName;
 
-  /// Current persistent memory (for inspection).
+  /// Current persistent memory (for inspection / seeding next level).
   String get memory => _memory;
 
   @override
   Stream<AgentActEvent> act(AgentObservation obs) async* {
     final prompt = LlmAgent.buildPrompt(obs, memory: _memory);
     lastPrompt = prompt;
-    final useThinking =
-        thinkingEnabled && AnthropicModel.supportsThinking(model);
-
-    final body = <String, dynamic>{
-      'model': model,
-      'max_tokens': maxTokens + (useThinking ? 8000 : 0),
-      'stream': true,
-      'messages': [
-        {'role': 'user', 'content': prompt}
-      ],
-    };
-
-    if (useThinking) {
-      body['thinking'] = {'type': 'enabled', 'budget_tokens': 8000};
-    }
-
-    final request = http.Request(
-      'POST',
-      Uri.parse('https://api.anthropic.com/v1/messages'),
-    );
-    request.headers.addAll({
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'content-type': 'application/json',
-    });
-    request.body = jsonEncode(body);
-
-    final client = http.Client();
-    late http.StreamedResponse response;
-    try {
-      response = await client.send(request);
-    } catch (e) {
-      client.close();
-      throw LlmAgentException('Network error: $e');
-    }
-
-    if (response.statusCode != 200) {
-      final body = await response.stream.bytesToString();
-      client.close();
-      throw LlmAgentException(
-          'Anthropic API error ${response.statusCode}: $body');
-    }
 
     final thinkingBuffer = StringBuffer();
     final textBuffer = StringBuffer();
 
-    await for (final line in response.stream
-        .transform(utf8.decoder)
-        .transform(const LineSplitter())) {
-      if (!line.startsWith('data: ')) continue;
-      final data = line.substring(6).trim();
-      if (data == '[DONE]') break;
-
-      Map<String, dynamic> event;
-      try {
-        event = jsonDecode(data) as Map<String, dynamic>;
-      } catch (_) {
-        continue;
-      }
-
-      if (event['type'] == 'content_block_delta') {
-        final delta = event['delta'] as Map<String, dynamic>?;
-        if (delta == null) continue;
-        switch (delta['type'] as String?) {
-          case 'thinking_delta':
-            final chunk = delta['thinking'] as String? ?? '';
-            if (chunk.isNotEmpty) {
-              thinkingBuffer.write(chunk);
-              yield AgentThinkingDelta(chunk);
+    try {
+      await for (final event
+          in _provider.chatStream([ChatMessage.user(prompt)])) {
+        switch (event) {
+          case ThinkingDeltaEvent(:final delta):
+            if (delta.isNotEmpty) {
+              thinkingBuffer.write(delta);
+              yield AgentThinkingDelta(delta);
             }
-          case 'text_delta':
-            textBuffer.write(delta['text'] as String? ?? '');
+          case TextDeltaEvent(:final delta):
+            textBuffer.write(delta);
+          case CompletionEvent():
+            break;
+          case ErrorEvent(:final error):
+            throw LlmAgentException('LLM error: $error');
+          default:
+            break;
         }
       }
+    } catch (e) {
+      if (e is LlmAgentException) rethrow;
+      throw LlmAgentException('Streaming error: $e');
     }
-
-    client.close();
 
     final responseText = textBuffer.toString();
     final action = _extractAction(responseText, obs);
     final memoryUpdate = _extractMemory(responseText);
-
-    // Persist updated memory inside this agent instance.
     if (memoryUpdate != null) _memory = memoryUpdate;
 
     final thinking = thinkingBuffer.isNotEmpty

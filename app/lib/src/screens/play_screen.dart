@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
+import 'package:llm_dart/llm_dart.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
 import '../services/progress_service.dart';
@@ -473,27 +474,95 @@ class _PlayScreenState extends State<PlayScreen> {
   // AI play
   // ---------------------------------------------------------------------------
 
-  GridPonderAgent _buildAgent() {
+  Future<GridPonderAgent> _buildAgent() async {
     if (s.agentType == 'llm') {
       final key = s.apiKey;
       if (key == null || key.isEmpty) {
         throw Exception('No API key set. Add it in Settings.');
       }
+      final useThinking =
+          s.thinkingEnabled && AnthropicModel.supportsThinking(s.llmModel);
+      var builder = ai()
+          .anthropic()
+          .apiKey(key)
+          .model(s.llmModel)
+          .maxTokens(1024 + (useThinking ? 8000 : 0));
+      if (useThinking) {
+        builder = builder.reasoning(true).thinkingBudgetTokens(8000);
+      }
+      final provider = await builder.build();
+      final thinkLabel = useThinking ? ' + thinking' : '';
       return LlmAgent(
-        apiKey: key,
-        model: s.llmModel,
-        thinkingEnabled: s.thinkingEnabled,
+        provider: provider,
+        displayName: '${AnthropicModel.displayName(s.llmModel)}$thinkLabel',
+        initialMemory: _agentMemory[_currentEntry.ref] ?? '',
+      );
+    }
+    if (s.agentType == 'openai') {
+      final key = s.openAiApiKey;
+      if (key == null || key.isEmpty) {
+        throw Exception('No OpenAI API key set. Add it in Settings.');
+      }
+      final provider = await ai()
+          .openai()
+          .apiKey(key)
+          .model(s.openAiModel)
+          .maxTokens(1024)
+          .build();
+      return LlmAgent(
+        provider: provider,
+        displayName: OpenAIModel.displayName(s.openAiModel),
+        initialMemory: _agentMemory[_currentEntry.ref] ?? '',
+      );
+    }
+    if (s.agentType == 'google') {
+      final key = s.googleApiKey;
+      if (key == null || key.isEmpty) {
+        throw Exception('No Google API key set. Add it in Settings.');
+      }
+      final useThinking = s.googleThinkingEnabled &&
+          GoogleModel.supportsThinking(s.googleModel);
+      var builder = ai()
+          .google()
+          .apiKey(key)
+          .model(s.googleModel)
+          .maxTokens(1024 + (useThinking ? 8000 : 0));
+      if (useThinking) {
+        builder = builder.reasoning(true).thinkingBudgetTokens(8000);
+      }
+      final provider = await builder.build();
+      final thinkLabel = useThinking ? ' + thinking' : '';
+      return LlmAgent(
+        provider: provider,
+        displayName: '${GoogleModel.displayName(s.googleModel)}$thinkLabel',
+        initialMemory: _agentMemory[_currentEntry.ref] ?? '',
+      );
+    }
+    if (s.agentType == 'ollama') {
+      final useThink =
+          s.ollamaThinkEnabled && OllamaModel.supportsThinking(s.ollamaModel);
+      final provider = await ai()
+          .ollama(useThink ? (o) => o.reasoning(true) : null)
+          .baseUrl(s.ollamaBaseUrl)
+          .model(s.ollamaModel)
+          .maxTokens(useThink ? 32768 : 1024)
+          .build();
+      final thinkLabel = useThink ? ' + think' : '';
+      return LlmAgent(
+        provider: provider,
+        displayName: '${OllamaModel.displayName(s.ollamaModel)}$thinkLabel',
         initialMemory: _agentMemory[_currentEntry.ref] ?? '',
       );
     }
     return RandomAgent();
   }
 
-  void _startAgent() {
+  void _startAgent() async {
     GridPonderAgent agent;
     try {
-      agent = _buildAgent();
+      agent = await _buildAgent();
     } catch (e) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(e.toString())));
       return;

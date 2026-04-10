@@ -13,18 +13,32 @@ class SettingsScreen extends StatefulWidget {
 
 class _SettingsScreenState extends State<SettingsScreen> {
   late final TextEditingController _apiKeyCtrl;
+  late final TextEditingController _openAiKeyCtrl;
+  late final TextEditingController _googleKeyCtrl;
+  late final TextEditingController _ollamaUrlCtrl;
   bool _showKey = false;
+  bool _showOpenAiKey = false;
+  bool _showGoogleKey = false;
 
   @override
   void initState() {
     super.initState();
     _apiKeyCtrl =
         TextEditingController(text: widget.settings.apiKey ?? '');
+    _openAiKeyCtrl =
+        TextEditingController(text: widget.settings.openAiApiKey ?? '');
+    _googleKeyCtrl =
+        TextEditingController(text: widget.settings.googleApiKey ?? '');
+    _ollamaUrlCtrl =
+        TextEditingController(text: widget.settings.ollamaBaseUrl);
   }
 
   @override
   void dispose() {
     _apiKeyCtrl.dispose();
+    _openAiKeyCtrl.dispose();
+    _googleKeyCtrl.dispose();
+    _ollamaUrlCtrl.dispose();
     super.dispose();
   }
 
@@ -111,12 +125,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   _dropdownTile(
                     label: 'Agent type',
                     value: s.agentType,
-                    items: const {'random': 'Random', 'llm': 'LLM (Anthropic)'},
+                    items: const {
+                      'random': 'Random',
+                      'llm': 'Anthropic',
+                      'openai': 'OpenAI',
+                      'google': 'Google Gemini',
+                      'ollama': 'Ollama (local)',
+                    },
                     onChanged: (v) async {
                       await s.setAgentType(v!);
                       setState(() {});
                     },
                   ),
+                  if (s.agentType == 'ollama') ...[
+                    const Divider(height: 1),
+                    _dropdownTile(
+                      label: 'Model',
+                      value: s.ollamaModel,
+                      items: {
+                        for (final m in OllamaModel.all)
+                          m: OllamaModel.displayName(m)
+                      },
+                      onChanged: (v) async {
+                        await s.setOllamaModel(v!);
+                        setState(() {});
+                      },
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Think mode'),
+                      subtitle: Text(
+                        OllamaModel.supportsThinking(s.ollamaModel)
+                            ? 'Show reasoning in step-by-step mode'
+                            : 'Not available for ${OllamaModel.displayName(s.ollamaModel)}',
+                      ),
+                      value: s.ollamaThinkEnabled &&
+                          OllamaModel.supportsThinking(s.ollamaModel),
+                      onChanged: OllamaModel.supportsThinking(s.ollamaModel)
+                          ? (v) async {
+                              await s.setOllamaThinkEnabled(v);
+                              setState(() {});
+                            }
+                          : null,
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TextField(
+                            controller: _ollamaUrlCtrl,
+                            decoration: InputDecoration(
+                              labelText: 'Ollama URL',
+                              hintText: 'http://localhost:11434',
+                              border: InputBorder.none,
+                              suffixIcon: IconButton(
+                                icon: const Icon(Icons.save, size: 20),
+                                onPressed: () async {
+                                  await s.setOllamaBaseUrl(_ollamaUrlCtrl.text);
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                            content: Text('Ollama URL saved'),
+                                            duration: Duration(seconds: 1)));
+                                  }
+                                },
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'Default: http://localhost:11434',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade500),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                   if (s.agentType == 'llm') ...[
                     const Divider(height: 1),
                     _dropdownTile(
@@ -193,6 +280,158 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           Text(
                             'Stored locally. Only sent to api.anthropic.com.',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade500),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (s.agentType == 'openai') ...[
+                    const Divider(height: 1),
+                    _dropdownTile(
+                      label: 'Model',
+                      value: s.openAiModel,
+                      items: {
+                        for (final m in OpenAIModel.all)
+                          m: OpenAIModel.displayName(m)
+                      },
+                      onChanged: (v) async {
+                        await s.setOpenAiModel(v!);
+                        setState(() {});
+                      },
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TextField(
+                            controller: _openAiKeyCtrl,
+                            obscureText: !_showOpenAiKey,
+                            decoration: InputDecoration(
+                              labelText: 'API Key',
+                              hintText: 'sk-...',
+                              border: InputBorder.none,
+                              suffixIcon: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: Icon(
+                                        _showOpenAiKey
+                                            ? Icons.visibility_off
+                                            : Icons.visibility,
+                                        size: 20),
+                                    onPressed: () => setState(
+                                        () => _showOpenAiKey = !_showOpenAiKey),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.save, size: 20),
+                                    onPressed: () async {
+                                      await s.setOpenAiApiKey(
+                                          _openAiKeyCtrl.text);
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(const SnackBar(
+                                                content:
+                                                    Text('API key saved'),
+                                                duration:
+                                                    Duration(seconds: 1)));
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'Stored locally. Only sent to api.openai.com.',
+                            style: TextStyle(
+                                fontSize: 11, color: Colors.grey.shade500),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                  if (s.agentType == 'google') ...[
+                    const Divider(height: 1),
+                    _dropdownTile(
+                      label: 'Model',
+                      value: s.googleModel,
+                      items: {
+                        for (final m in GoogleModel.all)
+                          m: GoogleModel.displayName(m)
+                      },
+                      onChanged: (v) async {
+                        await s.setGoogleModel(v!);
+                        setState(() {});
+                      },
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Extended thinking'),
+                      subtitle: Text(
+                        GoogleModel.supportsThinking(s.googleModel)
+                            ? 'Show reasoning in step-by-step mode'
+                            : 'Not available for ${GoogleModel.displayName(s.googleModel)}',
+                      ),
+                      value: s.googleThinkingEnabled &&
+                          GoogleModel.supportsThinking(s.googleModel),
+                      onChanged: GoogleModel.supportsThinking(s.googleModel)
+                          ? (v) async {
+                              await s.setGoogleThinkingEnabled(v);
+                              setState(() {});
+                            }
+                          : null,
+                    ),
+                    const Divider(height: 1),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          TextField(
+                            controller: _googleKeyCtrl,
+                            obscureText: !_showGoogleKey,
+                            decoration: InputDecoration(
+                              labelText: 'API Key',
+                              hintText: 'AIza...',
+                              border: InputBorder.none,
+                              suffixIcon: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  IconButton(
+                                    icon: Icon(
+                                        _showGoogleKey
+                                            ? Icons.visibility_off
+                                            : Icons.visibility,
+                                        size: 20),
+                                    onPressed: () => setState(
+                                        () => _showGoogleKey = !_showGoogleKey),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(Icons.save, size: 20),
+                                    onPressed: () async {
+                                      await s.setGoogleApiKey(
+                                          _googleKeyCtrl.text);
+                                      if (mounted) {
+                                        ScaffoldMessenger.of(context)
+                                            .showSnackBar(const SnackBar(
+                                                content:
+                                                    Text('API key saved'),
+                                                duration:
+                                                    Duration(seconds: 1)));
+                                      }
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          Text(
+                            'Stored locally. Only sent to generativelanguage.googleapis.com.',
                             style: TextStyle(
                                 fontSize: 11, color: Colors.grey.shade500),
                           ),

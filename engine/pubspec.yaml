@@ -7,7 +7,7 @@ environment:
 
 dependencies:
   collection: ^1.18.0
-  http: ^1.2.0
+  llm_dart: ^0.10.7
 
 dev_dependencies:
   test: ^1.24.0

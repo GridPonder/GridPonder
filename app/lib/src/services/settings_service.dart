@@ -31,6 +31,7 @@ class SettingsService {
   String get agentType => _prefs.getString('agent_type') ?? 'random';
   Future<void> setAgentType(String v) => _prefs.setString('agent_type', v);
 
+  // Anthropic
   String get llmModel =>
       _prefs.getString('llm_model') ?? 'claude-haiku-4-5-20251001';
   Future<void> setLlmModel(String v) => _prefs.setString('llm_model', v);
@@ -38,6 +39,47 @@ class SettingsService {
   bool get thinkingEnabled => _prefs.getBool('thinking_enabled') ?? false;
   Future<void> setThinkingEnabled(bool v) =>
       _prefs.setBool('thinking_enabled', v);
+
+  // OpenAI
+  String? get openAiApiKey => _prefs.getString('openai_api_key');
+  Future<void> setOpenAiApiKey(String key) =>
+      _prefs.setString('openai_api_key', key.trim());
+
+  String get openAiModel =>
+      _prefs.getString('openai_model') ?? 'gpt-4o-mini';
+  Future<void> setOpenAiModel(String v) =>
+      _prefs.setString('openai_model', v);
+
+  // Google
+  String? get googleApiKey => _prefs.getString('google_api_key');
+  Future<void> setGoogleApiKey(String key) =>
+      _prefs.setString('google_api_key', key.trim());
+
+  String get googleModel =>
+      _prefs.getString('google_model') ?? 'gemini-2.0-flash';
+  Future<void> setGoogleModel(String v) =>
+      _prefs.setString('google_model', v);
+
+  bool get googleThinkingEnabled =>
+      _prefs.getBool('google_thinking_enabled') ?? false;
+  Future<void> setGoogleThinkingEnabled(bool v) =>
+      _prefs.setBool('google_thinking_enabled', v);
+
+  // Ollama
+  String get ollamaBaseUrl =>
+      _prefs.getString('ollama_base_url') ?? 'http://localhost:11434';
+  Future<void> setOllamaBaseUrl(String v) =>
+      _prefs.setString('ollama_base_url', v.trim());
+
+  String get ollamaModel =>
+      _prefs.getString('ollama_model') ?? 'qwen3.5:4b';
+  Future<void> setOllamaModel(String v) =>
+      _prefs.setString('ollama_model', v);
+
+  bool get ollamaThinkEnabled =>
+      _prefs.getBool('ollama_think_enabled') ?? false;
+  Future<void> setOllamaThinkEnabled(bool v) =>
+      _prefs.setBool('ollama_think_enabled', v);
 
   // --- Playback mode ---
   /// 'continuous' or 'step'
