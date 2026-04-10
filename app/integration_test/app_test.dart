@@ -13,42 +13,18 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // ---------------------------------------------------------------------------
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
-const String kPackId = 'box_builder';
-const String kLevelId = 'bb_017';
+const String kPackId = 'number_cells';
+const String kLevelId = 'nc_006';
 // Gold-path moves: a direction string or button label.
 //   Swipes:  'right' | 'left' | 'up' | 'down'
 //   Buttons: 'rotate' | 'flip' | 'flood'  (taps the labelled button)
 const List<String> kMoves = [
-  'right', // 1
-  'right', // 2
-  'left',  // 3
-  'down',  // 4
-  'right', // 5 — picks up pickaxe at (4,3)
-  'left',  // 6
-  'up',    // 7
-  'right', // 8
-  'down',  // 9
-  'down',  // 10 — C(6) pushed to T2=(4,4)
-  'left',  // 11
-  'up',    // 12
-  'right', // 13
-  'up',    // 14
-  'left',  // 15
-  'left',  // 16
-  'down',  // 17 — break R2=(2,3), KEY: non-obvious rock
-  'right', // 18
-  'up',    // 19
-  'right', // 20
-  'down',  // 21 — merge D(9) into C(6) at T2 → complete box
-  'up',    // 22
-  'left',  // 23
-  'left',  // 24
-  'left',  // 25
-  'up',    // 26
-  'left',  // 27
-  'down',  // 28 — merge A(5) into B(10) → complete box at (0,2)
-  'up',    // 29
-  'up',    // 30 — push merged box to T1=(0,0) → WIN
+  'up',    // 1 — 3@(1,1)→(1,0); 3@(4,3)→(4,0); 6 blocked by void@(2,2); emit 4@(1,2)
+  'left',  // 2 — 2+3=5@(1,0) ✓ seq[0]; 3@(4,0)→(2,0); 6@(2,3)→(1,3)
+  'down',  // 3 — 4+6=10@(1,3) ✓ seq[1]; 5@(1,0)→(1,2); 3@(2,0)→(2,1)
+  'left',  // 4 — 3@(2,1)→(1,1); others blocked
+  'up',    // 5 — 3+5=8@(1,0); 10→(1,1); emit 7@(1,2)
+  'down',  // 6 — 10+7=17@(1,3) ✓ seq[2] WIN
 ];
 // ---------------------------------------------------------------------------
 

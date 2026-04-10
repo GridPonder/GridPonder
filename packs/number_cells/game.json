@@ -29,7 +29,7 @@
     },
     "pipe": {
       "layer": "ground",
-      "tags": [],
+      "tags": ["solid"],
       "sprite": null,
       "symbol": "\u2502"
     },
