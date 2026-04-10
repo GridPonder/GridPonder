@@ -193,6 +193,13 @@ def apply(
 
     out_bit = _SIDE_BIT[direction]
     in_bit = _SIDE_BIT[_OPPOSITE[direction]]
+    # Faces parallel to the movement direction — both boxes sharing one means
+    # their walls would physically overlap, so the merge is blocked.
+    perp_mask = (
+        (_SIDE_BIT["left"] | _SIDE_BIT["right"])
+        if direction in ("up", "down")
+        else (_SIDE_BIT["up"] | _SIDE_BIT["down"])
+    )
 
     bd = _boxes_dict(state.boxes)
     box_at_pos = bd.get((ax, ay))  # sides int or None
@@ -216,6 +223,8 @@ def apply(
         if box_at_target is not None:
             if (box_at_target & in_bit) != 0:
                 return state, False  # Inward side blocks carry
+            if (box_at_pos & box_at_target & perp_mask) != 0:
+                return state, False  # Parallel walls would physically overlap
             merged = box_at_pos | box_at_target
             new_bd = {k: v for k, v in bd.items() if k != (ax, ay) and k != (tx, ty)}
             new_bd[(tx, ty)] = merged
@@ -261,6 +270,8 @@ def apply(
 
             if box_at_push_dest is not None:
                 # Push + merge
+                if (box_at_target & box_at_push_dest & perp_mask) != 0:
+                    return state, False  # Parallel walls would physically overlap
                 merged = box_at_target | box_at_push_dest
                 new_bd = {k: v for k, v in bd.items()
                           if k != (tx, ty) and k != (pdx, pdy)}
@@ -330,6 +341,77 @@ def apply(
     )
     ns = _apply_pickup(ns, info)
     return ns, _check_win(ns, info)
+
+
+# ---------------------------------------------------------------------------
+# Waypoint / override helpers
+# ---------------------------------------------------------------------------
+
+def override_initial_state(base: BBState, override: Dict[str, Any]) -> BBState:
+    """
+    Return a new BBState where fields listed in *override* replace those in
+    *base*.  Fields absent from *override* are taken from *base*.
+
+    Override JSON format::
+
+        {
+          "boxes":    [{"position": [x, y], "sides": N}, ...],
+          "rocks":    [[x, y], ...],          // optional
+          "pickaxes": [[x, y], ...],          // optional
+          "avatar":   [x, y],                 // optional
+          "inventory": null | "pickaxe"       // optional
+        }
+    """
+    boxes = base.boxes
+    if "boxes" in override:
+        boxes = frozenset(
+            (tuple(e["position"]), int(e["sides"]))
+            for e in override["boxes"]
+        )
+    rocks = base.rocks
+    if "rocks" in override:
+        rocks = frozenset(tuple(r) for r in override["rocks"])
+    pickaxes = base.pickaxes
+    if "pickaxes" in override:
+        pickaxes = frozenset(tuple(p) for p in override["pickaxes"])
+    ax, ay = base.ax, base.ay
+    if "avatar" in override:
+        ax, ay = override["avatar"]
+    inv = base.inv
+    if "inventory" in override:
+        inv = override["inventory"]  # None or "pickaxe"
+    return BBState(boxes=boxes, rocks=rocks, pickaxes=pickaxes,
+                   ax=ax, ay=ay, inv=inv)
+
+
+def matches_waypoint(state: BBState, waypoint: Dict[str, Any]) -> bool:
+    """
+    Return True if *state* satisfies all constraints listed in *waypoint*.
+
+    Waypoint JSON format::
+
+        {
+          "boxes":    [{"position": [x, y], "sides": N}, ...],  // optional
+          "avatar":   [x, y],                                    // optional
+          "inventory": null | "pickaxe"                          // optional
+        }
+
+    Only the listed fields are checked; others are ignored.
+    """
+    bd = _boxes_dict(state.boxes)
+    if "boxes" in waypoint:
+        for entry in waypoint["boxes"]:
+            pos = tuple(entry["position"])
+            if bd.get(pos) != int(entry["sides"]):
+                return False
+    if "avatar" in waypoint:
+        wx, wy = waypoint["avatar"]
+        if state.ax != wx or state.ay != wy:
+            return False
+    if "inventory" in waypoint:
+        if state.inv != waypoint["inventory"]:
+            return False
+    return True
 
 
 def _apply_pickup(state: BBState, info: LevelInfo) -> BBState:

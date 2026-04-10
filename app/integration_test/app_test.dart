@@ -13,43 +13,46 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // ---------------------------------------------------------------------------
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
-const String kPackId = 'number_cells';
-const String kLevelId = 'nc_018';
+const String kPackId = 'box_builder';
+const String kLevelId = 'bb_016';
 // Gold-path moves: a direction string or button label.
 //   Swipes:  'right' | 'left' | 'up' | 'down'
 //   Buttons: 'rotate' | 'flip' | 'flood'  (taps the labelled button)
 const List<String> kMoves = [
-  'left',  // 1
-  'left',  // 2
-  'left',  // 3 — accumulated 12 on left
-  'right', // 4 — merge into portal → 15 crosses gap
-  'right', // 5 — 15+2=17
-  'right', // 6 — 1+17=18, WIN
-  'down',  // 6 — carry C to (1,3)
-  'up',    // 7 — exit C
-  'right', // 8
-  'right', // 9
-  'down',  // 10
-  'left',  // 11 — enter D
-  'up',    // 12 — carry D to (2,2)
-  'down',  // 13 — exit D
-  'left',  // 14 — push C to (0,3)
-  'right', // 15
-  'up',    // 16 — enter D
-  'left',  // 17 — carry D left
-  'left',  // 18 — carry D to (0,2)
-  'right', // 19 — exit D
-  'up',    // 20 — enter B
-  'left',  // 21 — carry B to (0,1)
-  'down',  // 22 — exit B, push D into C → 15-box at (0,3)
-  'down',  // 23 — push 15-box to T2=(0,4)
-  'up',    // 24
-  'right', // 25
-  'up',    // 26
+  'right', // 1
+  'right', // 2
+  'down',  // 3 — picks up pickaxe at (4,3)
+  'up',    // 4
+  'left',  // 5
+  'down',  // 6
+  'right', // 7
+  'down',  // 8
+  'left',  // 9
+  'up',    // 10
+  'right', // 11
+  'up',    // 12
+  'left',  // 13
+  'left',  // 14
+  'down',  // 15
+  'right', // 16
+  'up',    // 17
+  'right', // 18
+  'down',  // 19 — merge C+D → T2=(4,4) complete
+  'up',    // 20
+  'left',  // 21
+  'left',  // 22
+  'up',    // 23 — break Rock1 at (2,1) with pickaxe
+  'left',  // 24
+  'down',  // 25
+  'right', // 26
   'up',    // 27
-  'left',  // 28 — enter A
-  'down',  // 29 — carry A into B → 15-box at (0,1)
-  'up',    // 30 — carry 15-box to T1=(0,0) WIN
+  'left',  // 28
+  'left',  // 29
+  'down',  // 30
+  'right', // 31
+  'up',    // 32
+  'left',  // 33
+  'up',    // 34 — WIN
 ];
 // ---------------------------------------------------------------------------
 

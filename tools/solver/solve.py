@@ -238,20 +238,48 @@ def _solve_rotate_flip(
 # Box Builder solver
 # ---------------------------------------------------------------------------
 
+def _parse_json_arg(value: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Parse a JSON string or @filename argument."""
+    if value is None:
+        return None
+    if value.startswith("@"):
+        with open(value[1:]) as f:
+            return json.load(f)
+    return json.loads(value)
+
+
 def _solve_box_builder(
     path: Path,
     level_json: Dict[str, Any],
     max_depth: int,
     all_solutions: bool,
+    override_start: Optional[str] = None,
+    partial_goal: Optional[str] = None,
 ) -> None:
     from collections import deque as _deque
 
     initial, info = bb.load(level_json)
+
+    override_json = _parse_json_arg(override_start)
+    if override_json is not None:
+        initial = bb.override_initial_state(initial, override_json)
+
+    partial_goal_json = _parse_json_arg(partial_goal)
+
+    def _is_win(state: bb.BBState) -> bool:
+        if partial_goal_json is not None:
+            return bb.matches_waypoint(state, partial_goal_json)
+        return bb._check_win(state, info)
+
     level_id = info.level_id or path.stem
     print(f"Solving  {level_id}   (max depth {max_depth})")
     print(f"  Game:   Box Builder")
     print(f"  Board:  {info.width}×{info.height}  "
           f"({len(info.walls)} wall cells,  {len(info.targets)} target(s))")
+    if override_json:
+        print(f"  Start:  overridden")
+    if partial_goal_json:
+        print(f"  Goal:   partial waypoint")
     print(f"  Mode:   {'DFS — all solutions' if all_solutions else 'BFS — shortest solution'}")
     print()
 
@@ -274,12 +302,14 @@ def _solve_box_builder(
                 ns, won = bb.apply(state, direction, info)
                 new_depth = depth + 1
                 new_path = path_so_far + [direction]
+                if not won:
+                    won = _is_win(ns)
                 if won:
                     solutions.append(new_path)
                     if shortest is None:
                         shortest = new_depth
                     continue
-                if bb.can_prune(ns, info, new_depth, max_depth):
+                if partial_goal_json is None and bb.can_prune(ns, info, new_depth, max_depth):
                     continue
                 prev = visited.get(ns)
                 if prev is not None and prev <= new_depth:
@@ -294,12 +324,14 @@ def _solve_box_builder(
                 ns, won = bb.apply(state, direction, info)
                 new_depth = depth + 1
                 new_path = path_so_far + [direction]
+                if not won:
+                    won = _is_win(ns)
                 if won:
                     solutions.append(new_path)
                     continue
                 if new_depth >= max_depth:
                     continue
-                if bb.can_prune(ns, info, new_depth, max_depth):
+                if partial_goal_json is None and bb.can_prune(ns, info, new_depth, max_depth):
                     continue
                 if ns in path_states:
                     continue
@@ -347,6 +379,7 @@ def solve(
     level_path: str,
     max_depth: int = 8,
     all_solutions: bool = False,
+    **kwargs,
 ) -> None:
     path = Path(level_path)
     with open(path) as f:
@@ -358,7 +391,9 @@ def solve(
         return
 
     if game == "box_builder":
-        _solve_box_builder(path, level_json, max_depth, all_solutions)
+        _solve_box_builder(path, level_json, max_depth, all_solutions,
+                           override_start=kwargs.get("override_start"),
+                           partial_goal=kwargs.get("partial_goal"))
         return
 
     if game != "number_crunch":
@@ -469,8 +504,24 @@ def main() -> None:
         "--all-solutions", action="store_true",
         help="Find all solutions up to --max-depth (uses DFS; slower but complete)",
     )
+    parser.add_argument(
+        "--override-start", metavar="JSON",
+        help='Override initial board state. JSON string or @file. '
+             'Format: {"boxes":[{"position":[x,y],"sides":N},...], '
+             '"rocks":[[x,y],...], "pickaxes":[[x,y],...], '
+             '"avatar":[x,y], "inventory":null}',
+    )
+    parser.add_argument(
+        "--partial-goal", metavar="JSON",
+        help='Use a partial intermediate goal instead of the level win condition. '
+             'JSON string or @file. '
+             'Format: {"boxes":[{"position":[x,y],"sides":N},...], '
+             '"avatar":[x,y], "inventory":null}',
+    )
     args = parser.parse_args()
-    solve(args.level, args.max_depth, args.all_solutions)
+    solve(args.level, args.max_depth, args.all_solutions,
+          override_start=args.override_start,
+          partial_goal=args.partial_goal)
 
 
 if __name__ == "__main__":

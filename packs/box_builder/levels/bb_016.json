@@ -1,0 +1,91 @@
+{
+  "id": "bb_016",
+  "title": "Quarry",
+  "board": {
+    "size": [5, 5],
+    "layers": {
+      "ground": [
+        ["empty", "empty", "void",  "void",  "void"],
+        ["empty", "empty", "empty", "void",  "void"],
+        ["empty", "empty", "empty", "empty", "empty"],
+        ["void",  "void",  "empty", "empty", "empty"],
+        ["void",  "void",  "void",  "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 1], "kind": "box_fragment", "sides": 5},
+          {"position": [0, 2], "kind": "box_fragment", "sides": 10},
+          {"position": [3, 3], "kind": "box_fragment", "sides": 6},
+          {"position": [3, 4], "kind": "box_fragment", "sides": 9},
+          {"position": [2, 1], "kind": "rock"},
+          {"position": [1, 0], "kind": "rock"},
+          {"position": [4, 3], "kind": "pickaxe"}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "box_target"},
+          {"position": [4, 4], "kind": "box_target"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [2, 2], "facing": "right"}
+  },
+  "goals": [
+    {
+      "id": "complete_boxes",
+      "type": "param_match",
+      "config": {
+        "markerLayer": "markers",
+        "markerKind": "box_target",
+        "checkLayer": "objects",
+        "checkKind": "box_fragment",
+        "checkParam": "sides",
+        "checkValue": 15
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "up"}
+    ],
+    "hintStops": [10, 19]
+  }
+}
