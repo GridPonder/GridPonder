@@ -3,7 +3,7 @@
   "packVersion": 1,
   "gameId": "rotate_flip",
   "title": "Rotate & Flip",
-  "description": "Move the 2x2 overlay and rotate or flip cells to match the goal",
+  "description": "Move the 2×2 selection overlay one step in any direction (move). Rotate spins the 4 cells inside the overlay 90° clockwise. Flip mirrors the 4 cells horizontally. Rearrange the board to match the target pattern shown in the goal.",
   "coverImage": "assets/rotate_flip_cover.png",
   "version": "1.0.0",
   "minEngineVersion": "0.1.0"

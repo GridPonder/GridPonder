@@ -3,7 +3,7 @@
   "packVersion": 1,
   "gameId": "flag_adventure",
   "title": "Carrot Quest",
-  "description": "A famished rabbit on the hunt for every last carrot",
+  "description": "Move one step per turn. Solid tiles (rock R, wood W, metal crate C) block movement. Pushable tiles (W, C) slide one step away when walked into. Pick up items by stepping on them: torch T burns adjacent wood, pickaxe P breaks adjacent rocks. Metal crates sink in water (≈). Portals (O) teleport you to the paired portal of the same channel. Reach every goal marker.",
   "coverImage": "assets/rabbit_reaching_for_carrot.png",
   "version": "1.0.0",
   "minEngineVersion": "0.1.0"

@@ -7,23 +7,27 @@ import '../models/position.dart';
 /// Each cell shows the "most prominent" entity across all layers.
 /// Priority (highest first): avatar, actors, markers, objects, MCO body, ground.
 ///
+/// When an overlay is active the avatar is suppressed from the grid (its
+/// position is shown in the Active region block instead) and cell content is
+/// displayed at every position without bracket corner markers.
+///
 /// The text symbol for each entity kind is defined by [EntityKindDef.symbol]
 /// in game.json. All symbols must be single Unicode characters with display
 /// width 1 (narrow). The only hardcoded symbol is '@' for the avatar (an
 /// engine concept, not an entity kind). Entity kinds with [EntityKindDef.symbolParam]
-/// show the value of that instance parameter at render time (e.g. number tiles
-/// show their numeric value).
+/// are rendered as 'N' in the grid; their exact values appear in the
+/// "Number values" block below the grid.
 ///
 /// Multi-cell objects (e.g. pipes) are rendered with direction-aware symbols
-/// in the grid (═ horizontal, ║ vertical, ╬ junction, ▼ exit) and additionally
-/// described in a labeled block below the grid that includes queue contents.
+/// in the grid (═ horizontal, ║ vertical, ╬ junction, ▲▼◄► exit — arrow
+/// points in the exit direction) and additionally described in a labeled block
+/// below the grid that includes remaining queue contents.
 class TextRenderer {
   static const _avatarSymbol = '@';
 
   /// Render the board to a text string.
   ///
   /// Returns a multi-line string where each character is one cell.
-  /// Includes an overlay region marker if present.
   /// Set [includeLegend] to false to omit the legend line.
   static String render(LevelState state, GameDefinition game,
       {bool includeLegend = true}) {
@@ -31,21 +35,16 @@ class TextRenderer {
     final w = board.width;
     final h = board.height;
 
-    // Build overlay set for highlighting.
-    final Set<Position> overlayPositions = {};
     final overlay = state.overlay;
-    if (overlay != null) {
-      for (int dy = 0; dy < overlay.height; dy++) {
-        for (int dx = 0; dx < overlay.width; dx++) {
-          overlayPositions.add(Position(overlay.x + dx, overlay.y + dy));
-        }
-      }
-    }
-
-    final avatarPos = state.avatar.enabled ? state.avatar.position : null;
+    // When an overlay is active, suppress the avatar from the grid so that
+    // actual cell content is visible everywhere.
+    final gridAvatarPos = overlay != null
+        ? null
+        : (state.avatar.enabled ? state.avatar.position : null);
 
     // Build a position→symbol map for multi-cell objects (pipe bodies, etc.)
-    // Exit cell gets ▼. Body cells get a direction-aware Unicode box-drawing symbol:
+    // Exit cell gets a directional arrow matching the exit direction (▲▼◄►).
+    // Body cells get a direction-aware Unicode box-drawing symbol:
     //   ═ horizontal, ║ vertical, ╬ corner/junction.
     final mcoSymbols = <Position, String>{};
     for (final mco in state.board.multiCellObjects) {
@@ -53,10 +52,16 @@ class TextRenderer {
       final exitPos = exitList != null
           ? Position(exitList[0] as int, exitList[1] as int)
           : null;
+      final exitDir = mco.params['exitDirection'] as String?;
       final cellSet = mco.cells.toSet();
       for (final cell in mco.cells) {
         if (cell == exitPos) {
-          mcoSymbols[cell] = '▼';
+          mcoSymbols[cell] = switch (exitDir) {
+            'up' => '▲',
+            'left' => '◄',
+            'right' => '►',
+            _ => '▼', // 'down' or unknown
+          };
           continue;
         }
         final h = cellSet.contains(Position(cell.x - 1, cell.y)) ||
@@ -75,8 +80,8 @@ class TextRenderer {
       for (int x = 0; x < w; x++) {
         final pos = Position(x, y);
 
-        // Avatar takes highest priority.
-        if (avatarPos == pos) {
+        // Avatar takes highest priority (suppressed when overlay is active).
+        if (gridAvatarPos == pos) {
           sb.write(_avatarSymbol);
           continue;
         }
@@ -97,7 +102,9 @@ class TextRenderer {
             sym = entity.kind[0].toUpperCase();
           } else if (kindDef.symbolParam != null) {
             final paramVal = entity.param(kindDef.symbolParam!);
-            sym = paramVal != null ? '${paramVal % 10}' : kindDef.symbol;
+            sym = paramVal != null
+                ? _valueToChar(paramVal as int)
+                : kindDef.symbol;
           } else {
             sym = kindDef.symbol;
           }
@@ -109,26 +116,7 @@ class TextRenderer {
           }
         }
 
-        final char = objectSymbol ?? mcoSymbol ?? groundSymbol ?? '.';
-
-        // Overlay region: mark corners with bracket characters.
-        if (overlay != null && overlayPositions.contains(pos)) {
-          final isTopLeft = pos == Position(overlay.x, overlay.y);
-          final isTopRight =
-              pos == Position(overlay.x + overlay.width - 1, overlay.y);
-          final isBottomLeft =
-              pos == Position(overlay.x, overlay.y + overlay.height - 1);
-          final isBottomRight = pos ==
-              Position(overlay.x + overlay.width - 1,
-                  overlay.y + overlay.height - 1);
-          if (isTopLeft) sb.write('[');
-          else if (isTopRight) sb.write(']');
-          else if (isBottomLeft) sb.write('{');
-          else if (isBottomRight) sb.write('}');
-          else sb.write(char);
-        } else {
-          sb.write(char);
-        }
+        sb.write(objectSymbol ?? mcoSymbol ?? groundSymbol ?? '.');
       }
       lines.add(sb.toString());
     }
@@ -138,9 +126,18 @@ class TextRenderer {
     final parts = <String>[gridStr];
 
     if (includeLegend) {
-      final legend = _buildLegend(state, game, avatarPos != null);
-      parts.add('Legend: $legend');
+      final legend = _buildLegend(state, game, gridAvatarPos != null);
+      parts.add('Each character is one cell, each line is one row. Legend: $legend');
     }
+
+    final numbersBlock = _buildNumbersBlock(state, game);
+    if (numbersBlock.isNotEmpty) parts.add(numbersBlock);
+
+    final overlayBlock = _buildOverlayBlock(state, game);
+    if (overlayBlock.isNotEmpty) parts.add(overlayBlock);
+
+    final stackedBlock = _buildStackedBlock(state, game, gridAvatarPos);
+    if (stackedBlock.isNotEmpty) parts.add(stackedBlock);
 
     final mcoBlock = _buildMcoBlock(state, game);
     if (mcoBlock.isNotEmpty) parts.add(mcoBlock);
@@ -159,19 +156,121 @@ class TextRenderer {
         final kindDef = game.entityKinds[entity.kind];
         if (kindDef == null) continue;
 
-        final sym = kindDef.symbol; // legend always uses the static symbol
+        // Entities with symbolParam are shown as 'N' in the grid;
+        // exact values are always listed in the "Number values" block below.
+        final sym = kindDef.symbolParam != null ? 'N' : kindDef.symbol;
         if (!seen.containsKey(sym)) {
           final label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
-          final suffix = kindDef.symbolParam != null ? ' (0–9)' : '';
-          final desc = kindDef.description != null ? ' (${kindDef.description})' : '';
-          seen[sym] = '$label$suffix$desc';
+          final desc = kindDef.symbolParam != null
+              ? ' (exact value in "Number values")'
+              : (kindDef.description != null ? ' (${kindDef.description})' : '');
+          seen[sym] = '$label$desc';
         }
       }
     }
 
-    if (state.overlay != null) seen['[...]'] = 'overlay region';
+    if (state.board.multiCellObjects.isNotEmpty) {
+      seen['║/═'] = 'pipe body';
+      seen['▲/▼/◄/►'] = 'pipe exit (arrow = exit direction)';
+    }
 
     return seen.entries.map((e) => '${e.key}=${e.value}').join('  ');
+  }
+
+  /// Renders the active overlay region as a labeled block showing its bounds
+  /// and the content of every cell it covers. The avatar position is included
+  /// when the overlay is active (since @ is suppressed from the grid).
+  static String _buildOverlayBlock(LevelState state, GameDefinition game) {
+    final overlay = state.overlay;
+    if (overlay == null) return '';
+
+    final x1 = overlay.x;
+    final y1 = overlay.y;
+    final x2 = overlay.x + overlay.width - 1;
+    final y2 = overlay.y + overlay.height - 1;
+
+    return 'Overlay region: ($x1,$y1)–($x2,$y2)';
+  }
+
+  /// Reports cells where more than one layer has a visible entity, so the LLM
+  /// knows the grid symbol hides additional content beneath it.
+  static String _buildStackedBlock(
+      LevelState state, GameDefinition game, Position? avatarPos) {
+    final layerOrder = ['actors', 'markers', 'objects', 'ground'];
+    final entries = <String>[];
+
+    final w = state.board.width;
+    final h = state.board.height;
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final pos = Position(x, y);
+        final symbols = <String>[];
+
+        for (final layerId in layerOrder) {
+          final entity = state.board.getEntity(layerId, pos);
+          if (entity == null) continue;
+          final kindDef = game.entityKinds[entity.kind];
+          String sym;
+          String label;
+          if (kindDef == null) {
+            sym = entity.kind[0].toUpperCase();
+            label = entity.kind.replaceAll('_', ' ');
+          } else if (kindDef.symbolParam != null) {
+            final paramVal = entity.param(kindDef.symbolParam!);
+            sym = paramVal != null
+                ? _valueToChar(paramVal as int)
+                : kindDef.symbol;
+            label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
+          } else {
+            sym = kindDef.symbol;
+            label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
+          }
+          if (sym == '.') continue; // empty/void cell — no information value
+          symbols.add('$sym($label)');
+        }
+
+        // Avatar counts as an extra layer on top (only when shown in grid).
+        if (avatarPos == pos) symbols.insert(0, '@(avatar)');
+
+        if (symbols.length >= 2) {
+          entries.add('  ($x,$y): ${symbols.join(' + ')}');
+        }
+      }
+    }
+
+    if (entries.isEmpty) return '';
+    return 'Stacked cells (grid shows only top symbol):\n${entries.join('\n')}';
+  }
+
+  /// Returns the grid symbol for a numeric tile value.
+  /// Always 'N' — exact values are listed in the "Number values" block.
+  static String _valueToChar(int v) => 'N';
+
+  /// Lists all number-valued tiles with their exact decimal values.
+  /// Appears below the legend so the LLM always knows precise values even when
+  /// the grid symbol is compressed (A–F or ?).
+  static String _buildNumbersBlock(LevelState state, GameDefinition game) {
+    final entries = <String>[];
+    final w = state.board.width;
+    final h = state.board.height;
+    const layerOrder = ['actors', 'markers', 'objects', 'ground'];
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        final pos = Position(x, y);
+        for (final layerId in layerOrder) {
+          final entity = state.board.getEntity(layerId, pos);
+          if (entity == null) continue;
+          final kindDef = game.entityKinds[entity.kind];
+          if (kindDef?.symbolParam == null) continue;
+          final paramVal = entity.param(kindDef!.symbolParam!);
+          if (paramVal == null) break;
+          entries.add('($x,$y)=${paramVal as int}');
+          break;
+        }
+      }
+    }
+    if (entries.isEmpty) return '';
+    return 'Number values: ${entries.join('  ')}';
   }
 
   /// Renders each multi-cell object as a labeled block (separate from the grid).
@@ -186,27 +285,45 @@ class TextRenderer {
       final label = kindDef?.uiName ?? mco.kind.replaceAll('_', ' ');
       sb.writeln('  ${mco.id} [$label]');
 
-      // Cells with exit marker.
+      // Cells with exit marker including direction.
       final exitList = mco.params['exitPosition'] as List?;
       final exitPos = exitList != null
           ? Position(exitList[0] as int, exitList[1] as int)
           : null;
+      final exitDir = mco.params['exitDirection'] as String?;
+      final exitTag = exitDir != null ? '[exit→$exitDir]' : '[exit]';
       final cellStr = mco.cells.map((p) {
-        final tag = p == exitPos ? '[exit]' : '';
+        final tag = p == exitPos ? exitTag : '';
         return '(${p.x},${p.y})$tag';
       }).join(' ');
       sb.writeln('    cells: $cellStr');
 
-      // Queue contents if present. Items are not yet on the board; they will
-      // be released one per turn at the exit cell when it is empty.
+      // Compute spawn position: one step from exit in exitDirection.
+      Position? spawnPos;
+      if (exitPos != null && exitDir != null) {
+        spawnPos = switch (exitDir) {
+          'right' => Position(exitPos.x + 1, exitPos.y),
+          'left' => Position(exitPos.x - 1, exitPos.y),
+          'down' => Position(exitPos.x, exitPos.y + 1),
+          'up' => Position(exitPos.x, exitPos.y - 1),
+          _ => null,
+        };
+      }
+
+      // Queue contents — skip already-emitted items (tracked by currentIndex).
+      // Items are released one per turn at the spawn cell when it is empty.
       final queue = mco.params['queue'] as List?;
-      if (queue != null && queue.isNotEmpty) {
-        final exitStr =
-            exitPos != null ? ' (releases at exit (${exitPos.x},${exitPos.y}))' : '';
-        final queueStr = queue.map((v) => '$v').join(' → ');
-        sb.writeln('    queue$exitStr: $queueStr');
-      } else if (queue != null) {
-        sb.writeln('    queue: (empty)');
+      if (queue != null) {
+        final currentIndex = (mco.params['currentIndex'] as int?) ?? 0;
+        final remaining = queue.skip(currentIndex).toList();
+        final spawnStr =
+            spawnPos != null ? ' (next spawns at (${spawnPos.x},${spawnPos.y}))' : '';
+        if (remaining.isNotEmpty) {
+          final queueStr = remaining.map((v) => '$v').join(' → ');
+          sb.writeln('    queue$spawnStr: $queueStr');
+        } else {
+          sb.writeln('    queue$spawnStr: (empty)');
+        }
       }
     }
 
