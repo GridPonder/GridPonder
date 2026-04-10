@@ -1,7 +1,7 @@
 {
   "id": "nc_006",
   "title": "Cross Current",
-  "guide": "That 5 on the board won't advance the sequence on its own \u2014 but it will carry the pipe's first delivery to 9. Get it into position before the numbers pile up.",
+  "guide": "That 6 on the board won't advance the sequence on its own \u2014 but it will carry the pipe's first delivery to 10. Get it into position before the numbers pile up.",
   "board": {
     "size": [
       5,
@@ -63,7 +63,7 @@
               3
             ],
             "kind": "number",
-            "value": 5
+            "value": 6
           },
           {
             "position": [
@@ -130,8 +130,8 @@
       "config": {
         "sequence": [
           5,
-          9,
-          16
+          10,
+          17
         ],
         "scanTrigger": "on_merge"
       }

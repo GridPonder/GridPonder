@@ -1,0 +1,77 @@
+{
+  "id": "nc_015",
+  "title": "Two Lanes",
+  "guide": "Two pipes feed the same bottom row. Nudge the board tile to unblock the left pipe, then let both lanes merge in sequence.",
+  "board": {
+    "size": [6, 4],
+    "layers": {
+      "ground": [
+        ["void", "empty", "empty", "empty", "empty", "void"],
+        ["void", "empty", "void", "void", "empty", "void"],
+        ["void", "empty", "void", "void", "empty", "void"],
+        ["empty", "empty", "empty", "empty", "empty", "empty"]
+      ],
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 3], "kind": "number", "value": 4}
+        ]
+      }
+    },
+    "multiCellObjects": [
+      {
+        "id": "pipe_1",
+        "kind": "pipe",
+        "cells": [
+          {"position": [1, 0], "sprite": "assets/pipe_end_d.png"},
+          {"position": [1, 1], "sprite": "assets/pipe_straight_v.png"},
+          {"position": [1, 2], "sprite": "assets/pipe_end_u.png"}
+        ],
+        "params": {
+          "exitPosition": [1, 2],
+          "exitDirection": "down",
+          "queue": [3, 1],
+          "currentIndex": 0
+        }
+      },
+      {
+        "id": "pipe_2",
+        "kind": "pipe",
+        "cells": [
+          {"position": [4, 0], "sprite": "assets/pipe_end_d.png"},
+          {"position": [4, 1], "sprite": "assets/pipe_straight_v.png"},
+          {"position": [4, 2], "sprite": "assets/pipe_end_u.png"}
+        ],
+        "params": {
+          "exitPosition": [4, 2],
+          "exitDirection": "down",
+          "queue": [2, 5],
+          "currentIndex": 0
+        }
+      }
+    ]
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "seq",
+      "type": "sequence_match",
+      "config": {
+        "sequence": [6, 4, 11, 15],
+        "scanTrigger": "on_merge"
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "left"}
+    ],
+    "hintStops": [1, 3]
+  }
+}

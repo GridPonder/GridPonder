@@ -56,8 +56,7 @@
       {"action": "move", "direction": "down"},
       {"action": "move", "direction": "left"},
       {"action": "move", "direction": "right"},
-      {"action": "move", "direction": "down"},
-      {"action": "move", "direction": "left"}
+      {"action": "move", "direction": "down"}
     ],
     "hintStops": [2]
   }
