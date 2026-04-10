@@ -2,45 +2,56 @@
 """
 GridPonder puzzle solver.
 
-Enumerates solutions for a level up to a given depth and reports whether
-the intended gold path is unique.
-
-Two search modes:
-  Default           BFS with state deduplication — finds the shortest solution
-                    and all solutions at that same depth.
-  --all-solutions   DFS without cross-path deduplication — finds every winning
-                    path up to --max-depth, including longer alternatives.
-                    (BFS deduplication would silently drop longer paths that
-                    pass through states already seen via shorter routes.)
-
-Currently supported games (auto-detected from pack folder name):
-  number_cells  →  Number Crunch (slide-merge + queued emitters)
+Three search modes:
+  bfs (default)  BFS with state deduplication — finds the shortest solution(s)
+  dfs            DFS without cross-path dedup — finds every solution up to max-depth
+  astar          A* with heuristic — finds the optimal solution; best for deep levels
 
 Usage:
     python solve.py <path/to/level.json> [options]
 
 Options:
-    --max-depth N     Search up to N moves deep (default: 8)
-    --all-solutions   Find every solution up to --max-depth (uses DFS)
+    --max-depth N         Maximum moves to search (default: 30)
+    --mode bfs|dfs|astar  Search algorithm (default: bfs)
+    --timeout N           A* wall-clock timeout in seconds (default: 60)
+    --trace               Print per-step event trace for the best solution
+    --constraint JSON     Constraint dict (repeatable).
+                          e.g. {"type":"must_not","event":"object_removed","kind":"rock"}
+    --mc-trials N         Run N random rollouts to measure difficulty (default: 0 = off)
+    --mc-steps N          Max steps per Monte Carlo trial (default: 3 × gold path length)
+    --all-solutions       Alias for --mode dfs
+    --override-start JSON Override initial board state (box_builder only). JSON or @file.
+    --partial-goal JSON   Partial intermediate goal (box_builder only). JSON or @file.
 
 Examples:
-    python solve.py ../../packs/number_cells/levels/nc_005.json
-    python solve.py ../../packs/number_cells/levels/nc_005.json --max-depth 10 --all-solutions
+    python solve.py ../../packs/box_builder/levels/bb_007.json --mode astar --trace
+    python solve.py ../../packs/box_builder/levels/bb_016.json --mode astar --max-depth 40
+    python solve.py ../../packs/box_builder/levels/bb_013.json --mc-trials 50000
+    python solve.py ../../packs/box_builder/levels/bb_007.json --mode bfs --max-depth 12 \\
+        --constraint '{"type":"must_not","event":"object_removed","kind":"rock"}'
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import math
+import random as _random
+import statistics
 import sys
+import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 sys.path.insert(0, str(Path(__file__).parent))
 import games.number_crunch as nc
 import games.rotate_flip as rf
 import games.box_builder as bb
+import games.flag_adventure as fa
+from search.astar import astar
+from search.events import format_event, violates_constraint
+from search.types import Solution
 
 
 # ---------------------------------------------------------------------------
@@ -55,52 +66,54 @@ def _detect_game(level_path: Path) -> str:
             return "rotate_flip"
         if part == "box_builder":
             return "box_builder"
+        if part == "flag_adventure":
+            return "flag_adventure"
     return "number_crunch"
 
 
 # ---------------------------------------------------------------------------
-# Search: BFS (shortest only) and DFS (all solutions)
+# Generic BFS / DFS
 # ---------------------------------------------------------------------------
 
 def _bfs_shortest(
-    initial: nc.NCState,
-    info: nc.LevelInfo,
+    initial: Any,
+    info: Any,
+    module: Any,
     max_depth: int,
+    is_win_fn: Optional[Callable] = None,
+    constraints: Optional[List[Dict]] = None,
+    prune_fn: Optional[Callable] = None,
 ) -> List[List[str]]:
-    """
-    BFS with state deduplication.
+    """BFS: returns all solutions at the shortest depth found (dedup-limited)."""
+    if prune_fn is None:
+        prune_fn = module.can_prune
 
-    Finds the minimum-length solution depth, then returns all solutions at
-    that depth.  Longer alternatives are not reported.
-    """
     queue: deque = deque([(initial, [])])
-    visited: Dict[nc.NCState, int] = {initial: 0}
+    visited: Dict[Any, int] = {initial: 0}
     solutions: List[List[str]] = []
     shortest: Optional[int] = None
 
     while queue:
-        cur, path = queue.popleft()
+        state, path = queue.popleft()
         depth = len(path)
-
         if shortest is not None and depth >= shortest:
             continue
         if depth >= max_depth:
             continue
-
-        for direction in nc.ACTIONS:
-            new_state, won = nc.apply(cur, direction, info)
+        for action in module.ACTIONS:
+            new_state, module_won, step_events = module.apply(state, action, info)
+            if constraints and any(violates_constraint(step_events, c) for c in constraints):
+                continue
+            won = module_won or (is_win_fn is not None and is_win_fn(new_state))
             new_depth = depth + 1
-            new_path = path + [direction]
-
+            new_path = path + [action]
             if won:
                 solutions.append(new_path)
                 if shortest is None:
                     shortest = new_depth
                 continue
-
-            if nc.can_prune(new_state, info, new_depth, max_depth):
+            if prune_fn(new_state, info, new_depth, max_depth):
                 continue
-
             prev = visited.get(new_state)
             if prev is not None and prev <= new_depth:
                 continue
@@ -111,37 +124,38 @@ def _bfs_shortest(
 
 
 def _dfs_all(
-    initial: nc.NCState,
-    info: nc.LevelInfo,
+    initial: Any,
+    info: Any,
+    module: Any,
     max_depth: int,
+    is_win_fn: Optional[Callable] = None,
+    constraints: Optional[List[Dict]] = None,
+    prune_fn: Optional[Callable] = None,
 ) -> List[List[str]]:
-    """
-    DFS without cross-path state deduplication.
+    """DFS: finds all solutions up to max_depth (no cross-path dedup)."""
+    if prune_fn is None:
+        prune_fn = module.can_prune
 
-    Visits every path up to max_depth (pruning obviously dead branches).
-    Cycle detection within each path prevents infinite loops.
-    """
     solutions: List[List[str]] = []
 
-    def _dfs(state: nc.NCState, path: List[str], path_states: set) -> None:
+    def _dfs(state: Any, path: List[str], path_states: set) -> None:
         depth = len(path)
-        for direction in nc.ACTIONS:
-            new_state, won = nc.apply(state, direction, info)
+        for action in module.ACTIONS:
+            new_state, module_won, step_events = module.apply(state, action, info)
+            if constraints and any(violates_constraint(step_events, c) for c in constraints):
+                continue
+            won = module_won or (is_win_fn is not None and is_win_fn(new_state))
             new_depth = depth + 1
-            new_path = path + [direction]
-
+            new_path = path + [action]
             if won:
                 solutions.append(new_path)
                 continue
-
             if new_depth >= max_depth:
                 continue
-            if nc.can_prune(new_state, info, new_depth, max_depth):
+            if prune_fn(new_state, info, new_depth, max_depth):
                 continue
-            # Avoid revisiting the same state on THIS path (cycle prevention)
             if new_state in path_states:
                 continue
-
             _dfs(new_state, new_path, path_states | {new_state})
 
     _dfs(initial, [], {initial})
@@ -149,97 +163,214 @@ def _dfs_all(
 
 
 # ---------------------------------------------------------------------------
-# Rotate-Flip solver (BFS only)
+# Monte Carlo difficulty measurement
 # ---------------------------------------------------------------------------
 
-def _solve_rotate_flip(
-    path: Path,
-    level_json: Dict[str, Any],
-    max_depth: int,
-    all_solutions: bool,
-) -> None:
-    from collections import deque as _deque
+def _monte_carlo(
+    initial: Any,
+    info: Any,
+    module: Any,
+    n_trials: int,
+    max_steps: int,
+    is_win_fn: Optional[Callable] = None,
+    seed: int = 42,
+) -> Dict[str, Any]:
+    """
+    Run N uniform-random rollouts and measure how often the level is solved.
 
-    initial, info = rf.load(level_json)
-    level_id = info.level_id or path.stem
-    print(f"Solving  {level_id}   (max depth {max_depth})")
-    print(f"  Game:   Rotate & Flip")
-    print(f"  Board:  {info.cols}×{info.rows}  overlay {info.overlay_w}×{info.overlay_h}")
-    print(f"  Mode:   {'DFS — all solutions' if all_solutions else 'BFS — shortest solution'}")
+    Uses a purely random agent (uniform over ACTIONS at each step).  This is
+    intentionally simple — it measures how "lucky-solvable" a level is, which
+    is a proxy for difficulty that does not depend on search algorithms.
+
+    Returns a dict with solve_rate, successes, n_trials, step_counts.
+    """
+    rng = _random.Random(seed)
+    actions = module.ACTIONS
+    n_actions = len(actions)
+
+    successes = 0
+    step_counts: List[int] = []
+
+    for _ in range(n_trials):
+        state = initial
+        for step in range(1, max_steps + 1):
+            action = actions[rng.randrange(n_actions)]
+            state, module_won, _ = module.apply(state, action, info)
+            won = module_won or (is_win_fn is not None and is_win_fn(state))
+            if won:
+                successes += 1
+                step_counts.append(step)
+                break
+
+    return {
+        "solve_rate": successes / n_trials,
+        "successes": successes,
+        "n_trials": n_trials,
+        "step_counts": step_counts,
+        "max_steps": max_steps,
+    }
+
+
+def _print_mc_results(result: Dict[str, Any], optimal_len: Optional[int] = None) -> None:
+    r = result
+    sr = r["solve_rate"]
+    print(f"Monte Carlo ({r['n_trials']:,} trials, max {r['max_steps']} steps/trial):")
+    print(f"  Solve rate:  {sr * 100:.4f}%  "
+          f"({r['successes']:,} / {r['n_trials']:,})")
+
+    if r["step_counts"]:
+        avg = statistics.mean(r["step_counts"])
+        med = statistics.median(r["step_counts"])
+        opt_note = f"  (optimal: {optimal_len})" if optimal_len else ""
+        print(f"  Steps when solved:  avg {avg:.1f},  median {med:.0f}{opt_note}")
+
+    if sr > 0:
+        bits = -math.log2(sr)
+        print(f"  Difficulty:  {bits:.1f} bits  "
+              f"(random agent needs ~{1/sr:,.0f} attempts on average)")
+    else:
+        max_bits = math.log2(r["n_trials"])
+        print(f"  Difficulty:  > {max_bits:.0f} bits  "
+              f"(0 solves — increase --mc-trials for a tighter bound)")
     print()
 
-    # BFS
-    queue: deque = _deque([(initial, [])])
-    visited: Dict = {initial: 0}
-    solutions: List[List[str]] = []
-    shortest: Optional[int] = None
 
-    while queue:
-        state, path_so_far = queue.popleft()
-        depth = len(path_so_far)
-        if shortest is not None and depth >= shortest:
-            continue
-        if depth >= max_depth:
-            continue
-        for action in rf.ACTIONS:
-            ns, won = rf.apply(state, action, info)
-            new_depth = depth + 1
-            new_path = path_so_far + [action]
-            if won:
-                solutions.append(new_path)
-                if shortest is None:
-                    shortest = new_depth
-                continue
-            prev = visited.get(ns)
-            if prev is not None and prev <= new_depth:
-                continue
-            visited[ns] = new_depth
-            queue.append((ns, new_path))
+# ---------------------------------------------------------------------------
+# Event trace output
+# ---------------------------------------------------------------------------
 
+def _print_trace(path: List[str], initial: Any, module: Any, info: Any) -> None:
+    """Re-simulate path and print a per-step event trace."""
+    state = initial
+    for step, action in enumerate(path, 1):
+        new_state, _won, events = module.apply(state, action, info)
+        print(f"    Step {step:2d}: {action}")
+        for e in events:
+            print(f"             {format_event(e)}")
+        state = new_state
+
+
+# ---------------------------------------------------------------------------
+# Result printers (shared by all games)
+# ---------------------------------------------------------------------------
+
+def _print_results(
+    solutions: List[List[str]],
+    max_depth: int,
+    gold_actions: Optional[List[str]],
+    trace: bool,
+    initial: Any,
+    module: Any,
+    info: Any,
+    mode: str = "bfs",
+) -> None:
     if not solutions:
-        print(f"No solution found within {max_depth} moves.")
+        print(f"  No solution found within {max_depth} moves.")
         return
 
+    solutions.sort(key=len)
     min_len = len(solutions[0])
-    print(f"Solutions found: {len(solutions)}  (shortest: {min_len} move{'s' if min_len != 1 else ''})")
+    by_depth: Dict[int, List] = {}
+    for s in solutions:
+        by_depth.setdefault(len(s), []).append(s)
+
+    print(f"Solutions found: {len(solutions)}  "
+          f"(shortest: {min_len} move{'s' if min_len != 1 else ''})")
     print()
-    for sol in solutions:
-        marker = "★" if len(sol) == min_len else " "
-        print(f"  {marker} {len(sol)} moves: {sol}")
+    for depth in sorted(by_depth):
+        paths = by_depth[depth]
+        marker = "★" if depth == min_len else " "
+        print(f"  {marker} depth {depth}: {len(paths)} solution(s)")
+        for p in paths:
+            print(f"      {' '.join(a.upper() for a in p)}")
     print()
 
-    gold_raw = level_json.get("solution", {}).get("goldPath", [])
-    if gold_raw:
-        gold = [
-            m.get("direction", m.get("action", "?"))
-            if m.get("action") == "move" else m.get("action", "?")
-            for m in gold_raw
-        ]
-        gold_actions = [
-            f"move_{m['direction']}" if m.get("action") == "move" else m["action"]
-            for m in gold_raw
-        ]
+    if trace:
+        best = solutions[0]
+        print(f"  Trace ({len(best)} moves):")
+        _print_trace(best, initial, module, info)
+        print()
+
+    if gold_actions:
+        gold_str = " ".join(a.upper() for a in gold_actions)
         if gold_actions in solutions:
-            print(f"  Gold path: ✓  {gold_actions}")
+            print(f"  Gold path: ✓  {gold_str}")
         else:
-            note = f"(not among the {len(solutions)} shortest solutions found)"
-            print(f"  Gold path: ✗  {gold_actions}  {note}")
+            note = f"(not among the {len(solutions)} solutions found)"
+            print(f"  Gold path: ✗  {gold_str}  {note}")
 
-    if gold_raw and min_len < len(gold_raw):
-        print(f"\n  ⚠  WARNING: a {min_len}-move solution exists "
-              f"— shorter than the declared gold path ({len(gold_raw)} moves)!")
-    elif len(solutions) == 1:
-        print(f"\n  ✓  UNIQUE: exactly one {min_len}-move solution exists.")
+    shortest_count = len(by_depth.get(min_len, []))
+    gold_len = len(gold_actions) if gold_actions else None
+    print()
+    if gold_len and min_len < gold_len:
+        print(f"  ⚠  WARNING: a {min_len}-move solution exists "
+              f"— shorter than the declared gold path ({gold_len} moves)!")
+    elif mode == "dfs":
+        # DFS is exhaustive: solution count is exact
+        if shortest_count == 1:
+            print(f"  ✓  UNIQUE: exactly one {min_len}-move solution exists.")
+        else:
+            print(f"  ✗  NOT UNIQUE: {shortest_count} solutions at depth {min_len}.")
     else:
-        print(f"\n  ✗  NOT UNIQUE: {len(solutions)} solutions at depth {min_len}.")
+        # BFS dedup can miss solutions sharing intermediate states with other paths
+        if shortest_count == 1:
+            print(f"  ✓  UNIQUE (BFS): no other shortest path found — "
+                  f"use --mode dfs for exact count.")
+        else:
+            print(f"  ✗  NOT UNIQUE: {shortest_count} shortest paths found.")
+
+
+def _print_astar_result(
+    sol: Solution,
+    gold_actions: Optional[List[str]],
+    trace: bool,
+    initial: Any,
+    module: Any,
+    info: Any,
+    elapsed: Optional[float] = None,
+) -> None:
+    elapsed_str = f",  {elapsed:.2f}s" if elapsed is not None else ""
+    if sol.timed_out:
+        print(f"  Timed out after {sol.states_explored} states explored{elapsed_str}.")
+        return
+    if not sol.path:
+        print(f"  No solution found.  States explored: {sol.states_explored}{elapsed_str}")
+        if sol.is_optimal:
+            print("  (search exhausted — proven no solution exists)")
+        return
+
+    print(f"Solution found: {sol.cost} move{'s' if sol.cost != 1 else ''}  "
+          f"(states explored: {sol.states_explored}{elapsed_str})")
+    print()
+    print(f"  Path: {' '.join(a.upper() for a in sol.path)}")
+    print()
+
+    if trace:
+        print(f"  Trace ({sol.cost} moves):")
+        _print_trace(sol.path, initial, module, info)
+        print()
+
+    if gold_actions:
+        gold_str = " ".join(a.upper() for a in gold_actions)
+        if sol.path == gold_actions:
+            print(f"  Gold path: ✓  {gold_str}")
+        else:
+            print(f"  Gold path: ✗  {gold_str}  (A* found a different path)")
+
+    gold_len = len(gold_actions) if gold_actions else None
+    print()
+    if gold_len and sol.cost < gold_len:
+        print(f"  ⚠  WARNING: a {sol.cost}-move solution exists "
+              f"— shorter than the declared gold path ({gold_len} moves)!")
+    elif sol.is_optimal:
+        print(f"  ✓  OPTIMAL: A* confirmed this is the shortest solution.")
 
 
 # ---------------------------------------------------------------------------
-# Box Builder solver
+# JSON arg helpers
 # ---------------------------------------------------------------------------
 
 def _parse_json_arg(value: Optional[str]) -> Optional[Dict[str, Any]]:
-    """Parse a JSON string or @filename argument."""
     if value is None:
         return None
     if value.startswith("@"):
@@ -248,166 +379,26 @@ def _parse_json_arg(value: Optional[str]) -> Optional[Dict[str, Any]]:
     return json.loads(value)
 
 
-def _solve_box_builder(
+# ---------------------------------------------------------------------------
+# Per-game solvers
+# ---------------------------------------------------------------------------
+
+def _solve_number_crunch(
     path: Path,
     level_json: Dict[str, Any],
+    mode: str,
     max_depth: int,
-    all_solutions: bool,
-    override_start: Optional[str] = None,
-    partial_goal: Optional[str] = None,
+    timeout: float,
+    trace: bool,
+    constraints: List[Dict],
+    mc_trials: int = 0,
+    mc_steps: int = 0,
 ) -> None:
-    from collections import deque as _deque
-
-    initial, info = bb.load(level_json)
-
-    override_json = _parse_json_arg(override_start)
-    if override_json is not None:
-        initial = bb.override_initial_state(initial, override_json)
-
-    partial_goal_json = _parse_json_arg(partial_goal)
-
-    def _is_win(state: bb.BBState) -> bool:
-        if partial_goal_json is not None:
-            return bb.matches_waypoint(state, partial_goal_json)
-        return bb._check_win(state, info)
-
+    initial, info = nc.load(level_json)
     level_id = info.level_id or path.stem
-    print(f"Solving  {level_id}   (max depth {max_depth})")
-    print(f"  Game:   Box Builder")
-    print(f"  Board:  {info.width}×{info.height}  "
-          f"({len(info.walls)} wall cells,  {len(info.targets)} target(s))")
-    if override_json:
-        print(f"  Start:  overridden")
-    if partial_goal_json:
-        print(f"  Goal:   partial waypoint")
-    print(f"  Mode:   {'DFS — all solutions' if all_solutions else 'BFS — shortest solution'}")
-    print()
-
-    solutions: List[List[str]] = []
-    shortest: Optional[int] = None
-
-    if not all_solutions:
-        # BFS with deduplication
-        queue: _deque = _deque([(initial, [])])
-        visited: Dict = {initial: 0}
-
-        while queue:
-            state, path_so_far = queue.popleft()
-            depth = len(path_so_far)
-            if shortest is not None and depth >= shortest:
-                continue
-            if depth >= max_depth:
-                continue
-            for direction in bb.ACTIONS:
-                ns, won = bb.apply(state, direction, info)
-                new_depth = depth + 1
-                new_path = path_so_far + [direction]
-                if not won:
-                    won = _is_win(ns)
-                if won:
-                    solutions.append(new_path)
-                    if shortest is None:
-                        shortest = new_depth
-                    continue
-                if partial_goal_json is None and bb.can_prune(ns, info, new_depth, max_depth):
-                    continue
-                prev = visited.get(ns)
-                if prev is not None and prev <= new_depth:
-                    continue
-                visited[ns] = new_depth
-                queue.append((ns, new_path))
-    else:
-        # DFS without cross-path deduplication
-        def _dfs(state: bb.BBState, path_so_far: List[str], path_states: set) -> None:
-            depth = len(path_so_far)
-            for direction in bb.ACTIONS:
-                ns, won = bb.apply(state, direction, info)
-                new_depth = depth + 1
-                new_path = path_so_far + [direction]
-                if not won:
-                    won = _is_win(ns)
-                if won:
-                    solutions.append(new_path)
-                    continue
-                if new_depth >= max_depth:
-                    continue
-                if partial_goal_json is None and bb.can_prune(ns, info, new_depth, max_depth):
-                    continue
-                if ns in path_states:
-                    continue
-                _dfs(ns, new_path, path_states | {ns})
-
-        _dfs(initial, [], {initial})
-
-    if not solutions:
-        print(f"No solution found within {max_depth} moves.")
-        return
-
-    solutions.sort(key=len)
-    min_len = len(solutions[0])
-    print(f"Solutions found: {len(solutions)}  (shortest: {min_len} move{'s' if min_len != 1 else ''})")
-    print()
-    for sol in solutions:
-        marker = "★" if len(sol) == min_len else " "
-        print(f"  {marker} {len(sol)} moves: {sol}")
-    print()
-
-    gold_raw = level_json.get("solution", {}).get("goldPath", [])
-    if gold_raw:
-        gold = [m["direction"] for m in gold_raw if m.get("action") == "move"]
-        gold_str = " ".join(d.upper() for d in gold)
-        if gold in solutions:
-            print(f"  Gold path: ✓  {gold_str}")
-        else:
-            print(f"  Gold path: ✗  {gold_str}  (not among the {len(solutions)} solutions found)")
-
-    if gold_raw and min_len < len(gold_raw):
-        print(f"\n  ⚠  WARNING: a {min_len}-move solution exists "
-              f"— shorter than the declared gold path ({len(gold_raw)} moves)!")
-    elif len([s for s in solutions if len(s) == min_len]) == 1:
-        print(f"\n  ✓  UNIQUE: exactly one {min_len}-move solution exists.")
-    else:
-        count = len([s for s in solutions if len(s) == min_len])
-        print(f"\n  ✗  NOT UNIQUE: {count} solutions at depth {min_len}.")
-
-
-# ---------------------------------------------------------------------------
-# Main solver
-# ---------------------------------------------------------------------------
-
-def solve(
-    level_path: str,
-    max_depth: int = 8,
-    all_solutions: bool = False,
-    **kwargs,
-) -> None:
-    path = Path(level_path)
-    with open(path) as f:
-        level_json: Dict[str, Any] = json.load(f)
-
-    game = _detect_game(path)
-    if game == "rotate_flip":
-        _solve_rotate_flip(path, level_json, max_depth, all_solutions)
-        return
-
-    if game == "box_builder":
-        _solve_box_builder(path, level_json, max_depth, all_solutions,
-                           override_start=kwargs.get("override_start"),
-                           partial_goal=kwargs.get("partial_goal"))
-        return
-
-    if game != "number_crunch":
-        print(f"Error: unsupported game '{game}'", file=sys.stderr)
-        sys.exit(1)
-
-    initial_state, info = nc.load(level_json)
-
-    # ── Header ──────────────────────────────────────────────────────────────
-    level_id = info.level_id or path.stem
-    print(f"Solving  {level_id}   (max depth {max_depth})")
+    print(f"Solving  {level_id}   (mode: {mode}, max depth: {max_depth})")
     print(f"  Game:     Number Crunch")
-    print(f"  Board:    {info.width}×{info.height}  "
-          f"({len(info.void_cells)} void cells)")
+    print(f"  Board:    {info.width}×{info.height}  ({len(info.void_cells)} void cells)")
     print(f"  Pipes:    {len(info.pipes)}", end="")
     for p in info.pipes:
         print(f"  queue={p.queue}", end="")
@@ -415,113 +406,324 @@ def solve(
     print(f"  Sequence: {info.sequence}")
     if info.max_turns:
         print(f"  Max turns: {info.max_turns}")
-    mode = "DFS — all solutions" if all_solutions else "BFS — shortest solutions"
-    print(f"  Mode:     {mode}")
     print()
 
-    # ── Search ──────────────────────────────────────────────────────────────
-    if all_solutions:
-        solutions = _dfs_all(initial_state, info, max_depth)
-    else:
-        solutions = _bfs_shortest(initial_state, info, max_depth)
-
-    # ── Results ─────────────────────────────────────────────────────────────
-    if not solutions:
-        print(f"No solution found within {max_depth} moves.")
-        return
-
-    solutions.sort(key=len)
-    min_len = len(solutions[0])
-
-    by_depth: Dict[int, List[List[str]]] = {}
-    for s in solutions:
-        by_depth.setdefault(len(s), []).append(s)
-
-    print(f"Solutions found: {len(solutions)}  "
-          f"(shortest: {min_len} move{'s' if min_len != 1 else ''})")
-    print()
-
-    for depth in sorted(by_depth):
-        paths = by_depth[depth]
-        marker = "★" if depth == min_len else " "
-        print(f"  {marker} depth {depth}: {len(paths)} solution(s)")
-        for p in paths:
-            print(f"      {' '.join(d.upper() for d in p)}")
-
-    print()
-
-    # ── Gold path validation ─────────────────────────────────────────────────
     gold_raw = level_json.get("solution", {}).get("goldPath", [])
-    if gold_raw:
-        gold = [m["direction"] for m in gold_raw]
-        gold_str = " ".join(d.upper() for d in gold)
-        if gold in solutions:
-            print(f"  Gold path: ✓  {gold_str}")
-        else:
-            # Gold path not found — simulate to explain why
-            sim_state = initial_state
-            for step, d in enumerate(gold, 1):
-                sim_state, won = nc.apply(sim_state, d, info)
-                if won:
-                    break
-            if sim_state.seq_idx >= len(info.sequence):
-                note = "(valid but longer than --max-depth or filtered by BFS; use --all-solutions)"
-            else:
-                note = f"(simulation ends at seq_idx={sim_state.seq_idx}/{len(info.sequence)})"
-            print(f"  Gold path: ✗  {gold_str}  {note}")
+    gold_actions = [m["direction"] for m in gold_raw] if gold_raw else None
+    optimal_len = len(gold_actions) if gold_actions else None
 
-    # ── Uniqueness verdict ───────────────────────────────────────────────────
-    gold_len = len(gold_raw) if gold_raw else None
-    shortest_solutions = by_depth.get(min_len, [])
-
-    print()
-    if gold_len and min_len < gold_len:
-        print(f"  ⚠  WARNING: a {min_len}-move solution exists "
-              f"— shorter than the declared gold path ({gold_len} moves)!")
-    elif len(shortest_solutions) == 1:
-        print(f"  ✓  UNIQUE: exactly one {min_len}-move solution exists.")
+    if mode == "astar":
+        _t0 = time.monotonic()
+        sol = astar(initial, info, nc, timeout, constraints, max_depth=max_depth)
+        _print_astar_result(sol, gold_actions, trace, initial, nc, info,
+                            elapsed=time.monotonic() - _t0)
+        if sol.path:
+            optimal_len = sol.cost
+    elif mode == "dfs":
+        solutions = _dfs_all(initial, info, nc, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, nc, info,
+                       mode=mode)
     else:
-        print(f"  ✗  NOT UNIQUE: {len(shortest_solutions)} solutions "
-              f"at depth {min_len}.")
+        solutions = _bfs_shortest(initial, info, nc, max_depth, constraints=constraints)
+        if gold_actions and solutions and gold_actions not in solutions:
+            sim_state = initial
+            for d in gold_actions:
+                sim_state, _won, _ev = nc.apply(sim_state, d, info)
+            if sim_state.seq_idx >= len(info.sequence):
+                print("  (gold path is valid but longer than max-depth; "
+                      "use --all-solutions)")
+            else:
+                print(f"  (gold simulation ends at seq_idx="
+                      f"{sim_state.seq_idx}/{len(info.sequence)})")
+        _print_results(solutions, max_depth, gold_actions, trace, initial, nc, info,
+                       mode=mode)
+
+    if mc_trials > 0:
+        steps = mc_steps or max(100, 3 * (optimal_len or 20))
+        print()
+        result = _monte_carlo(initial, info, nc, mc_trials, steps)
+        _print_mc_results(result, optimal_len)
+
+
+def _solve_rotate_flip(
+    path: Path,
+    level_json: Dict[str, Any],
+    mode: str,
+    max_depth: int,
+    timeout: float,
+    trace: bool,
+    constraints: List[Dict],
+    mc_trials: int = 0,
+    mc_steps: int = 0,
+) -> None:
+    initial, info = rf.load(level_json)
+    level_id = info.level_id or path.stem
+    print(f"Solving  {level_id}   (mode: {mode}, max depth: {max_depth})")
+    print(f"  Game:   Rotate & Flip")
+    print(f"  Board:  {info.cols}×{info.rows}  overlay {info.overlay_w}×{info.overlay_h}")
+    print()
+
+    gold_raw = level_json.get("solution", {}).get("goldPath", [])
+    gold_actions = [
+        f"move_{m['direction']}" if m.get("action") == "move" else m["action"]
+        for m in gold_raw
+    ] if gold_raw else None
+    optimal_len = len(gold_actions) if gold_actions else None
+
+    if mode == "astar":
+        _t0 = time.monotonic()
+        sol = astar(initial, info, rf, timeout, constraints, max_depth=max_depth)
+        _print_astar_result(sol, gold_actions, trace, initial, rf, info,
+                            elapsed=time.monotonic() - _t0)
+        if sol.path:
+            optimal_len = sol.cost
+    elif mode == "dfs":
+        solutions = _dfs_all(initial, info, rf, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, rf, info,
+                       mode=mode)
+    else:
+        solutions = _bfs_shortest(initial, info, rf, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, rf, info,
+                       mode=mode)
+
+    if mc_trials > 0:
+        steps = mc_steps or max(100, 3 * (optimal_len or 20))
+        print()
+        result = _monte_carlo(initial, info, rf, mc_trials, steps)
+        _print_mc_results(result, optimal_len)
+
+
+def _solve_box_builder(
+    path: Path,
+    level_json: Dict[str, Any],
+    mode: str,
+    max_depth: int,
+    timeout: float,
+    trace: bool,
+    constraints: List[Dict],
+    mc_trials: int = 0,
+    mc_steps: int = 0,
+    override_start: Optional[str] = None,
+    partial_goal: Optional[str] = None,
+) -> None:
+    initial, info = bb.load(level_json)
+
+    override_json = _parse_json_arg(override_start)
+    if override_json is not None:
+        initial = bb.override_initial_state(initial, override_json)
+
+    partial_goal_json = _parse_json_arg(partial_goal)
+    is_win_fn = (lambda s: bb.matches_waypoint(s, partial_goal_json)
+                 if partial_goal_json is not None else None)
+    # Heuristic pruning is based on the full win condition — skip for partial goals
+    prune_fn = (lambda *a: False) if partial_goal_json is not None else bb.can_prune
+
+    level_id = info.level_id or path.stem
+    print(f"Solving  {level_id}   (mode: {mode}, max depth: {max_depth})")
+    print(f"  Game:   Box Builder")
+    print(f"  Board:  {info.width}×{info.height}  "
+          f"({len(info.walls)} wall cells,  {len(info.targets)} target(s))")
+    if override_json:
+        print(f"  Start:  overridden")
+    if partial_goal_json:
+        print(f"  Goal:   partial waypoint")
+    print()
+
+    gold_raw = level_json.get("solution", {}).get("goldPath", [])
+    gold_actions = (
+        [m["direction"] for m in gold_raw if m.get("action") == "move"]
+        if gold_raw else None
+    )
+    optimal_len = len(gold_actions) if gold_actions else None
+
+    if mode == "astar":
+        _t0 = time.monotonic()
+        sol = astar(initial, info, bb, timeout, constraints, max_depth=max_depth,
+                    is_win_fn=is_win_fn)
+        _print_astar_result(sol, gold_actions, trace, initial, bb, info,
+                            elapsed=time.monotonic() - _t0)
+        if sol.path:
+            optimal_len = sol.cost
+    elif mode == "dfs":
+        solutions = _dfs_all(initial, info, bb, max_depth,
+                             is_win_fn=is_win_fn, constraints=constraints,
+                             prune_fn=prune_fn)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, bb, info,
+                       mode=mode)
+    else:
+        solutions = _bfs_shortest(initial, info, bb, max_depth,
+                                  is_win_fn=is_win_fn, constraints=constraints,
+                                  prune_fn=prune_fn)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, bb, info,
+                       mode=mode)
+
+    if mc_trials > 0:
+        steps = mc_steps or max(100, 3 * (optimal_len or 30))
+        print()
+        result = _monte_carlo(initial, info, bb, mc_trials, steps,
+                              is_win_fn=is_win_fn)
+        _print_mc_results(result, optimal_len)
+
+
+def _solve_flag_adventure(
+    path: Path,
+    level_json: Dict[str, Any],
+    mode: str,
+    max_depth: int,
+    timeout: float,
+    trace: bool,
+    constraints: List[Dict],
+    mc_trials: int = 0,
+    mc_steps: int = 0,
+) -> None:
+    initial, info = fa.load(level_json)
+    level_id = info.level_id or path.stem
+    print(f"Solving  {level_id}   (mode: {mode}, max depth: {max_depth})")
+    print(f"  Game:   Flag Adventure (Carrot Quest)")
+    print(f"  Board:  {info.width}×{info.height}  "
+          f"({len(info.water_cells)} water cell(s),  "
+          f"{len(info.portals) // 2} portal pair(s))")
+    print(f"  Flag:   {info.flag}")
+    print()
+
+    gold_raw = level_json.get("solution", {}).get("goldPath", [])
+    gold_actions = [m["direction"] for m in gold_raw] if gold_raw else None
+    optimal_len = len(gold_actions) if gold_actions else None
+
+    if mode == "astar":
+        sol = astar(initial, info, fa, timeout, constraints, max_depth=max_depth)
+        _print_astar_result(sol, gold_actions, trace, initial, fa, info)
+        if sol.path:
+            optimal_len = sol.cost
+    elif mode == "dfs":
+        solutions = _dfs_all(initial, info, fa, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, fa, info,
+                       mode=mode)
+    else:
+        solutions = _bfs_shortest(initial, info, fa, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, fa, info,
+                       mode=mode)
+
+    if mc_trials > 0:
+        steps = mc_steps or max(100, 3 * (optimal_len or 30))
+        print()
+        result = _monte_carlo(initial, info, fa, mc_trials, steps)
+        _print_mc_results(result, optimal_len)
 
 
 # ---------------------------------------------------------------------------
-# Entry point
+# Public API
+# ---------------------------------------------------------------------------
+
+def solve(
+    level_path: str,
+    mode: str = "bfs",
+    max_depth: int = 30,
+    timeout: float = 60.0,
+    trace: bool = False,
+    constraints: Optional[List[Dict]] = None,
+    mc_trials: int = 0,
+    mc_steps: int = 0,
+    **kwargs,
+) -> None:
+    path = Path(level_path)
+    with open(path) as f:
+        level_json: Dict[str, Any] = json.load(f)
+
+    if constraints is None:
+        constraints = []
+
+    mc_kw = dict(mc_trials=mc_trials, mc_steps=mc_steps)
+    game = _detect_game(path)
+    if game == "rotate_flip":
+        _solve_rotate_flip(path, level_json, mode, max_depth, timeout, trace,
+                           constraints, **mc_kw)
+    elif game == "box_builder":
+        _solve_box_builder(path, level_json, mode, max_depth, timeout, trace,
+                           constraints, **mc_kw,
+                           override_start=kwargs.get("override_start"),
+                           partial_goal=kwargs.get("partial_goal"))
+    elif game == "number_crunch":
+        _solve_number_crunch(path, level_json, mode, max_depth, timeout, trace,
+                             constraints, **mc_kw)
+    elif game == "flag_adventure":
+        _solve_flag_adventure(path, level_json, mode, max_depth, timeout, trace,
+                              constraints, **mc_kw)
+    else:
+        print(f"Error: unsupported game '{game}'", file=sys.stderr)
+        sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# CLI
 # ---------------------------------------------------------------------------
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="GridPonder puzzle solver — enumerate solutions for a level.",
+        description="GridPonder puzzle solver.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
     )
     parser.add_argument("level", help="Path to the level JSON file")
     parser.add_argument(
-        "--max-depth", type=int, default=8, metavar="N",
-        help="Maximum moves to search (default: 8)",
+        "--max-depth", type=int, default=30, metavar="N",
+        help="Maximum moves to search (default: 30)",
+    )
+    parser.add_argument(
+        "--mode", choices=["bfs", "dfs", "astar"], default="bfs",
+        help="Search algorithm: bfs (default), dfs (all solutions), astar (optimal)",
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=60.0, metavar="S",
+        help="A* wall-clock timeout in seconds (default: 60)",
+    )
+    parser.add_argument(
+        "--trace", action="store_true",
+        help="Print per-step event trace for the best solution",
+    )
+    parser.add_argument(
+        "--constraint", action="append", default=[], metavar="JSON",
+        dest="constraints",
+        help='Constraint dict (repeatable). '
+             '{"type":"must_not","event":"object_removed","kind":"rock"}',
+    )
+    parser.add_argument(
+        "--mc-trials", type=int, default=0, metavar="N",
+        help="Run N random rollouts to measure difficulty (0 = disabled)",
+    )
+    parser.add_argument(
+        "--mc-steps", type=int, default=0, metavar="N",
+        help="Max steps per Monte Carlo trial (default: 3 × gold path length)",
     )
     parser.add_argument(
         "--all-solutions", action="store_true",
-        help="Find all solutions up to --max-depth (uses DFS; slower but complete)",
+        help="Alias for --mode dfs",
     )
     parser.add_argument(
         "--override-start", metavar="JSON",
-        help='Override initial board state. JSON string or @file. '
-             'Format: {"boxes":[{"position":[x,y],"sides":N},...], '
-             '"rocks":[[x,y],...], "pickaxes":[[x,y],...], '
-             '"avatar":[x,y], "inventory":null}',
+        help="Override initial board state (box_builder). JSON string or @file.",
     )
     parser.add_argument(
         "--partial-goal", metavar="JSON",
-        help='Use a partial intermediate goal instead of the level win condition. '
-             'JSON string or @file. '
-             'Format: {"boxes":[{"position":[x,y],"sides":N},...], '
-             '"avatar":[x,y], "inventory":null}',
+        help="Use a partial intermediate goal (box_builder). JSON string or @file.",
     )
     args = parser.parse_args()
-    solve(args.level, args.max_depth, args.all_solutions,
-          override_start=args.override_start,
-          partial_goal=args.partial_goal)
+
+    mode = "dfs" if args.all_solutions else args.mode
+    constraints = [json.loads(c) for c in args.constraints]
+
+    solve(
+        args.level,
+        mode=mode,
+        max_depth=args.max_depth,
+        timeout=args.timeout,
+        trace=args.trace,
+        constraints=constraints,
+        mc_trials=args.mc_trials,
+        mc_steps=args.mc_steps,
+        override_start=args.override_start,
+        partial_goal=args.partial_goal,
+    )
 
 
 if __name__ == "__main__":

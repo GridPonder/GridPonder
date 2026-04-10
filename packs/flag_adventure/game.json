@@ -297,6 +297,10 @@
     {
       "type": "level",
       "ref": "pw_003"
+    },
+    {
+      "type": "level",
+      "ref": "fw_007"
     }
   ],
   "defaults": {

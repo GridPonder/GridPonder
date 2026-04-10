@@ -103,7 +103,7 @@ def load(level_json: Dict[str, Any]) -> Tuple[NCState, LevelInfo]:
         for entry in ground_data.get("entries", []):
             px, py = entry["position"]
             kind = entry.get("kind", "empty")
-            if kind == "void":
+            if kind in ("void", "pipe"):
                 void_cells_list.append((px, py))
             elif kind == "portal":
                 channel = entry.get("channel", "")
@@ -229,7 +229,7 @@ def apply(
     state: NCState,
     direction: str,
     info: LevelInfo,
-) -> Tuple[NCState, bool]:
+) -> Tuple[NCState, bool, List]:
     """
     Apply one move and return (new_state, won).
 
@@ -326,7 +326,7 @@ def apply(
         seq_idx=seq_idx,
     )
     won = seq_idx >= len(info.sequence)
-    return new_state, won
+    return new_state, won, []
 
 
 def _apply_teleporters(

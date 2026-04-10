@@ -21,7 +21,7 @@ Overlay mechanics (2×2 default)
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, Optional, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Tuple
 
 Board = FrozenSet[Tuple[Tuple[int, int], str]]
 
@@ -160,54 +160,54 @@ def _flip(board_dict: dict, ox: int, oy: int, ow: int, oh: int) -> dict:
 
 def apply(
     state: RFState, action: str, info: LevelInfo
-) -> Tuple[RFState, bool]:
+) -> Tuple[RFState, bool, List]:
     ox, oy = state.ox, state.oy
     max_ox = info.cols - info.overlay_w
     max_oy = info.rows - info.overlay_h
 
     if action == "move_right":
         if ox >= max_ox:
-            return state, False
+            return state, False, []
         if (ox + 1, oy) in info.void_cells:
-            return state, False
+            return state, False, []
         ns = RFState(board=state.board, ox=ox + 1, oy=oy)
     elif action == "move_left":
         if ox <= 0:
-            return state, False
+            return state, False, []
         if (ox - 1, oy) in info.void_cells:
-            return state, False
+            return state, False, []
         ns = RFState(board=state.board, ox=ox - 1, oy=oy)
     elif action == "move_down":
         if oy >= max_oy:
-            return state, False
+            return state, False, []
         if (ox, oy + 1) in info.void_cells:
-            return state, False
+            return state, False, []
         ns = RFState(board=state.board, ox=ox, oy=oy + 1)
     elif action == "move_up":
         if oy <= 0:
-            return state, False
+            return state, False, []
         if (ox, oy - 1) in info.void_cells:
-            return state, False
+            return state, False, []
         ns = RFState(board=state.board, ox=ox, oy=oy - 1)
     elif action == "rotate":
         # Blocked if any overlay cell is void
         if any((ox + dx, oy + dy) in info.void_cells
                for dx in range(info.overlay_w) for dy in range(info.overlay_h)):
-            return state, False
+            return state, False, []
         nb = _rotate(dict(state.board), ox, oy, info.overlay_w, info.overlay_h)
         ns = RFState(board=frozenset(nb.items()), ox=ox, oy=oy)
     elif action == "flip":
         # Blocked if any overlay cell is void
         if any((ox + dx, oy + dy) in info.void_cells
                for dx in range(info.overlay_w) for dy in range(info.overlay_h)):
-            return state, False
+            return state, False, []
         nb = _flip(dict(state.board), ox, oy, info.overlay_w, info.overlay_h)
         ns = RFState(board=frozenset(nb.items()), ox=ox, oy=oy)
     else:
-        return state, False
+        return state, False, []
 
     won = ns.board == info.goal_board
-    return ns, won
+    return ns, won, []
 
 
 def can_prune(

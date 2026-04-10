@@ -3,10 +3,14 @@ Box Builder game simulator for the GridPonder puzzle solver.
 
 Faithfully implements the sided_box DSL system from the Dart engine.
 
-State is immutable (frozen dataclass) so BFS can hash/deduplicate it.
+State is immutable (frozen dataclass) so BFS/A* can hash/deduplicate it.
 
 Side bit encoding:  U=1, R=2, D=4, L=8
 A complete box has sides == 15 (all four sides present).
+
+apply() returns (new_state, won, events) where *events* is a list of DSL event
+dicts using the same vocabulary as the Dart engine's event.dart.  This enables
+generic event formatting and constraint checking in the search layer.
 """
 
 from __future__ import annotations
@@ -42,8 +46,8 @@ _SIDE_BIT: Dict[str, int] = {
 # State / LevelInfo
 # ---------------------------------------------------------------------------
 
-# boxes: frozenset of ((x, y), sides_int)
 Boxes = FrozenSet[Tuple[Tuple[int, int], int]]
+Event = Dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -81,13 +85,11 @@ def load(level_json: Dict[str, Any]) -> Tuple[BBState, LevelInfo]:
     walls: list = []
     ground = layers.get("ground", [])
     if isinstance(ground, list):
-        # Dense format: list of rows, each row is a list of kind strings
         for row_idx, row in enumerate(ground):
             for col_idx, kind in enumerate(row):
                 if kind != "empty":
                     walls.append((col_idx, row_idx))
     elif isinstance(ground, dict):
-        # Sparse format (unusual for ground but handle it)
         for entry in ground.get("entries", []):
             x, y = entry["position"]
             if entry.get("kind", "empty") not in ("empty",):
@@ -110,7 +112,7 @@ def load(level_json: Dict[str, Any]) -> Tuple[BBState, LevelInfo]:
             rocks_list.append((x, y))
         elif kind == "pickaxe":
             pickaxes_list.append((x, y))
-        # portals: not handled in solver v1
+        # portals: not yet handled in solver
 
     # ── Markers layer → targets ─────────────────────────────────────────────
     targets_list: list = []
@@ -122,7 +124,7 @@ def load(level_json: Dict[str, Any]) -> Tuple[BBState, LevelInfo]:
             targets_list.append((x, y))
 
     # ── Goals → target_value ────────────────────────────────────────────────
-    target_value = 15  # default: full box
+    target_value = 15
     for goal in level_json.get("goals", []):
         if goal.get("type") == "param_match":
             target_value = int(goal["config"].get("checkValue", 15))
@@ -160,12 +162,32 @@ def _is_in_bounds(x: int, y: int, info: LevelInfo) -> bool:
 
 
 def _is_walkable_ground(x: int, y: int, info: LevelInfo) -> bool:
-    """Returns True if the ground tile at (x,y) is walkable (not a wall)."""
     return _is_in_bounds(x, y, info) and (x, y) not in info.walls
 
 
 def _boxes_dict(boxes: Boxes) -> Dict[Tuple[int, int], int]:
     return dict(boxes)
+
+
+def _apply_pickup(
+    state: BBState, info: LevelInfo
+) -> Tuple[BBState, List[Event]]:
+    """
+    If the avatar is standing on a pickaxe and not already holding one,
+    pick it up.  Returns (new_state, events).
+    """
+    pos = (state.ax, state.ay)
+    if state.inv is None and pos in state.pickaxes:
+        ns = BBState(
+            boxes=state.boxes,
+            rocks=state.rocks,
+            pickaxes=state.pickaxes - {pos},
+            ax=state.ax,
+            ay=state.ay,
+            inv="pickaxe",
+        )
+        return ns, [{"type": "inventory_changed", "oldItem": None, "newItem": "pickaxe"}]
+    return state, []
 
 
 # ---------------------------------------------------------------------------
@@ -174,27 +196,27 @@ def _boxes_dict(boxes: Boxes) -> Dict[Tuple[int, int], int]:
 
 def apply(
     state: BBState, direction: str, info: LevelInfo
-) -> Tuple[BBState, bool]:
+) -> Tuple[BBState, bool, List[Event]]:
     """
-    Apply one move action (direction) to state.
+    Apply one move action to state.
 
-    Returns (new_state, won). If the move is blocked, returns (state, False)
-    (no state change, no win).
+    Returns (new_state, won, events).
+
+    *events* is a list of DSL event dicts describing what happened this turn.
+    If the move is blocked, returns (state, False, []) with no state change.
     """
     dx, dy = _DELTA[direction]
     ax, ay = state.ax, state.ay
     tx, ty = ax + dx, ay + dy
 
-    # Basic bounds + walkable ground check for target
+    # Basic bounds + walkable check
     if not _is_in_bounds(tx, ty, info):
-        return state, False
+        return state, False, []
     if (tx, ty) in info.walls:
-        return state, False
+        return state, False, []
 
-    out_bit = _SIDE_BIT[direction]
-    in_bit = _SIDE_BIT[_OPPOSITE[direction]]
-    # Faces parallel to the movement direction — both boxes sharing one means
-    # their walls would physically overlap, so the merge is blocked.
+    out_bit  = _SIDE_BIT[direction]
+    in_bit   = _SIDE_BIT[_OPPOSITE[direction]]
     perp_mask = (
         (_SIDE_BIT["left"] | _SIDE_BIT["right"])
         if direction in ("up", "down")
@@ -202,31 +224,29 @@ def apply(
     )
 
     bd = _boxes_dict(state.boxes)
-    box_at_pos = bd.get((ax, ay))  # sides int or None
+    box_at_pos    = bd.get((ax, ay))
     box_at_target = bd.get((tx, ty))
 
+    events: List[Event] = []
+
     # -----------------------------------------------------------------------
-    # CASE 1: Carry — avatar on a cell with a sided box, exits through that side
+    # CASE 1: Carry — avatar co-occupies a box with the outward side set
     # -----------------------------------------------------------------------
     if box_at_pos is not None and (box_at_pos & out_bit) != 0:
-        # Target must be in bounds + walkable (checked above already)
 
-        # Blocked by rock (non-sided solid) at target
         if (tx, ty) in state.rocks:
-            return state, False
-
-        # Target has a pickup or portal (non-sided, non-solid) → blocked
+            return state, False, []
         if (tx, ty) in state.pickaxes:
-            return state, False  # Can't place box on a pickaxe cell
+            return state, False, []
 
-        # Target has a sided box → check inward side, then carry+merge
         if box_at_target is not None:
             if (box_at_target & in_bit) != 0:
-                return state, False  # Inward side blocks carry
+                return state, False, []
             if (box_at_pos & box_at_target & perp_mask) != 0:
-                return state, False  # Parallel walls would physically overlap
+                return state, False, []
             merged = box_at_pos | box_at_target
-            new_bd = {k: v for k, v in bd.items() if k != (ax, ay) and k != (tx, ty)}
+            new_bd = {k: v for k, v in bd.items()
+                      if k != (ax, ay) and k != (tx, ty)}
             new_bd[(tx, ty)] = merged
             ns = BBState(
                 boxes=frozenset(new_bd.items()),
@@ -235,9 +255,17 @@ def apply(
                 ax=tx, ay=ty,
                 inv=state.inv,
             )
-            return ns, _check_win(ns, info)
+            events = [
+                {"type": "object_pushed", "kind": "box_fragment",
+                 "from": [ax, ay], "to": [tx, ty], "direction": direction},
+                {"type": "boxes_merged", "position": [tx, ty],
+                 "resultSides": merged, "aSides": box_at_pos, "bSides": box_at_target},
+                {"type": "avatar_entered", "position": [tx, ty],
+                 "from": [ax, ay], "direction": direction},
+            ]
+            return ns, _check_win(ns, info), events
 
-        # Target is clear → carry box there
+        # Clear carry
         new_bd = {k: v for k, v in bd.items() if k != (ax, ay)}
         new_bd[(tx, ty)] = box_at_pos
         ns = BBState(
@@ -247,31 +275,37 @@ def apply(
             ax=tx, ay=ty,
             inv=state.inv,
         )
-        return _apply_pickup(ns, info), _check_win(ns, info)
+        events = [
+            {"type": "object_pushed", "kind": "box_fragment",
+             "from": [ax, ay], "to": [tx, ty], "direction": direction},
+            {"type": "avatar_entered", "position": [tx, ty],
+             "from": [ax, ay], "direction": direction},
+        ]
+        ns, pickup_events = _apply_pickup(ns, info)
+        return ns, _check_win(ns, info), events + pickup_events
 
     # -----------------------------------------------------------------------
-    # CASE 2: Target has a sided box
+    # CASE 2: Target cell has a box fragment
     # -----------------------------------------------------------------------
     if box_at_target is not None:
         if (box_at_target & in_bit) != 0:
-            # 2a: PUSH — inward side blocks entry
+            # ── 2a: PUSH — inward side blocks entry ──────────────────────────
             pdx, pdy = tx + dx, ty + dy
 
             if not _is_in_bounds(pdx, pdy, info):
-                return state, False
+                return state, False, []
             if (pdx, pdy) in info.walls:
-                return state, False
+                return state, False, []
             if not _is_walkable_ground(pdx, pdy, info):
-                return state, False
+                return state, False, []
             if (pdx, pdy) in state.rocks:
-                return state, False
+                return state, False, []
 
             box_at_push_dest = bd.get((pdx, pdy))
 
             if box_at_push_dest is not None:
-                # Push + merge
                 if (box_at_target & box_at_push_dest & perp_mask) != 0:
-                    return state, False  # Parallel walls would physically overlap
+                    return state, False, []
                 merged = box_at_target | box_at_push_dest
                 new_bd = {k: v for k, v in bd.items()
                           if k != (tx, ty) and k != (pdx, pdy)}
@@ -283,11 +317,19 @@ def apply(
                     ax=tx, ay=ty,
                     inv=state.inv,
                 )
-                return ns, _check_win(ns, info)
+                events = [
+                    {"type": "object_pushed", "kind": "box_fragment",
+                     "from": [tx, ty], "to": [pdx, pdy], "direction": direction},
+                    {"type": "boxes_merged", "position": [pdx, pdy],
+                     "resultSides": merged,
+                     "aSides": box_at_target, "bSides": box_at_push_dest},
+                    {"type": "avatar_entered", "position": [tx, ty],
+                     "from": [ax, ay], "direction": direction},
+                ]
+                return ns, _check_win(ns, info), events
 
-            # Push dest has any other object → blocked
             if (pdx, pdy) in state.pickaxes:
-                return state, False
+                return state, False, []
 
             # Push to empty cell
             new_bd = {k: v for k, v in bd.items() if k != (tx, ty)}
@@ -299,9 +341,16 @@ def apply(
                 ax=tx, ay=ty,
                 inv=state.inv,
             )
-            return ns, _check_win(ns, info)
+            events = [
+                {"type": "object_pushed", "kind": "box_fragment",
+                 "from": [tx, ty], "to": [pdx, pdy], "direction": direction},
+                {"type": "avatar_entered", "position": [tx, ty],
+                 "from": [ax, ay], "direction": direction},
+            ]
+            return ns, _check_win(ns, info), events
+
         else:
-            # 2b: ENTER — avatar walks into cell (co-occupies with box)
+            # ── 2b: ENTER — no inward side, avatar co-occupies ───────────────
             ns = BBState(
                 boxes=state.boxes,
                 rocks=state.rocks,
@@ -309,28 +358,38 @@ def apply(
                 ax=tx, ay=ty,
                 inv=state.inv,
             )
-            ns = _apply_pickup(ns, info)
-            return ns, _check_win(ns, info)
+            events = [
+                {"type": "avatar_entered", "position": [tx, ty],
+                 "from": [ax, ay], "direction": direction},
+            ]
+            ns, pickup_events = _apply_pickup(ns, info)
+            return ns, _check_win(ns, info), events + pickup_events
 
     # -----------------------------------------------------------------------
-    # CASE 3: Target has a rock (non-sided solid)
+    # CASE 3: Rock — break with pickaxe
     # -----------------------------------------------------------------------
     if (tx, ty) in state.rocks:
         if state.inv == "pickaxe":
-            # Break rock, consume pickaxe, move
-            new_rocks = state.rocks - {(tx, ty)}
             ns = BBState(
                 boxes=state.boxes,
-                rocks=new_rocks,
+                rocks=state.rocks - {(tx, ty)},
                 pickaxes=state.pickaxes,
                 ax=tx, ay=ty,
                 inv=None,
             )
-            return ns, _check_win(ns, info)
-        return state, False
+            events = [
+                {"type": "object_removed", "position": [tx, ty],
+                 "kind": "rock", "animation": "breaking"},
+                {"type": "inventory_changed",
+                 "oldItem": "pickaxe", "newItem": None},
+                {"type": "avatar_entered", "position": [tx, ty],
+                 "from": [ax, ay], "direction": direction},
+            ]
+            return ns, _check_win(ns, info), events
+        return state, False, []
 
     # -----------------------------------------------------------------------
-    # CASE 4: Clear — normal move
+    # CASE 4: Clear move
     # -----------------------------------------------------------------------
     ns = BBState(
         boxes=state.boxes,
@@ -339,8 +398,121 @@ def apply(
         ax=tx, ay=ty,
         inv=state.inv,
     )
-    ns = _apply_pickup(ns, info)
-    return ns, _check_win(ns, info)
+    events = [
+        {"type": "avatar_entered", "position": [tx, ty],
+         "from": [ax, ay], "direction": direction},
+    ]
+    ns, pickup_events = _apply_pickup(ns, info)
+    return ns, _check_win(ns, info), events + pickup_events
+
+
+# ---------------------------------------------------------------------------
+# Heuristic (for A* search)
+# ---------------------------------------------------------------------------
+
+def heuristic(state: BBState, info: LevelInfo) -> float:
+    """
+    Admissible lower-bound heuristic for A*.
+
+    For each unsatisfied target, finds the cheapest valid group assignment
+    (set of fragments whose sides OR to the target value) and estimates:
+        assembly_cost (bring fragments together) + delivery_cost (reach target)
+
+    Returns float('inf') if no valid fragment pairing exists — this signals
+    a dead end and causes A* to prune the subtree immediately.
+
+    The estimate uses Manhattan distances and is therefore admissible: real
+    paths cost at least as many moves.
+    """
+    bd = _boxes_dict(state.boxes)
+
+    unsatisfied = [t for t in info.targets if bd.get(t) != info.target_value]
+    if not unsatisfied:
+        return 0.0
+
+    # Exclude fragments already on satisfied targets (they are done)
+    satisfied = {t for t in info.targets if bd.get(t) == info.target_value}
+    fragments = [(pos, sides) for pos, sides in bd.items() if pos not in satisfied]
+
+    if not fragments:
+        return float("inf")
+
+    valid_groups = _enumerate_valid_groups(fragments, info.target_value)
+    if not valid_groups:
+        return float("inf")  # No valid pairing → dead end
+
+    # For each unsatisfied target, find cheapest valid group (ignoring
+    # disjointness — gives admissible lower bound per target).
+    total = 0.0
+    for target in unsatisfied:
+        best = min((_group_cost(g, target) for g in valid_groups), default=float("inf"))
+        if best == float("inf"):
+            return float("inf")
+        total += best
+
+    return total
+
+
+def _enumerate_valid_groups(
+    fragments: List[Tuple[Tuple[int, int], int]],
+    target_value: int,
+) -> List[List[Tuple[Tuple[int, int], int]]]:
+    """
+    Return all non-empty subsets of *fragments* whose sides bitwise-OR to
+    *target_value*.  For n ≤ 12 fragments this is fast (at most 4096 subsets).
+    """
+    n = len(fragments)
+    valid = []
+    for mask in range(1, 1 << n):
+        combined = 0
+        group = []
+        for i in range(n):
+            if mask & (1 << i):
+                combined |= fragments[i][1]
+                group.append(fragments[i])
+        if combined == target_value:
+            valid.append(group)
+    return valid
+
+
+def _group_cost(
+    group: List[Tuple[Tuple[int, int], int]],
+    target: Tuple[int, int],
+) -> float:
+    """
+    Lower-bound cost to assemble the fragment group and deliver it to *target*.
+
+    assembly_cost — nearest-neighbour MST estimate (Manhattan) to bring all
+                    group members together for merging.
+    delivery_cost — Manhattan distance from nearest group member to the target.
+    """
+    positions = [pos for pos, _ in group]
+
+    if len(positions) == 1:
+        assembly = 0.0
+    elif len(positions) == 2:
+        p0, p1 = positions
+        assembly = float(abs(p0[0] - p1[0]) + abs(p0[1] - p1[1]))
+    else:
+        # Nearest-neighbour approximation of minimum spanning tree
+        remaining = list(positions)
+        assembly = 0.0
+        current = remaining.pop(0)
+        while remaining:
+            nearest = min(
+                remaining,
+                key=lambda p: abs(p[0] - current[0]) + abs(p[1] - current[1]),
+            )
+            assembly += abs(nearest[0] - current[0]) + abs(nearest[1] - current[1])
+            remaining.remove(nearest)
+            current = nearest
+
+    delivery = float(min(
+        abs(pos[0] - target[0]) + abs(pos[1] - target[1])
+        for pos in positions
+    ))
+
+    return assembly + delivery
 
 
 # ---------------------------------------------------------------------------
@@ -355,11 +527,11 @@ def override_initial_state(base: BBState, override: Dict[str, Any]) -> BBState:
     Override JSON format::
 
         {
-          "boxes":    [{"position": [x, y], "sides": N}, ...],
-          "rocks":    [[x, y], ...],          // optional
-          "pickaxes": [[x, y], ...],          // optional
-          "avatar":   [x, y],                 // optional
-          "inventory": null | "pickaxe"       // optional
+          "boxes":     [{"position": [x, y], "sides": N}, ...],
+          "rocks":     [[x, y], ...],
+          "pickaxes":  [[x, y], ...],
+          "avatar":    [x, y],
+          "inventory": null | "pickaxe"
         }
     """
     boxes = base.boxes
@@ -379,7 +551,7 @@ def override_initial_state(base: BBState, override: Dict[str, Any]) -> BBState:
         ax, ay = override["avatar"]
     inv = base.inv
     if "inventory" in override:
-        inv = override["inventory"]  # None or "pickaxe"
+        inv = override["inventory"]
     return BBState(boxes=boxes, rocks=rocks, pickaxes=pickaxes,
                    ax=ax, ay=ay, inv=inv)
 
@@ -391,12 +563,12 @@ def matches_waypoint(state: BBState, waypoint: Dict[str, Any]) -> bool:
     Waypoint JSON format::
 
         {
-          "boxes":    [{"position": [x, y], "sides": N}, ...],  // optional
-          "avatar":   [x, y],                                    // optional
-          "inventory": null | "pickaxe"                          // optional
+          "boxes":     [{"position": [x, y], "sides": N}, ...],
+          "avatar":    [x, y],
+          "inventory": null | "pickaxe"
         }
 
-    Only the listed fields are checked; others are ignored.
+    Only listed fields are checked; others are ignored.
     """
     bd = _boxes_dict(state.boxes)
     if "boxes" in waypoint:
@@ -414,27 +586,13 @@ def matches_waypoint(state: BBState, waypoint: Dict[str, Any]) -> bool:
     return True
 
 
-def _apply_pickup(state: BBState, info: LevelInfo) -> BBState:
-    """If avatar is standing on a pickaxe and not already holding something, pick it up."""
-    pos = (state.ax, state.ay)
-    if state.inv is None and pos in state.pickaxes:
-        return BBState(
-            boxes=state.boxes,
-            rocks=state.rocks,
-            pickaxes=state.pickaxes - {pos},
-            ax=state.ax, ay=state.ay,
-            inv="pickaxe",
-        )
-    return state
-
+# ---------------------------------------------------------------------------
+# Win condition
+# ---------------------------------------------------------------------------
 
 def _check_win(state: BBState, info: LevelInfo) -> bool:
-    """Win if every target has a box with the required sides value."""
     bd = _boxes_dict(state.boxes)
-    return all(
-        bd.get(t) == info.target_value
-        for t in info.targets
-    )
+    return all(bd.get(t) == info.target_value for t in info.targets)
 
 
 # ---------------------------------------------------------------------------
@@ -447,31 +605,19 @@ def can_prune(
     """Return True if this state cannot possibly lead to a solution."""
     bd = _boxes_dict(state.boxes)
 
-    # ── Heuristic 1: Too few moves remain to satisfy all targets ─────────────
-    # Each unsatisfied target needs at least 1 more move (to push/merge a box
-    # onto it or to do the final merge on it). This is a sound lower bound.
-    remaining = sum(
-        1 for t in info.targets
-        if bd.get(t) != info.target_value
-    )
+    # ── Heuristic 1: Too few moves remain for all unsatisfied targets ────────
+    remaining = sum(1 for t in info.targets if bd.get(t) != info.target_value)
     if depth + remaining > max_depth:
         return True
 
     # ── Heuristic 2: Box permanently stuck (no reachable push direction) ─────
-    # A box is stuck if, in every direction, the push destination is blocked
-    # (OOB, wall, or rock) AND the avatar cannot enter the box from that side
-    # (i.e., the inward side is set).  Such a box can never move.
-    # Note: complete boxes (sides=15) CAN be pushed — the inward side being set
-    # triggers a push. So we check pushability, not entryability.
     for pos, sides in bd.items():
         if pos in info.targets and sides == info.target_value:
-            continue  # already satisfied, doesn't need to move
+            continue  # already satisfied
         px, py = pos
         can_move = False
         for d in ACTIONS:
             ddx, ddy = _DELTA[d]
-            # To push box in direction d, avatar must be at (px-ddx, py-ddy)
-            # and box can land at (px+ddx, py+ddy).
             land_x, land_y = px + ddx, py + ddy
             if not _is_in_bounds(land_x, land_y, info):
                 continue
@@ -479,8 +625,6 @@ def can_prune(
                 continue
             if (land_x, land_y) in state.rocks:
                 continue
-            # Land cell must not be occupied by a non-box entity
-            # (a box there means push+merge, which is fine)
             if (land_x, land_y) in state.pickaxes:
                 continue
             can_move = True
