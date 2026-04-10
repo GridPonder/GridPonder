@@ -31,7 +31,8 @@
       "layer": "ground",
       "tags": [],
       "sprite": "cell_void.png",
-      "symbol": "v"
+      "symbol": "v",
+      "description": "impassable, cannot enter"
     },
     "box_fragment": {
       "layer": "objects",
@@ -40,8 +41,9 @@
         "sides": { "type": "integer" }
       },
       "sprite": null,
-      "symbol": "B",
-      "symbolParam": "sides"
+      "symbol": "b",
+      "symbolParam": "sides",
+      "description": "4-bit sides bitmask in hex: bit0=up, bit1=right, bit2=down, bit3=left; F=all 4 sides connected"
     },
     "box_target": {
       "layer": "markers",
@@ -63,13 +65,15 @@
           "mode": "once"
         }
       },
-      "symbol": "R"
+      "symbol": "R",
+      "description": "blocks movement; destroyed by walking into it while carrying a pickaxe"
     },
     "pickaxe": {
       "layer": "objects",
       "tags": ["pickup"],
       "sprite": "assets/sprites/pickaxe.png",
-      "symbol": "P"
+      "symbol": "P",
+      "description": "pick up by walking onto it; then walk into a rock to destroy it"
     },
     "portal": {
       "layer": "objects",

@@ -253,8 +253,7 @@ BOARD AFTER (current):
 ${obs.boardText}$inventoryLine$movesLine
 
 Compare the two boards to understand exactly what your last action did (tiles removed, pushed, merged, etc.).
-If your inventory changed, note what was gained or lost.
-Update your memory with any new observations about game mechanics or level layout.
+${(inv != null || obs.previousInventory != null) ? 'If your inventory changed, note what was gained or lost.\n' : ''}Update your memory with any new observations about game mechanics or level layout.
 Memory is your only way to retain knowledge across actions.'''
         : '''
 CURRENT BOARD (first move of this attempt):
@@ -409,8 +408,14 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
           final params = Map<String, dynamic>.from(map)
             ..remove('action')
             ..remove('memory');
-          final candidate = GameAction(actionId, params);
-          if (obs.game.isValidAction(candidate)) return candidate;
+          // Match strictly against the pre-enumerated valid actions so that
+          // hallucinated parameters (e.g. rotate+direction) are rejected.
+          final match = obs.validActions.where((a) =>
+            a.actionId == actionId &&
+            a.params.length == params.length &&
+            params.entries.every((e) => a.params[e.key] == e.value)
+          ).firstOrNull;
+          if (match != null) return match;
         }
       } catch (_) {}
     }

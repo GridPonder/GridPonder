@@ -563,8 +563,7 @@ class _PlayScreenState extends State<PlayScreen> {
       agent = await _buildAgent();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(e.toString())));
+      _showTextDialog('Agent Error', e.toString());
       return;
     }
 
@@ -609,8 +608,7 @@ class _PlayScreenState extends State<PlayScreen> {
       onError: (e) {
         if (!mounted) return;
         setState(() => _aiRunning = false);
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Agent error: $e')));
+        _showTextDialog('Agent Error', e.toString());
       },
       onDone: () {
         if (mounted) setState(() => _aiRunning = false);
@@ -633,7 +631,7 @@ class _PlayScreenState extends State<PlayScreen> {
         content: SizedBox(
           width: double.maxFinite,
           child: SingleChildScrollView(
-            child: Text(
+            child: SelectableText(
               content?.isNotEmpty == true ? content! : '(empty)',
               style: const TextStyle(fontSize: 12, height: 1.5,
                   fontFamily: 'monospace'),
@@ -1557,7 +1555,7 @@ class _PlayScreenState extends State<PlayScreen> {
       if (parts[i].isEmpty) continue;
       spans.add(TextSpan(text: parts[i], style: i.isOdd ? monoStyle : baseStyle));
     }
-    return RichText(text: TextSpan(children: spans));
+    return SelectableText.rich(TextSpan(children: spans));
   }
 
   Widget _debugButton(String label, VoidCallback onPressed) {

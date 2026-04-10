@@ -357,7 +357,13 @@ class AgentRunner {
       previousInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
-      engine.executeTurn(result.action);
+      try {
+        engine.executeTurn(result.action);
+      } catch (_) {
+        // Engine rejected the action (e.g. hallucinated params from the LLM).
+        // Treat as a wasted no-op and continue without advancing totalSteps.
+        continue;
+      }
       lastAction = result.action;
       totalSteps++;
 

@@ -64,7 +64,8 @@
       "tags": ["flooded"],
       "sprite": null,
       "symbol": "F",
-      "uiName": "flooded"
+      "uiName": "flooded",
+      "description": "your expanding region"
     }
   },
   "actions": [
