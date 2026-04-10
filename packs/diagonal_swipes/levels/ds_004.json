@@ -32,11 +32,11 @@
   "solution": {
     "goldPath": [
       {"action": "move", "direction": "down"},
-      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "diagonal_swap", "direction": "up_left"},
       {"action": "move", "direction": "up"},
-      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "diagonal_swap", "direction": "up_left"},
       {"action": "move", "direction": "right"},
-      {"action": "diagonal_swap", "direction": "down_right"}
+      {"action": "diagonal_swap", "direction": "up_left"}
     ],
     "hintStops": [1, 3, 5]
   }

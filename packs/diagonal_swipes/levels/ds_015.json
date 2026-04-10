@@ -42,13 +42,13 @@
   ],
   "solution": {
     "goldPath": [
-      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "diagonal_swap", "direction": "up_left"},
       {"action": "move", "direction": "down"},
-      {"action": "diagonal_swap", "direction": "down_right"},
-      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "diagonal_swap", "direction": "up_left"},
+      {"action": "diagonal_swap", "direction": "up_right"},
       {"action": "move", "direction": "up"},
-      {"action": "diagonal_swap", "direction": "down_right"},
-      {"action": "diagonal_swap", "direction": "down_left"}
+      {"action": "diagonal_swap", "direction": "up_left"},
+      {"action": "diagonal_swap", "direction": "up_right"}
     ],
     "hintStops": [0, 2, 3]
   }

@@ -38,14 +38,14 @@
   ],
   "solution": {
     "goldPath": [
-      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "diagonal_swap", "direction": "up_left"},
       {"action": "move", "direction": "down"},
       {"action": "move", "direction": "right"},
-      {"action": "diagonal_swap", "direction": "down_right"},
+      {"action": "diagonal_swap", "direction": "up_left"},
       {"action": "move", "direction": "left"},
-      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "diagonal_swap", "direction": "up_right"},
       {"action": "move", "direction": "up"},
-      {"action": "diagonal_swap", "direction": "down_right"}
+      {"action": "diagonal_swap", "direction": "up_left"}
     ],
     "hintStops": [0, 3, 6]
   }

@@ -33,10 +33,10 @@
   "solution": {
     "goldPath": [
       {"action": "move", "direction": "right"},
-      {"action": "diagonal_swap", "direction": "down_right"},
-      {"action": "diagonal_swap", "direction": "down_left"},
+      {"action": "diagonal_swap", "direction": "up_left"},
+      {"action": "diagonal_swap", "direction": "up_right"},
       {"action": "move", "direction": "left"},
-      {"action": "diagonal_swap", "direction": "down_right"}
+      {"action": "diagonal_swap", "direction": "up_left"}
     ],
     "hintStops": [1, 2]
   }
