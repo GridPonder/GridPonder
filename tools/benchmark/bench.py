@@ -80,14 +80,16 @@ def expand_model_variants(
 ) -> list[tuple[dict, dict]]:
     """Return (model, variant) pairs, filtered by selected_ids if given.
 
-    selected_ids can be a model id ("gemma4-e2b") or a full variant id
-    ("gemma4-e2b-think"). None means all models and all variants.
+    selected_ids must be full variant ids (e.g. "gemma4-e2b" for the no-think
+    variant, "gemma4-e2b-think" for the think variant). Passing a bare model id
+    like "gemma4-e2b" only matches the variant whose suffix is "", not all
+    variants of that model. None means all models and all variants.
     """
     pairs: list[tuple[dict, dict]] = []
     for model in models:
         for variant in model["variants"]:
             full_id = f"{model['id']}{variant.get('suffix', '')}"
-            if selected_ids is None or model["id"] in selected_ids or full_id in selected_ids:
+            if selected_ids is None or full_id in selected_ids:
                 pairs.append((model, variant))
     return pairs
 
@@ -136,6 +138,7 @@ def run_level(
     output_tokens_total = 0
     resets = 0
     consecutive_rejections = 0
+    consecutive_timeouts = 0
     final_event: dict | None = None
 
     proc = subprocess.Popen(
@@ -174,8 +177,16 @@ def run_level(
                 except Exception as exc:
                     # LLM call failed — give_up to avoid hanging.
                     send({"action": "give_up", "memory": f"LLM error: {exc}"})
+                    if action_timeout is not None and isinstance(exc, TimeoutError):
+                        consecutive_timeouts += 1
+                        if consecutive_timeouts >= MAX_CONSECUTIVE_REJECTIONS:
+                            # Model can't respond within the timeout budget —
+                            # abort this level rather than burning the full
+                            # action budget at timeout_seconds each.
+                            break
                     continue
 
+                consecutive_timeouts = 0
                 latencies.append(latency_ms)
                 thinking_tokens_total += think_tok
                 output_tokens_total += out_tok

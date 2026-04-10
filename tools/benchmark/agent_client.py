@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import re
 import time
+import threading
 from typing import Any
 
 import litellm
@@ -60,8 +61,34 @@ def call_llm(
         params["timeout"] = request_timeout
     params.update(extra_params)
 
+    # Use a real wall-clock timeout via a thread so that streaming responses
+    # (e.g. long Ollama thinking traces) are also cut off after the limit,
+    # not just idle connections.
+    result: dict[str, Any] = {}
+    exc_holder: list[BaseException] = []
+
+    def _call() -> None:
+        try:
+            result["response"] = litellm.completion(**params)
+        except BaseException as e:  # noqa: BLE001
+            exc_holder.append(e)
+
     t0 = time.monotonic()
-    response = litellm.completion(**params)
+    if request_timeout is not None:
+        thread = threading.Thread(target=_call, daemon=True)
+        thread.start()
+        thread.join(timeout=request_timeout)
+        if thread.is_alive():
+            raise TimeoutError(
+                f"LLM call exceeded {request_timeout}s wall-clock limit"
+            )
+    else:
+        _call()
+
+    if exc_holder:
+        raise exc_holder[0]
+
+    response = result["response"]
     latency_ms = (time.monotonic() - t0) * 1000.0
 
     content: str = response.choices[0].message.content or ""
