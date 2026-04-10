@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
@@ -1373,6 +1374,22 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   Widget _buildAiStartButton() {
+    if (kIsWeb) {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: Tooltip(
+            message: 'AI play requires the native app (browser security restricts API calls)',
+            child: TextButton.icon(
+              icon: const Icon(Icons.smart_toy_outlined, size: 18),
+              label: const Text('Start AI'),
+              onPressed: null,
+            ),
+          ),
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
       child: Align(

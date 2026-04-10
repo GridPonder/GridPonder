@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
 import '../services/settings_service.dart';
@@ -61,6 +62,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const SizedBox(height: 20),
           _sectionHeader('AI Play Mode'),
+          if (kIsWeb)
+            Container(
+              margin: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.amber.shade200),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, size: 18, color: Colors.amber.shade700),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'AI play is not available in the browser. Use the macOS app for AI features.',
+                      style: TextStyle(fontSize: 13, color: Colors.amber.shade900),
+                    ),
+                  ),
+                ],
+              ),
+            ),
           _card(
             child: Column(
               children: [
@@ -69,10 +92,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: const Text('Enable AI Play'),
                   subtitle: const Text('Show AI controls on the play screen'),
                   value: s.aiPlayEnabled,
-                  onChanged: (v) async {
-                    await s.setAiPlayEnabled(v);
-                    setState(() {});
-                  },
+                  onChanged: kIsWeb
+                      ? null
+                      : (v) async {
+                          await s.setAiPlayEnabled(v);
+                          setState(() {});
+                        },
                 ),
               ],
             ),

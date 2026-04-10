@@ -124,9 +124,41 @@ where state is enumerable and the move space is small). A solver is critical
 for ensuring harder levels cannot be cracked by BFS or a simple AI — see the
 difficulty guidance in Phase 3 below.
 
+If writing a solver, state whether you can also implement an **admissible
+heuristic** (`heuristic(state, info) → float`). A good heuristic enables A*
+search and makes deep levels (> 15 moves) tractable — BFS explores states
+exponentially with depth, while A* with a useful heuristic stays manageable.
+Describe the heuristic's admissibility argument here (it must never
+overestimate the true remaining cost).
+
+### 2.8 Game design document
+
+Before proceeding to implementation, write `docs/games/<packId>.md`. This
+document captures the design intent in a form that will guide level creation
+and serve as a reference for future contributors.
+
+Structure it after `docs/games/box-that-pip-built.md` (read that file for an
+example), with these sections:
+
+1. **Game description** — 2–3 narrative paragraphs: who is the player,
+   what do they do, what is the core surprise that sets this game apart.
+2. **DSL elements** — concise reference list: layers, entity kinds, actions,
+   systems, rules, win condition. Enough to reconstruct `game.json` from
+   scratch; not a prose retelling.
+3. **Aha moments** — 3–8 numbered items. Each is a non-obvious insight a
+   player must discover. These are the puzzle insights that make the game
+   interesting *and* resistant to brute-force search. Weak aha moments
+   usually signal levels that will be too easy.
+4. **Level design** — progression arc (numbered mechanic stages, no specific
+   level references) and 3–5 concrete design tips for this game.
+5. **Solver heuristics** — if a solver is planned: state representation,
+   any precomputation, the heuristic formula and its admissibility argument,
+   dead-end pruning rules, and tiebreaking. This section is the specification
+   for the solver you will write in Phase 3.
+
 ---
 
-**Wait for explicit user approval of the design before proceeding.**
+**Wait for explicit user approval of the design document before proceeding.**
 If the user requests changes, revise the relevant section and re-present.
 
 ---
@@ -157,13 +189,22 @@ game has a sequence or board-match goal type.
 ### 3.2 Solver (strongly recommended)
 
 If the game's state is enumerable, write a Python solver following the pattern
-in `tools/solver/games/`. The solver should:
-- Represent the full board state as a hashable Python object
-- Implement `apply_action(state, action) → state | None`
-- Expose the state to the BFS engine in `tools/solver/solve.py`
+in `tools/solver/games/`. The solver must implement:
+- A hashable state dataclass
+- `apply(state, action, info) → (new_state, won, events)` — events are DSL
+  event dicts (same vocabulary as `engine/lib/src/event.dart`); return `[]`
+  if the game does not yet emit events
+- `can_prune(state, info, depth, max_depth) → bool`
+- `load(level_json) → (initial_state, info)`
+- `ACTIONS: List[str]`
 
-A solver is the primary tool for validating that a level is correctly
-designed and not trivially solvable. Commit it to `tools/solver/games/`.
+If the game design document (§2.8) specifies an admissible heuristic, also
+implement `heuristic(state, info) → float` — return `float('inf')` for
+provably dead states. This enables `--mode astar` in the solver CLI, which is
+significantly faster than BFS for levels with gold paths > 15 moves.
+
+Commit the solver to `tools/solver/games/` and register the game in
+`tools/solver/solve.py` (game detection + `_solve_<game>` function).
 
 ### 3.3 Tiles
 
@@ -233,8 +274,10 @@ Before declaring the game done:
       `levels/`
 - [ ] Every level has a valid `goldPath` confirmed by integration test
       (last screenshot shows "Level Complete!")
-- [ ] All levels from level 3 onward resist trivial BFS (solver confirms gold
-      path is unique or near-unique at the intended depth)
+- [ ] `docs/games/<packId>.md` exists and has been approved
+- [ ] All levels from level 3 onward reach ≥ 8 difficulty bits on Monte Carlo
+      (run `python3 tools/solver/solve.py <level> --mc-trials 10000`); use
+      `--mode astar` to verify optimality when gold path > 15 moves
 - [ ] At least one hint stop is placed in each level with a gold path > 2 moves,
       biased toward the early/critical steps
 - [ ] Theme colours and gesture map are consistent and tested on device

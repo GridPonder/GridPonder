@@ -14,3 +14,4 @@ See `README.md` for repo structure, `docs/gridponder_platform_overview.md` for a
 - use skills to test levels when needed before declaring that your work is done (usually involves writing an integration test, starting the app, taking screenshots and analysing correctness)
 - do not declare AI models as co-author in git commits
 - when you place hint stops in levels, bias them towards earlier steps in the gold path and after critical/useful actions
+- write screenshots or other temporary files to tmp/ (in this repo) as writing elsewhere needs explicit approval
