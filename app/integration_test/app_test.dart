@@ -14,45 +14,41 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
 const String kPackId = 'box_builder';
-const String kLevelId = 'bb_016';
+const String kLevelId = 'bb_017';
 // Gold-path moves: a direction string or button label.
 //   Swipes:  'right' | 'left' | 'up' | 'down'
 //   Buttons: 'rotate' | 'flip' | 'flood'  (taps the labelled button)
 const List<String> kMoves = [
   'right', // 1
   'right', // 2
-  'down',  // 3 — picks up pickaxe at (4,3)
-  'up',    // 4
-  'left',  // 5
-  'down',  // 6
-  'right', // 7
-  'down',  // 8
-  'left',  // 9
-  'up',    // 10
-  'right', // 11
+  'left',  // 3
+  'down',  // 4
+  'right', // 5 — picks up pickaxe at (4,3)
+  'left',  // 6
+  'up',    // 7
+  'right', // 8
+  'down',  // 9
+  'down',  // 10 — C(6) pushed to T2=(4,4)
+  'left',  // 11
   'up',    // 12
-  'left',  // 13
-  'left',  // 14
-  'down',  // 15
-  'right', // 16
-  'up',    // 17
+  'right', // 13
+  'up',    // 14
+  'left',  // 15
+  'left',  // 16
+  'down',  // 17 — break R2=(2,3), KEY: non-obvious rock
   'right', // 18
-  'down',  // 19 — merge C+D → T2=(4,4) complete
-  'up',    // 20
-  'left',  // 21
-  'left',  // 22
-  'up',    // 23 — break Rock1 at (2,1) with pickaxe
+  'up',    // 19
+  'right', // 20
+  'down',  // 21 — merge D(9) into C(6) at T2 → complete box
+  'up',    // 22
+  'left',  // 23
   'left',  // 24
-  'down',  // 25
-  'right', // 26
-  'up',    // 27
-  'left',  // 28
-  'left',  // 29
-  'down',  // 30
-  'right', // 31
-  'up',    // 32
-  'left',  // 33
-  'up',    // 34 — WIN
+  'left',  // 25
+  'up',    // 26
+  'left',  // 27
+  'down',  // 28 — merge A(5) into B(10) → complete box at (0,2)
+  'up',    // 29
+  'up',    // 30 — push merged box to T1=(0,0) → WIN
 ];
 // ---------------------------------------------------------------------------
 
