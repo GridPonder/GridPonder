@@ -27,15 +27,13 @@
   ],
   "solution": {
     "goldPath": [
-      {"action": "move", "direction": "right"},
-      {"action": "move", "direction": "right"},
-      {"action": "move", "direction": "down"},
       {"action": "move", "direction": "down"},
       {"action": "move", "direction": "right"},
       {"action": "move", "direction": "right"},
       {"action": "move", "direction": "up"},
-      {"action": "move", "direction": "up"}
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
     ],
-    "hintStops": [2, 5]
+    "hintStops": [2]
   }
 }
