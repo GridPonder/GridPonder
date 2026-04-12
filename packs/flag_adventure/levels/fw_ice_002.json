@@ -1,0 +1,65 @@
+{
+  "id": "fw_ice_002",
+  "title": "Through the Looking Glass",
+  "board": {
+    "size": [9, 5],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 2], "kind": "ice"},
+          {"position": [3, 2], "kind": "ice"},
+          {"position": [4, 2], "kind": "ice"}
+        ]
+      },
+      "portals": {
+        "format": "sparse",
+        "entries": [
+          {"position": [5, 2], "kind": "portal", "channel": "beta"},
+          {"position": [5, 4], "kind": "portal", "channel": "beta"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 1], "kind": "rock"},
+          {"position": [3, 1], "kind": "rock"},
+          {"position": [4, 1], "kind": "rock"},
+          {"position": [5, 1], "kind": "rock"},
+          {"position": [6, 1], "kind": "rock"},
+          {"position": [7, 1], "kind": "rock"},
+          {"position": [1, 2], "kind": "wood"},
+          {"position": [2, 3], "kind": "rock"},
+          {"position": [3, 3], "kind": "rock"},
+          {"position": [4, 3], "kind": "rock"},
+          {"position": [5, 3], "kind": "rock"},
+          {"position": [6, 3], "kind": "rock"},
+          {"position": [7, 3], "kind": "rock"}
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {"position": [7, 2], "kind": "flag"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0], "facing": "right"}
+  },
+  "goals": [
+    {"id": "reach_flag", "type": "reach_target", "config": {"targetTag": "goal_target"}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
+    ],
+    "hintStops": [2]
+  }
+}

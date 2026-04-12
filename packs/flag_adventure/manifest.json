@@ -3,7 +3,7 @@
   "packVersion": 1,
   "gameId": "flag_adventure",
   "title": "Carrot Quest",
-  "description": "Move one step per turn. Solid tiles (rock R, wood W, metal crate C) block movement. Pushable tiles (W, C) slide one step away when walked into. Pick up items by stepping on them: torch T burns adjacent wood, pickaxe P breaks adjacent rocks. Metal crates sink in water (≈). Portals (O) teleport you to the paired portal of the same channel. Reach every goal marker.",
+  "description": "Navigate the grid to reach the carrot. Solid tiles (rock) block movement. Pushable tiles (wood, crate) slide one step when walked into. Ice is slippery and let's you or pushable items slide. Inventory (torch, pickaxe) interacts with the environment.",
   "coverImage": "assets/rabbit_reaching_for_carrot.png",
   "version": "1.0.0",
   "minEngineVersion": "0.1.0"

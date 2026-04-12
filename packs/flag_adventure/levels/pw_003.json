@@ -10,17 +10,22 @@
           {"position": [0, 4], "kind": "water"}
         ]
       },
-      "objects": {
+      "portals": {
         "format": "sparse",
         "entries": [
           {"position": [2, 0], "kind": "portal", "channel": "blue"},
+          {"position": [0, 2], "kind": "portal", "channel": "blue"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
           {"position": [3, 0], "kind": "rock"},
           {"position": [0, 1], "kind": "rock"},
           {"position": [1, 1], "kind": "rock"},
           {"position": [2, 1], "kind": "rock"},
           {"position": [3, 1], "kind": "rock"},
           {"position": [4, 1], "kind": "rock"},
-          {"position": [0, 2], "kind": "portal", "channel": "blue"},
           {"position": [2, 2], "kind": "rock"},
           {"position": [3, 2], "kind": "rock"},
           {"position": [4, 2], "kind": "rock"},

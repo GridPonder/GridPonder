@@ -2,6 +2,7 @@ import '../engine/game_system.dart';
 import '../models/game_definition.dart';
 import 'avatar_navigation_system.dart';
 import 'flood_fill_system.dart';
+import 'ice_slide_system.dart';
 import 'follower_npcs_system.dart';
 import 'overlay_cursor_system.dart';
 import 'portals_system.dart';
@@ -28,6 +29,7 @@ class SystemRegistry {
     'sided_box': (id, _) => SidedBoxSystem(id: id),
     'flood_fill': (id, _) => FloodFillSystem(id: id),
     'tile_teleport': (id, _) => TileTeleportSystem(id: id),
+    'ice_slide': (id, _) => IceSlideSystem(id: id),
   };
 
   /// Instantiate all enabled systems from a GameDefinition,

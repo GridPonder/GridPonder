@@ -6,6 +6,10 @@
       "default": "empty"
     },
     {
+      "id": "portals",
+      "occupancy": "zero_or_one"
+    },
+    {
       "id": "objects",
       "occupancy": "zero_or_one"
     },
@@ -38,6 +42,34 @@
       ],
       "sprite": "assets/sprites/bridge.png",
       "symbol": "="
+    },
+    "ice": {
+      "layer": "ground",
+      "tags": [
+        "slippery",
+        "walkable"
+      ],
+      "sprite": "assets/sprites/ice.png",
+      "animations": {
+        "melting": {
+          "frames": [
+            "assets/sprites/ice_melts_01.png",
+            "assets/sprites/ice_melts_02.png",
+            "assets/sprites/ice_melts_03.png"
+          ],
+          "duration": 600,
+          "mode": "once"
+        },
+        "breaking": {
+          "frames": [
+            "assets/sprites/ice_breaks_01.png",
+            "assets/sprites/ice_breaks_02.png"
+          ],
+          "duration": 400,
+          "mode": "once"
+        }
+      },
+      "symbol": "I"
     },
     "rock": {
       "layer": "objects",
@@ -106,7 +138,7 @@
       "symbol": "P"
     },
     "portal": {
-      "layer": "objects",
+      "layer": "portals",
       "tags": [
         "teleport"
       ],
@@ -182,6 +214,13 @@
       "config": {
         "matchKey": "channel"
       }
+    },
+    {
+      "id": "ice_slide",
+      "type": "ice_slide",
+      "config": {
+        "slipperyTag": "slippery"
+      }
     }
   ],
   "rules": [
@@ -227,6 +266,61 @@
           "clear_inventory": {}
         }
       ]
+    },
+    {
+      "id": "torch_melts_ice",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "slippery"
+        }
+      },
+      "if": {
+        "avatar": {
+          "hasItem": "torch"
+        }
+      },
+      "then": [
+        {
+          "transform": {
+            "layer": "ground",
+            "position": "$event.position",
+            "toKind": "water",
+            "animation": "melting"
+          }
+        }
+      ],
+      "priority": 10
+    },
+    {
+      "id": "pickaxe_breaks_ice",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "slippery"
+        }
+      },
+      "if": {
+        "avatar": {
+          "hasItem": "pickaxe"
+        }
+      },
+      "then": [
+        {
+          "transform": {
+            "layer": "ground",
+            "position": "$event.position",
+            "toKind": "empty",
+            "animation": "breaking"
+          }
+        },
+        {
+          "clear_inventory": {}
+        }
+      ],
+      "priority": 10
     },
     {
       "id": "crate_creates_bridge",
@@ -299,12 +393,25 @@
       "ref": "pw_003"
     },
     {
+      "type": "story",
+      "title": "A Frosty Frontier",
+      "text": "Pip shivers as she enters the frozen caves. The ground ahead glistens with treacherous ice — one wrong step and she'll slide uncontrollably!\n\nBut her torch might come in handy... fire melts ice, after all. And that metal crate could be useful too."
+    },
+    {
+      "type": "level",
+      "ref": "fw_ice_001"
+    },
+    {
+      "type": "level",
+      "ref": "fw_ice_002"
+    },
+    {
       "type": "level",
       "ref": "fw_007"
     }
   ],
   "defaults": {
-    "maxCascadeDepth": 3,
+    "maxCascadeDepth": 10,
     "avatar": {
       "enabled": true,
       "facing": "right"

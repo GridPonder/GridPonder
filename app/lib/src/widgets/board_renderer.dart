@@ -31,6 +31,9 @@ class BoardRenderer extends StatelessWidget {
   /// When set, cell_flooded entities are rendered in this color instead of
   /// their default color — used by Flood Colors to show the last chosen color.
   final Color? floodedColorOverride;
+  /// When set, the avatar is rendered at this position instead of
+  /// state.avatar.position — used during ice slide animations.
+  final Position? avatarPositionOverride;
 
   const BoardRenderer({
     super.key,
@@ -40,6 +43,7 @@ class BoardRenderer extends StatelessWidget {
     this.animationOverlays,
     this.onCellTap,
     this.floodedColorOverride,
+    this.avatarPositionOverride,
   });
 
   @override
@@ -110,7 +114,12 @@ class BoardRenderer extends StatelessWidget {
               if (state.overlay != null)
                 _buildOverlay(state.overlay!, cellSize),
               if (state.avatar.enabled && state.avatar.position != null)
-                _buildAvatar(state.avatar, cellSize),
+                _buildAvatar(
+                  avatarPositionOverride != null
+                      ? state.avatar.copyWith(position: avatarPositionOverride)
+                      : state.avatar,
+                  cellSize,
+                ),
             ],
           ),
         );
@@ -353,6 +362,7 @@ class _Cell extends StatelessWidget {
       child: Stack(
         children: [
           if (!skipGround) _layer('ground', pos),
+          _layer('portals', pos),
           _layer('objects', pos),
           _layer('markers', pos),
           _layer('actors', pos),
@@ -505,6 +515,7 @@ class _Cell extends StatelessWidget {
       'empty' => const Color(0xFFF5F0E8),
       'wall' => const Color(0xFF546E7A),
       'water' => const Color(0xFF64B5F6),
+      'ice' => const Color(0xFFB3E5FC),
       'bridge' => const Color(0xFF8D6E63),
       'void' => Colors.black87,
       'rock' => const Color(0xFF9E9E9E),

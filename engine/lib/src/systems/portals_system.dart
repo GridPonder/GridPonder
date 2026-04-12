@@ -1,4 +1,6 @@
 import '../engine/game_system.dart';
+import '../models/board.dart';
+import '../models/entity.dart';
 import '../models/event.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
@@ -7,51 +9,113 @@ import '../models/position.dart';
 class PortalsSystem extends GameSystem {
   const PortalsSystem({required super.id}) : super(type: 'portals');
 
+  // ---------------------------------------------------------------------------
+  // Phase 3 — normal movement (avatar walks into portal; push resolves a normal
+  // push that lands an object on a portal).
+  // ---------------------------------------------------------------------------
+
   @override
   List<GameEvent> executeMovementResolution(
     LevelState state,
     GameDefinition game,
   ) {
-    final config = game.systemConfig(id, {});
-
-    final teleportTagsRaw =
-        config['teleportTags'] as List<dynamic>? ?? ['teleport'];
-    final teleportTags = teleportTagsRaw.map((t) => t.toString()).toList();
-
-    final matchKey = config['matchKey'] as String? ?? 'channel';
-    final endMovement = config['endMovement'] as bool? ?? true;
-    final teleportObjects = config['teleportObjects'] as bool? ?? false;
-
+    final cfg = _config(game);
     final events = <GameEvent>[];
 
-    final avatar = state.avatar;
-    final avatarPos = avatar.position;
-
+    final avatarPos = state.avatar.position;
     if (avatarPos != null) {
-      final avatarTeleportEvents = _tryTeleportAvatar(
+      events.addAll(_tryTeleportAvatar(
         state: state,
         game: game,
         avatarPos: avatarPos,
-        teleportTags: teleportTags,
-        matchKey: matchKey,
-        endMovement: endMovement,
-      );
-      events.addAll(avatarTeleportEvents);
+        teleportTags: cfg.tags,
+        matchKey: cfg.matchKey,
+        endMovement: cfg.endMovement,
+      ));
     }
 
-    if (teleportObjects) {
-      final objectTeleportEvents = _tryTeleportPushedObject(
-        state: state,
-        game: game,
-        teleportTags: teleportTags,
-        matchKey: matchKey,
-      );
-      events.addAll(objectTeleportEvents);
+    // Object teleportation is handled in executeCascadeResolution, triggered
+    // by object_placed events. Never scan all portals proactively here — that
+    // would undo object placements made on previous turns.
+
+    return events;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Phase 5 (cascade) — avatar or object arrives at a portal cell via ice slide.
+  // ---------------------------------------------------------------------------
+
+  @override
+  List<GameEvent> executeCascadeResolution(
+    List<GameEvent> triggerEvents,
+    LevelState state,
+    GameDefinition game,
+  ) {
+    final cfg = _config(game);
+    final events = <GameEvent>[];
+
+    final avatarPos = state.avatar.position;
+    if (avatarPos != null) {
+      for (final e in triggerEvents) {
+        if (e.type != 'avatar_entered') continue;
+
+        // Only act on the event that placed Pip at her current position.
+        final enteredPos = e.position;
+        if (enteredPos != avatarPos) continue;
+
+        // Bounce guard: if Pip arrived here FROM the partner portal (i.e. this
+        // avatar_entered was itself emitted by a prior teleport), do not
+        // teleport again — that would send her straight back.
+        final fromRaw = e.payload['fromPosition'];
+        final fromPos = fromRaw == null
+            ? null
+            : (fromRaw is Position ? fromRaw : Position.fromJson(fromRaw));
+
+        final portal = _portalAt(state.board, avatarPos, cfg.tags, game);
+        if (portal != null) {
+          final channelValue = portal.entity.param(cfg.matchKey);
+          if (channelValue != null) {
+            final exitPos = _findExitPortal(state.board, avatarPos,
+                portal.entity.kind, channelValue, cfg.matchKey);
+            if (exitPos != null && fromPos == exitPos) break; // came from partner → stop
+          }
+        }
+
+        events.addAll(_tryTeleportAvatar(
+          state: state,
+          game: game,
+          avatarPos: avatarPos,
+          teleportTags: cfg.tags,
+          matchKey: cfg.matchKey,
+          endMovement: cfg.endMovement,
+        ));
+        break; // only process one avatar_entered per pass
+      }
+    }
+
+    // Collect object_placed positions that arrived naturally (not via teleport).
+    // Teleported placements carry wasTeleported:true to break the bounce loop.
+    final arrivedAtPortal = triggerEvents
+        .where((e) =>
+            e.type == 'object_placed' &&
+            e.payload['wasTeleported'] != true)
+        .map((e) => e.position)
+        .whereType<Position>()
+        .toSet();
+    if (arrivedAtPortal.isNotEmpty) {
+      events.addAll(_tryTeleportObjects(state, game, cfg, arrivedAtPortal));
     }
 
     return events;
   }
 
+  // ---------------------------------------------------------------------------
+  // Core teleport helpers
+  // ---------------------------------------------------------------------------
+
+  /// Teleports the avatar if they are standing on a portal.
+  /// Returns [] without teleporting when the exit portal is blocked by a solid
+  /// object — the caller (navigation or ice_slide) then continues the move.
   List<GameEvent> _tryTeleportAvatar({
     required LevelState state,
     required GameDefinition game,
@@ -61,39 +125,27 @@ class PortalsSystem extends GameSystem {
     required bool endMovement,
   }) {
     final board = state.board;
-    final objectsLayer = board.layers['objects'];
-    if (objectsLayer == null) return const [];
 
-    final entityAtAvatarPos = objectsLayer.getAt(avatarPos);
-    if (entityAtAvatarPos == null) return const [];
+    // Find a portal entity at the avatar's position across all layers.
+    final portal = _portalAt(board, avatarPos, teleportTags, game);
+    if (portal == null) return const [];
 
-    final hasPortalTag =
-        teleportTags.any((tag) => game.hasTag(entityAtAvatarPos.kind, tag));
-    if (!hasPortalTag) return const [];
-
-    final channelValue = entityAtAvatarPos.param(matchKey);
+    final channelValue = portal.entity.param(matchKey);
     if (channelValue == null) return const [];
 
-    // Find matching exit portal: same kind, same matchKey value, different position
-    Position? exitPos;
-    for (final entry in objectsLayer.entries()) {
-      if (entry.key == avatarPos) continue;
-      final candidate = entry.value;
-      if (candidate.kind != entityAtAvatarPos.kind) continue;
-      final candidateChannel = candidate.param(matchKey);
-      if (candidateChannel == null) continue;
-      if (candidateChannel.toString() == channelValue.toString()) {
-        exitPos = entry.key;
-        break;
-      }
-    }
-
+    // Find the matching exit portal (same kind + channel, different position).
+    final exitPos = _findExitPortal(
+        board, avatarPos, portal.entity.kind, channelValue, matchKey);
     if (exitPos == null) return const [];
 
+    // Blocked exit: a solid object occupies the exit cell → pass through.
+    final objAtExit = board.getEntity('objects', exitPos);
+    if (objAtExit != null && game.hasTag(objAtExit.kind, 'solid')) {
+      return const [];
+    }
+
     final oldPos = avatarPos;
-    state.avatar = state.avatar.copyWith(
-      position: exitPos,
-    );
+    state.avatar = state.avatar.copyWith(position: exitPos);
 
     if (endMovement) {
       final facingStr = state.avatar.facing.toJson();
@@ -102,99 +154,127 @@ class PortalsSystem extends GameSystem {
         GameEvent.avatarEntered(exitPos, oldPos, facingStr),
       ];
     }
-
     return const [];
   }
 
-  List<GameEvent> _tryTeleportPushedObject({
-    required LevelState state,
-    required GameDefinition game,
-    required List<String> teleportTags,
-    required String matchKey,
-  }) {
-    // This is called after push has already resolved (pendingMove cleared).
-    // We need to detect if an object was recently pushed onto a portal.
-    // Since pendingMove is cleared by the push system, we check the overlay
-    // or look at recently placed objects.
-    // Per the spec: check if there's an object that was just pushed onto a
-    // portal (from objectPushed events). Since we don't have those events here,
-    // we scan the objects layer for any object sitting on a portal entity
-    // that also has a teleport tag.
+  /// Teleports any object in the objects layer that is sitting on a portal.
+  /// [onlyAtPositions] — when non-null, only checks portals at those positions
+  /// (used in cascade to avoid re-scanning unrelated portals).
+  /// Skips if the exit cell is occupied (any object, not just solid).
+  List<GameEvent> _tryTeleportObjects(
+    LevelState state,
+    GameDefinition game,
+    _PortalConfig cfg,
+    Set<Position>? onlyAtPositions,
+  ) {
     final board = state.board;
     final objectsLayer = board.layers['objects'];
     if (objectsLayer == null) return const [];
 
     final events = <GameEvent>[];
 
-    // Find all cells where there is an object AND also a portal (objects layer
-    // would only have one entity per cell in typical usage). The portal and the
-    // pushable object would be on different layers. Check if the objects layer
-    // cell has a pushable entity AND a portal marker layer or check ground layer.
-    // Per the design: portals are in the objects layer. A pushable object being
-    // pushed onto a portal cell would occupy the same cell. This scenario would
-    // typically be resolved differently (object replacing portal or layered).
-    //
-    // A simpler reading: after a push, the pushed object lands on pushDest.
-    // If pushDest had a portal entity, the push likely failed (portal is solid
-    // or not). If portals are non-solid (walkable), the push system would allow
-    // placing there. We scan for objects with pushable tags that are co-located
-    // with a portal-tagged entity across layers.
-    //
-    // Practical implementation: scan markers/ground layers for portal entities
-    // and check if the objects layer at those cells has a pushable object.
     for (final layerEntry in board.layers.entries) {
       if (layerEntry.key == 'objects' || layerEntry.key == 'actors') continue;
-      final layer = layerEntry.value;
-      for (final cell in layer.entries()) {
-        final entity = cell.value;
-        final isPortal =
-            teleportTags.any((tag) => game.hasTag(entity.kind, tag));
-        if (!isPortal) continue;
-
+      for (final cell in layerEntry.value.entries()) {
         final portalPos = cell.key;
-        final channelValue = entity.param(matchKey);
+        if (onlyAtPositions != null && !onlyAtPositions.contains(portalPos)) continue;
+
+        final entity = cell.value;
+        if (!cfg.tags.any((t) => game.hasTag(entity.kind, t))) continue;
+
+        final channelValue = entity.param(cfg.matchKey);
         if (channelValue == null) continue;
 
-        final objectAtPortal = objectsLayer.getAt(portalPos);
-        if (objectAtPortal == null) continue;
+        final objAtPortal = objectsLayer.getAt(portalPos);
+        if (objAtPortal == null) continue;
 
-        // Find matching exit portal in all layers (same kind, same channel,
-        // different pos)
-        Position? exitPos;
-        for (final otherLayerEntry in board.layers.entries) {
-          if (otherLayerEntry.key == 'objects' ||
-              otherLayerEntry.key == 'actors') continue;
-          final otherLayer = otherLayerEntry.value;
-          for (final otherCell in otherLayer.entries()) {
-            if (otherCell.key == portalPos) continue;
-            final otherEntity = otherCell.value;
-            if (otherEntity.kind != entity.kind) continue;
-            final otherChannel = otherEntity.param(matchKey);
-            if (otherChannel == null) continue;
-            if (otherChannel.toString() == channelValue.toString()) {
-              exitPos = otherCell.key;
-              break;
-            }
-          }
-          if (exitPos != null) break;
-        }
-
+        final exitPos = _findExitPortal(
+            board, portalPos, entity.kind, channelValue, cfg.matchKey);
         if (exitPos == null) continue;
 
-        // Check exit is clear
-        final objectAtExit = objectsLayer.getAt(exitPos);
-        if (objectAtExit != null) continue;
+        // Exit must be clear for object teleportation.
+        final objAtExit = objectsLayer.getAt(exitPos);
+        if (objAtExit != null) continue;
 
-        // Teleport object
         board.setEntity('objects', portalPos, null);
-        board.setEntity('objects', exitPos, objectAtPortal);
+        board.setEntity('objects', exitPos, objAtPortal);
 
-        events.add(GameEvent.objectRemoved(portalPos, objectAtPortal.kind));
-        events.add(GameEvent.objectPlaced(
-            exitPos, objectAtPortal.kind, objectAtPortal.params));
+        events.add(GameEvent.objectRemoved(portalPos, objAtPortal.kind));
+        // wasTeleported marks this placement so the next cascade pass does not
+        // immediately teleport the object back.
+        events.add(GameEvent('object_placed', {
+          'position': exitPos,
+          'kind': objAtPortal.kind,
+          'params': objAtPortal.params,
+          'wasTeleported': true,
+        }));
       }
     }
 
     return events;
   }
+
+  // ---------------------------------------------------------------------------
+  // Utilities
+  // ---------------------------------------------------------------------------
+
+  /// Returns the first portal-tagged entity at [pos] across all board layers,
+  /// or null if none exists.
+  _PortalHit? _portalAt(Board board, Position pos,
+      List<String> teleportTags, GameDefinition game) {
+    for (final layerEntry in board.layers.entries) {
+      final entity = layerEntry.value.getAt(pos);
+      if (entity == null) continue;
+      if (teleportTags.any((t) => game.hasTag(entity.kind, t))) {
+        return _PortalHit(entity, layerEntry.key);
+      }
+    }
+    return null;
+  }
+
+  /// Finds the exit portal: same kind and channel, any position ≠ [sourcePos].
+  Position? _findExitPortal(Board board, Position sourcePos, String kind,
+      dynamic channelValue, String matchKey) {
+    for (final layerEntry in board.layers.entries) {
+      for (final entry in layerEntry.value.entries()) {
+        if (entry.key == sourcePos) continue;
+        final candidate = entry.value;
+        if (candidate.kind != kind) continue;
+        final ch = candidate.param(matchKey);
+        if (ch?.toString() == channelValue.toString()) {
+          return entry.key;
+        }
+      }
+    }
+    return null;
+  }
+
+  _PortalConfig _config(GameDefinition game) {
+    final config = game.systemConfig(id, {});
+    final tagsRaw = config['teleportTags'] as List<dynamic>? ?? ['teleport'];
+    return _PortalConfig(
+      tags: tagsRaw.map((t) => t.toString()).toList(),
+      matchKey: config['matchKey'] as String? ?? 'channel',
+      endMovement: config['endMovement'] as bool? ?? true,
+      teleportObjects: config['teleportObjects'] as bool? ?? true,
+    );
+  }
+}
+
+class _PortalConfig {
+  final List<String> tags;
+  final String matchKey;
+  final bool endMovement;
+  final bool teleportObjects;
+  const _PortalConfig(
+      {required this.tags,
+      required this.matchKey,
+      required this.endMovement,
+      required this.teleportObjects});
+}
+
+class _PortalHit {
+  final EntityInstance entity;
+  final String layerId;
+  const _PortalHit(this.entity, this.layerId);
 }
