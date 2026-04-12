@@ -60,6 +60,8 @@ class _PlayScreenState extends State<PlayScreen> {
   LevelState? _preAnimState;
   Map<Position, String>? _animOverlays;
   bool _animating = false;
+  // Non-null during ice slide: overrides the avatar's rendered position.
+  Position? _avatarSlidePos;
 
   // Flood Colors: color of the last successfully applied flood action.
   Color? _lastFloodColor;
@@ -135,21 +137,119 @@ class _PlayScreenState extends State<PlayScreen> {
         .where((s) => s.type == 'entity_animation')
         .toList();
 
+    final avatarMoves = result.animations
+        .where((s) => s.type == 'avatar_move')
+        .toList();
+    final hasSlide = avatarMoves.length > 1;
+
+    setState(() => _animating = true);
+
     if (entityAnims.isNotEmpty) {
-      setState(() => _animating = true);
       for (final step in entityAnims) {
         if (!mounted) return;
         await _playEntityAnimation(preState, step);
       }
       if (!mounted) return;
       setState(() {
-        _animating = false;
         _preAnimState = null;
         _animOverlays = null;
       });
-    } else {
-      setState(() {});
     }
+
+    // Avatar ice-slide: hold the pre-turn board so pushed objects stay at their
+    // original positions while Pip slides. Skip last avatarMove — it's the
+    // final position already shown by the engine state.
+    if (hasSlide) {
+      setState(() => _preAnimState = preState);
+      for (int i = 0; i < avatarMoves.length - 1; i++) {
+        if (!mounted) return;
+        final toRaw = avatarMoves[i].extra['to'] as List;
+        setState(() => _avatarSlidePos = Position(toRaw[0] as int, toRaw[1] as int));
+        await Future.delayed(const Duration(milliseconds: 130));
+      }
+      // _avatarSlidePos now holds Pip's last ice cell. Do NOT clear it yet —
+      // if a push follows, it keeps Pip visible at the correct position while
+      // the object animates. Cleared after the object animation (or below if
+      // no push follows).
+    }
+
+    // Animate objects that were pushed. Two cases:
+    //   (a) Pip slid on ice and pushed an object at the end of her slide.
+    //   (b) An object was pushed onto ice and slid on its own (2+ push events).
+    final pushEvents = result.events
+        .where((e) => e.type == 'object_pushed')
+        .toList();
+    if (pushEvents.isNotEmpty) {
+      final pushByKind = <String, List<GameEvent>>{};
+      for (final e in pushEvents) {
+        final k = e.payload['kind'] as String?;
+        if (k != null) pushByKind.putIfAbsent(k, () => []).add(e);
+      }
+      for (final entry in pushByKind.entries) {
+        if (hasSlide || entry.value.length > 1) {
+          await _playObjectSlide(preState, entry.key, entry.value);
+        }
+      }
+    }
+
+    // Clear slide overrides: _playObjectSlide already cleared _preAnimState and
+    // _animOverlays, but _avatarSlidePos needs explicit cleanup here.
+    if (hasSlide) {
+      if (!mounted) return;
+      setState(() {
+        _preAnimState = null;    // no-op if _playObjectSlide already cleared it
+        _avatarSlidePos = null;
+      });
+    }
+
+    if (!mounted) return;
+    setState(() => _animating = false);
+  }
+
+  /// Animates a sliding object through its sequence of ice-slide positions.
+  Future<void> _playObjectSlide(
+    LevelState preState,
+    String kind,
+    List<GameEvent> pushEvents,
+  ) async {
+    final kindDef = widget.packService.game.entityKinds[kind];
+    final sprite = kindDef?.sprite;
+    if (sprite == null) return;
+    final spritePath = widget.packService.resolveSprite(sprite);
+
+    // Build full position sequence: [from of first push, to of each push].
+    Position posFromPayload(dynamic p) =>
+        p is Position ? p : Position.fromJson(p);
+    final positions = <Position>[];
+    final firstFrom = pushEvents.first.payload['fromPosition'];
+    if (firstFrom == null) return;
+    positions.add(posFromPayload(firstFrom));
+    for (final e in pushEvents) {
+      final to = e.payload['toPosition'];
+      if (to == null) return;
+      positions.add(posFromPayload(to));
+    }
+
+    // Build animation board: remove object from its starting position so the
+    // overlay is the only rendered copy of it throughout the animation.
+    final animState = preState.copy();
+    animState.board.setEntity('objects', positions.first, null);
+
+    // Show object at each position in turn; skip the last because clearing
+    // _preAnimState afterwards reveals the final engine state there.
+    for (int i = 0; i < positions.length - 1; i++) {
+      if (!mounted) return;
+      setState(() {
+        _preAnimState = animState;
+        _animOverlays = {positions[i]: spritePath};
+      });
+      await Future.delayed(const Duration(milliseconds: 130));
+    }
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = null;
+      _animOverlays = null;
+    });
   }
 
   Future<void> _playEntityAnimation(LevelState preState, AnimationStep step) async {
@@ -157,10 +257,15 @@ class _PlayScreenState extends State<PlayScreen> {
     final animDef = kindDef?.animations[step.animationName!];
     if (animDef == null || animDef.frames.isEmpty) return;
 
-    // Remove the entity from the board so frames render cleanly over the
-    // ground tile — no original sprite bleeding through transparent pixels.
+    // For object-layer entities (wood, rock…), remove them from the board so
+    // animation frames render cleanly without the original sprite bleeding through.
+    // For ground-layer entities (ice…), keep the original tile visible beneath
+    // the overlay frames — clearing ground would show void/black behind the anim.
     final cleanState = preState.copy();
-    cleanState.board.setEntity('objects', step.position, null);
+    final layer = widget.packService.game.entityKinds[step.entityKind]?.layer ?? 'objects';
+    if (layer == 'objects') {
+      cleanState.board.setEntity('objects', step.position, null);
+    }
 
     final frameMs = (animDef.durationMs / animDef.frames.length).round();
     for (final framePath in animDef.frames) {
@@ -474,7 +579,24 @@ class _PlayScreenState extends State<PlayScreen> {
   // AI play
   // ---------------------------------------------------------------------------
 
+  /// Base max-tokens for the chosen inference mode (without thinking budget).
+  int get _baseModeTokens {
+    switch (s.inferenceMode) {
+      case 'fixed-n':
+        return (512 * s.stepSizeN).clamp(1024, 8192);
+      case 'flex-n':
+      case 'full':
+        return 4096;
+      default: // single
+        return 1024;
+    }
+  }
+
   Future<GridPonderAgent> _buildAgent() async {
+    final inferenceMode = s.inferenceMode;
+    final stepSizeN = s.stepSizeN;
+    final maxN = s.maxN == 0 ? null : s.maxN;
+
     if (s.agentType == 'llm') {
       final key = s.apiKey;
       if (key == null || key.isEmpty) {
@@ -482,11 +604,12 @@ class _PlayScreenState extends State<PlayScreen> {
       }
       final useThinking =
           s.thinkingEnabled && AnthropicModel.supportsThinking(s.llmModel);
+      final baseTokens = _baseModeTokens;
       var builder = ai()
           .anthropic()
           .apiKey(key)
           .model(s.llmModel)
-          .maxTokens(1024 + (useThinking ? 8000 : 0));
+          .maxTokens(baseTokens + (useThinking ? 8000 : 0));
       if (useThinking) {
         builder = builder.reasoning(true).thinkingBudgetTokens(8000);
       }
@@ -496,6 +619,9 @@ class _PlayScreenState extends State<PlayScreen> {
         provider: provider,
         displayName: '${AnthropicModel.displayName(s.llmModel)}$thinkLabel',
         initialMemory: _agentMemory[_currentEntry.ref] ?? '',
+        inferenceMode: inferenceMode,
+        stepSize: stepSizeN,
+        maxN: maxN,
       );
     }
     if (s.agentType == 'openai') {
@@ -507,12 +633,15 @@ class _PlayScreenState extends State<PlayScreen> {
           .openai()
           .apiKey(key)
           .model(s.openAiModel)
-          .maxTokens(1024)
+          .maxTokens(_baseModeTokens)
           .build();
       return LlmAgent(
         provider: provider,
         displayName: OpenAIModel.displayName(s.openAiModel),
         initialMemory: _agentMemory[_currentEntry.ref] ?? '',
+        inferenceMode: inferenceMode,
+        stepSize: stepSizeN,
+        maxN: maxN,
       );
     }
     if (s.agentType == 'google') {
@@ -522,11 +651,12 @@ class _PlayScreenState extends State<PlayScreen> {
       }
       final useThinking = s.googleThinkingEnabled &&
           GoogleModel.supportsThinking(s.googleModel);
+      final baseTokens = _baseModeTokens;
       var builder = ai()
           .google()
           .apiKey(key)
           .model(s.googleModel)
-          .maxTokens(1024 + (useThinking ? 8000 : 0));
+          .maxTokens(baseTokens + (useThinking ? 8000 : 0));
       if (useThinking) {
         builder = builder.reasoning(true).thinkingBudgetTokens(8000);
       }
@@ -536,6 +666,9 @@ class _PlayScreenState extends State<PlayScreen> {
         provider: provider,
         displayName: '${GoogleModel.displayName(s.googleModel)}$thinkLabel',
         initialMemory: _agentMemory[_currentEntry.ref] ?? '',
+        inferenceMode: inferenceMode,
+        stepSize: stepSizeN,
+        maxN: maxN,
       );
     }
     if (s.agentType == 'ollama') {
@@ -545,13 +678,16 @@ class _PlayScreenState extends State<PlayScreen> {
           .ollama(useThink ? (o) => o.reasoning(true) : null)
           .baseUrl(s.ollamaBaseUrl)
           .model(s.ollamaModel)
-          .maxTokens(useThink ? 32768 : 1024)
+          .maxTokens(useThink ? 32768 : _baseModeTokens)
           .build();
       final thinkLabel = useThink ? ' + think' : '';
       return LlmAgent(
         provider: provider,
         displayName: '${OllamaModel.displayName(s.ollamaModel)}$thinkLabel',
         initialMemory: _agentMemory[_currentEntry.ref] ?? '',
+        inferenceMode: inferenceMode,
+        stepSize: stepSizeN,
+        maxN: maxN,
       );
     }
     return RandomAgent();
@@ -774,6 +910,7 @@ class _PlayScreenState extends State<PlayScreen> {
                     animationOverlays: _animOverlays,
                     onCellTap: _hasCellTapGesture ? _onCellTap : null,
                     floodedColorOverride: _lastFloodColor,
+                    avatarPositionOverride: _avatarSlidePos,
                   ),
                 ),
               ),

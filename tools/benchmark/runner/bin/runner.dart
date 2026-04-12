@@ -2,10 +2,19 @@
 //
 // Communicates via newline-delimited JSON on stdin/stdout:
 //   stdout → Python: state / reset / rejected / won / lost events
-//   stdin  ← Python: {"action": "...", ...params, "memory": "..."}
+//   stdin  ← Python:
+//     single mode:  {"action": "...", ...params, "memory": "..."}
+//     other modes:  {"actions": [...], "memory": "..."} or single format
+//
+// Inference modes:
+//   single  — one action per LLM call (default, backwards-compatible)
+//   fixed-n — up to step-size actions per LLM call (model may output fewer)
+//   flex-n  — 1 to max-n actions per call, model chooses; extra steps penalised
+//   full    — all actions in one call; no intermediate feedback, one attempt
 //
 // give_up counts as 1 action toward the total action budget;
-// auto-reset triggers when actionCount >= action_limit_per_attempt.
+// auto-reset triggers when actionCount >= action_limit_per_attempt
+// (not applicable in full mode).
 
 import 'dart:convert';
 import 'dart:io';
@@ -18,15 +27,22 @@ Future<void> main(List<String> arguments) async {
     ..addOption('pack', abbr: 'p', help: 'Pack ID', mandatory: true)
     ..addOption('level', abbr: 'l', help: 'Level ID', mandatory: true)
     ..addOption('packs-dir',
-        help: 'Absolute path to the packs/ directory',
-        defaultsTo: null)
+        help: 'Absolute path to the packs/ directory', defaultsTo: null)
     ..addOption('attempt-multiplier',
         help: 'action_limit_per_attempt = M × gold_path_length',
-        defaultsTo: '3')
+        defaultsTo: '2')
     ..addOption('total-multiplier',
-        help:
-            'action_limit = M × gold_path_length  (give_up counts as 1 action)',
-        defaultsTo: '5');
+        help: 'action_limit = M × gold_path_length  (give_up counts as 1)',
+        defaultsTo: '3')
+    ..addOption('mode',
+        help: 'Inference mode',
+        allowed: ['single', 'fixed-n', 'full', 'flex-n'],
+        defaultsTo: 'single')
+    ..addOption('step-size',
+        help: 'Max actions per LLM call (fixed-n mode)', defaultsTo: '1')
+    ..addOption('max-n',
+        help: 'Max actions per LLM call (flex-n mode, default: unlimited)',
+        defaultsTo: null);
 
   late final ArgResults args;
   try {
@@ -39,10 +55,13 @@ Future<void> main(List<String> arguments) async {
 
   final packId = args['pack'] as String;
   final levelId = args['level'] as String;
-  final packsDir =
-      args['packs-dir'] as String? ?? _defaultPacksDir();
+  final packsDir = args['packs-dir'] as String? ?? _defaultPacksDir();
   final attemptMul = int.parse(args['attempt-multiplier'] as String);
   final totalMul = int.parse(args['total-multiplier'] as String);
+  final mode = args['mode'] as String;
+  final stepSize = int.parse(args['step-size'] as String);
+  final maxNStr = args['max-n'] as String?;
+  final maxN = maxNStr != null ? int.parse(maxNStr) : null;
 
   // ── Load pack ─────────────────────────────────────────────────────────────
   final packDir = '$packsDir/$packId';
@@ -88,7 +107,6 @@ Future<void> main(List<String> arguments) async {
   final levelDef = pack.levels[levelId]!;
   final goldPathLen = levelDef.solution.goldPath.length;
 
-  // Limits: fall back to sensible absolute values when gold path is absent.
   final limitPerAttempt = goldPathLen > 0
       ? attemptMul * goldPathLen
       : (attemptMul * 10).clamp(10, 60);
@@ -99,11 +117,10 @@ Future<void> main(List<String> arguments) async {
   // ── Game state ────────────────────────────────────────────────────────────
   final engine = TurnEngine(gameDef, levelDef);
   int attemptNumber = 1;
-  int totalGameActions = 0; // real game actions (not give_ups)
-  int giveUpCount = 0; // each voluntary give_up costs 1 toward total
+  int totalGameActions = 0;
+  int giveUpCount = 0;
   String memory = '';
 
-  // For the before/after board comparison in the prompt:
   GameAction? lastAction;
   String? prevBoardText;
   String? prevInventory;
@@ -123,9 +140,16 @@ Future<void> main(List<String> arguments) async {
       previousBoardText: prevBoardText,
       previousInventory: prevInventory,
     );
+
+    // single mode: prompt is unchanged (keeps small models unconfused).
+    // Other modes: append mode-specific instruction block.
+    final basePrompt = LlmAgent.buildPrompt(obs, memory: memory);
+    final prompt =
+        mode == 'single' ? basePrompt : basePrompt + _modeSuffix(mode, stepSize, maxN);
+
     out({
       'event': 'state',
-      'prompt': LlmAgent.buildPrompt(obs, memory: memory),
+      'prompt': prompt,
       'valid_actions': [
         ...obs.validActions.map((a) => a.toJson()),
         {'action': 'give_up'},
@@ -138,6 +162,9 @@ Future<void> main(List<String> arguments) async {
       'gold_path_length': goldPathLen,
       'level_id': levelId,
       'pack_id': packId,
+      'inference_mode': mode,
+      if (mode == 'fixed-n') 'step_size': stepSize,
+      if (mode == 'flex-n') 'max_n': maxN,
     });
   }
 
@@ -154,6 +181,22 @@ Future<void> main(List<String> arguments) async {
       'actions_total': totalGameActions + giveUpCount,
     });
   }
+
+  Map<String, dynamic> wonEvent() => {
+        'event': 'won',
+        'actions_this_attempt': engine.state.actionCount,
+        'actions_total': totalGameActions + giveUpCount,
+        'attempts': attemptNumber,
+        'gold_path_length': goldPathLen,
+      };
+
+  Map<String, dynamic> lostEvent() => {
+        'event': 'lost',
+        'actions_this_attempt': engine.state.actionCount,
+        'actions_total': totalGameActions + giveUpCount,
+        'attempts': attemptNumber,
+        'gold_path_length': goldPathLen,
+      };
 
   // ── Initial state ─────────────────────────────────────────────────────────
   emitState();
@@ -172,113 +215,246 @@ Future<void> main(List<String> arguments) async {
       continue;
     }
 
-    // Memory update is applied regardless of action type.
+    // Top-level memory update applies to both single and multi-action input.
     final memUpdate = input['memory'] as String?;
     if (memUpdate != null) memory = memUpdate;
 
-    final actionId = input['action'] as String?;
-    if (actionId == null) {
-      stderr.writeln('Missing "action" field: $trimmed');
-      continue;
-    }
+    // ── single mode: exact original behaviour ─────────────────────────────
+    if (mode == 'single') {
+      final actionId = input['action'] as String?;
+      if (actionId == null) {
+        stderr.writeln('Missing "action" field: $trimmed');
+        continue;
+      }
 
-    // ── give_up ─────────────────────────────────────────────────────────────
-    if (actionId == 'give_up') {
-      giveUpCount++; // give_up costs 1 action toward total budget
+      if (actionId == 'give_up') {
+        giveUpCount++;
+        final totalNow = totalGameActions + giveUpCount;
+        doReset(reason: 'voluntary');
+        if (totalNow >= limitTotal) {
+          out(lostEvent());
+          break;
+        }
+        emitState();
+        continue;
+      }
+
+      prevBoardText =
+          TextRenderer.render(engine.state, gameDef, includeLegend: false);
+      prevInventory = engine.state.avatar.enabled
+          ? engine.state.avatar.inventory.slot
+          : null;
+
+      final params = Map<String, dynamic>.from(input)
+        ..remove('action')
+        ..remove('memory');
+      final gameAction = GameAction(actionId, params);
+      final result = engine.executeTurn(gameAction);
+
+      if (!result.accepted) {
+        prevBoardText = null;
+        prevInventory = null;
+        out({'event': 'rejected', 'action': input});
+        emitState();
+        continue;
+      }
+
+      lastAction = gameAction;
+      totalGameActions++;
       final totalNow = totalGameActions + giveUpCount;
-      doReset(reason: 'voluntary');
+
+      if (engine.isWon) {
+        out(wonEvent());
+        break;
+      }
+      if (engine.isLost) {
+        out(lostEvent());
+        break;
+      }
+      if (engine.state.actionCount >= limitPerAttempt) {
+        doReset(reason: 'limit');
+      }
       if (totalNow >= limitTotal) {
-        out({
-          'event': 'lost',
-          'actions_this_attempt': engine.state.actionCount,
-          'actions_total': totalNow,
-          'attempts': attemptNumber,
-          'gold_path_length': goldPathLen,
-        });
+        out(lostEvent());
         break;
       }
       emitState();
       continue;
     }
 
-    // ── Game action ──────────────────────────────────────────────────────────
-    // Capture board state before executing (used in the *next* state event).
-    prevBoardText =
-        TextRenderer.render(engine.state, gameDef, includeLegend: false);
-    prevInventory = engine.state.avatar.enabled
-        ? engine.state.avatar.inventory.slot
-        : null;
+    // ── multi-action modes: fixed-n, flex-n, full ─────────────────────────
+    final actions = _extractActionList(input,
+        maxAllowed: mode == 'fixed-n'
+            ? stepSize
+            : mode == 'flex-n'
+                ? maxN
+                : null);
 
-    final params = Map<String, dynamic>.from(input)
-      ..remove('action')
-      ..remove('memory');
-    final gameAction = GameAction(actionId, params);
-    final result = engine.executeTurn(gameAction);
-
-    if (!result.accepted) {
-      // Invalid action — restore context and re-emit state unchanged.
-      prevBoardText = null;
-      prevInventory = null;
-      out({'event': 'rejected', 'action': input});
-      emitState();
+    if (actions == null || actions.isEmpty) {
+      stderr.writeln('No valid actions found in input: $trimmed');
       continue;
     }
 
-    lastAction = gameAction;
-    totalGameActions++;
-    final totalNow = totalGameActions + giveUpCount;
+    bool outerBreak = false;
 
-    if (engine.isWon) {
-      out({
-        'event': 'won',
-        'actions_this_attempt': engine.state.actionCount,
-        'actions_total': totalNow,
-        'attempts': attemptNumber,
-        'gold_path_length': goldPathLen,
-      });
+    for (final actionInput in actions) {
+      final actionId = actionInput['action'] as String?;
+      if (actionId == null) continue;
+
+      // give_up: in full mode, treat as "done" → lost.
+      // In interactive modes (fixed-n, flex-n), process as normal reset.
+      if (actionId == 'give_up') {
+        if (mode == 'full') {
+          out(lostEvent());
+          outerBreak = true;
+        } else {
+          giveUpCount++;
+          final totalNow = totalGameActions + giveUpCount;
+          doReset(reason: 'voluntary');
+          if (totalNow >= limitTotal) {
+            out(lostEvent());
+            outerBreak = true;
+          }
+          // Stop batch after give_up regardless; emit new state below.
+        }
+        break;
+      }
+
+      // Capture board before execution (used in next state prompt).
+      prevBoardText =
+          TextRenderer.render(engine.state, gameDef, includeLegend: false);
+      prevInventory = engine.state.avatar.enabled
+          ? engine.state.avatar.inventory.slot
+          : null;
+
+      final params = Map<String, dynamic>.from(actionInput)
+        ..remove('action')
+        ..remove('memory');
+      final gameAction = GameAction(actionId, params);
+      final result = engine.executeTurn(gameAction);
+
+      if (!result.accepted) {
+        prevBoardText = null;
+        prevInventory = null;
+        out({'event': 'rejected', 'action': actionInput});
+        // Stop batch on first rejection; emit new state below.
+        break;
+      }
+
+      lastAction = gameAction;
+      totalGameActions++;
+      final totalNow = totalGameActions + giveUpCount;
+
+      if (engine.isWon) {
+        out(wonEvent());
+        outerBreak = true;
+        break;
+      }
+      if (engine.isLost) {
+        out(lostEvent());
+        outerBreak = true;
+        break;
+      }
+
+      // Per-attempt limit hit mid-batch (not applicable in full mode).
+      if (mode != 'full' && engine.state.actionCount >= limitPerAttempt) {
+        doReset(reason: 'limit');
+        if (totalNow >= limitTotal) {
+          out(lostEvent());
+          outerBreak = true;
+        }
+        break; // stop batch; emit new state below if not terminal
+      }
+
+      if (totalNow >= limitTotal) {
+        out(lostEvent());
+        outerBreak = true;
+        break;
+      }
+    }
+
+    if (outerBreak) break;
+
+    // full mode: if batch exhausted without winning, it's a loss.
+    if (mode == 'full') {
+      out(lostEvent());
       break;
     }
 
-    if (engine.isLost) {
-      out({
-        'event': 'lost',
-        'actions_this_attempt': engine.state.actionCount,
-        'actions_total': totalNow,
-        'attempts': attemptNumber,
-        'gold_path_length': goldPathLen,
-      });
-      break;
-    }
-
-    // Auto-reset: per-attempt action limit reached.
-    if (engine.state.actionCount >= limitPerAttempt) {
-      doReset(reason: 'limit');
-    }
-
-    // Total action budget exhausted.
-    if (totalNow >= limitTotal) {
-      out({
-        'event': 'lost',
-        'actions_this_attempt': engine.state.actionCount,
-        'actions_total': totalNow,
-        'attempts': attemptNumber,
-        'gold_path_length': goldPathLen,
-      });
-      break;
-    }
-
+    // interactive modes: ask for the next batch of actions.
     emitState();
   }
 }
 
-// ── Utilities ──────────────────────────────────────────────────────────────
+// ── Mode-specific prompt suffixes ─────────────────────────────────────────────
+
+String _modeSuffix(String mode, int stepSize, int? maxN) {
+  switch (mode) {
+    case 'fixed-n':
+      return '''
+
+INFERENCE MODE: fixed-$stepSize
+Output up to $stepSize actions as a JSON array. You may output fewer if the goal is reachable sooner.
+You will receive the board state after the batch completes.
+Format: [{"action": "..."}, {"action": "..."}]
+Optionally add "memory" to the last object to update your notes.
+Example: [{"action": "move", "direction": "right"}, {"action": "move", "direction": "up", "memory": "Moved right then up."}]''';
+
+    case 'full':
+      return '''
+
+INFERENCE MODE: full
+Output ALL actions needed to solve the level as a JSON array in a single response.
+You will receive no further board feedback — plan the complete solution now.
+Format: [{"action": "..."}, {"action": "..."}, ...]
+Optionally add "memory" to the last object.
+Choose the most likely solution path and commit to it.''';
+
+    case 'flex-n':
+      final limitLine = maxN != null
+          ? 'Output 1 to $maxN actions as a JSON array. You decide how many.'
+          : 'Output one or more actions as a JSON array. You decide how many.';
+      return '''
+
+INFERENCE MODE: flex-n
+$limitLine
+Cost: each action beyond the first adds 0.5 to your effective action count (lowers efficiency).
+Strategy: output one action when uncertain; output multiple only when confident about the sequence.
+Write to "memory" when you reach a key insight about the level layout or mechanics.
+Format: [{"action": "..."}] or [{"action": "..."}, {"action": "..."}, ...]''';
+
+    default:
+      return '';
+  }
+}
+
+// ── Input parsing ─────────────────────────────────────────────────────────────
+
+/// Parses the actions list from multi-action mode input.
+/// Accepts both {"actions": [...]} and single {"action": "..."} (wrapped as list).
+/// Caps list length at [maxAllowed] if provided.
+List<Map<String, dynamic>>? _extractActionList(
+    Map<String, dynamic> input, {int? maxAllowed}) {
+  List<dynamic>? raw;
+  if (input.containsKey('actions')) {
+    raw = input['actions'] as List<dynamic>?;
+  } else if (input.containsKey('action')) {
+    raw = [input]; // backward-compat: single action wrapped in list
+  }
+  if (raw == null || raw.isEmpty) return null;
+
+  var actions = raw.whereType<Map<String, dynamic>>().toList();
+  if (maxAllowed != null && actions.length > maxAllowed) {
+    actions = actions.sublist(0, maxAllowed);
+  }
+  return actions.isEmpty ? null : actions;
+}
+
+// ── Utilities ──────────────────────────────────────────────────────────────────
 
 Map<String, dynamic> _readJson(String path) =>
     jsonDecode(File(path).readAsStringSync()) as Map<String, dynamic>;
 
-/// Default packs/ directory: four levels up from the compiled binary location.
-/// Binary is compiled to tools/benchmark/runner/runner, so:
-///   runner → runner/ → benchmark/ → tools/ → project-root → packs/
 String _defaultPacksDir() {
   final exe = File(Platform.script.toFilePath());
   return '${exe.parent.parent.parent.parent.path}/packs';

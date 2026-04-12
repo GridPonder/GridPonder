@@ -8,7 +8,8 @@ import 'text_renderer.dart';
 
 /// The result of one agent action, including optional reasoning and memory.
 class AgentActResult {
-  final GameAction action;
+  /// All actions chosen by the agent this turn (one or more).
+  final List<GameAction> actions;
 
   /// Full chain-of-thought or extended thinking text from the LLM, if available.
   final String? thinking;
@@ -16,7 +17,10 @@ class AgentActResult {
   /// If non-null, replaces the agent's persistent memory for this level.
   final String? memoryUpdate;
 
-  const AgentActResult(this.action, {this.thinking, this.memoryUpdate});
+  const AgentActResult(this.actions, {this.thinking, this.memoryUpdate});
+
+  /// Convenience accessor for single-action results.
+  GameAction get action => actions.first;
 }
 
 // ---------------------------------------------------------------------------
@@ -339,43 +343,62 @@ class AgentRunner {
         yield AgentStepMemoryUpdated(result.memoryUpdate!);
       }
 
-      // give_up: reset without consuming a game action.
-      if (result.action.actionId == 'give_up') {
-        previousAttemptsActions += engine.state.actionCount;
-        engine.reset();
-        attemptNumber++;
-        lastAction = null;
-        previousBoardText = null;
-        previousInventory = null;
-        yield AgentStepReset(attempt: attemptNumber, auto: false);
-        if (stepDelay > Duration.zero) await Future.delayed(stepDelay);
-        continue;
-      }
-
-      previousBoardText = TextRenderer.render(engine.state, engine.game,
+      // Capture board state before the batch so the next prompt has before/after.
+      final batchPrevBoard = TextRenderer.render(engine.state, engine.game,
           includeLegend: false);
-      previousInventory = engine.state.avatar.enabled
+      final batchPrevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
-      try {
-        engine.executeTurn(result.action);
-      } catch (_) {
-        // Engine rejected the action (e.g. hallucinated params from the LLM).
-        // Treat as a wasted no-op and continue without advancing totalSteps.
-        continue;
+
+      bool batchTerminated = false;
+
+      for (int i = 0; i < result.actions.length; i++) {
+        final action = result.actions[i];
+
+        // give_up: reset without consuming a game action; discard rest of batch.
+        if (action.actionId == 'give_up') {
+          previousAttemptsActions += engine.state.actionCount;
+          engine.reset();
+          attemptNumber++;
+          lastAction = null;
+          previousBoardText = null;
+          previousInventory = null;
+          yield AgentStepReset(attempt: attemptNumber, auto: false);
+          if (stepDelay > Duration.zero) await Future.delayed(stepDelay);
+          batchTerminated = true;
+          break;
+        }
+
+        try {
+          engine.executeTurn(action);
+        } catch (_) {
+          // Engine rejected the action — skip and continue batch.
+          continue;
+        }
+        lastAction = action;
+        totalSteps++;
+
+        yield AgentStepActed(
+          result: result,
+          newState: engine.state,
+          isWon: engine.isWon,
+          isLost: engine.isLost,
+        );
+
+        if (engine.isWon || engine.isLost) {
+          batchTerminated = true;
+          break;
+        }
+
+        // Delay between actions within the batch (and after the last one).
+        if (stepDelay > Duration.zero) await Future.delayed(stepDelay);
       }
-      lastAction = result.action;
-      totalSteps++;
 
-      yield AgentStepActed(
-        result: result,
-        newState: engine.state,
-        isWon: engine.isWon,
-        isLost: engine.isLost,
-      );
+      if (batchTerminated) break;
 
-      if (engine.isWon || engine.isLost) break;
-      if (stepDelay > Duration.zero) await Future.delayed(stepDelay);
+      // After batch completes, update prev board for next observation.
+      previousBoardText = batchPrevBoard;
+      previousInventory = batchPrevInventory;
     }
 
     yield AgentRunFinished(

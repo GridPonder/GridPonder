@@ -113,6 +113,15 @@ class LlmAgent implements GridPonderAgent {
   final ChatCapability _provider;
   final String _displayName;
 
+  /// Inference mode: 'single' | 'fixed-n' | 'flex-n' | 'full'
+  final String inferenceMode;
+
+  /// Max actions per LLM call for fixed-n mode.
+  final int stepSize;
+
+  /// Max actions per LLM call for flex-n mode (null = unlimited).
+  final int? maxN;
+
   String _memory;
 
   /// The most recent prompt sent to the LLM. Null before the first call.
@@ -122,6 +131,9 @@ class LlmAgent implements GridPonderAgent {
     required ChatCapability provider,
     required String displayName,
     String initialMemory = '',
+    this.inferenceMode = 'single',
+    this.stepSize = 3,
+    this.maxN,
   })  : _provider = provider,
         _displayName = displayName,
         _memory = initialMemory;
@@ -134,7 +146,10 @@ class LlmAgent implements GridPonderAgent {
 
   @override
   Stream<AgentActEvent> act(AgentObservation obs) async* {
-    final prompt = LlmAgent.buildPrompt(obs, memory: _memory);
+    final basePrompt = LlmAgent.buildPrompt(obs, memory: _memory);
+    final prompt = inferenceMode == 'single'
+        ? basePrompt
+        : basePrompt + _modeSuffix(inferenceMode, stepSize, maxN);
     lastPrompt = prompt;
 
     final thinkingBuffer = StringBuffer();
@@ -165,17 +180,153 @@ class LlmAgent implements GridPonderAgent {
     }
 
     final responseText = textBuffer.toString();
-    final action = _extractAction(responseText, obs);
-    final memoryUpdate = _extractMemory(responseText);
-    if (memoryUpdate != null) _memory = memoryUpdate;
-
     final thinking = thinkingBuffer.isNotEmpty
         ? thinkingBuffer.toString()
         : responseText;
 
-    yield AgentActCompleted(
-      AgentActResult(action, thinking: thinking, memoryUpdate: memoryUpdate),
-    );
+    if (inferenceMode == 'single') {
+      final action = _extractAction(responseText, obs);
+      final memoryUpdate = _extractMemory(responseText);
+      if (memoryUpdate != null) _memory = memoryUpdate;
+      yield AgentActCompleted(
+        AgentActResult([action], thinking: thinking, memoryUpdate: memoryUpdate),
+      );
+    } else {
+      final (actions, memoryUpdate) = _extractActionList(responseText, obs);
+      if (memoryUpdate != null) _memory = memoryUpdate;
+      yield AgentActCompleted(
+        AgentActResult(actions, thinking: thinking, memoryUpdate: memoryUpdate),
+      );
+    }
+  }
+
+  /// Mode-specific prompt suffix (matches benchmark runner's _modeSuffix).
+  static String _modeSuffix(String mode, int stepSize, int? maxN) {
+    switch (mode) {
+      case 'fixed-n':
+        return '''
+
+INFERENCE MODE: fixed-$stepSize
+Output up to $stepSize actions as a JSON array. You may output fewer if the goal is reachable sooner.
+You will receive the board state after the batch completes.
+Format: [{"action": "..."}, {"action": "..."}]
+Optionally add "memory" to the last object to update your notes.
+Example: [{"action": "move", "direction": "right"}, {"action": "move", "direction": "up", "memory": "Moved right then up."}]''';
+
+      case 'full':
+        return '''
+
+INFERENCE MODE: full
+Output ALL actions needed to solve the level as a JSON array in a single response.
+You will receive no further board feedback — plan the complete solution now.
+Format: [{"action": "..."}, {"action": "..."}, ...]
+Optionally add "memory" to the last object.
+Choose the most likely solution path and commit to it.''';
+
+      case 'flex-n':
+        final limitLine = maxN != null
+            ? 'Output 1 to $maxN actions as a JSON array. You decide how many.'
+            : 'Output one or more actions as a JSON array. You decide how many.';
+        return '''
+
+INFERENCE MODE: flex-n
+$limitLine
+Cost: each action beyond the first adds 0.5 to your effective action count (lowers efficiency).
+Strategy: output one action when uncertain; output multiple only when confident about the sequence.
+Write to "memory" when you reach a key insight about the level layout or mechanics.
+Format: [{"action": "..."}] or [{"action": "..."}, {"action": "..."}, ...]''';
+
+      default:
+        return '';
+    }
+  }
+
+  /// Parses a multi-action LLM response. Returns (actions, memoryUpdate).
+  /// Accepts: bare JSON array, {"actions":[...]}, or single {"action":"..."}.
+  (List<GameAction>, String?) _extractActionList(
+      String text, AgentObservation obs) {
+    // Strip <think>...</think> blocks.
+    final stripped =
+        text.replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '').trim();
+
+    dynamic parsed;
+
+    // Try whole stripped text first.
+    try {
+      parsed = jsonDecode(stripped);
+    } catch (_) {}
+
+    // If that failed, find first '[' or '{' and try from there.
+    if (parsed == null) {
+      final ai = stripped.indexOf('[');
+      final oi = stripped.indexOf('{');
+      if (ai != -1 && (oi == -1 || ai < oi)) {
+        try {
+          parsed = jsonDecode(stripped.substring(ai));
+        } catch (_) {}
+      }
+      if (parsed == null && oi != -1) {
+        try {
+          parsed = jsonDecode(stripped.substring(oi));
+        } catch (_) {}
+      }
+    }
+
+    List<dynamic>? rawList;
+    String? memoryUpdate;
+
+    if (parsed is List) {
+      rawList = parsed;
+      // Memory on the last element.
+      if (rawList.isNotEmpty && rawList.last is Map) {
+        memoryUpdate = (rawList.last as Map)['memory'] as String?;
+      }
+    } else if (parsed is Map<String, dynamic>) {
+      memoryUpdate = parsed['memory'] as String?;
+      if (parsed.containsKey('actions') && parsed['actions'] is List) {
+        rawList = parsed['actions'] as List;
+      } else if (parsed.containsKey('action')) {
+        rawList = [parsed];
+      }
+    }
+
+    if (rawList == null || rawList.isEmpty) {
+      return ([
+        obs.validActions.isNotEmpty
+            ? obs.validActions.first
+            : GameAction('noop', {})
+      ], null);
+    }
+
+    final result = <GameAction>[];
+    for (final item in rawList) {
+      if (item is! Map) continue;
+      final actionId = item['action'] as String?;
+      if (actionId == null) continue;
+      if (actionId == 'give_up') {
+        result.add(GameAction('give_up', {}));
+        break;
+      }
+      final params = Map<String, dynamic>.from(item as Map<String, dynamic>)
+        ..remove('action')
+        ..remove('memory');
+      final match = obs.validActions
+          .where((a) =>
+              a.actionId == actionId &&
+              a.params.length == params.length &&
+              params.entries.every((e) => a.params[e.key] == e.value))
+          .firstOrNull;
+      if (match != null) result.add(match);
+    }
+
+    if (result.isEmpty) {
+      return ([
+        obs.validActions.isNotEmpty
+            ? obs.validActions.first
+            : GameAction('noop', {})
+      ], memoryUpdate);
+    }
+    return (result, memoryUpdate);
   }
 
   /// Builds the LLM prompt for the given observation.

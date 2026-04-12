@@ -477,6 +477,60 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ],
                   const Divider(height: 1),
+                  _dropdownTile(
+                    label: 'Inference mode',
+                    value: s.inferenceMode,
+                    items: const {
+                      'single': 'Single (1 action/call)',
+                      'fixed-n': 'Fixed-N (batch)',
+                      'flex-n': 'Flex-N (model chooses)',
+                      'full': 'Full (one-shot)',
+                    },
+                    onChanged: (v) async {
+                      await s.setInferenceMode(v!);
+                      setState(() {});
+                    },
+                  ),
+                  if (s.inferenceMode == 'fixed-n') ...[
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('Batch size: ${s.stepSizeN} actions/call'),
+                      subtitle: Slider(
+                        value: s.stepSizeN.toDouble(),
+                        min: 2,
+                        max: 10,
+                        divisions: 8,
+                        onChanged: (v) async {
+                          await s.setStepSizeN(v.round());
+                          setState(() {});
+                        },
+                      ),
+                    ),
+                  ],
+                  if (s.inferenceMode == 'flex-n') ...[
+                    const Divider(height: 1),
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        s.maxN == 0
+                            ? 'Max actions/call: unlimited'
+                            : 'Max actions/call: ${s.maxN}',
+                      ),
+                      subtitle: Slider(
+                        value: s.maxN.toDouble(),
+                        min: 0,
+                        max: 10,
+                        divisions: 10,
+                        label: s.maxN == 0 ? '∞' : '${s.maxN}',
+                        onChanged: (v) async {
+                          await s.setMaxN(v.round());
+                          setState(() {});
+                        },
+                      ),
+                    ),
+                  ],
+                  const Divider(height: 1),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(

@@ -81,6 +81,20 @@ class SettingsService {
   Future<void> setOllamaThinkEnabled(bool v) =>
       _prefs.setBool('ollama_think_enabled', v);
 
+  // --- Inference mode ---
+  /// 'single' | 'fixed-n' | 'flex-n' | 'full'
+  String get inferenceMode => _prefs.getString('inference_mode') ?? 'single';
+  Future<void> setInferenceMode(String v) =>
+      _prefs.setString('inference_mode', v);
+
+  /// Max actions per LLM call for fixed-n mode.
+  int get stepSizeN => _prefs.getInt('step_size_n') ?? 3;
+  Future<void> setStepSizeN(int v) => _prefs.setInt('step_size_n', v);
+
+  /// Max actions per LLM call for flex-n mode (0 = unlimited).
+  int get maxN => _prefs.getInt('max_n') ?? 0;
+  Future<void> setMaxN(int v) => _prefs.setInt('max_n', v);
+
   // --- Playback mode ---
   /// 'continuous' or 'step'
   String get playbackMode => _prefs.getString('playback_mode') ?? 'continuous';

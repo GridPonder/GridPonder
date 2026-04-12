@@ -1,56 +1,6 @@
 {
-  "generated": "2026-04-10T11:22:51.145176+00:00",
+  "generated": "2026-04-11T07:08:31.668476+00:00",
   "models": [
-    {
-      "id": "gemma4-e2b",
-      "display_name": "Gemma 4 E2B",
-      "local": true,
-      "reasoning": false,
-      "overall": {
-        "levels_run": 30,
-        "success_rate": 0.16666666666666666,
-        "avg_efficiency": 1.0,
-        "p50_latency_ms": 937.8860834999898
-      },
-      "by_pack": {
-        "number_cells": {
-          "levels_run": 5,
-          "success_rate": 0.4,
-          "avg_efficiency": 1.0,
-          "p50_latency_ms": 1014.3617499999991
-        },
-        "flag_adventure": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 951.5131670000017
-        },
-        "rotate_flip": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 887.6873749999845
-        },
-        "flood_colors": {
-          "levels_run": 5,
-          "success_rate": 0.2,
-          "avg_efficiency": 1.0,
-          "p50_latency_ms": 897.8245419999666
-        },
-        "diagonal_swipes": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 1041.4502500000253
-        },
-        "box_builder": {
-          "levels_run": 5,
-          "success_rate": 0.4,
-          "avg_efficiency": 1.0,
-          "p50_latency_ms": 936.0908329999802
-        }
-      }
-    },
     {
       "id": "qwen3.5-4b",
       "display_name": "Qwen 3.5 4B",
@@ -198,6 +148,56 @@
           "success_rate": 0.4,
           "avg_efficiency": 0.4375,
           "p50_latency_ms": 841.0277080001833
+        }
+      }
+    },
+    {
+      "id": "gemma4-e2b",
+      "display_name": "Gemma 4 E2B",
+      "local": true,
+      "reasoning": false,
+      "overall": {
+        "levels_run": 78,
+        "success_rate": 0.11538461538461539,
+        "avg_efficiency": 0.9444444444444444,
+        "p50_latency_ms": 1082.1164579999981
+      },
+      "by_pack": {
+        "number_cells": {
+          "levels_run": 5,
+          "success_rate": 0.4,
+          "avg_efficiency": 1.0,
+          "p50_latency_ms": 1014.3617499999991
+        },
+        "flag_adventure": {
+          "levels_run": 14,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "p50_latency_ms": 1016.7923749997954
+        },
+        "rotate_flip": {
+          "levels_run": 5,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "p50_latency_ms": 887.6873749999845
+        },
+        "flood_colors": {
+          "levels_run": 8,
+          "success_rate": 0.375,
+          "avg_efficiency": 0.8333333333333334,
+          "p50_latency_ms": 899.8335209999766
+        },
+        "diagonal_swipes": {
+          "levels_run": 25,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "p50_latency_ms": 2014.8894999999811
+        },
+        "box_builder": {
+          "levels_run": 21,
+          "success_rate": 0.19047619047619047,
+          "avg_efficiency": 1.0,
+          "p50_latency_ms": 1095.0550830000054
         }
       }
     },

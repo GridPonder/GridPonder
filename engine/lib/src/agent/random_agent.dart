@@ -19,6 +19,6 @@ class RandomAgent implements GridPonderAgent {
     final action = actions.isEmpty
         ? GameAction('noop', {})
         : actions[_rng.nextInt(actions.length)];
-    yield AgentActCompleted(AgentActResult(action));
+    yield AgentActCompleted(AgentActResult([action]));
   }
 }
