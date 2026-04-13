@@ -24,6 +24,7 @@
       "tags": [
         "walkable"
       ],
+      "sprite": "assets/sprites/grass.png",
       "symbol": "."
     },
     "water": {
@@ -32,7 +33,7 @@
         "liquid",
         "walkable"
       ],
-      "sprite": "assets/sprites/water3.png",
+      "sprite": "assets/sprites/water4.png",
       "symbol": "≈"
     },
     "bridge": {
