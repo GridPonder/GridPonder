@@ -168,6 +168,7 @@ def run_level(
     output_tokens_total = 0
     resets = 0
     llm_calls = 0
+    total_rejections = 0
     consecutive_rejections = 0
     consecutive_timeouts = 0
     final_event: dict | None = None
@@ -242,6 +243,7 @@ def run_level(
                 consecutive_rejections = 0
 
             elif etype == "rejected":
+                total_rejections += 1
                 # full mode: runner will emit lost automatically; nothing to send.
                 if mode == "full":
                     continue
@@ -316,6 +318,7 @@ def run_level(
         "attempts": attempts,
         "resets": resets,
         "llm_calls": llm_calls,
+        "rejections": total_rejections,
         "latency_ms": {
             "mean": sum(sorted_lat) / n if n else 0,
             "median": sorted_lat[n // 2] if n else 0,
@@ -535,6 +538,7 @@ def main() -> None:
                 actions = result.get("actions_total", "?")
                 gold = result.get("gold_path_length", "?")
                 calls = result.get("llm_calls", "?")
+                rejections = result.get("rejections", 0)
                 lat = result.get("latency_ms", {})
                 lat_total = lat.get("total")
                 lat_mean = lat.get("mean")
@@ -544,7 +548,7 @@ def main() -> None:
                 calls_col = f"  calls={calls:>3}" if args.mode != "single" else ""
                 tqdm.write(
                     f"  {status}  {full_id:22s}  {level_col:28s}"
-                    f"  actions={actions:>3}/{gold:<3}{calls_col}"
+                    f"  actions={actions:>3}/{gold:<3}  rej={rejections:<3}{calls_col}"
                     f"  avg={mean_str}  total={total_str}"
                 )
 

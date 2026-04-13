@@ -137,16 +137,22 @@ def call_llm(
     return content, latency_ms, thinking_tokens, output_tokens
 
 
+def _strip_noise(text: str) -> str:
+    """Remove <think> blocks and markdown code fences, then strip whitespace."""
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL)
+    text = re.sub(r"```[a-z]*\n?", "", text, flags=re.IGNORECASE)
+    return text.strip()
+
+
 def extract_action(text: str) -> dict[str, Any] | None:
     """Extract a single JSON action object from the LLM response.
 
     Mirrors the regex in llm_agent.dart: finds the first {...} block.
     Returns None if no valid JSON action could be parsed.
 
-    Strips <think>...</think> blocks first (Ollama thinking models) so
-    that JSON inside reasoning text doesn't get matched accidentally.
+    Strips <think>...</think> blocks and markdown code fences first.
     """
-    stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
+    stripped = _strip_noise(text)
     for candidate in [stripped or text, text]:
         match = re.search(r"\{[^}]+\}", candidate)
         if match:
@@ -173,11 +179,10 @@ def extract_actions_list(
       - actions is a (possibly empty) list of action dicts without memory fields
       - memory is the extracted memory string or None
 
-    Strips <think>...</think> blocks before parsing.
+    Strips <think>...</think> blocks and markdown code fences before parsing.
     Caps list length at max_n if provided.
     """
-    stripped = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL).strip()
-    source = stripped or text
+    source = _strip_noise(text) or text
 
     def _cap(lst: list) -> list:
         return lst[:max_n] if max_n is not None else lst

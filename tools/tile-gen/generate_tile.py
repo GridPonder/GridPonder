@@ -45,26 +45,30 @@ LORA_STYLES = {"pixel_art", "retro"}
 
 STYLE_SUFFIX = {
     "pixel_art": (
-        "pixel_art, pixel art game sprite, 16-bit style, flat colors, "
-        "crisp pixel edges, retro video game tile, isolated on white background"
+        "pixel art, single isolated object, 16-bit style, flat colors, "
+        "crisp pixel edges, centered on solid white background, "
+        "one element only, no repetition, no grid"
     ),
     "retro": (
-        "pixel_art, 8-bit retro pixel art, NES/SNES style, very limited color "
-        "palette, crisp square pixels, classic arcade aesthetic, isolated tile"
+        "8-bit pixel art, single isolated object, NES style, very limited color "
+        "palette, crisp square pixels, centered on white background, "
+        "one element only, no repetition"
     ),
     "cartoon": (
-        "2D cartoon game tile, flat colors, bold clean outlines, "
-        "mobile game art style, isolated on white background, simple and clear"
+        "2D cartoon, single isolated object, flat colors, bold clean outlines, "
+        "centered on white background, one element only, no repetition"
     ),
     "default": (
-        "2D game tile, flat illustration, clean edges, game asset, "
-        "isolated on white background, simple and readable at small size"
+        "2D game art, single isolated object, flat illustration, clean edges, "
+        "centered on white background, one element only, no repetition"
     ),
 }
 
 NEGATIVE = (
-    "multiple characters, sprite sheet, photorealistic, 3D render, blurry, "
-    "noisy, text, watermark, accessories, busy background, smooth gradients"
+    "sprite sheet, sprite atlas, texture atlas, multiple objects, multiple characters, "
+    "tiled pattern, seamless texture, repeating pattern, grid layout, collage, "
+    "composite image, many items, photorealistic, 3D render, blurry, "
+    "noisy, text, watermark, busy background, smooth gradients"
 )
 
 RESAMPLE = {
@@ -126,9 +130,12 @@ def load_pipelines(style: str, device: str):
 # Prompt building
 # ---------------------------------------------------------------------------
 
-def build_prompt(user_prompt: str, style: str, frame_index: int, total_frames: int) -> str:
-    suffix = STYLE_SUFFIX.get(style, STYLE_SUFFIX["default"])
-    prompt = f"{user_prompt}, {suffix}"
+def build_prompt(user_prompt: str, style: str, frame_index: int, total_frames: int, raw: bool = False) -> str:
+    if raw:
+        prompt = user_prompt
+    else:
+        suffix = STYLE_SUFFIX.get(style, STYLE_SUFFIX["default"])
+        prompt = f"{user_prompt}, {suffix}"
     if total_frames > 1:
         hint = FRAME_HINTS[frame_index] if frame_index < len(FRAME_HINTS) \
                else f"animation frame {frame_index + 1} of {total_frames}"
@@ -150,6 +157,7 @@ def generate_tiles(
     anim_strength: float,
     output_dir: Path,
     base_name: str,
+    raw: bool = False,
 ) -> list[Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     resample = RESAMPLE.get(style, Image.LANCZOS)
@@ -158,7 +166,7 @@ def generate_tiles(
 
     for i in range(count):
         label = f"frame {i + 1}/{count}" if count > 1 else "tile"
-        prompt = build_prompt(user_prompt, style, i, count)
+        prompt = build_prompt(user_prompt, style, i, count, raw=raw)
         print(f"[tile-gen] Generating {label} …", file=sys.stderr)
         print(f"[tile-gen]   {prompt}", file=sys.stderr)
 
@@ -224,6 +232,9 @@ def main() -> None:
     parser.add_argument("--strength", type=float, default=0.75,
         help="img2img strength for animation frames 2+ (0.0–1.0, default: 0.75). "
              "Lower = more similar to frame 1; higher = more pose variation.")
+    parser.add_argument("--raw", action="store_true",
+        help="Pass the prompt exactly as given — skip the automatic style suffix. "
+             "The LoRA is still loaded when --style pixel_art or retro is set.")
     parser.add_argument("--output", type=Path, default=Path("."),
         help="Output directory (default: current directory)")
     parser.add_argument("--name", default="tile",
@@ -243,6 +254,7 @@ def main() -> None:
         anim_strength=args.strength,
         output_dir=args.output,
         base_name=args.name,
+        raw=args.raw,
     )
 
     # Print output paths on stdout (for skill integration)

@@ -120,6 +120,11 @@ Future<void> main(List<String> arguments) async {
   int totalGameActions = 0;
   int giveUpCount = 0;
   String memory = '';
+  int consecutiveRejections = 0;
+  // Cap: if the model can't produce a single accepted action in this many
+  // consecutive calls, declare a loss. Prevents infinite loops when a model
+  // consistently hallucinates invalid actions for a level.
+  const maxConsecutiveRejections = 5;
 
   GameAction? lastAction;
   String? prevBoardText;
@@ -141,11 +146,13 @@ Future<void> main(List<String> arguments) async {
       previousInventory: prevInventory,
     );
 
-    // single mode: prompt is unchanged (keeps small models unconfused).
-    // Other modes: append mode-specific instruction block.
-    final basePrompt = LlmAgent.buildPrompt(obs, memory: memory);
-    final prompt =
-        mode == 'single' ? basePrompt : basePrompt + _modeSuffix(mode, stepSize, maxN);
+    final prompt = LlmAgent.buildPrompt(
+      obs,
+      memory: memory,
+      inferenceMode: mode,
+      stepSize: stepSize,
+      maxN: maxN,
+    );
 
     out({
       'event': 'state',
@@ -228,6 +235,7 @@ Future<void> main(List<String> arguments) async {
       }
 
       if (actionId == 'give_up') {
+        consecutiveRejections = 0;
         giveUpCount++;
         final totalNow = totalGameActions + giveUpCount;
         doReset(reason: 'voluntary');
@@ -254,11 +262,17 @@ Future<void> main(List<String> arguments) async {
       if (!result.accepted) {
         prevBoardText = null;
         prevInventory = null;
+        consecutiveRejections++;
         out({'event': 'rejected', 'action': input});
+        if (consecutiveRejections >= maxConsecutiveRejections) {
+          out(lostEvent());
+          break;
+        }
         emitState();
         continue;
       }
 
+      consecutiveRejections = 0;
       lastAction = gameAction;
       totalGameActions++;
       final totalNow = totalGameActions + giveUpCount;
@@ -304,6 +318,7 @@ Future<void> main(List<String> arguments) async {
       // give_up: in full mode, treat as "done" → lost.
       // In interactive modes (fixed-n, flex-n), process as normal reset.
       if (actionId == 'give_up') {
+        consecutiveRejections = 0;
         if (mode == 'full') {
           out(lostEvent());
           outerBreak = true;
@@ -336,11 +351,17 @@ Future<void> main(List<String> arguments) async {
       if (!result.accepted) {
         prevBoardText = null;
         prevInventory = null;
+        consecutiveRejections++;
         out({'event': 'rejected', 'action': actionInput});
+        if (consecutiveRejections >= maxConsecutiveRejections) {
+          outerBreak = true;
+          out(lostEvent());
+        }
         // Stop batch on first rejection; emit new state below.
         break;
       }
 
+      consecutiveRejections = 0;
       lastAction = gameAction;
       totalGameActions++;
       final totalNow = totalGameActions + giveUpCount;
@@ -383,48 +404,6 @@ Future<void> main(List<String> arguments) async {
 
     // interactive modes: ask for the next batch of actions.
     emitState();
-  }
-}
-
-// ── Mode-specific prompt suffixes ─────────────────────────────────────────────
-
-String _modeSuffix(String mode, int stepSize, int? maxN) {
-  switch (mode) {
-    case 'fixed-n':
-      return '''
-
-INFERENCE MODE: fixed-$stepSize
-Output up to $stepSize actions as a JSON array. You may output fewer if the goal is reachable sooner.
-You will receive the board state after the batch completes.
-Format: [{"action": "..."}, {"action": "..."}]
-Optionally add "memory" to the last object to update your notes.
-Example: [{"action": "move", "direction": "right"}, {"action": "move", "direction": "up", "memory": "Moved right then up."}]''';
-
-    case 'full':
-      return '''
-
-INFERENCE MODE: full
-Output ALL actions needed to solve the level as a JSON array in a single response.
-You will receive no further board feedback — plan the complete solution now.
-Format: [{"action": "..."}, {"action": "..."}, ...]
-Optionally add "memory" to the last object.
-Choose the most likely solution path and commit to it.''';
-
-    case 'flex-n':
-      final limitLine = maxN != null
-          ? 'Output 1 to $maxN actions as a JSON array. You decide how many.'
-          : 'Output one or more actions as a JSON array. You decide how many.';
-      return '''
-
-INFERENCE MODE: flex-n
-$limitLine
-Cost: each action beyond the first adds 0.5 to your effective action count (lowers efficiency).
-Strategy: output one action when uncertain; output multiple only when confident about the sequence.
-Write to "memory" when you reach a key insight about the level layout or mechanics.
-Format: [{"action": "..."}] or [{"action": "..."}, {"action": "..."}, ...]''';
-
-    default:
-      return '';
   }
 }
 
