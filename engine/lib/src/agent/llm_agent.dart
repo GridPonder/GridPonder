@@ -146,10 +146,13 @@ class LlmAgent implements GridPonderAgent {
 
   @override
   Stream<AgentActEvent> act(AgentObservation obs) async* {
-    final basePrompt = LlmAgent.buildPrompt(obs, memory: _memory);
-    final prompt = inferenceMode == 'single'
-        ? basePrompt
-        : basePrompt + _modeSuffix(inferenceMode, stepSize, maxN);
+    final prompt = LlmAgent.buildPrompt(
+      obs,
+      memory: _memory,
+      inferenceMode: inferenceMode,
+      stepSize: stepSize,
+      maxN: maxN,
+    );
     lastPrompt = prompt;
 
     final thinkingBuffer = StringBuffer();
@@ -180,64 +183,31 @@ class LlmAgent implements GridPonderAgent {
     }
 
     final responseText = textBuffer.toString();
-    final thinking = thinkingBuffer.isNotEmpty
-        ? thinkingBuffer.toString()
-        : responseText;
+    // When the model emits a separate thinking block, keep both distinct.
+    // When there is no thinking block, the response text IS the thinking.
+    final hasThinking = thinkingBuffer.isNotEmpty;
+    final thinking = hasThinking ? thinkingBuffer.toString() : responseText;
+    final separateResponse = hasThinking ? responseText : null;
 
     if (inferenceMode == 'single') {
       final action = _extractAction(responseText, obs);
       final memoryUpdate = _extractMemory(responseText);
       if (memoryUpdate != null) _memory = memoryUpdate;
       yield AgentActCompleted(
-        AgentActResult([action], thinking: thinking, memoryUpdate: memoryUpdate),
+        AgentActResult([action],
+            thinking: thinking,
+            responseText: separateResponse,
+            memoryUpdate: memoryUpdate),
       );
     } else {
       final (actions, memoryUpdate) = _extractActionList(responseText, obs);
       if (memoryUpdate != null) _memory = memoryUpdate;
       yield AgentActCompleted(
-        AgentActResult(actions, thinking: thinking, memoryUpdate: memoryUpdate),
+        AgentActResult(actions,
+            thinking: thinking,
+            responseText: separateResponse,
+            memoryUpdate: memoryUpdate),
       );
-    }
-  }
-
-  /// Mode-specific prompt suffix (matches benchmark runner's _modeSuffix).
-  static String _modeSuffix(String mode, int stepSize, int? maxN) {
-    switch (mode) {
-      case 'fixed-n':
-        return '''
-
-INFERENCE MODE: fixed-$stepSize
-Output up to $stepSize actions as a JSON array. You may output fewer if the goal is reachable sooner.
-You will receive the board state after the batch completes.
-Format: [{"action": "..."}, {"action": "..."}]
-Optionally add "memory" to the last object to update your notes.
-Example: [{"action": "move", "direction": "right"}, {"action": "move", "direction": "up", "memory": "Moved right then up."}]''';
-
-      case 'full':
-        return '''
-
-INFERENCE MODE: full
-Output ALL actions needed to solve the level as a JSON array in a single response.
-You will receive no further board feedback — plan the complete solution now.
-Format: [{"action": "..."}, {"action": "..."}, ...]
-Optionally add "memory" to the last object.
-Choose the most likely solution path and commit to it.''';
-
-      case 'flex-n':
-        final limitLine = maxN != null
-            ? 'Output 1 to $maxN actions as a JSON array. You decide how many.'
-            : 'Output one or more actions as a JSON array. You decide how many.';
-        return '''
-
-INFERENCE MODE: flex-n
-$limitLine
-Cost: each action beyond the first adds 0.5 to your effective action count (lowers efficiency).
-Strategy: output one action when uncertain; output multiple only when confident about the sequence.
-Write to "memory" when you reach a key insight about the level layout or mechanics.
-Format: [{"action": "..."}] or [{"action": "..."}, {"action": "..."}, ...]''';
-
-      default:
-        return '';
     }
   }
 
@@ -245,9 +215,11 @@ Format: [{"action": "..."}] or [{"action": "..."}, {"action": "..."}, ...]''';
   /// Accepts: bare JSON array, {"actions":[...]}, or single {"action":"..."}.
   (List<GameAction>, String?) _extractActionList(
       String text, AgentObservation obs) {
-    // Strip <think>...</think> blocks.
-    final stripped =
-        text.replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '').trim();
+    // Strip <think>...</think> blocks and markdown code fences.
+    final stripped = text
+        .replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '')
+        .replaceAll(RegExp(r'```[a-z]*\n?', caseSensitive: false), '')
+        .trim();
 
     dynamic parsed;
 
@@ -310,12 +282,11 @@ Format: [{"action": "..."}] or [{"action": "..."}, {"action": "..."}, ...]''';
       final params = Map<String, dynamic>.from(item as Map<String, dynamic>)
         ..remove('action')
         ..remove('memory');
-      final match = obs.validActions
-          .where((a) =>
-              a.actionId == actionId &&
-              a.params.length == params.length &&
-              params.entries.every((e) => a.params[e.key] == e.value))
-          .firstOrNull;
+      final match = obs.validActions.where((a) =>
+        a.actionId == actionId &&
+        a.params.length == params.length &&
+        params.entries.every((e) => a.params[e.key] == e.value)
+      ).firstOrNull;
       if (match != null) result.add(match);
     }
 
@@ -333,7 +304,13 @@ Format: [{"action": "..."}] or [{"action": "..."}, {"action": "..."}, ...]''';
   ///
   /// Public and static so external tools (e.g. the benchmark runner) can
   /// produce identical prompts without instantiating an [LlmAgent].
-  static String buildPrompt(AgentObservation obs, {String memory = ''}) {
+  static String buildPrompt(
+    AgentObservation obs, {
+    String memory = '',
+    String inferenceMode = 'single',
+    int stepSize = 3,
+    int? maxN,
+  }) {
     final goalParts = <String>[];
     for (final g in obs.level.goals) {
       switch (g.type) {
@@ -414,25 +391,80 @@ ${obs.boardText}$inventoryLine$movesLine''';
         ? '\n${obs.game.description}\n'
         : '';
 
-    return '''You are playing a grid puzzle called "${obs.game.title}".
+    final header = '''You are playing a grid puzzle called "${obs.game.title}".
 Attempt ${obs.attemptNumber} | Total actions across all attempts: ${obs.totalActionsAllAttempts}
 Minimize total actions — give up early if stuck rather than wasting moves.
 $descriptionSection$memorySection
 GOAL: $goalDescriptions
 $lastActionSection
 
-AVAILABLE ACTIONS (pick exactly one):
+AVAILABLE ACTIONS:
 $actionsDesc
-{"action": "give_up"} — reset and start a fresh attempt
+{"action": "give_up"} — reset and start a fresh attempt''';
 
-Respond with ONLY a JSON object on a single line.
+    // Pick two representative valid actions for examples (first and last).
+    final va = obs.validActions;
+    final ex1 = va.isNotEmpty ? jsonEncode(va.first.toJson()) : '{"action": "..."}';
+    final ex2 = va.length > 1 ? jsonEncode(va.last.toJson()) : ex1;
+
+    return '$header\n\n${_promptTail(inferenceMode, stepSize, maxN, ex1: ex1, ex2: ex2)}';
+  }
+
+  static String _promptTail(
+    String inferenceMode,
+    int stepSize,
+    int? maxN, {
+    required String ex1,
+    required String ex2,
+  }) {
+    // ex2 with memory field added (insert before closing brace).
+    final ex2mem = ex2.substring(0, ex2.length - 1) +
+        ', "memory": "Useful observation about the level."}';
+
+    switch (inferenceMode) {
+      case 'fixed-n':
+        return '''Respond with a JSON array of up to $stepSize actions. You may output fewer if the goal is reachable in fewer steps.
+You will receive updated board state after the batch is applied.
+Add a "memory" field to the last action to update your notes (replaces previous memory).
+Examples:
+  [$ex1, $ex2]
+  [$ex2mem]
+  [{"action": "give_up", "memory": "Dead end. Must try a different approach."}]
+
+Choose actions most likely to reach the goal in fewest total actions (summed across attempts).''';
+
+      case 'flex-n':
+        final countLine = maxN != null
+            ? 'Respond with a JSON array of 1 to $maxN actions.'
+            : 'Respond with a JSON array of one or more actions.';
+        return '''$countLine
+Each action beyond the first counts as only 0.5 toward your total action score (e.g. outputting 3 actions = 2 effective actions). Minimize your effective total across all attempts.
+Add a "memory" field to the last action to update your notes (replaces previous memory).
+Examples:
+  [$ex1]
+  [$ex1, $ex2, $ex2mem]
+  [{"action": "give_up", "memory": "Dead end. Must try a different approach."}]
+
+Choose actions most likely to reach the goal in fewest effective actions (summed across attempts).''';
+
+      case 'full':
+        return '''Respond with a JSON array containing every action needed to solve the level. No further board state will be shown — plan the complete sequence now.
+Add a "memory" field to the last action if useful.
+Example:
+  [$ex1, $ex2, $ex2mem]
+
+Output the shortest sequence you are confident will solve the level.''';
+
+      default: // single
+        return '''Respond with ONLY a JSON object on a single line.
 You may optionally update your persistent memory by adding a "memory" field (replaces previous memory).
 Examples:
-  {"action": "move", "direction": "right"}
-  {"action": "move", "direction": "left", "memory": "Torch burns wood. Plan: get torch at top-left first."}
-  {"action": "give_up", "memory": "Pushing crate right is a dead end. Must go left first, then up."}
+  $ex1
+  $ex2mem
+  {"action": "give_up", "memory": "Dead end. Must try a different approach."}
 
 Choose the action most likely to reach the goal in fewest total actions (summed across attempts).''';
+    }
   }
 
   /// Renders the targetLayers config of a board_match goal as an ASCII grid.
@@ -559,8 +591,6 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
           final params = Map<String, dynamic>.from(map)
             ..remove('action')
             ..remove('memory');
-          // Match strictly against the pre-enumerated valid actions so that
-          // hallucinated parameters (e.g. rotate+direction) are rejected.
           final match = obs.validActions.where((a) =>
             a.actionId == actionId &&
             a.params.length == params.length &&

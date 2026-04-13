@@ -72,6 +72,7 @@ class _PlayScreenState extends State<PlayScreen> {
   // AI play state
   bool _aiRunning = false;
   String? _lastThinking;
+  String? _lastResponse;
   int _agentAttempt = 1;
   StreamSubscription<AgentStepEvent>? _agentSub;
   GridPonderAgent? _currentAgent;
@@ -116,6 +117,7 @@ class _PlayScreenState extends State<PlayScreen> {
     _engine = TurnEngine(widget.packService.game, _levelDef);
     _hintService = HintService(hintStops: _levelDef.solution.hintStops);
     _lastThinking = null;
+    _lastResponse = null;
     _agentAttempt = 1;
     _agentMemory.clear();
     _lastFloodColor = null;
@@ -291,6 +293,7 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() {
       _engine.reset();
       _lastThinking = null;
+      _lastResponse = null;
       _lastFloodColor = null;
     });
   }
@@ -707,6 +710,7 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() {
       _aiRunning = true;
       _lastThinking = null;
+      _lastResponse = null;
       _agentAttempt = 1;
       _currentAgent = agent;
     });
@@ -716,9 +720,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final stream = runner.run(
       _engine,
       agent,
-      stepDelay: Duration(
-          milliseconds:
-              s.playbackMode == 'continuous' ? s.stepDelayMs : 0),
+      stepDelay: Duration(milliseconds: s.stepDelayMs),
       autoResetMultiplier: s.autoResetMultiplier,
     );
 
@@ -728,14 +730,18 @@ class _PlayScreenState extends State<PlayScreen> {
         if (event is AgentStepThinking) {
           setState(() => _lastThinking = (_lastThinking ?? '') + event.delta);
         } else if (event is AgentStepActed) {
-          setState(() => _lastThinking = event.result.thinking);
-          if (s.playbackMode == 'step') _agentSub?.pause();
+          setState(() {
+            _lastThinking = event.result.thinking;
+            _lastResponse = event.result.responseText;
+          });
+          if (s.playbackMode == 'step' && event.isBatchEnd) _agentSub?.pause();
         } else if (event is AgentStepMemoryUpdated) {
           _agentMemory[levelId] = event.memory;
         } else if (event is AgentStepReset) {
           setState(() {
             _agentAttempt = event.attempt;
             _lastThinking = null;
+            _lastResponse = null;
           });
         } else if (event is AgentRunFinished) {
           setState(() => _aiRunning = false);
@@ -759,18 +765,38 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   void _showTextDialog(String title, String? content) {
+    final text = content?.isNotEmpty == true ? content! : '(empty)';
     showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(title,
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+        title: Row(
+          children: [
+            Expanded(
+              child: Text(title,
+                  style: const TextStyle(
+                      fontSize: 16, fontWeight: FontWeight.w600)),
+            ),
+            IconButton(
+              icon: const Icon(Icons.copy, size: 18),
+              tooltip: 'Copy',
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: text));
+                ScaffoldMessenger.of(ctx).showSnackBar(
+                  const SnackBar(
+                      content: Text('Copied'),
+                      duration: Duration(seconds: 1)),
+                );
+              },
+            ),
+          ],
+        ),
         content: SizedBox(
           width: double.maxFinite,
           child: SingleChildScrollView(
             child: SelectableText(
-              content?.isNotEmpty == true ? content! : '(empty)',
-              style: const TextStyle(fontSize: 12, height: 1.5,
-                  fontFamily: 'monospace'),
+              text,
+              style: const TextStyle(
+                  fontSize: 12, height: 1.5, fontFamily: 'monospace'),
             ),
           ),
         ),
@@ -807,7 +833,10 @@ class _PlayScreenState extends State<PlayScreen> {
 
   void _stepAgent() {
     if (_agentSub != null && _agentSub!.isPaused) {
-      setState(() => _lastThinking = null);
+      setState(() {
+        _lastThinking = null;
+        _lastResponse = null;
+      });
       _agentSub!.resume();
     }
   }
@@ -1648,7 +1677,9 @@ class _PlayScreenState extends State<PlayScreen> {
                 ),
                 TextButton.icon(
                   icon: const Icon(Icons.skip_next, size: 18),
-                  label: const Text('Next Step'),
+                  label: Text(s.inferenceMode == 'single'
+                      ? 'Infer Action'
+                      : 'Infer Actions'),
                   onPressed: _stepAgent,
                 ),
               ] else ...[
@@ -1673,6 +1704,30 @@ class _PlayScreenState extends State<PlayScreen> {
               constraints: const BoxConstraints(maxHeight: 120),
               child: SingleChildScrollView(
                 child: _buildThinkingText(_lastThinking!),
+              ),
+            ),
+          ],
+          if (_lastResponse != null && _lastResponse!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.teal.shade50,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.teal.shade100),
+              ),
+              constraints: const BoxConstraints(maxHeight: 80),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  _lastResponse!,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontFamily: 'Courier',
+                    color: Colors.teal.shade900,
+                    height: 1.4,
+                  ),
+                ),
               ),
             ),
           ],

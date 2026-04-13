@@ -14,10 +14,15 @@ class AgentActResult {
   /// Full chain-of-thought or extended thinking text from the LLM, if available.
   final String? thinking;
 
+  /// The raw text response from the LLM (separate from thinking/reasoning).
+  /// Non-null when the model produces a distinct text output alongside thinking.
+  final String? responseText;
+
   /// If non-null, replaces the agent's persistent memory for this level.
   final String? memoryUpdate;
 
-  const AgentActResult(this.actions, {this.thinking, this.memoryUpdate});
+  const AgentActResult(this.actions,
+      {this.thinking, this.responseText, this.memoryUpdate});
 
   /// Convenience accessor for single-action results.
   GameAction get action => actions.first;
@@ -241,11 +246,16 @@ class AgentStepActed extends AgentStepEvent {
   final LevelState newState;
   final bool isWon;
   final bool isLost;
+  /// True when this is the last action in the current batch (all actions from
+  /// one LLM call have been applied). In step-by-step mode the UI waits for
+  /// the next user press after this event.
+  final bool isBatchEnd;
   AgentStepActed({
     required this.result,
     required this.newState,
     required this.isWon,
     required this.isLost,
+    this.isBatchEnd = false,
   });
 }
 
@@ -350,12 +360,17 @@ class AgentRunner {
           ? engine.state.avatar.inventory.slot
           : null;
 
-      bool batchTerminated = false;
+      // runDone = true exits the outer while loop (win/loss/no-result).
+      // skipPrevUpdate = true skips updating previousBoardText (give_up/win/loss).
+      bool runDone = false;
+      bool skipPrevUpdate = false;
+      GameAction? lastAppliedAction;
 
       for (int i = 0; i < result.actions.length; i++) {
         final action = result.actions[i];
+        final isLast = i == result.actions.length - 1;
 
-        // give_up: reset without consuming a game action; discard rest of batch.
+        // give_up: reset and discard rest of batch; outer loop continues.
         if (action.actionId == 'give_up') {
           previousAttemptsActions += engine.state.actionCount;
           engine.reset();
@@ -365,7 +380,7 @@ class AgentRunner {
           previousInventory = null;
           yield AgentStepReset(attempt: attemptNumber, auto: false);
           if (stepDelay > Duration.zero) await Future.delayed(stepDelay);
-          batchTerminated = true;
+          skipPrevUpdate = true;
           break;
         }
 
@@ -375,30 +390,41 @@ class AgentRunner {
           // Engine rejected the action — skip and continue batch.
           continue;
         }
-        lastAction = action;
+        lastAppliedAction = action;
         totalSteps++;
 
+        // isBatchEnd: true when this is the last action that will be applied
+        // from this LLM call — either the last in the list, or game over.
+        final gameOver = engine.isWon || engine.isLost;
         yield AgentStepActed(
           result: result,
           newState: engine.state,
           isWon: engine.isWon,
           isLost: engine.isLost,
+          isBatchEnd: isLast || gameOver,
         );
 
-        if (engine.isWon || engine.isLost) {
-          batchTerminated = true;
+        if (gameOver) {
+          runDone = true;
+          skipPrevUpdate = true;
           break;
         }
 
-        // Delay between actions within the batch (and after the last one).
-        if (stepDelay > Duration.zero) await Future.delayed(stepDelay);
+        // Delay between actions within the batch.
+        if (!isLast && stepDelay > Duration.zero) {
+          await Future.delayed(stepDelay);
+        }
       }
 
-      if (batchTerminated) break;
+      if (runDone) break;
 
-      // After batch completes, update prev board for next observation.
-      previousBoardText = batchPrevBoard;
-      previousInventory = batchPrevInventory;
+      if (lastAppliedAction != null) lastAction = lastAppliedAction;
+
+      // After batch completes normally, update prev board for next observation.
+      if (!skipPrevUpdate) {
+        previousBoardText = batchPrevBoard;
+        previousInventory = batchPrevInventory;
+      }
     }
 
     yield AgentRunFinished(
