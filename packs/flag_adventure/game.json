@@ -32,7 +32,7 @@
         "liquid",
         "walkable"
       ],
-      "sprite": "assets/sprites/water.png",
+      "sprite": "assets/sprites/water3.png",
       "symbol": "≈"
     },
     "bridge": {
@@ -49,21 +49,19 @@
         "slippery",
         "walkable"
       ],
-      "sprite": "assets/sprites/ice.png",
+      "sprite": "assets/sprites/ice2.png",
       "animations": {
         "melting": {
           "frames": [
-            "assets/sprites/ice_melts_01.png",
-            "assets/sprites/ice_melts_02.png",
-            "assets/sprites/ice_melts_03.png"
+            "assets/sprites/ice_melting.png"
           ],
-          "duration": 600,
+          "duration": 800,
           "mode": "once"
         },
         "breaking": {
           "frames": [
-            "assets/sprites/ice_breaks_01.png",
-            "assets/sprites/ice_breaks_02.png"
+            "assets/sprites/ice_breaks_1.png",
+            "assets/sprites/ice_breaks_2.png"
           ],
           "duration": 400,
           "mode": "once"
@@ -393,13 +391,13 @@
       "ref": "pw_003"
     },
     {
+      "type": "level",
+      "ref": "fw_007"
+    },
+    {
       "type": "story",
       "title": "A Frosty Frontier",
       "text": "Pip shivers as she enters the frozen caves. The ground ahead glistens with treacherous ice — one wrong step and she'll slide uncontrollably!\n\nBut her torch might come in handy... fire melts ice, after all. And that metal crate could be useful too."
-    },
-    {
-      "type": "level",
-      "ref": "fw_ice_001"
     },
     {
       "type": "level",
@@ -407,7 +405,11 @@
     },
     {
       "type": "level",
-      "ref": "fw_007"
+      "ref": "fw_ice_003"
+    },
+    {
+      "type": "level",
+      "ref": "fw_ice_005"
     }
   ],
   "defaults": {

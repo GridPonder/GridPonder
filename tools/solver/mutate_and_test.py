@@ -487,11 +487,25 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             constraints_ok = False
 
+    # Compute interaction score from events
+    _INTERACTION_EVENTS_W = {
+        "object_pushed", "object_removed", "inventory_changed",
+        "bridge_created", "ground_transformed",
+    }
+    interaction_score = 0
+    for e in all_events:
+        etype = e.get("type", "")
+        if etype in _INTERACTION_EVENTS_W:
+            interaction_score += 3
+        elif etype == "avatar_entered":
+            interaction_score += 1
+
     result = {
         "ok": True,
         "solution_length": len(solution_path) if solution_path else None,
         "solution_path": solution_path,
         "events": all_events,
+        "interaction_score": interaction_score,
         "mc_bits": None,
         "solve_rate": None,
         "timed_out": False,
@@ -590,6 +604,43 @@ def _check_criteria(result: Dict, criteria: List[Dict]) -> bool:
                 return False
 
     return True
+
+
+# ---------------------------------------------------------------------------
+# Interaction scoring
+# ---------------------------------------------------------------------------
+
+# Events that count as meaningful interactions (3 pts each).
+_INTERACTION_EVENTS: set = {
+    "object_pushed",       # pushing wood, crates — ice slide push too
+    "object_removed",      # rock broken (pickaxe), wood burned (torch)
+    "inventory_changed",   # picking up or consuming an item
+    "bridge_created",      # crate-into-water
+    "ground_transformed",  # torch melts ice / pickaxe breaks ice
+}
+
+
+def score_solution(events: List[Dict]) -> int:
+    """
+    Score a solution by its event richness.
+
+    Scoring rules:
+      - avatar_entered  : 1 point  (plain move or ice slide step)
+      - interaction event (push, remove, pickup, bridge, transform): 3 points
+      - all other event types: 0 points
+
+    A slide over N ice cells contributes N × 1 pt; each object push or item
+    pickup contributes 3 pts.  This naturally rewards levels that require
+    many interactions over levels with long featureless walks.
+    """
+    score = 0
+    for e in events:
+        etype = e.get("type", "")
+        if etype in _INTERACTION_EVENTS:
+            score += 3
+        elif etype == "avatar_entered":
+            score += 1
+    return score
 
 
 # ---------------------------------------------------------------------------
@@ -768,39 +819,50 @@ def _run(args: argparse.Namespace) -> None:
         _print_distribution(results)
         return
 
-    # Sort: harder (more MC bits) first; within equal bits, shorter solution first
-    def _sort_key(item: Tuple[Dict, Dict]) -> Tuple[float, int]:
+    # Sort: highest interaction score first; tiebreak by MC bits (harder), then shorter
+    def _sort_key(item: Tuple[Dict, Dict]) -> Tuple[int, float, int]:
         _, res = item
+        score = res.get("interaction_score") or 0
         bits = res.get("mc_bits") or 0.0
         length = res.get("solution_length") or 0
-        return (-bits, length)
+        return (-score, -bits, length)
 
     passing.sort(key=_sort_key)
     top = passing[:args.candidates]
 
     # --- Phase 4: Report ---
-    print(f"Top {len(top)} candidates (sorted by difficulty):")
+    print(f"Top {len(top)} candidates (sorted by interaction score):")
     print()
-    header = f"  {'#':>3}  {'moves':>5}  {'mc_bits':>8}  {'merges':>6}  notes"
+    header = f"  {'#':>3}  {'score':>6}  {'moves':>5}  {'mc_bits':>8}  notes"
     print(header)
     print("  " + "-" * (len(header) - 2))
 
     for rank, (level_json, res) in enumerate(top, 1):
         length = res.get("solution_length", "?")
         bits = res.get("mc_bits")
+        iscore = res.get("interaction_score") or 0
         events = res.get("events", [])
         merges = sum(1 for e in events if e.get("type") == "boxes_merged")
         rocks_broken = sum(1 for e in events if e.get("type") == "object_removed"
                            and e.get("kind") == "rock")
+        pushes = sum(1 for e in events if e.get("type") == "object_pushed")
+        pickups = sum(1 for e in events if e.get("type") == "inventory_changed")
+        transforms = sum(1 for e in events if e.get("type") == "ground_transformed")
 
         bits_str = f"{bits:.1f}" if bits is not None else "—"
         notes = []
         if merges:
             notes.append(f"merges={merges}")
         if rocks_broken:
-            notes.append(f"rocks_broken={rocks_broken}")
+            notes.append(f"rocks={rocks_broken}")
+        if pushes:
+            notes.append(f"pushes={pushes}")
+        if pickups:
+            notes.append(f"pickups={pickups}")
+        if transforms:
+            notes.append(f"transforms={transforms}")
 
-        print(f"  {rank:>3}  {length:>5}  {bits_str:>8}  {merges:>6}  "
+        print(f"  {rank:>3}  {iscore:>6}  {length:>5}  {bits_str:>8}  "
               f"{', '.join(notes)}")
 
     print()
@@ -829,6 +891,7 @@ def _run(args: argparse.Namespace) -> None:
                 "source": seed_id,
                 "mutation_rank": rank,
                 "solution_length": res.get("solution_length"),
+                "interaction_score": res.get("interaction_score"),
                 "mc_bits": round(res.get("mc_bits") or 0.0, 2),
                 "solve_rate": res.get("solve_rate"),
             }

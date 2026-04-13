@@ -1,6 +1,6 @@
 {
-  "id": "fw_ice_001",
-  "title": "Frozen Passage",
+  "id": "fw_ice_003",
+  "title": "The Long Push",
   "board": {
     "size": [7, 7],
     "layers": {
@@ -25,17 +25,17 @@
         "format": "sparse",
         "entries": [
           {"position": [5, 4], "kind": "portal", "channel": "alpha"},
-          {"position": [2, 6], "kind": "portal", "channel": "alpha"}
+          {"position": [2, 5], "kind": "portal", "channel": "alpha"}
         ]
       },
       "objects": {
         "format": "sparse",
         "entries": [
           {"position": [4, 0], "kind": "rock"},
-          {"position": [0, 2], "kind": "pickaxe"},
+          {"position": [5, 2], "kind": "pickaxe"},
           {"position": [1, 4], "kind": "metal_crate"},
           {"position": [1, 5], "kind": "rock"},
-          {"position": [3, 5], "kind": "wood"},
+          {"position": [2, 1], "kind": "wood"},
           {"position": [4, 5], "kind": "rock"},
           {"position": [6, 4], "kind": "rock"},
           {"position": [3, 6], "kind": "rock"},
@@ -65,19 +65,23 @@
       {"action": "move", "direction": "down"},
       {"action": "move", "direction": "right"},
       {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
       {"action": "move", "direction": "left"},
-      {"action": "move", "direction": "up"},
-      {"action": "move", "direction": "up"},
-      {"action": "move", "direction": "right"},
-      {"action": "move", "direction": "right"},
-      {"action": "move", "direction": "right"},
-      {"action": "move", "direction": "down"},
       {"action": "move", "direction": "down"},
       {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"},
       {"action": "move", "direction": "down"},
       {"action": "move", "direction": "down"},
       {"action": "move", "direction": "down"}
     ],
-    "hintStops": [4, 12]
+    "hintStops": [4, 11]
   }
 }

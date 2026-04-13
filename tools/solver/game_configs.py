@@ -72,20 +72,25 @@ GAME_CONFIGS: dict = {
     "flag_adventure": {
         "game_module": "flag_adventure",
         "mutable_layers": {
-            # Rocks, wood, crates, pickups (torch/pickaxe), portals can be repositioned
+            # Rocks, wood, crates, pickups (torch/pickaxe) can be repositioned
             "objects": {
                 "format": "sparse",
                 "mutable_kinds": ["rock", "wood", "metal_crate", "torch", "pickaxe"],
+            },
+            # Portal pairs can be repositioned (dedicated portals layer)
+            "portals": {
+                "format": "sparse",
+                "mutable_kinds": ["portal"],
             },
             # Flag target can be repositioned
             "markers": {
                 "format": "sparse",
                 "mutable_kinds": ["flag"],
             },
-            # Water cells can be swapped with each other (dense or sparse ground)
+            # Water and ice cells can be repositioned
             "ground": {
                 "format": "sparse",
-                "mutable_kinds": ["water"],
+                "mutable_kinds": ["water", "ice"],
             },
         },
         "mutable_avatar": True,
