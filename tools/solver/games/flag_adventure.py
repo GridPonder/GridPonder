@@ -60,6 +60,7 @@ class LevelInfo:
     width: int
     height: int
     water_cells: FrozenSet[Tuple[int, int]]               # initial water positions
+    void_cells: FrozenSet[Tuple[int, int]]                # non-playable cells
     portals: Dict[Tuple[int, int], Tuple[int, int]]       # pos → partner (bidirectional)
     flag: Tuple[int, int]
     level_id: Optional[str] = None
@@ -74,9 +75,10 @@ def load(level_json: Dict[str, Any]) -> Tuple[FAState, LevelInfo]:
     cols, rows = level_json["board"]["size"]
     layers = level_json["board"]["layers"]
 
-    # ── Ground layer → water + ice cells ────────────────────────────────────
+    # ── Ground layer → water + ice + void cells ─────────────────────────────
     water_list: list = []
     ice_list: list = []
+    void_list: list = []
     ground = layers.get("ground", {})
     if isinstance(ground, dict):
         for entry in ground.get("entries", []):
@@ -86,6 +88,8 @@ def load(level_json: Dict[str, Any]) -> Tuple[FAState, LevelInfo]:
                 water_list.append((x, y))
             elif kind == "ice":
                 ice_list.append((x, y))
+            elif kind == "void":
+                void_list.append((x, y))
     elif isinstance(ground, list):
         for row_idx, row in enumerate(ground):
             for col_idx, kind in enumerate(row):
@@ -93,6 +97,8 @@ def load(level_json: Dict[str, Any]) -> Tuple[FAState, LevelInfo]:
                     water_list.append((col_idx, row_idx))
                 elif kind == "ice":
                     ice_list.append((col_idx, row_idx))
+                elif kind == "void":
+                    void_list.append((col_idx, row_idx))
 
     # ── Portal channel collector (used by both layers below) ────────────────
     portal_by_channel: Dict[str, List[Tuple[int, int]]] = {}
@@ -159,6 +165,7 @@ def load(level_json: Dict[str, Any]) -> Tuple[FAState, LevelInfo]:
         width=cols,
         height=rows,
         water_cells=frozenset(water_list),
+        void_cells=frozenset(void_list),
         portals=portals,
         flag=flag_pos,
         level_id=level_json.get("id"),
@@ -207,8 +214,10 @@ def _pickup_at(x: int, y: int, state: FAState) -> Optional[str]:
 
 
 def _blocks_move(x: int, y: int, state: FAState, info: LevelInfo) -> bool:
-    """True if (x, y) cannot be entered by avatar (out-of-bounds or solid)."""
+    """True if (x, y) cannot be entered by avatar (out-of-bounds, void, or solid)."""
     if not _in_bounds(x, y, info):
+        return True
+    if (x, y) in info.void_cells:
         return True
     return _has_solid(x, y, state)
 
@@ -216,11 +225,13 @@ def _blocks_move(x: int, y: int, state: FAState, info: LevelInfo) -> bool:
 def _blocks_push(x: int, y: int, state: FAState, info: LevelInfo) -> bool:
     """
     True if position (x, y) cannot receive a pushed object.
-    A pushed object can land on any in-bounds cell not occupied by another
-    solid object or a pickup.  Water cells are fine for wood; crate-into-water
-    triggers the bridge rule.  Ice cells are walkable, not blocking.
+    A pushed object can land on any in-bounds non-void cell not occupied by
+    another solid object or a pickup.  Water cells are fine for wood;
+    crate-into-water triggers the bridge rule.  Ice cells are walkable.
     """
     if not _in_bounds(x, y, info):
+        return True
+    if (x, y) in info.void_cells:
         return True
     if _has_solid(x, y, state):
         return True
@@ -296,6 +307,73 @@ def _apply_post_move_rules(
     events += ev
     state, ev = _apply_water_clear(state, info)
     events += ev
+    return state, events
+
+
+def _apply_ice_entry_effects(
+    state: FAState, entry_x: int, entry_y: int
+) -> Tuple[FAState, List[Event]]:
+    """
+    Apply ice rules triggered by avatar_entered at (entry_x, entry_y) for the
+    case where the avatar immediately teleported away via portal.
+
+    In Dart, cascade rules fire on ALL avatar_entered events from the turn,
+    including intermediate portal-entry cells. torch_melts_ice fires on the
+    entry cell even though the avatar has already teleported to the exit.
+    Then water_clears_items fires because the entry cell is now water (liquid).
+
+    This must NOT be called for non-portal moves (those are handled by
+    _apply_ice_slide which processes the avatar's current resting position).
+    """
+    if (entry_x, entry_y) not in state.ice_cells:
+        return state, []
+    if state.inventory is None:
+        return state, []
+
+    events: List[Event] = []
+
+    if state.inventory == "torch":
+        # torch_melts_ice: ice → water (torch NOT consumed by this rule)
+        new_ice = state.ice_cells - {(entry_x, entry_y)}
+        new_water = state.extra_water | {(entry_x, entry_y)}
+        state = FAState(
+            ax=state.ax, ay=state.ay,
+            rocks=state.rocks, wood=state.wood, crates=state.crates,
+            pickups=state.pickups, bridges=state.bridges,
+            inventory=state.inventory,
+            ice_cells=new_ice, extra_water=new_water,
+        )
+        events.append({"type": "ground_transformed", "position": [entry_x, entry_y],
+                       "from": "ice", "to": "water", "animation": "melting"})
+        events.append({"type": "object_removed", "position": [entry_x, entry_y],
+                       "kind": "ice"})
+        # water_clears_items fires in next cascade pass: entry cell is now water,
+        # avatar_entered event still applies → clear inventory
+        old_inv = state.inventory
+        state = FAState(
+            ax=state.ax, ay=state.ay,
+            rocks=state.rocks, wood=state.wood, crates=state.crates,
+            pickups=state.pickups, bridges=state.bridges,
+            inventory=None,
+            ice_cells=state.ice_cells, extra_water=state.extra_water,
+        )
+        events.append({"type": "inventory_changed", "oldItem": old_inv, "newItem": None})
+
+    elif state.inventory == "pickaxe":
+        # pickaxe_breaks_ice: ice → empty, pickaxe consumed
+        new_ice = state.ice_cells - {(entry_x, entry_y)}
+        state = FAState(
+            ax=state.ax, ay=state.ay,
+            rocks=state.rocks, wood=state.wood, crates=state.crates,
+            pickups=state.pickups, bridges=state.bridges,
+            inventory=None,
+            ice_cells=new_ice, extra_water=state.extra_water,
+        )
+        events.append({"type": "ground_transformed", "position": [entry_x, entry_y],
+                       "from": "ice", "to": "empty", "animation": "breaking"})
+        events.append({"type": "inventory_changed",
+                       "oldItem": "pickaxe", "newItem": None})
+
     return state, events
 
 
@@ -467,9 +545,16 @@ def _apply_portal_then_slide(
             ev = [{"type": "avatar_entered", "position": [dest_x, dest_y],
                    "from": [state.ax, state.ay], "direction": direction,
                    "fromPosition": list(pos)}]
-            return ns, ev
-        # Blocked exit — stay at portal cell, no slide
-        return state, []
+            # Apply ice effects at portal entry cell (Dart cascade fires on avatar_entered
+            # event there even after teleport; torch_melts_ice + water_clears_items)
+            ns, ice_ev = _apply_ice_entry_effects(ns, pos[0], pos[1])
+            ev.extend(ice_ev)
+            # Phase 5: ice slide from portal exit (portals don't chain, but ice does)
+            ns, slide_ev = _apply_ice_slide(ns, direction, info)
+            return ns, ev + slide_ev
+        # Blocked exit — stay at portal cell; _apply_ice_slide handles ice effects
+        # at current position at start of its loop
+        return _apply_ice_slide(state, direction, info)
     return _apply_ice_slide(state, direction, info)
 
 
@@ -618,6 +703,13 @@ def _apply_ice_slide(
                                "position": [dest_x, dest_y],
                                "from": [ax, ay], "direction": direction,
                                "fromPosition": [nx, ny]})
+                # Apply ice effects at portal entry cell (nx,ny) — Dart cascade fires
+                # torch_melts_ice / pickaxe_breaks_ice on avatar_entered(nx,ny)
+                state, ice_ev = _apply_ice_entry_effects(state, nx, ny)
+                events.extend(ice_ev)
+                # Phase 5: ice slide from portal exit (portals don't chain, but ice does)
+                state, cont_ev = _apply_ice_slide(state, direction, info)
+                events.extend(cont_ev)
             else:
                 # Blocked exit: move to portal cell, don't teleport
                 state = FAState(
@@ -629,6 +721,9 @@ def _apply_ice_slide(
                 )
                 events.append({"type": "avatar_entered", "position": [nx, ny],
                                "from": [ax, ay], "direction": direction})
+                # Apply ice effects at (nx,ny) — same cascade logic as teleport case
+                state, ice_ev = _apply_ice_entry_effects(state, nx, ny)
+                events.extend(ice_ev)
             break  # portals always end movement
 
         # Clear slide move
@@ -676,6 +771,9 @@ def apply(
     tx, ty = ax + dx, ay + dy
 
     if not _in_bounds(tx, ty, info):
+        return state, False, []
+
+    if (tx, ty) in info.void_cells:
         return state, False, []
 
     events: List[Event] = []
@@ -830,7 +928,9 @@ def apply(
                 {"type": "avatar_entered", "position": [tx, ty],
                  "from": [ax, ay], "direction": direction},
             ]
-            # No ice slide — portal cell ends movement even when blocked
+            # Portal exit blocked — avatar stays at portal cell, but ice slide still fires (matches Dart)
+            ns, slide_ev = _apply_ice_slide(ns, direction, info)
+            events.extend(slide_ev)
             ns, post_ev = _apply_post_move_rules(ns, info)
             return ns, _check_win(ns, info), events + post_ev
 
@@ -851,7 +951,13 @@ def apply(
              "from": [ax, ay], "direction": direction,
              "fromPosition": [tx, ty]},
         ]
-        # No ice slide after portal teleport (portals end movement)
+        # Apply ice effects at portal entry cell (Dart cascade fires torch_melts_ice /
+        # pickaxe_breaks_ice on avatar_entered(tx,ty) even after teleport)
+        ns, ice_ev = _apply_ice_entry_effects(ns, tx, ty)
+        events.extend(ice_ev)
+        # Phase 5: ice slide from portal exit (portals don't chain, but ice does)
+        ns, slide_ev = _apply_ice_slide(ns, direction, info)
+        events.extend(slide_ev)
         ns, post_ev = _apply_post_move_rules(ns, info)
         return ns, _check_win(ns, info), events + post_ev
 

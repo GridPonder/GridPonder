@@ -488,15 +488,15 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             constraints_ok = False
 
     # Compute interaction score from events
-    _INTERACTION_EVENTS_W = {
-        "object_pushed", "object_removed", "inventory_changed",
-        "bridge_created", "ground_transformed",
-    }
+    _IRREVERSIBLE_W = {"object_removed", "bridge_created", "ground_transformed"}
+    _REVERSIBLE_W   = {"object_pushed", "inventory_changed"}
     interaction_score = 0
     for e in all_events:
         etype = e.get("type", "")
-        if etype in _INTERACTION_EVENTS_W:
+        if etype in _IRREVERSIBLE_W:
             interaction_score += 3
+        elif etype in _REVERSIBLE_W:
+            interaction_score += 2
         elif etype == "avatar_entered":
             interaction_score += 1
 
@@ -610,11 +610,9 @@ def _check_criteria(result: Dict, criteria: List[Dict]) -> bool:
 # Interaction scoring
 # ---------------------------------------------------------------------------
 
-# Events that count as meaningful interactions (3 pts each).
-_INTERACTION_EVENTS: set = {
-    "object_pushed",       # pushing wood, crates — ice slide push too
+# Irreversible events (3 pts each).
+_IRREVERSIBLE_EVENTS: set = {
     "object_removed",      # rock broken (pickaxe), wood burned (torch)
-    "inventory_changed",   # picking up or consuming an item
     "bridge_created",      # crate-into-water
     "ground_transformed",  # torch melts ice / pickaxe breaks ice
 }
@@ -625,19 +623,19 @@ def score_solution(events: List[Dict]) -> int:
     Score a solution by its event richness.
 
     Scoring rules:
-      - avatar_entered  : 1 point  (plain move or ice slide step)
-      - interaction event (push, remove, pickup, bridge, transform): 3 points
-      - all other event types: 0 points
-
-    A slide over N ice cells contributes N × 1 pt; each object push or item
-    pickup contributes 3 pts.  This naturally rewards levels that require
-    many interactions over levels with long featureless walks.
+      - avatar_entered           : 1 point  (plain move or ice slide step)
+      - reversible action        : 2 points (object_pushed, inventory_changed)
+      - irreversible action      : 3 points (object_removed, bridge_created,
+                                             ground_transformed)
+      - all other event types    : 0 points
     """
     score = 0
     for e in events:
         etype = e.get("type", "")
-        if etype in _INTERACTION_EVENTS:
+        if etype in _IRREVERSIBLE_EVENTS:
             score += 3
+        elif etype in {"object_pushed", "inventory_changed"}:
+            score += 2
         elif etype == "avatar_entered":
             score += 1
     return score

@@ -1,0 +1,472 @@
+{
+  "id": "fw_ice_008",
+  "title": "Ice Seal",
+  "board": {
+    "size": [
+      8,
+      8
+    ],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {
+            "position": [
+              6,
+              3
+            ],
+            "kind": "ice"
+          },
+          {
+            "position": [
+              4,
+              3
+            ],
+            "kind": "ice"
+          },
+          {
+            "position": [
+              7,
+              4
+            ],
+            "kind": "ice"
+          },
+          {
+            "position": [
+              0,
+              3
+            ],
+            "kind": "ice"
+          },
+          {
+            "position": [
+              3,
+              3
+            ],
+            "kind": "ice"
+          },
+          {
+            "position": [
+              1,
+              2
+            ],
+            "kind": "water"
+          },
+          {
+            "position": [
+              0,
+              0
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              1,
+              0
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              0,
+              1
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              6,
+              0
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              7,
+              0
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              7,
+              1
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              7,
+              2
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              0,
+              6
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              0,
+              7
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              1,
+              7
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              2,
+              7
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              7,
+              5
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              7,
+              6
+            ],
+            "kind": "void"
+          },
+          {
+            "position": [
+              2,
+              4
+            ],
+            "kind": "ice"
+          },
+          {
+            "position": [
+              4,
+              4
+            ],
+            "kind": "ice"
+          },
+          {
+            "position": [
+              5,
+              0
+            ],
+            "kind": "ice"
+          }
+        ]
+      },
+      "portals": {
+        "format": "sparse",
+        "entries": [
+          {
+            "position": [
+              6,
+              1
+            ],
+            "kind": "portal",
+            "channel": "alpha"
+          },
+          {
+            "position": [
+              6,
+              6
+            ],
+            "kind": "portal",
+            "channel": "alpha"
+          }
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {
+            "position": [
+              2,
+              6
+            ],
+            "kind": "pickaxe"
+          },
+          {
+            "position": [
+              7,
+              7
+            ],
+            "kind": "torch"
+          },
+          {
+            "position": [
+              5,
+              7
+            ],
+            "kind": "metal_crate"
+          },
+          {
+            "position": [
+              4,
+              3
+            ],
+            "kind": "wood"
+          },
+          {
+            "position": [
+              4,
+              7
+            ],
+            "kind": "rock"
+          },
+          {
+            "position": [
+              4,
+              6
+            ],
+            "kind": "rock"
+          },
+          {
+            "position": [
+              6,
+              3
+            ],
+            "kind": "rock"
+          },
+          {
+            "position": [
+              1,
+              1
+            ],
+            "kind": "rock"
+          },
+          {
+            "position": [
+              5,
+              5
+            ],
+            "kind": "pickaxe"
+          },
+          {
+            "position": [
+              4,
+              4
+            ],
+            "kind": "wood"
+          },
+          {
+            "position": [
+              3,
+              2
+            ],
+            "kind": "wood"
+          },
+          {
+            "position": [
+              5,
+              6
+            ],
+            "kind": "wood"
+          },
+          {
+            "position": [
+              2,
+              2
+            ],
+            "kind": "rock"
+          },
+          {
+            "position": [
+              6,
+              7
+            ],
+            "kind": "rock"
+          },
+          {
+            "position": [
+              3,
+              5
+            ],
+            "kind": "rock"
+          },
+          {
+            "position": [
+              5,
+              4
+            ],
+            "kind": "rock"
+          },
+          {
+            "position": [
+              6,
+              5
+            ],
+            "kind": "rock"
+          }
+        ]
+      },
+      "markers": {
+        "format": "sparse",
+        "entries": [
+          {
+            "position": [
+              6,
+              3
+            ],
+            "kind": "flag"
+          }
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {
+      "enabled": true,
+      "position": [
+        0,
+        4
+      ],
+      "facing": "right"
+    }
+  },
+  "goals": [
+    {
+      "id": "reach_flag",
+      "type": "reach_target",
+      "config": {
+        "targetTag": "goal_target"
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "up"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "left"
+      },
+      {
+        "action": "move",
+        "direction": "down"
+      },
+      {
+        "action": "move",
+        "direction": "down"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "up"
+      },
+      {
+        "action": "move",
+        "direction": "up"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "up"
+      },
+      {
+        "action": "move",
+        "direction": "left"
+      },
+      {
+        "action": "move",
+        "direction": "up"
+      },
+      {
+        "action": "move",
+        "direction": "down"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "down"
+      },
+      {
+        "action": "move",
+        "direction": "down"
+      },
+      {
+        "action": "move",
+        "direction": "up"
+      },
+      {
+        "action": "move",
+        "direction": "left"
+      },
+      {
+        "action": "move",
+        "direction": "up"
+      },
+      {
+        "action": "move",
+        "direction": "left"
+      },
+      {
+        "action": "move",
+        "direction": "left"
+      },
+      {
+        "action": "move",
+        "direction": "down"
+      },
+      {
+        "action": "move",
+        "direction": "down"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      },
+      {
+        "action": "move",
+        "direction": "right"
+      }
+    ],
+    "hintStops": [
+      4,
+      7,
+      16
+    ]
+  }
+}
