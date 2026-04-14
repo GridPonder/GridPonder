@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../engine/turn_engine.dart';
 import '../models/game_action.dart';
 import '../models/game_definition.dart';
@@ -95,6 +97,7 @@ class AgentObservation {
     GameAction? lastAction,
     String? previousBoardText,
     String? previousInventory,
+    Map<String, String>? kindSymbolOverrides,
   }) {
     // Collect entity kinds currently present on the board for action filtering.
     final presentKinds = <String>{};
@@ -109,7 +112,8 @@ class AgentObservation {
       level: level,
       state: state,
       validActions: _enumerateActions(game, presentKinds),
-      boardText: TextRenderer.render(state, game),
+      boardText: TextRenderer.render(state, game,
+          kindSymbolOverrides: kindSymbolOverrides),
       attemptNumber: attemptNumber,
       totalActionsAllAttempts: totalActionsAllAttempts,
       lastAction: lastAction,
@@ -299,11 +303,16 @@ class AgentRunner {
     int maxSteps = 200,
     Duration stepDelay = const Duration(milliseconds: 600),
     int autoResetMultiplier = 3,
+    bool anonymize = false,
   }) async* {
     final goldPathLen = engine.level.solution.goldPath.length;
     final autoResetThreshold = goldPathLen > 0
         ? autoResetMultiplier * goldPathLen
         : (autoResetMultiplier * 10).clamp(10, 60);
+
+    // Anon mode: build kind→label map once (stable for the whole run).
+    final kindSymbolOverrides =
+        anonymize ? buildAnonKindToLabel(engine.game) : null;
 
     int totalSteps = 0;
     int attemptNumber = 1;
@@ -336,6 +345,7 @@ class AgentRunner {
         lastAction: lastAction,
         previousBoardText: previousBoardText,
         previousInventory: previousInventory,
+        kindSymbolOverrides: kindSymbolOverrides,
       );
 
       AgentActResult? result;
@@ -355,7 +365,7 @@ class AgentRunner {
 
       // Capture board state before the batch so the next prompt has before/after.
       final batchPrevBoard = TextRenderer.render(engine.state, engine.game,
-          includeLegend: false);
+          includeLegend: false, kindSymbolOverrides: kindSymbolOverrides);
       final batchPrevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
@@ -433,4 +443,45 @@ class AgentRunner {
       steps: totalSteps,
     );
   }
+}
+
+// ---------------------------------------------------------------------------
+// Anonymous-mode helpers (used by AgentRunner and LlmAgent)
+// ---------------------------------------------------------------------------
+
+/// Builds a deterministic entity-kind → single-letter label map.
+/// All kind IDs from [game] are sorted alphabetically and assigned A, B, C, …
+/// Entities whose game-defined symbol is '.' (empty) or ' ' (void) are
+/// excluded — they keep their original symbol so the board stays readable.
+/// Used to anonymise board symbols, legend entries, and goal descriptions.
+Map<String, String> buildAnonKindToLabel(GameDefinition game) {
+  final sortedKinds = game.entityKinds.keys.toList()..sort();
+  final map = <String, String>{};
+  int labelIndex = 0;
+  for (final kindId in sortedKinds) {
+    final sym = game.entityKinds[kindId]?.symbol ?? '';
+    if (sym == '.' || sym == ' ') continue; // keep original — "empty" stays
+    map[kindId] = _anonIndexToLabel(labelIndex++);
+  }
+  return map;
+}
+
+/// Builds a reverse map from anonymous action label (a1, a2, …) to the
+/// corresponding [GameAction]. Actions are sorted by their JSON representation
+/// for determinism, then labelled a1, a2, …
+Map<String, GameAction> buildAnonReverseMap(List<GameAction> validActions) {
+  final sorted = List<GameAction>.from(validActions)
+    ..sort((a, b) => jsonEncode(a.toJson()).compareTo(jsonEncode(b.toJson())));
+  final map = <String, GameAction>{};
+  for (int i = 0; i < sorted.length; i++) {
+    map['a${i + 1}'] = sorted[i];
+  }
+  return map;
+}
+
+/// Converts a 0-based index to a label: 0→A, 1→B, …, 25→Z, 26→AA, 27→AB, …
+String _anonIndexToLabel(int i) {
+  if (i < 26) return String.fromCharCode(65 + i);
+  return String.fromCharCode(65 + (i ~/ 26) - 1) +
+      String.fromCharCode(65 + (i % 26));
 }

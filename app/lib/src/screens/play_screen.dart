@@ -625,6 +625,7 @@ class _PlayScreenState extends State<PlayScreen> {
         inferenceMode: inferenceMode,
         stepSize: stepSizeN,
         maxN: maxN,
+        anonymize: s.anonymize,
       );
     }
     if (s.agentType == 'openai') {
@@ -645,6 +646,7 @@ class _PlayScreenState extends State<PlayScreen> {
         inferenceMode: inferenceMode,
         stepSize: stepSizeN,
         maxN: maxN,
+        anonymize: s.anonymize,
       );
     }
     if (s.agentType == 'google') {
@@ -672,6 +674,7 @@ class _PlayScreenState extends State<PlayScreen> {
         inferenceMode: inferenceMode,
         stepSize: stepSizeN,
         maxN: maxN,
+        anonymize: s.anonymize,
       );
     }
     if (s.agentType == 'ollama') {
@@ -691,6 +694,7 @@ class _PlayScreenState extends State<PlayScreen> {
         inferenceMode: inferenceMode,
         stepSize: stepSizeN,
         maxN: maxN,
+        anonymize: s.anonymize,
       );
     }
     return RandomAgent();
@@ -722,6 +726,7 @@ class _PlayScreenState extends State<PlayScreen> {
       agent,
       stepDelay: Duration(milliseconds: s.stepDelayMs),
       autoResetMultiplier: s.autoResetMultiplier,
+      anonymize: s.anonymize,
     );
 
     _agentSub = stream.listen(

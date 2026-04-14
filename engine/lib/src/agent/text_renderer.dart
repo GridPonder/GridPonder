@@ -29,8 +29,10 @@ class TextRenderer {
   ///
   /// Returns a multi-line string where each character is one cell.
   /// Set [includeLegend] to false to omit the legend line.
+  /// When [kindSymbolOverrides] is provided, entity kind IDs are rendered
+  /// using the mapped symbol instead of the game-defined symbol (anonymous mode).
   static String render(LevelState state, GameDefinition game,
-      {bool includeLegend = true}) {
+      {bool includeLegend = true, Map<String, String>? kindSymbolOverrides}) {
     final board = state.board;
     final w = board.width;
     final h = board.height;
@@ -101,10 +103,14 @@ class TextRenderer {
           if (kindDef == null) {
             sym = entity.kind[0].toUpperCase();
           } else if (kindDef.symbolParam != null) {
+            // Number tiles always render as 'N' regardless of anon mode.
             final paramVal = entity.param(kindDef.symbolParam!);
             sym = paramVal != null
                 ? _valueToChar(paramVal as int)
                 : kindDef.symbol;
+          } else if (kindSymbolOverrides != null &&
+              kindSymbolOverrides.containsKey(entity.kind)) {
+            sym = kindSymbolOverrides[entity.kind];
           } else {
             sym = kindDef.symbol;
           }
@@ -126,7 +132,8 @@ class TextRenderer {
     final parts = <String>[gridStr];
 
     if (includeLegend) {
-      final legend = _buildLegend(state, game, gridAvatarPos != null);
+      final legend = _buildLegend(state, game, gridAvatarPos != null,
+          kindSymbolOverrides: kindSymbolOverrides);
       parts.add('Each character is one cell, each line is one row. Legend: $legend');
     }
 
@@ -136,17 +143,20 @@ class TextRenderer {
     final overlayBlock = _buildOverlayBlock(state, game);
     if (overlayBlock.isNotEmpty) parts.add(overlayBlock);
 
-    final stackedBlock = _buildStackedBlock(state, game, gridAvatarPos);
+    final stackedBlock = _buildStackedBlock(state, game, gridAvatarPos,
+        kindSymbolOverrides: kindSymbolOverrides);
     if (stackedBlock.isNotEmpty) parts.add(stackedBlock);
 
-    final mcoBlock = _buildMcoBlock(state, game);
+    final mcoBlock = _buildMcoBlock(state, game,
+        kindSymbolOverrides: kindSymbolOverrides);
     if (mcoBlock.isNotEmpty) parts.add(mcoBlock);
 
     return parts.join('\n\n');
   }
 
   static String _buildLegend(
-      LevelState state, GameDefinition game, bool hasAvatar) {
+      LevelState state, GameDefinition game, bool hasAvatar,
+      {Map<String, String>? kindSymbolOverrides}) {
     final seen = <String, String>{}; // symbol -> label
     if (hasAvatar) seen[_avatarSymbol] = 'avatar (you)';
 
@@ -156,16 +166,27 @@ class TextRenderer {
         final kindDef = game.entityKinds[entity.kind];
         if (kindDef == null) continue;
 
-        // Entities with symbolParam are shown as 'N' in the grid;
-        // exact values are always listed in the "Number values" block below.
-        final sym = kindDef.symbolParam != null ? 'N' : kindDef.symbol;
-        if (!seen.containsKey(sym)) {
-          final label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
-          final desc = kindDef.symbolParam != null
-              ? ' (exact value in "Number values")'
-              : (kindDef.description != null ? ' (${kindDef.description})' : '');
-          seen[sym] = '$label$desc';
+        String sym;
+        String label;
+        if (kindDef.symbolParam != null) {
+          // Number tiles always 'N'; exact values in "Number values" block.
+          sym = 'N';
+          label = kindSymbolOverrides != null
+              ? '? (exact value in "Number values")'
+              : '${kindDef.uiName ?? kindDef.id.replaceAll('_', ' ')} (exact value in "Number values")';
+        } else if (kindSymbolOverrides != null &&
+            kindSymbolOverrides.containsKey(entity.kind)) {
+          sym = kindSymbolOverrides[entity.kind]!;
+          label = '?';
+        } else {
+          sym = kindDef.symbol;
+          final desc = kindDef.description != null
+              ? ' (${kindDef.description})'
+              : '';
+          label = '${kindDef.uiName ?? kindDef.id.replaceAll('_', ' ')}$desc';
         }
+
+        if (!seen.containsKey(sym)) seen[sym] = label;
       }
     }
 
@@ -195,7 +216,8 @@ class TextRenderer {
   /// Reports cells where more than one layer has a visible entity, so the LLM
   /// knows the grid symbol hides additional content beneath it.
   static String _buildStackedBlock(
-      LevelState state, GameDefinition game, Position? avatarPos) {
+      LevelState state, GameDefinition game, Position? avatarPos,
+      {Map<String, String>? kindSymbolOverrides}) {
     final layerOrder = ['actors', 'markers', 'objects', 'ground'];
     final entries = <String>[];
 
@@ -214,18 +236,29 @@ class TextRenderer {
           String label;
           if (kindDef == null) {
             sym = entity.kind[0].toUpperCase();
-            label = entity.kind.replaceAll('_', ' ');
+            label = kindSymbolOverrides != null
+                ? '?'
+                : entity.kind.replaceAll('_', ' ');
           } else if (kindDef.symbolParam != null) {
             final paramVal = entity.param(kindDef.symbolParam!);
             sym = paramVal != null
                 ? _valueToChar(paramVal as int)
                 : kindDef.symbol;
-            label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
+            label = kindSymbolOverrides != null
+                ? '?'
+                : (kindDef.uiName ?? kindDef.id.replaceAll('_', ' '));
+          } else if (kindSymbolOverrides != null &&
+              kindSymbolOverrides.containsKey(entity.kind)) {
+            sym = kindSymbolOverrides[entity.kind]!;
+            label = '?';
           } else {
             sym = kindDef.symbol;
             label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
           }
-          if (sym == '.') continue; // empty/void cell — no information value
+          // Skip void/empty cells. In anon mode the symbol may be overridden,
+          // so check both the display symbol and the original game symbol.
+          final originalSym = kindDef?.symbol ?? sym;
+          if (sym == '.' || sym == ' ' || originalSym == '.' || originalSym == ' ') continue;
           symbols.add('$sym($label)');
         }
 
@@ -274,7 +307,8 @@ class TextRenderer {
   }
 
   /// Renders each multi-cell object as a labeled block (separate from the grid).
-  static String _buildMcoBlock(LevelState state, GameDefinition game) {
+  static String _buildMcoBlock(LevelState state, GameDefinition game,
+      {Map<String, String>? kindSymbolOverrides}) {
     if (state.board.multiCellObjects.isEmpty) return '';
 
     final sb = StringBuffer();
@@ -282,7 +316,9 @@ class TextRenderer {
 
     for (final mco in state.board.multiCellObjects) {
       final kindDef = game.entityKinds[mco.kind];
-      final label = kindDef?.uiName ?? mco.kind.replaceAll('_', ' ');
+      final label = kindSymbolOverrides != null
+          ? '?'
+          : (kindDef?.uiName ?? mco.kind.replaceAll('_', ' '));
       sb.writeln('  ${mco.id} [$label]');
 
       // Cells with exit marker including direction.

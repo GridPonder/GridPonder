@@ -42,7 +42,10 @@ Future<void> main(List<String> arguments) async {
         help: 'Max actions per LLM call (fixed-n mode)', defaultsTo: '1')
     ..addOption('max-n',
         help: 'Max actions per LLM call (flex-n mode, default: unlimited)',
-        defaultsTo: null);
+        defaultsTo: null)
+    ..addFlag('anon',
+        help: 'Anonymise entity kinds and action IDs in the prompt',
+        defaultsTo: false);
 
   late final ArgResults args;
   try {
@@ -62,6 +65,7 @@ Future<void> main(List<String> arguments) async {
   final stepSize = int.parse(args['step-size'] as String);
   final maxNStr = args['max-n'] as String?;
   final maxN = maxNStr != null ? int.parse(maxNStr) : null;
+  final anon = args['anon'] as bool;
 
   // ── Load pack ─────────────────────────────────────────────────────────────
   final packDir = '$packsDir/$packId';
@@ -107,6 +111,10 @@ Future<void> main(List<String> arguments) async {
   final levelDef = pack.levels[levelId]!;
   final goldPathLen = levelDef.solution.goldPath.length;
 
+  // Anon mode: kind→label map (stable for the whole run).
+  final kindSymbolOverrides =
+      anon ? buildAnonKindToLabel(gameDef) : const <String, String>{};
+
   final limitPerAttempt = goldPathLen > 0
       ? attemptMul * goldPathLen
       : (attemptMul * 10).clamp(10, 60);
@@ -129,6 +137,9 @@ Future<void> main(List<String> arguments) async {
   GameAction? lastAction;
   String? prevBoardText;
   String? prevInventory;
+  // Anon mode: reverse map from label (a1, a2, …) to real GameAction.
+  // Rebuilt each time emitState() is called (valid actions may change).
+  Map<String, GameAction> currentAnonMap = {};
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   void out(Map<String, dynamic> event) => stdout.writeln(jsonEncode(event));
@@ -144,7 +155,11 @@ Future<void> main(List<String> arguments) async {
       lastAction: lastAction,
       previousBoardText: prevBoardText,
       previousInventory: prevInventory,
+      kindSymbolOverrides: anon ? kindSymbolOverrides : null,
     );
+
+    // Rebuild the reverse map for the current set of valid actions.
+    if (anon) currentAnonMap = buildAnonReverseMap(obs.validActions);
 
     final prompt = LlmAgent.buildPrompt(
       obs,
@@ -152,6 +167,7 @@ Future<void> main(List<String> arguments) async {
       inferenceMode: mode,
       stepSize: stepSize,
       maxN: maxN,
+      anonymize: anon,
     );
 
     out({
@@ -247,16 +263,40 @@ Future<void> main(List<String> arguments) async {
         continue;
       }
 
-      prevBoardText =
-          TextRenderer.render(engine.state, gameDef, includeLegend: false);
+      prevBoardText = TextRenderer.render(engine.state, gameDef,
+          includeLegend: false,
+          kindSymbolOverrides: anon ? kindSymbolOverrides : null);
       prevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
 
-      final params = Map<String, dynamic>.from(input)
-        ..remove('action')
-        ..remove('memory');
-      final gameAction = GameAction(actionId, params);
+      // Anon mode: reverse-map label (a1, a2, …) to real action.
+      final GameAction gameAction;
+      if (anon) {
+        if (actionId == 'give_up') {
+          gameAction = GameAction('give_up', {});
+        } else {
+          final real = currentAnonMap[actionId];
+          if (real == null) {
+            prevBoardText = null;
+            prevInventory = null;
+            consecutiveRejections++;
+            out({'event': 'rejected', 'action': input});
+            if (consecutiveRejections >= maxConsecutiveRejections) {
+              out(lostEvent());
+              break;
+            }
+            emitState();
+            continue;
+          }
+          gameAction = real;
+        }
+      } else {
+        final params = Map<String, dynamic>.from(input)
+          ..remove('action')
+          ..remove('memory');
+        gameAction = GameAction(actionId, params);
+      }
       final result = engine.executeTurn(gameAction);
 
       if (!result.accepted) {
@@ -336,16 +376,35 @@ Future<void> main(List<String> arguments) async {
       }
 
       // Capture board before execution (used in next state prompt).
-      prevBoardText =
-          TextRenderer.render(engine.state, gameDef, includeLegend: false);
+      prevBoardText = TextRenderer.render(engine.state, gameDef,
+          includeLegend: false,
+          kindSymbolOverrides: anon ? kindSymbolOverrides : null);
       prevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
 
-      final params = Map<String, dynamic>.from(actionInput)
-        ..remove('action')
-        ..remove('memory');
-      final gameAction = GameAction(actionId, params);
+      // Anon mode: reverse-map label (a1, a2, …) to real action.
+      final GameAction gameAction;
+      if (anon) {
+        final real = currentAnonMap[actionId];
+        if (real == null) {
+          prevBoardText = null;
+          prevInventory = null;
+          consecutiveRejections++;
+          out({'event': 'rejected', 'action': actionInput});
+          if (consecutiveRejections >= maxConsecutiveRejections) {
+            outerBreak = true;
+            out(lostEvent());
+          }
+          break;
+        }
+        gameAction = real;
+      } else {
+        final params = Map<String, dynamic>.from(actionInput)
+          ..remove('action')
+          ..remove('memory');
+        gameAction = GameAction(actionId, params);
+      }
       final result = engine.executeTurn(gameAction);
 
       if (!result.accepted) {

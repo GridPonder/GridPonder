@@ -118,6 +118,7 @@ def run_level(
     step_size: int = 1,
     max_n: int = 5,
     flex_penalty: float = 0.5,
+    anon: bool = False,
 ) -> dict[str, Any]:
     """Run one level with one model variant. Returns a result dict.
 
@@ -158,6 +159,8 @@ def run_level(
         cmd += ["--step-size", str(step_size)]
     elif mode == "flex-n" and max_n is not None:
         cmd += ["--max-n", str(max_n)]
+    if anon:
+        cmd += ["--anon"]
 
     litellm_model: str = model["litellm_model"]
     extra_params: dict = dict(variant.get("params") or {})
@@ -310,6 +313,7 @@ def run_level(
         "local": model.get("local", True),
         "reasoning": variant.get("reasoning", False),
         "inference_mode": mode,
+        "anon": anon,
         "success": success,
         "actions_total": actions_total,
         "gold_path_length": gold_path_length,
@@ -400,6 +404,8 @@ def main() -> None:
                         help="Max actions per LLM call for flex-n mode (default: unlimited)")
     parser.add_argument("--flex-penalty", type=float, default=0.5,
                         help="Efficiency penalty per extra step beyond first in flex-n (default: 0.5)")
+    parser.add_argument("--anon", action="store_true",
+                        help="Anonymise entity kinds and action IDs (ARC-AGI style)")
 
     args = parser.parse_args()
 
@@ -440,7 +446,8 @@ def main() -> None:
         mode_label = f"fixed-{args.step_size}"
     elif args.mode == "flex-n":
         mode_label = f"flex-{args.max_n}(f={args.flex_penalty})"
-    print(f"Benchmark [{mode_label}]: {total} run(s) — "
+    anon_label = " [anon]" if args.anon else ""
+    print(f"Benchmark [{mode_label}]{anon_label}: {total} run(s) — "
           f"{len(model_variants)} model variant(s) × "
           f"{sum(len(v) for v in levels_by_pack.values())} level(s)"
           f"{f' × {args.runs} runs' if args.runs > 1 else ''}")
@@ -492,6 +499,7 @@ def main() -> None:
             "local": model_cfg.get("local", True),
             "reasoning": variant_cfg.get("reasoning", False),
             "inference_mode": args.mode,
+            "anon": args.anon,
             "attempt_multiplier": args.attempt_multiplier,
             "total_multiplier": args.total_multiplier,
             "runs_per_level": args.runs,
@@ -519,6 +527,7 @@ def main() -> None:
                         step_size=args.step_size,
                         max_n=args.max_n,
                         flex_penalty=args.flex_penalty,
+                        anon=args.anon,
                     )
                 except Exception as exc:
                     result = {

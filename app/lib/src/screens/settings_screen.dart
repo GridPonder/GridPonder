@@ -531,6 +531,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ],
                   const Divider(height: 1),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Anonymous mode'),
+                    subtitle: const Text(
+                        'Hide entity names and action semantics (ARC-AGI style)'),
+                    value: s.anonymize,
+                    onChanged: (v) async {
+                      await s.setAnonymize(v);
+                      setState(() {});
+                    },
+                  ),
+                  const Divider(height: 1),
                   ListTile(
                     contentPadding: EdgeInsets.zero,
                     title: Text(

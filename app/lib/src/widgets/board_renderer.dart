@@ -356,6 +356,8 @@ class _Cell extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final pos = Position(x, y);
+    final groundEntity = state.board.getEntity('ground', pos);
+    if (groundEntity?.kind == 'void') return const SizedBox.shrink();
     return Container(
       decoration:
           BoxDecoration(border: Border.all(color: Colors.black12, width: 0.5)),

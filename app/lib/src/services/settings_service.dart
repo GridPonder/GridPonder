@@ -95,6 +95,11 @@ class SettingsService {
   int get maxN => _prefs.getInt('max_n') ?? 0;
   Future<void> setMaxN(int v) => _prefs.setInt('max_n', v);
 
+  // --- Anonymous mode ---
+  /// When true, entity kinds and action IDs are anonymised in the prompt.
+  bool get anonymize => _prefs.getBool('anonymize') ?? false;
+  Future<void> setAnonymize(bool v) => _prefs.setBool('anonymize', v);
+
   // --- Playback mode ---
   /// 'continuous' or 'step'
   String get playbackMode => _prefs.getString('playback_mode') ?? 'continuous';

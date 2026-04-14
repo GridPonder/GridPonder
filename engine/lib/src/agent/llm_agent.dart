@@ -122,6 +122,9 @@ class LlmAgent implements GridPonderAgent {
   /// Max actions per LLM call for flex-n mode (null = unlimited).
   final int? maxN;
 
+  /// When true, entity kinds and action IDs are anonymised in the prompt.
+  final bool anonymize;
+
   String _memory;
 
   /// The most recent prompt sent to the LLM. Null before the first call.
@@ -134,6 +137,7 @@ class LlmAgent implements GridPonderAgent {
     this.inferenceMode = 'single',
     this.stepSize = 3,
     this.maxN,
+    this.anonymize = false,
   })  : _provider = provider,
         _displayName = displayName,
         _memory = initialMemory;
@@ -152,6 +156,7 @@ class LlmAgent implements GridPonderAgent {
       inferenceMode: inferenceMode,
       stepSize: stepSize,
       maxN: maxN,
+      anonymize: anonymize,
     );
     lastPrompt = prompt;
 
@@ -189,8 +194,10 @@ class LlmAgent implements GridPonderAgent {
     final thinking = hasThinking ? thinkingBuffer.toString() : responseText;
     final separateResponse = hasThinking ? responseText : null;
 
+    final anonMap = anonymize ? buildAnonReverseMap(obs.validActions) : null;
+
     if (inferenceMode == 'single') {
-      final action = _extractAction(responseText, obs);
+      final action = _extractAction(responseText, obs, anonMap: anonMap);
       final memoryUpdate = _extractMemory(responseText);
       if (memoryUpdate != null) _memory = memoryUpdate;
       yield AgentActCompleted(
@@ -200,7 +207,8 @@ class LlmAgent implements GridPonderAgent {
             memoryUpdate: memoryUpdate),
       );
     } else {
-      final (actions, memoryUpdate) = _extractActionList(responseText, obs);
+      final (actions, memoryUpdate) =
+          _extractActionList(responseText, obs, anonMap: anonMap);
       if (memoryUpdate != null) _memory = memoryUpdate;
       yield AgentActCompleted(
         AgentActResult(actions,
@@ -213,8 +221,10 @@ class LlmAgent implements GridPonderAgent {
 
   /// Parses a multi-action LLM response. Returns (actions, memoryUpdate).
   /// Accepts: bare JSON array, {"actions":[...]}, or single {"action":"..."}.
+  /// When [anonMap] is provided, action labels (a1, a2, …) are reverse-mapped.
   (List<GameAction>, String?) _extractActionList(
-      String text, AgentObservation obs) {
+      String text, AgentObservation obs,
+      {Map<String, GameAction>? anonMap}) {
     // Strip <think>...</think> blocks and markdown code fences.
     final stripped = text
         .replaceAll(RegExp(r'<think>.*?</think>', dotAll: true), '')
@@ -279,6 +289,12 @@ class LlmAgent implements GridPonderAgent {
         result.add(GameAction('give_up', {}));
         break;
       }
+      if (anonMap != null) {
+        // Anon mode: reverse-map label (a1, a2, …) to real GameAction.
+        final real = anonMap[actionId];
+        if (real != null) result.add(real);
+        continue;
+      }
       final params = Map<String, dynamic>.from(item as Map<String, dynamic>)
         ..remove('action')
         ..remove('memory');
@@ -304,23 +320,47 @@ class LlmAgent implements GridPonderAgent {
   ///
   /// Public and static so external tools (e.g. the benchmark runner) can
   /// produce identical prompts without instantiating an [LlmAgent].
+  ///
+  /// When [anonymize] is true, entity kind names, action IDs, and game
+  /// description are replaced with opaque labels (ARC-AGI style).
   static String buildPrompt(
     AgentObservation obs, {
     String memory = '',
     String inferenceMode = 'single',
     int stepSize = 3,
     int? maxN,
+    bool anonymize = false,
   }) {
+    // ── Anon maps ────────────────────────────────────────────────────────────
+    final kindToLabel =
+        anonymize ? buildAnonKindToLabel(obs.game) : const <String, String>{};
+    // Forward map: jsonEncoded action → anon label (a1, a2, …)
+    final Map<String, String> actionForward;
+    if (anonymize) {
+      final sorted = List<GameAction>.from(obs.validActions)
+        ..sort((a, b) => jsonEncode(a.toJson()).compareTo(jsonEncode(b.toJson())));
+      actionForward = {
+        for (int i = 0; i < sorted.length; i++)
+          jsonEncode(sorted[i].toJson()): 'a${i + 1}',
+      };
+    } else {
+      actionForward = {};
+    }
+
+    // ── Goals ─────────────────────────────────────────────────────────────────
     final goalParts = <String>[];
     for (final g in obs.level.goals) {
       switch (g.type) {
         case 'reach_target':
-          final name = _resolveEntityName(
-              obs.game, g.config['targetKind'] as String?,
-              g.config['targetTag'] as String?);
+          final kindId = g.config['targetKind'] as String?;
+          final tag = g.config['targetTag'] as String?;
+          final name = anonymize
+              ? _resolveEntityNameAnon(obs.game, kindId, tag, kindToLabel)
+              : _resolveEntityName(obs.game, kindId, tag);
           goalParts.add('Reach the $name');
         case 'board_match':
-          final targetGrid = _renderTargetGrid(obs.game, g.config);
+          final targetGrid = _renderTargetGrid(obs.game, g.config,
+              kindToLabel: anonymize ? kindToLabel : null);
           if (targetGrid != null) {
             goalParts.add('Arrange tiles to match the target pattern:\n$targetGrid');
           } else {
@@ -328,34 +368,49 @@ class LlmAgent implements GridPonderAgent {
           }
         case 'sequence_match':
           final sequence = (g.config['sequence'] as List?)
-              ?.map((e) => e as int)
-              .toList() ?? [];
+                  ?.map((e) => e as int)
+                  .toList() ??
+              [];
           final matched = obs.state.sequenceIndices[g.id] ?? 0;
           final done = sequence.take(matched).map((n) => '✓$n').join(', ');
           final pending = sequence.skip(matched).map((n) => '$n').join(', ');
-          final progress = [if (done.isNotEmpty) done, if (pending.isNotEmpty) pending].join(', ');
-          goalParts.add('Merge numbers in sequence [$progress] ($matched/${sequence.length} done)');
+          final progress = [
+            if (done.isNotEmpty) done,
+            if (pending.isNotEmpty) pending
+          ].join(', ');
+          goalParts.add(
+              'Merge numbers in sequence [$progress] ($matched/${sequence.length} done)');
         case 'all_cleared':
-          final name = _resolveEntityName(
-              obs.game, g.config['kind'] as String?,
-              g.config['tag'] as String?);
+          final kindId = g.config['kind'] as String?;
+          final tag = g.config['tag'] as String?;
+          final name = anonymize
+              ? _resolveEntityNameAnon(obs.game, kindId, tag, kindToLabel)
+              : _resolveEntityName(obs.game, kindId, tag);
           goalParts.add('Clear all ${name}s from the board');
         case 'sum_constraint':
           goalParts.add(_describeSumConstraint(g.config));
         case 'count_constraint':
           goalParts.add(_describeCountConstraint(g.config));
         case 'param_match':
-          goalParts.add(_describeParamMatch(obs.game, g.config));
+          goalParts.add(_describeParamMatch(obs.game, g.config,
+              kindToLabel: anonymize ? kindToLabel : null));
         default:
           goalParts.add(g.type);
       }
     }
     final goalDescriptions = goalParts.join('; ');
 
-    final actionsDesc = obs.validActions
-        .map((a) => jsonEncode(a.toJson()))
-        .join(', ');
+    // ── Actions desc ──────────────────────────────────────────────────────────
+    final actionsDesc = anonymize
+        ? obs.validActions
+            .map((a) {
+              final label = actionForward[jsonEncode(a.toJson())] ?? '?';
+              return '{"action": "$label"}';
+            })
+            .join(', ')
+        : obs.validActions.map((a) => jsonEncode(a.toJson())).join(', ');
 
+    // ── Inventory / moves ─────────────────────────────────────────────────────
     final inv = obs.state.avatar.inventory.slot;
     final inventoryLine = inv != null ? '\nInventory: $inv' : '';
 
@@ -371,9 +426,20 @@ class LlmAgent implements GridPonderAgent {
         ? '\nInventory: ${obs.previousInventory}'
         : '';
 
+    // ── Last action section ───────────────────────────────────────────────────
+    final String lastActionLabel;
+    if (obs.lastAction != null && anonymize) {
+      final label = actionForward[jsonEncode(obs.lastAction!.toJson())] ?? '?';
+      lastActionLabel = '{"action": "$label"}';
+    } else if (obs.lastAction != null) {
+      lastActionLabel = jsonEncode(obs.lastAction!.toJson());
+    } else {
+      lastActionLabel = '';
+    }
+
     final lastActionSection = obs.lastAction != null
         ? '''
-LAST ACTION: ${jsonEncode(obs.lastAction!.toJson())}
+LAST ACTION: $lastActionLabel
 BOARD BEFORE:
 ${obs.previousBoardText}$prevInventoryLine
 
@@ -387,13 +453,19 @@ Memory is your only way to retain knowledge across actions.'''
 CURRENT BOARD (first move of this attempt):
 ${obs.boardText}$inventoryLine$movesLine''';
 
-    final descriptionSection = obs.game.description.isNotEmpty
-        ? '\n${obs.game.description}\n'
-        : '';
+    // ── Header ────────────────────────────────────────────────────────────────
+    final titleLine = anonymize
+        ? 'You are playing a grid puzzle.'
+        : 'You are playing a grid puzzle called "${obs.game.title}".';
+    final descriptionSection = anonymize
+        ? '\n2D grid game. Entities and rules unknown — discover by observation and experimentation.\n'
+        : (obs.game.description.isNotEmpty
+            ? '\n${obs.game.description}\n'
+            : '');
 
-    final header = '''You are playing a grid puzzle called "${obs.game.title}".
-Attempt ${obs.attemptNumber} | Total actions across all attempts: ${obs.totalActionsAllAttempts}
+    final header = '''$titleLine
 Minimize total actions — give up early if stuck rather than wasting moves.
+Attempt ${obs.attemptNumber} | Total actions across all attempts: ${obs.totalActionsAllAttempts}
 $descriptionSection$memorySection
 GOAL: $goalDescriptions
 $lastActionSection
@@ -402,10 +474,17 @@ AVAILABLE ACTIONS:
 $actionsDesc
 {"action": "give_up"} — reset and start a fresh attempt''';
 
-    // Pick two representative valid actions for examples (first and last).
-    final va = obs.validActions;
-    final ex1 = va.isNotEmpty ? jsonEncode(va.first.toJson()) : '{"action": "..."}';
-    final ex2 = va.length > 1 ? jsonEncode(va.last.toJson()) : ex1;
+    // ── Examples ──────────────────────────────────────────────────────────────
+    final String ex1, ex2;
+    if (anonymize) {
+      final n = obs.validActions.length;
+      ex1 = '{"action": "a1"}';
+      ex2 = n > 1 ? '{"action": "a$n"}' : ex1;
+    } else {
+      final va = obs.validActions;
+      ex1 = va.isNotEmpty ? jsonEncode(va.first.toJson()) : '{"action": "..."}';
+      ex2 = va.length > 1 ? jsonEncode(va.last.toJson()) : ex1;
+    }
 
     return '$header\n\n${_promptTail(inferenceMode, stepSize, maxN, ex1: ex1, ex2: ex2)}';
   }
@@ -469,8 +548,10 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
 
   /// Renders the targetLayers config of a board_match goal as an ASCII grid.
   /// Returns null if the config has no renderable target.
+  /// When [kindToLabel] is provided, entity kinds are shown as their labels.
   static String? _renderTargetGrid(
-      GameDefinition game, Map<String, dynamic> config) {
+      GameDefinition game, Map<String, dynamic> config,
+      {Map<String, String>? kindToLabel}) {
     final targetLayers = config['targetLayers'] as Map<String, dynamic>?;
     if (targetLayers == null || targetLayers.isEmpty) return null;
 
@@ -494,7 +575,9 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         for (int x = 0; x < row.length; x++) {
           final kindId = row[x] as String?;
           if (kindId == null) continue;
-          final sym = game.entityKinds[kindId]?.symbol ?? kindId[0];
+          final sym = kindToLabel != null
+              ? (kindToLabel[kindId] ?? kindId[0])
+              : (game.entityKinds[kindId]?.symbol ?? kindId[0]);
           grid[y][x] = sym;
         }
       }
@@ -559,20 +642,21 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
   }
 
   static String _describeParamMatch(
-      GameDefinition game, Map<String, dynamic> config) {
+      GameDefinition game, Map<String, dynamic> config,
+      {Map<String, String>? kindToLabel}) {
     final markerKind = config['markerKind'] as String?;
     final checkKind = config['checkKind'] as String?;
     final checkParam = config['checkParam'] as String?;
     final checkValue = config['checkValue'];
 
-    final markerName = markerKind != null
-        ? (game.entityKinds[markerKind]?.uiName ??
-            markerKind.replaceAll('_', ' '))
-        : 'target';
-    final checkName = checkKind != null
-        ? (game.entityKinds[checkKind]?.uiName ??
-            checkKind.replaceAll('_', ' '))
-        : 'piece';
+    String _name(String? kindId, String fallback) {
+      if (kindId == null) return fallback;
+      if (kindToLabel != null) return kindToLabel[kindId] ?? kindId;
+      return game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
+    }
+
+    final markerName = _name(markerKind, 'target');
+    final checkName = _name(checkKind, 'piece');
 
     if (checkParam == 'sides' && checkValue == 15) {
       return 'Fill every $markerName cell with a complete $checkName (all 4 sides connected)';
@@ -580,7 +664,8 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     return 'Place a $checkName on every $markerName where $checkParam = $checkValue';
   }
 
-  GameAction _extractAction(String text, AgentObservation obs) {
+  GameAction _extractAction(String text, AgentObservation obs,
+      {Map<String, GameAction>? anonMap}) {
     final jsonMatch = RegExp(r'\{[^}]+\}').firstMatch(text);
     if (jsonMatch != null) {
       try {
@@ -588,15 +673,21 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         final actionId = map['action'] as String?;
         if (actionId == 'give_up') return GameAction('give_up', {});
         if (actionId != null) {
-          final params = Map<String, dynamic>.from(map)
-            ..remove('action')
-            ..remove('memory');
-          final match = obs.validActions.where((a) =>
-            a.actionId == actionId &&
-            a.params.length == params.length &&
-            params.entries.every((e) => a.params[e.key] == e.value)
-          ).firstOrNull;
-          if (match != null) return match;
+          if (anonMap != null) {
+            final real = anonMap[actionId];
+            if (real != null) return real;
+          } else {
+            final params = Map<String, dynamic>.from(map)
+              ..remove('action')
+              ..remove('memory');
+            final match = obs.validActions
+                .where((a) =>
+                    a.actionId == actionId &&
+                    a.params.length == params.length &&
+                    params.entries.every((e) => a.params[e.key] == e.value))
+                .firstOrNull;
+            if (match != null) return match;
+          }
         }
       } catch (_) {}
     }
@@ -623,6 +714,29 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
       return tag;
     }
     return 'target';
+  }
+
+  /// Anonymous version: resolves entity kind (via kindId or tag) then looks up
+  /// its label in [kindToLabel]. Falls back to a generic '?' if unresolved.
+  static String _resolveEntityNameAnon(
+      GameDefinition game,
+      String? kindId,
+      String? tag,
+      Map<String, String> kindToLabel) {
+    // Resolve to a kindId first.
+    String? resolvedKind = kindId;
+    if (resolvedKind == null && tag != null) {
+      for (final entry in game.entityKinds.entries) {
+        if (entry.value.tags.contains(tag)) {
+          resolvedKind = entry.key;
+          break;
+        }
+      }
+    }
+    if (resolvedKind != null) {
+      return kindToLabel[resolvedKind] ?? resolvedKind;
+    }
+    return '?';
   }
 
   String? _extractMemory(String text) {

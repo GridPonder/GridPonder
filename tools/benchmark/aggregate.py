@@ -66,9 +66,15 @@ def load_results(results_dir: Path, mode_filter: str | None = None) -> dict[str,
             continue
 
         model_id = meta["model_id"]
-        key = f"{model_id}|{file_mode}"
+        file_anon = meta.get("anon", False)
+        key = f"{model_id}|{file_mode}|{'anon' if file_anon else 'named'}"
         if key not in data:
-            data[key] = {"meta": meta, "levels": [], "inference_mode": file_mode}
+            data[key] = {
+                "meta": meta,
+                "levels": [],
+                "inference_mode": file_mode,
+                "anon": file_anon,
+            }
         data[key]["levels"].extend(levels)
 
     return data
@@ -134,6 +140,7 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
             "local": meta.get("local", True),
             "reasoning": meta.get("reasoning", False),
             "inference_mode": inference_mode,
+            "anon": entry.get("anon", False),
             "overall": overall,
             "by_pack": pack_stats,
         })
