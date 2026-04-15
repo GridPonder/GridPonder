@@ -428,6 +428,15 @@
     {
       "type": "level",
       "ref": "fw_ice_008"
+    },
+    {
+      "type": "story",
+      "title": "The Frozen Labyrinth",
+      "text": "Deep in the frozen caves, Pip discovers a new challenge: vast icy chambers where every step sends her sliding uncontrollably. Crates, torches and pickaxes are scattered throughout — but reaching them means mastering the ice!"
+    },
+    {
+      "type": "level",
+      "ref": "fw_ice_011"
     }
   ],
   "defaults": {

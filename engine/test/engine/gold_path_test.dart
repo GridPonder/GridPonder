@@ -54,6 +54,7 @@ void main() {
     for (final id in [
       'fw_001','fw_002','fw_003','fw_004','fw_005','fw_006','pw_001','pw_003','fw_007',
       'fw_ice_002','fw_ice_003','fw_ice_005','fw_ice_006','fw_ice_007','fw_ice_008',
+      'fw_ice_011',
     ]) {
       test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
     }
