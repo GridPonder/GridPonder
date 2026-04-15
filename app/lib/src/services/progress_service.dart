@@ -60,6 +60,21 @@ class ProgressService {
   int completedCount(List<String> levelIds) =>
       levelIds.where(_completed.contains).length;
 
+  /// Returns the [ref] of the first level entry in [sequence] that has not
+  /// been completed, or null if all levels are completed.
+  ///
+  /// Story entries are ignored. In developer mode this always returns null
+  /// (no jump — start at the beginning as usual).
+  String? firstIncompleteRef(List<SequenceEntry> sequence) {
+    if (isDeveloperMode) return null;
+    for (final entry in sequence) {
+      if (entry.type == 'level' && !_completed.contains(entry.ref)) {
+        return entry.ref;
+      }
+    }
+    return null; // all completed
+  }
+
   // ---------------------------------------------------------------------------
   // Recording progress
   // ---------------------------------------------------------------------------

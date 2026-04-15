@@ -681,7 +681,9 @@ class _PlayScreenState extends State<PlayScreen> {
       final useThink =
           s.ollamaThinkEnabled && OllamaModel.supportsThinking(s.ollamaModel);
       final provider = await ai()
-          .ollama(useThink ? (o) => o.reasoning(true) : null)
+          .ollama(OllamaModel.supportsThinking(s.ollamaModel)
+              ? (o) => o.reasoning(useThink)
+              : null)
           .baseUrl(s.ollamaBaseUrl)
           .model(s.ollamaModel)
           .maxTokens(useThink ? 32768 : _baseModeTokens)

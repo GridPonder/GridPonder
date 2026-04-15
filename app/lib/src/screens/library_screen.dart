@@ -286,6 +286,7 @@ class _PackCardState extends State<_PackCard> {
     try {
       final pack = await PackService.loadFromEntry(widget.entry);
       if (!mounted) return;
+      final startId = widget.progress?.firstIncompleteRef(pack.sequence);
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -293,6 +294,7 @@ class _PackCardState extends State<_PackCard> {
             packService: pack,
             settings: widget.settings,
             progress: widget.progress,
+            startLevelId: startId,
           ),
         ),
       );
