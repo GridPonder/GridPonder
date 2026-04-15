@@ -1,4 +1,4 @@
-# Gridponder DSL v0.5 — Manifest Schema
+# Gridponder DSL — Manifest Schema
 
 The pack's entry point: declares identity, version, compatibility requirements, and presentation metadata without loading any gameplay content.
 
@@ -14,14 +14,14 @@ The pack's entry point: declares identity, version, compatibility requirements, 
 
 ```json
 {
-  "dslVersion": "0.1.0",
+  "dslVersion": "0.5",
   "packVersion": 1,
   "gameId": "com.example.mygame",
   "title": "My Puzzle Game",
   "description": "A short description of the game.",
   "coverImage": "assets/cover.png",
   "version": "1.0.0",
-  "minEngineVersion": "0.1.0",
+  "minEngineVersion": "0.5.0",
   "author": "Author Name",
   "license": "CC-BY-4.0",
   "website": "https://example.com"

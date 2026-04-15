@@ -6,8 +6,8 @@ See `README.md` for repo structure, `docs/gridponder_platform_overview.md` for a
 
 - `packs/` contains multiple games which adhere to the DSL spec in `docs/dsl/`; we follow the philosophy of "each game is a folder" i.e. a DSL compliant engine can take a pack folder and render a 2D grid puzzle game
 - `app/assets/packs` is a symlink to `../../packs` for Flutter integration 
-- `engine/` is a pure Dart package with no Flutter dependency.
-- `app/` depends on `engine/` via a local path reference in `pubspec.yaml`.
+- `engines/dart/` is a pure Dart package with no Flutter dependency; `engines/python/` is the Python port used by the solver and benchmark tools.
+- `app/` depends on `engines/dart/` via a local path reference in `pubspec.yaml`.
 
 ## Instructions
 
@@ -16,3 +16,5 @@ See `README.md` for repo structure, `docs/gridponder_platform_overview.md` for a
 - when you place hint stops in levels, bias them towards earlier steps in the gold path and after critical/useful actions
 - write screenshots or other temporary files to tmp/ (in this repo) as writing elsewhere needs explicit approval
 - there is a Dart engine and a Python solver; to compare them step-by-step use trace_path.py and trace.dart and compare their outputs
+- versioning: DSL version is the single source of truth in `docs/dsl/VERSION` (currently `0.5`). Engines use SemVer `MAJOR.DSL_MINOR.PATCH` (e.g. `0.5.1`). When bumping the DSL version: update `docs/dsl/VERSION`, `engines/dart/pubspec.yaml` version, and `engines/python/__init__.py __version__`. Only update `dslVersion`/`minEngineVersion` in a pack's `manifest.json` if that pack actually uses the new DSL feature — packs that don't rely on newly added systems or rules can stay at the previous version.
+- after any change to engine logic, run `python engines/python/test_gold_paths.py` (Python gold paths) to verify Dart and Python engines remain in sync

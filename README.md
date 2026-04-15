@@ -6,7 +6,7 @@ A lightweight puzzle game platform built around a data-driven game engine and a 
 
 ```
 app/        Flutter app (iOS, Android, macOS) — the player-facing shell
-engine/     Pure Dart game engine — loads and runs game packs
+engines/    Engine implementations — engines/dart/ (Dart, used by app) and engines/python/ (Python, used by solver/benchmark)
 packs/      Game packs defined in the GridPonder DSL
 docs/       DSL specification and platform overview
 tools/      Asset generation tooling (tile-gen via SDXL-Turbo)

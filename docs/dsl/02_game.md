@@ -1,4 +1,4 @@
-# Gridponder DSL v0.5 — Game Schema
+# Gridponder DSL — Game Schema
 
 Defines all gameplay content shared across levels: entity kinds, systems, actions, rules, and the level sequence.
 
@@ -433,7 +433,7 @@ Default values applied to levels when those fields are not specified. This reduc
 ```json
 {
   "id": "com.gridponder.flag_worlds",
-  "dslVersion": "0.1.0",
+  "dslVersion": "0.5",
   "title": "Flag Worlds",
   "description": "Guide the rabbit to the flag using tools, crates, and portals.",
 

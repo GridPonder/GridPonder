@@ -1,4 +1,4 @@
-# Gridponder DSL v0.5 — System Catalog
+# Gridponder DSL — System Catalog
 
 The ten built-in engine systems, their execution order, and the per-system configuration reference.
 

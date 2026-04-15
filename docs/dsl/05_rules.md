@@ -1,4 +1,4 @@
-# Gridponder DSL v0.5 — Rules Model
+# Gridponder DSL — Rules Model
 
 How game-specific interactions are expressed as data-driven if/then rules that fire between system execution phases.
 

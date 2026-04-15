@@ -5,6 +5,7 @@ import path from 'node:path';
 
 // process.cwd() is the website/ directory when running npm run build / npm run dev
 const dslDir = path.resolve(process.cwd(), '../docs/dsl');
+const dslVersion = fs.readFileSync(path.join(dslDir, 'VERSION'), 'utf-8').trim();
 
 const sections = fs.readdirSync(dslDir)
   .filter(f => f.endsWith('.md') && /^\d/.test(f))
@@ -13,8 +14,8 @@ const sections = fs.readdirSync(dslDir)
     const slug = file.replace('.md', '');
     const content = fs.readFileSync(path.join(dslDir, file), 'utf-8');
     const fullTitle = (content.split('\n').find(l => l.startsWith('# ')) ?? '').replace(/^#+\s*/, '');
-    // Strip "Gridponder DSL v0.5 — " prefix for display
-    const title = fullTitle.replace(/^Gridponder DSL v0(\.\d+)?\s*[—–-]\s*/i, '').trim();
+    // Strip "Gridponder DSL [vX.Y —] — " prefix for display
+    const title = fullTitle.replace(/^Gridponder DSL(?:\s+v[\d.]+)?\s*[—–-]\s*/i, '').trim();
     // First non-empty, non-heading paragraph after the H1
     const lines = content.split('\n');
     const h1Idx = lines.findIndex(l => l.startsWith('# '));
@@ -26,14 +27,14 @@ const sections = fs.readdirSync(dslDir)
 ---
 <Base
   title="DSL Reference"
-  description="The GridPonder DSL v0.5 — a declarative JSON spec for designing grid puzzle games."
+  description={`The GridPonder DSL v${dslVersion} — a declarative JSON spec for designing grid puzzle games.`}
 >
   <div class="max-w-3xl mx-auto px-4 sm:px-6 py-16">
     <!-- Header -->
     <div class="mb-12">
       <div class="inline-flex items-center gap-2 bg-brand-50 text-brand-700 font-mono text-xs font-semibold px-3 py-1.5 rounded-full border border-brand-100 mb-5">
         <span>⊞</span>
-        <span>GridPonder DSL v0.5</span>
+        <span>GridPonder DSL v{dslVersion}</span>
       </div>
       <h1 class="text-4xl sm:text-5xl font-black text-gray-900 mb-5 leading-tight">
         Domain-Specific Language

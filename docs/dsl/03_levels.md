@@ -1,4 +1,4 @@
-# Gridponder DSL v0.5 — Level Schema
+# Gridponder DSL — Level Schema
 
 Each level file specifies one puzzle instance: board layout, initial entity state, goals, hints, and the gold-path solution.
 

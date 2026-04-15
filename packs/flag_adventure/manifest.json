@@ -1,10 +1,10 @@
 {
-  "dslVersion": "0.1.0",
+  "dslVersion": "0.5",
   "packVersion": 1,
   "gameId": "flag_adventure",
   "title": "Carrot Quest",
   "description": "Navigate the grid to reach the carrot. Solid tiles (rock) block movement. Pushable tiles (wood, crate) slide one step when walked into. Ice is slippery and let's you or pushable items slide. Inventory (torch, pickaxe) interacts with the environment.",
   "coverImage": "assets/rabbit_reaching_for_carrot.png",
   "version": "1.0.0",
-  "minEngineVersion": "0.1.0"
+  "minEngineVersion": "0.5.0"
 }

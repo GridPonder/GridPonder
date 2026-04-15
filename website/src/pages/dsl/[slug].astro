@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dslDir = path.resolve(__dirname, '../../../../docs/dsl');
+const dslVersion = fs.readFileSync(path.resolve(__dirname, '../../../../docs/dsl/VERSION'), 'utf-8').trim();
 
 export function getStaticPaths() {
   const dir = path.resolve(
@@ -36,7 +37,7 @@ const rawContent = fs.readFileSync(path.join(dslDir, file), 'utf-8');
 const html = await marked.parse(rawContent, { gfm: true, breaks: false });
 
 // Derive short title for nav (strip "Gridponder DSL v0 —" prefix)
-const shortTitle = (t: string) => t.replace(/^Gridponder DSL v0(\.\d+)?\s*[—–-]\s*/i, '').trim();
+const shortTitle = (t: string) => t.replace(/^Gridponder DSL(?:\s+v[\d.]+)?\s*[—–-]\s*/i, '').trim();
 
 function slugTitle(slug: string): string {
   try {
@@ -52,7 +53,7 @@ function slugTitle(slug: string): string {
   }
 }
 ---
-<Base title={shortTitle(title)} description={`GridPonder DSL specification: ${title}`}>
+<Base title={shortTitle(title)} description={`GridPonder DSL v${dslVersion} specification: ${title}`}>
   <div class="max-w-4xl mx-auto px-4 sm:px-6 py-12">
     <!-- Breadcrumb -->
     <nav class="flex items-center gap-2 text-sm text-gray-400 mb-8">

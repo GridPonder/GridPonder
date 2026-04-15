@@ -1,10 +1,10 @@
 {
-  "dslVersion": "0.1.0",
+  "dslVersion": "0.5",
   "packVersion": 1,
   "gameId": "diagonal_swipes",
   "title": "Diagonal Swipes",
   "description": "Move the 2×2 selection overlay one step in any direction (move). diagonal_swap up_left swaps the top-right and bottom-left cells of the overlay. diagonal_swap up_right swaps the top-left and bottom-right cells. Rearrange the board to match the target pattern shown in the goal.",
   "coverImage": "assets/rabbit_diagonal_swipes.png",
   "version": "1.0.0",
-  "minEngineVersion": "0.1.0"
+  "minEngineVersion": "0.5.0"
 }

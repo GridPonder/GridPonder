@@ -1,4 +1,4 @@
-# Gridponder DSL v0.5 — Overview
+# Gridponder DSL — Overview
 
 A high-level map of the DSL: scope, design principles, file structure, and the turn execution pipeline.
 
@@ -136,7 +136,7 @@ Systems never call each other directly. Coordination happens through state and e
 
 ## 8. Versioning
 
-- `manifest.json` and `game.json` declare `dslVersion` (v0.5 uses `"0.1.0"`)
+- `manifest.json` declares `dslVersion` (currently `"0.5"`); `game.json` does not require a version field
 - The engine supports specific DSL versions explicitly — no implicit guessing
 - If a pack uses an unsupported version, import fails with a clear error
 - New mechanics are introduced by adding new system types or new fields to existing structures
