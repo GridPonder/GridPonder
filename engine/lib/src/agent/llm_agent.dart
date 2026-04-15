@@ -502,7 +502,7 @@ $actionsDesc
 
     switch (inferenceMode) {
       case 'fixed-n':
-        return '''Respond with a JSON array of up to $stepSize actions. You may output fewer if the goal is reachable in fewer steps.
+        return '''Respond with ONLY a JSON array of up to $stepSize actions on a single line, no explanation or surrounding text. You may output fewer if the goal is reachable in fewer steps.
 You will receive updated board state after the batch is applied.
 Add a "memory" field to the last action to update your notes (replaces previous memory).
 Examples:
@@ -514,8 +514,8 @@ Choose actions most likely to reach the goal in fewest total actions (summed acr
 
       case 'flex-n':
         final countLine = maxN != null
-            ? 'Respond with a JSON array of 1 to $maxN actions.'
-            : 'Respond with a JSON array of one or more actions.';
+            ? 'Respond with ONLY a JSON array of 1 to $maxN actions on a single line, no explanation or surrounding text.'
+            : 'Respond with ONLY a JSON array of one or more actions on a single line, no explanation or surrounding text.';
         return '''$countLine
 Each action beyond the first counts as only 0.5 toward your total action score (e.g. outputting 3 actions = 2 effective actions). Minimize your effective total across all attempts.
 Add a "memory" field to the last action to update your notes (replaces previous memory).
