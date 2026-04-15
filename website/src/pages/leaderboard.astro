@@ -82,7 +82,7 @@ const allPacksJson = JSON.stringify(allPacks);
     <!-- Selectors -->
     <div class="mb-8 space-y-4">
       <!-- Input mode (normal / anon) -->
-      <div class="flex items-center gap-4">
+      <div id="anon-row" class="flex items-center gap-4">
         <span class="text-sm text-gray-500 font-medium w-16 shrink-0">Input</span>
         <div class="flex gap-1 bg-gray-100 rounded-lg p-1">
           <button id="anon-normal" class="anon-btn px-4 py-1.5 rounded-md text-sm font-medium transition-colors bg-white text-gray-900 shadow-sm">Normal</button>
@@ -301,15 +301,30 @@ const allPacksJson = JSON.stringify(allPacks);
       });
     }
 
+    const anonRow = document.getElementById('anon-row');
+
+    function applyFullModeConstraint() {
+      // full+anon is not a meaningful benchmark — hide the anon toggle in full mode.
+      if (currentMode === 'full') {
+        anonRow.style.display = 'none';
+        if (currentAnon) {
+          currentAnon = false;
+          setAnonActive('anon-normal');
+        }
+      } else {
+        anonRow.style.display = '';
+      }
+    }
+
     // Mode buttons
     document.getElementById('mode-single').addEventListener('click', () => {
-      currentMode = 'single'; setModeActive('mode-single'); render();
+      currentMode = 'single'; setModeActive('mode-single'); applyFullModeConstraint(); render();
     });
     document.getElementById('mode-flex-n').addEventListener('click', () => {
-      currentMode = 'flex-n'; setModeActive('mode-flex-n'); render();
+      currentMode = 'flex-n'; setModeActive('mode-flex-n'); applyFullModeConstraint(); render();
     });
     document.getElementById('mode-full').addEventListener('click', () => {
-      currentMode = 'full'; setModeActive('mode-full'); render();
+      currentMode = 'full'; setModeActive('mode-full'); applyFullModeConstraint(); render();
     });
 
     // Anon buttons
@@ -321,6 +336,7 @@ const allPacksJson = JSON.stringify(allPacks);
     });
 
     // Initial render
+    applyFullModeConstraint();
     render();
   </script>
 </Base>

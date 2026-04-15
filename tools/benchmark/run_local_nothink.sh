@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Run the curated suite for all local non-thinking models (Gemma 4 + Qwen 3.5)
 # across every combination of inference mode (single / flex-n / full) and
-# anonymisation (normal / anon) — 6 runs in total.
+# anonymisation (normal / anon) — 5 runs in total.
+# full+anon is intentionally skipped: without intermediate feedback and without
+# semantic labels, every model scores near-zero, producing no useful signal.
 #
 # Usage: cd tools/benchmark && bash run_local_nothink.sh
 #
@@ -21,6 +23,9 @@ MODELS=(
 
 for mode in single flex-n full; do
   for anon_flag in "" "--anon"; do
+    # full+anon produces near-zero signal for all models — skip it.
+    [ "$mode" = "full" ] && [ "$anon_flag" = "--anon" ] && continue
+
     label="${mode}${anon_flag:+ anon}"
     echo ""
     echo "=== Running: $label ==="
@@ -29,4 +34,4 @@ for mode in single flex-n full; do
 done
 
 echo ""
-echo "=== All 6 combinations done. Run: python aggregate.py ==="
+echo "=== All 5 combinations done. Run: python aggregate.py ==="
