@@ -49,6 +49,7 @@ import games.number_crunch as nc
 import games.rotate_flip as rf
 import games.box_builder as bb
 import games.flag_adventure as fa
+import engine_adapter as ea
 from search.astar import astar
 from search.events import format_event, violates_constraint
 from search.types import Solution
@@ -68,6 +69,10 @@ def _detect_game(level_path: Path) -> str:
             return "box_builder"
         if part == "flag_adventure":
             return "flag_adventure"
+        if part == "diagonal_swipes":
+            return "diagonal_swipes"
+        if part == "flood_colors":
+            return "flood_colors"
     return "number_crunch"
 
 
@@ -612,6 +617,64 @@ def _solve_flag_adventure(
 
 
 # ---------------------------------------------------------------------------
+# Generic engine-backed solver (diagonal_swipes, flood_colors, …)
+# ---------------------------------------------------------------------------
+
+def _solve_generic(
+    path: Path,
+    level_json: Dict[str, Any],
+    game_label: str,
+    mode: str,
+    max_depth: int,
+    timeout: float,
+    trace: bool,
+    constraints: List[Dict],
+    mc_trials: int = 0,
+    mc_steps: int = 0,
+) -> None:
+    pack_dir = path.parent.parent  # levels/xxx.json → pack root
+    initial, info = ea.load(level_json, pack_dir)
+    level_id = info.level_id or path.stem
+    print(f"Solving  {level_id}   (mode: {mode}, max depth: {max_depth})")
+    print(f"  Game:   {game_label}")
+    print(f"  Board:  {info.width}×{info.height}")
+    print(f"  Actions: {', '.join(info.ACTIONS)}")
+    print()
+
+    # Build a module-like object that binds ACTIONS to this game's action list,
+    # compatible with the generic BFS/DFS/A*/MC callers that use module.ACTIONS.
+    class _mod:
+        ACTIONS = info.ACTIONS
+        apply = staticmethod(ea.apply)
+        can_prune = staticmethod(ea.can_prune)
+
+    gold_actions = ea.gold_path_actions(level_json) or None
+    optimal_len = len(gold_actions) if gold_actions else None
+
+    if mode == "astar":
+        _t0 = time.monotonic()
+        sol = astar(initial, info, _mod, timeout, constraints, max_depth=max_depth)
+        _print_astar_result(sol, gold_actions, trace, initial, _mod, info,
+                            elapsed=time.monotonic() - _t0)
+        if sol.path:
+            optimal_len = sol.cost
+    elif mode == "dfs":
+        solutions = _dfs_all(initial, info, _mod, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, _mod, info,
+                       mode=mode)
+    else:
+        solutions = _bfs_shortest(initial, info, _mod, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, _mod, info,
+                       mode=mode)
+
+    if mc_trials > 0:
+        steps = mc_steps or max(100, 3 * (optimal_len or 20))
+        print()
+        result = _monte_carlo(initial, info, _mod, mc_trials, steps)
+        _print_mc_results(result, optimal_len)
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -649,6 +712,12 @@ def solve(
     elif game == "flag_adventure":
         _solve_flag_adventure(path, level_json, mode, max_depth, timeout, trace,
                               constraints, **mc_kw)
+    elif game == "diagonal_swipes":
+        _solve_generic(path, level_json, "Diagonal Swipes", mode, max_depth, timeout,
+                       trace, constraints, **mc_kw)
+    elif game == "flood_colors":
+        _solve_generic(path, level_json, "Flood Colors", mode, max_depth, timeout,
+                       trace, constraints, **mc_kw)
     else:
         print(f"Error: unsupported game '{game}'", file=sys.stderr)
         sys.exit(1)
