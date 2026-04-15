@@ -49,7 +49,7 @@ void main() {
   // --- flag_adventure ---
   group('flag_adventure gold paths', () {
     late LoadedPack pack;
-    setUpAll(() => pack = _loadPack('../packs/flag_adventure'));
+    setUpAll(() => pack = _loadPack('../../packs/flag_adventure'));
 
     for (final id in [
       'fw_001','fw_002','fw_003','fw_004','fw_005','fw_006','pw_001','pw_003','fw_007',
@@ -63,7 +63,7 @@ void main() {
   // --- number_cells ---
   group('number_cells gold paths', () {
     late LoadedPack pack;
-    setUpAll(() => pack = _loadPack('../packs/number_cells'));
+    setUpAll(() => pack = _loadPack('../../packs/number_cells'));
 
     for (final id in ['nc_001','nc_002','nc_003','nc_004','nc_005','nc_006','nc_007','nc_008','nc_009','nc_010','nc_011','nc_012','nc_013','nc_014','nc_015','nc_016','nc_017','nc_018','nc_019','nc_020']) {
       test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
@@ -73,7 +73,7 @@ void main() {
   // --- rotate_flip ---
   group('rotate_flip gold paths', () {
     late LoadedPack pack;
-    setUpAll(() => pack = _loadPack('../packs/rotate_flip'));
+    setUpAll(() => pack = _loadPack('../../packs/rotate_flip'));
 
     for (final id in ['rf_001','rf_002']) {
       test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
@@ -83,7 +83,7 @@ void main() {
   // --- flood_colors ---
   group('flood_colors gold paths', () {
     late LoadedPack pack;
-    setUpAll(() => pack = _loadPack('../packs/flood_colors'));
+    setUpAll(() => pack = _loadPack('../../packs/flood_colors'));
 
     test('fl_001', () => _replayAndExpectWin(_engineForLevel(pack, 'fl_001'), _goldPath(pack, 'fl_001')));
     test('fl_002', () => _replayAndExpectWin(_engineForLevel(pack, 'fl_002'), _goldPath(pack, 'fl_002')));
@@ -93,7 +93,7 @@ void main() {
   // --- diagonal_swipes ---
   group('diagonal_swipes gold paths', () {
     late LoadedPack pack;
-    setUpAll(() => pack = _loadPack('../packs/diagonal_swipes'));
+    setUpAll(() => pack = _loadPack('../../packs/diagonal_swipes'));
 
     for (final id in ['ds_001','ds_002']) {
       test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
@@ -102,7 +102,7 @@ void main() {
 
   group('undo/reset', () {
     late LoadedPack pack;
-    setUpAll(() => pack = _loadPack('../packs/flag_adventure'));
+    setUpAll(() => pack = _loadPack('../../packs/flag_adventure'));
     test('undo restores state', () {
       final engine = _engineForLevel(pack, 'fw_001');
       final initialState = engine.state;

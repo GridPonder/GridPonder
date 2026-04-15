@@ -23,7 +23,7 @@ void main() {
   late LevelDefinition levelDef;
 
   setUpAll(() {
-    pack = _loadPack('../packs/flood_colors');
+    pack = _loadPack('../../packs/flood_colors');
     gameDef = pack.game;
     levelDef = pack.levels['fl_001']!;
   });

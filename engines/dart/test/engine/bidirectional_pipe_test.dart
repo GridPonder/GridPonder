@@ -46,7 +46,7 @@ List<int?> _pipeSlots(LevelState state, String mcoId) {
 
 void main() {
   late LoadedPack pack;
-  setUpAll(() => pack = _loadPack('../packs/number_cells'));
+  setUpAll(() => pack = _loadPack('../../packs/number_cells'));
 
   // =========================================================================
   // nc_007 — 2-cell even-length bidirectional pipe, queue=[3, 2]
