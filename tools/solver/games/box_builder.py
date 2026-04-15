@@ -480,39 +480,56 @@ def _group_cost(
     target: Tuple[int, int],
 ) -> float:
     """
-    Lower-bound cost to assemble the fragment group and deliver it to *target*.
+    Admissible lower-bound cost to assemble the fragment group and deliver it
+    to *target*.
 
-    assembly_cost — nearest-neighbour MST estimate (Manhattan) to bring all
-                    group members together for merging.
-    delivery_cost — Manhattan distance from nearest group member to the target.
+    assembly_cost — Prim's MST (Manhattan) to bring all fragments together.
+                    MST distance is a lower bound on assembly push-actions
+                    because fragments must traverse at least MST-length to
+                    reach a common point.  (We use exact Prim's, not the
+                    previously used nearest-neighbour approximation which can
+                    overestimate the MST and break admissibility.)
+
+    delivery_cost — Manhattan distance from the nearest group member to the
+                    target (lower bound on how far the final box must travel).
+
+    We return max(assembly, delivery) rather than their sum because box carry
+    allows assembly and delivery to overlap: the avatar can merge fragments
+    while simultaneously moving toward the target, so the total cost is at
+    least the larger of the two costs individually, but need not pay both in
+    full.
     """
     positions = [pos for pos, _ in group]
 
     if len(positions) == 1:
         assembly = 0.0
-    elif len(positions) == 2:
-        p0, p1 = positions
-        assembly = float(abs(p0[0] - p1[0]) + abs(p0[1] - p1[1]))
     else:
-        # Nearest-neighbour approximation of minimum spanning tree
-        remaining = list(positions)
+        # Prim's MST — exact minimum spanning tree (Manhattan distances)
+        in_mst: set = {positions[0]}
+        not_in_mst = list(positions[1:])
         assembly = 0.0
-        current = remaining.pop(0)
-        while remaining:
-            nearest = min(
-                remaining,
-                key=lambda p: abs(p[0] - current[0]) + abs(p[1] - current[1]),
-            )
-            assembly += abs(nearest[0] - current[0]) + abs(nearest[1] - current[1])
-            remaining.remove(nearest)
-            current = nearest
+        while not_in_mst:
+            best_d = float("inf")
+            best_p = None
+            for p in not_in_mst:
+                for q in in_mst:
+                    d = abs(p[0] - q[0]) + abs(p[1] - q[1])
+                    if d < best_d:
+                        best_d = d
+                        best_p = p
+            assembly += best_d
+            in_mst.add(best_p)
+            not_in_mst.remove(best_p)
 
     delivery = float(min(
         abs(pos[0] - target[0]) + abs(pos[1] - target[1])
         for pos in positions
     ))
 
-    return assembly + delivery
+    # max is admissible: true cost ≥ assembly (fragments must meet)
+    # and true cost ≥ delivery (box must reach target), so
+    # true cost ≥ max(assembly, delivery).
+    return max(assembly, delivery)
 
 
 # ---------------------------------------------------------------------------
