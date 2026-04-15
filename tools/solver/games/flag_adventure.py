@@ -451,6 +451,8 @@ def _apply_object_slide(
 
         if not _in_bounds(nx, ny, info):
             break  # wall
+        if (nx, ny) in info.void_cells:
+            break  # void cell → stop
         if _blocks_push(nx, ny, state, info):
             break  # solid or pickup blocks
 
@@ -621,6 +623,9 @@ def _apply_ice_slide(
 
         if not _in_bounds(nx, ny, info):
             break  # board edge → stop
+
+        if (nx, ny) in info.void_cells:
+            break  # void cell → stop
 
         # Rock → non-pushable, stop
         if (nx, ny) in state.rocks:
@@ -989,18 +994,21 @@ def apply(
 
 def heuristic(state: FAState, info: LevelInfo) -> float:
     """
-    Admissible heuristic: BFS shortest path from avatar to flag on current
-    walkable cells, treating rocks, wood, and crates as walls.
+    Admissible heuristic: BFS over *actions* from avatar to flag, modelling
+    ice-slide physics so that one action covering many ice cells still costs 1.
 
-    Ice cells are walkable (slippery but passable).
-    Portals are traversable at cost 1 (entering portal = one move).
-    Bridges are traversable (already converted from water).
+    Objects (rocks, wood, crates) are ignored — they cost at most 1 action each
+    (push or tool use), same as a normal move, so omitting them never overestimates.
+
+    Ice cells: one action slides the avatar until it reaches a non-ice cell or
+    is blocked by a wall/void.  The BFS node is the *landing* position.
+
+    Portals are traversable at cost 1 (entering portal = one action).
 
     Returns float('inf') only when the flag is provably unreachable AND no
-    tools remain to clear any obstacle.  When tools are available, falls back
-    to Manhattan distance (still admissible; never overestimates).
+    tools remain to clear any obstacle.  Falls back to Manhattan distance
+    (always admissible) when tools are present.
     """
-    blocked = state.rocks | state.wood | state.crates
     start = (state.ax, state.ay)
     goal = info.flag
 
@@ -1012,30 +1020,57 @@ def heuristic(state: FAState, info: LevelInfo) -> float:
 
     while queue:
         (cx, cy), cost = queue.popleft()
+        new_cost = cost + 1
 
         for ddx, ddy in _DELTA.values():
-            nx, ny = cx + ddx, cy + ddy
-            if not _in_bounds(nx, ny, info):
-                continue
-            if (nx, ny) in blocked:
-                continue
-            if (nx, ny) in visited:
-                continue
+            # Simulate an ice-slide action: the avatar moves in direction
+            # (ddx, ddy) until it hits a wall, void, or non-ice cell.
+            # Objects are ignored (admissible relaxation — removing blockers
+            # only shortens paths, so h ≤ true optimal).
+            #
+            # Key: we enqueue EVERY cell we pass through, not just the final
+            # landing.  This matters because objects (ignored here) can create
+            # stopping points earlier in the slide that lead to shorter paths.
+            # Enqueueing intermediates allows the BFS to find those options,
+            # keeping the heuristic a genuine lower bound.
+            #
+            # Portal partners are also checked for every cell in the slide,
+            # including cells already in `visited` — this handles the case
+            # where the avatar starts on a portal entrance and moves away
+            # then returns to trigger the portal (portal-re-entry).
+            px, py = cx, cy
+            moved = False
+            while True:
+                nx, ny = px + ddx, py + ddy
+                if not _in_bounds(nx, ny, info):
+                    break
+                if (nx, ny) in info.void_cells:
+                    break
+                px, py = nx, ny
+                moved = True
 
-            new_cost = cost + 1
-            if (nx, ny) == goal:
-                return float(new_cost)
-
-            visited.add((nx, ny))
-            queue.append(((nx, ny), new_cost))
-
-            # Portals are traversable: enqueue partner at same cost step
-            partner = info.portals.get((nx, ny))
-            if partner is not None and partner not in visited:
-                if partner == goal:
+                # Goal reached (stop here OR pass through on ice)
+                if (px, py) == goal:
                     return float(new_cost)
-                visited.add(partner)
-                queue.append((partner, new_cost))
+
+                # Enqueue every intermediate cell as a potential stop point
+                if (px, py) not in visited:
+                    visited.add((px, py))
+                    queue.append(((px, py), new_cost))
+
+                # Portal: always check, even if (px, py) is already visited
+                partner = info.portals.get((px, py))
+                if partner is not None and partner not in visited:
+                    if partner == goal:
+                        return float(new_cost)
+                    visited.add(partner)
+                    queue.append((partner, new_cost))
+
+                if (px, py) not in state.ice_cells:
+                    break  # slide stops here in the absence of objects
+
+            if not moved:
+                continue  # action was fully blocked
 
     # No path found.  If tools remain (inventory, pickups on board, or
     # clearable obstacles), a future action may open a path — use Manhattan
