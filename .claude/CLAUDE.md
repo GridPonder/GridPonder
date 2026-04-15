@@ -15,3 +15,4 @@ See `README.md` for repo structure, `docs/gridponder_platform_overview.md` for a
 - do not declare AI models as co-author in git commits
 - when you place hint stops in levels, bias them towards earlier steps in the gold path and after critical/useful actions
 - write screenshots or other temporary files to tmp/ (in this repo) as writing elsewhere needs explicit approval
+- there is a Dart engine and a Python solver; to compare them step-by-step use trace_path.py and trace.dart and compare their outputs
