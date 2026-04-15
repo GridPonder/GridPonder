@@ -175,6 +175,7 @@ def run_level(
     consecutive_rejections = 0
     consecutive_timeouts = 0
     final_event: dict | None = None
+    llm_log: list[dict] = []
 
     proc = subprocess.Popen(
         cmd,
@@ -223,6 +224,12 @@ def run_level(
                 thinking_tokens_total += think_tok
                 output_tokens_total += out_tok
                 llm_calls += 1
+                llm_log.append({
+                    "latency_ms": round(latency_ms),
+                    "output_tokens": out_tok,
+                    "thinking_tokens": think_tok,
+                    "response": response_text,
+                })
 
                 if mode == "single":
                     action = extract_action(response_text)
@@ -331,6 +338,7 @@ def run_level(
         },
         "thinking_tokens_total": thinking_tokens_total,
         "output_tokens_total": output_tokens_total,
+        "llm_log": llm_log,
     }
 
     if mode == "fixed-n":
