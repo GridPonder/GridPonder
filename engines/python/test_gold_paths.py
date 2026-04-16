@@ -3,7 +3,6 @@ Smoke test: replay all gold paths for all packs using the Python engine.
 Run from engines/python/:  python test_gold_paths.py
 """
 from __future__ import annotations
-import json
 import sys
 from pathlib import Path
 
@@ -16,21 +15,6 @@ from engines.python._turn_engine import TurnEngine
 
 
 PACKS_DIR = ROOT / "packs"
-
-PACK_LEVELS = {
-    "flag_adventure": [
-        "fw_001","fw_002","fw_003","fw_004","fw_005","fw_006",
-        "pw_001","pw_003","fw_007",
-        "fw_ice_002","fw_ice_003","fw_ice_005","fw_ice_006",
-        "fw_ice_007","fw_ice_008","fw_ice_011",
-        "fw_ice_012","fw_ice_013","fw_ice_014","fw_ice_015",
-    ],
-    "number_cells": [f"nc_{i:03d}" for i in range(1, 21)],
-    "rotate_flip": ["rf_001","rf_002"],
-    "flood_colors": ["fl_001","fl_002","fl_003"],
-    "diagonal_swipes": ["ds_001","ds_002"],
-    "box_builder": [],  # will collect dynamically
-}
 
 
 def gold_path_actions(level_json: dict) -> list[tuple[str, dict]]:
@@ -58,27 +42,18 @@ def run_all():
     failed = 0
     skipped = 0
 
-    for pack_name, level_ids in PACK_LEVELS.items():
-        pack_dir = PACKS_DIR / pack_name
-        if not pack_dir.exists():
+    for pack_dir in sorted(PACKS_DIR.iterdir()):
+        if not pack_dir.is_dir() or not (pack_dir / "manifest.json").exists():
             continue
 
         try:
             game, levels = load_pack(pack_dir)
         except Exception as exc:
-            print(f"  LOAD ERROR {pack_name}: {exc}")
+            print(f"  LOAD ERROR {pack_dir.name}: {exc}")
             failed += 1
             continue
 
-        # If no level list specified, collect all levels with gold paths
-        ids_to_test = level_ids or list(levels.keys())
-
-        for level_id in ids_to_test:
-            level_json = levels.get(level_id)
-            if level_json is None:
-                skipped += 1
-                continue
-
+        for level_id, level_json in levels.items():
             gold = gold_path_actions(level_json)
             if not gold:
                 skipped += 1
@@ -92,14 +67,14 @@ def run_all():
                     engine.execute_turn(action_id, params)
 
                 if engine.is_won:
-                    print(f"  ✓ {pack_name}/{level_id} ({len(gold)} steps)")
+                    print(f"  ✓ {pack_dir.name}/{level_id} ({len(gold)} steps)")
                     passed += 1
                 else:
-                    print(f"  ✗ {pack_name}/{level_id} — NOT WON after {len(gold)} steps")
+                    print(f"  ✗ {pack_dir.name}/{level_id} — NOT WON after {len(gold)} steps")
                     failed += 1
             except Exception as exc:
                 import traceback
-                print(f"  ✗ {pack_name}/{level_id} — EXCEPTION: {exc}")
+                print(f"  ✗ {pack_dir.name}/{level_id} — EXCEPTION: {exc}")
                 traceback.print_exc()
                 failed += 1
 
