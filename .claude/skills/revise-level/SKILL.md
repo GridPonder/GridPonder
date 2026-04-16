@@ -10,10 +10,10 @@ argument-hint: <level-id> [notes]
 allowed-tools: Read, Edit, Write, Bash, Glob, Grep
 ---
 
-Read `{base_dir}/level-design-principles.md` and
-`{base_dir}/../test-level/game-rules.md` before starting. For the correct
-level JSON format and solver/difficulty guidance, refer to the create-level
-skill (`{base_dir}/../create-level/SKILL.md`).
+Read `{base_dir}/level-design-principles.md` and the relevant
+`docs/games/<pack-name>.md` before starting. For the correct level JSON format
+and solver/difficulty guidance, refer to the create-level skill
+(`{base_dir}/../create-level/SKILL.md`).
 
 ## 1. Parse arguments
 

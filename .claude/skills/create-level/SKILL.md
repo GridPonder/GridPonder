@@ -12,9 +12,8 @@ argument-hint: <pack-id> <new-level-id> [design notes]
 
 You are creating a new GridPonder level. Follow these steps.
 
-Before starting, read `{base_dir}/../test-level/game-rules.md` for mechanics
-reference and `{base_dir}/../revise-level/level-design-principles.md` for
-design guidance.
+Before starting, read `docs/games/<pack-name>.md` for mechanics reference and
+`{base_dir}/../revise-level/level-design-principles.md` for design guidance.
 
 ## 1. Parse arguments
 

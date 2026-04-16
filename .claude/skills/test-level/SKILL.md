@@ -15,8 +15,9 @@ The test launches the macOS app, navigates directly to the level, executes
 swipe gestures for each gold-path move, and captures a screenshot after every
 move. You then read the key screenshots and verify the game state is correct.
 
-Before starting, read `${CLAUDE_SKILL_DIR}/game-rules.md` so you understand
-the game mechanics needed to analyse screenshots correctly.
+Before starting, identify the pack for this level (using the prefix table in
+step 2) and read `docs/games/<pack-name>.md` so you understand the game
+mechanics needed to analyse screenshots correctly.
 
 ## 1. Parse arguments
 

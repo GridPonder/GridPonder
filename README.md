@@ -8,16 +8,16 @@ A lightweight puzzle game platform built around a data-driven engine and a decla
 
 ## Game packs
 
-Six complete games, 115+ levels:
+Six complete games, 113 levels:
 
 | Pack | Levels | Mechanic |
 |------|--------|----------|
-| Carrot Quest | 19 | Avatar navigation, pushing, ice, portals |
+| Carrot Quest | 18 | Avatar navigation, pushing, ice, portals |
 | Number Crunch | 20 | Slide-and-merge with goal sequences |
 | Rotate & Flip | 10 | 2×2 cursor rotate/flip to match a target pattern |
 | Diagonal Swipes | 20 | 2×2 diagonal swaps with sum/count constraints |
 | Flood Colors | 30 | Classic flood-fill under a move limit |
-| Box Builder | 16 | Side-aware box fragment assembly |
+| Box Builder | 15 | Side-aware box fragment assembly |
 
 Base tile sprites and character sprites live in `packs/gridponder-base/` and `packs/rabbit-character/` and are shared across packs.
 
@@ -54,4 +54,4 @@ Four Claude Code skills are available for game authoring:
 - `/test-level` — run a level's gold path with screenshots
 - `/tile-gen` — generate pixel-art tiles using local AI (SDXL-Turbo, MPS)
 
-After any change to engine logic, run `python engines/python/test_gold_paths.py` to verify all 115+ gold paths still pass across both engines.
+After any change to engine logic, run `python engines/python/test_gold_paths.py` to verify all gold paths still pass across both engines.

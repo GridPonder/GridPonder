@@ -11,10 +11,9 @@ argument-hint: [game concept or description]
 effort: high
 ---
 
-Read `{base_dir}/../revise-level/level-design-principles.md` and
-`{base_dir}/../test-level/game-rules.md` before starting. You will also need
-`docs/gridponder_platform_overview.md` and `docs/dsl/` (scan the full folder)
-to reason about DSL scope and system availability.
+Read `{base_dir}/../revise-level/level-design-principles.md` before starting.
+Also read `docs/gridponder_platform_overview.md` and `docs/dsl/` (scan the
+full folder) to reason about DSL scope and system availability.
 
 ---
 
@@ -81,13 +80,15 @@ Check whether all needed entity behaviours are covered by existing entity tags
 and systems before proposing custom rules.
 
 ### 2.3 Systems
-Identify which of the 10 built-in systems cover the game mechanics:
+Identify which built-in systems cover the game mechanics (check
+`engines/dart/lib/src/systems/system_registry.dart` for the authoritative list):
 
 | System | Phase | When to use |
 |---|---|---|
 | avatar_navigation | action_resolution | Player movement on ground layer |
 | push_objects | movement_resolution | Pushable objects, tool consumption |
-| portals | movement_resolution | Teleport between paired cells |
+| portals | movement_resolution | Teleport between paired portal cells |
+| tile_teleport | movement_resolution | Teleport triggered by stepping on a tile kind |
 | slide_merge | action_resolution | Sliding tiles that merge on collision |
 | queued_emitters | npc_resolution | Multi-cell pipe emitters |
 | overlay_cursor | action_resolution | Movable selection region |
@@ -95,6 +96,7 @@ Identify which of the 10 built-in systems cover the game mechanics:
 | flood_fill | action_resolution | Flood-fill connected same-kind cells |
 | follower_npcs | npc_resolution | Autonomous entity movement |
 | sided_box | cascade_resolution | Fragment assembly by side counts |
+| ice_slide | cascade_resolution | Slide avatar/objects on slippery ground tiles |
 
 If none of these cover a mechanic, describe the custom rule (event → condition
 → effect) needed. If a new system type is required, that is a DSL extension
