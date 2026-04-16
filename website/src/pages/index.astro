@@ -25,9 +25,10 @@ const packs = fs.readdirSync(packsDir)
   })
   .map(id => {
     const manifest = JSON.parse(fs.readFileSync(path.join(packsDir, id, 'manifest.json'), 'utf-8'));
-    const levelsDir = path.join(packsDir, id, 'levels');
-    const levelCount = fs.existsSync(levelsDir)
-      ? fs.readdirSync(levelsDir).filter(f => f.endsWith('.json')).length
+    const gameJsonPath = path.join(packsDir, id, 'game.json');
+    const levelCount = fs.existsSync(gameJsonPath)
+      ? JSON.parse(fs.readFileSync(gameJsonPath, 'utf-8'))
+          .levelSequence?.filter((e: any) => e.type === 'level').length ?? 0
       : 0;
     const coverFile = path.join(process.cwd(), `../packs/${id}`, manifest.coverImage ?? '');
     const hasCover = manifest.coverImage && fs.existsSync(coverFile);

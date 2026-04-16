@@ -79,29 +79,22 @@ const allPacksJson = JSON.stringify(allPacks);
       </div>
     </div>
 
-    <!-- Selectors -->
-    <div class="mb-8 space-y-4">
-      <!-- Input mode (normal / anon) -->
-      <div id="anon-row" class="flex items-center gap-4">
-        <span class="text-sm text-gray-500 font-medium w-16 shrink-0">Input</span>
-        <div class="flex gap-1 bg-gray-100 rounded-lg p-1">
-          <button id="anon-normal" class="anon-btn px-4 py-1.5 rounded-md text-sm font-medium transition-colors bg-white text-gray-900 shadow-sm">Normal</button>
-          <button id="anon-anon"   class="anon-btn px-4 py-1.5 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Anon (ARC-AGI style)</button>
-        </div>
-        <p id="anon-description" class="text-sm text-gray-400 hidden sm:block max-w-sm"></p>
+    <!-- Selectors: 5 valid combinations in 2 labelled groups -->
+    <div class="mb-8">
+      <div class="inline-flex flex-wrap items-center gap-1 bg-gray-100 rounded-xl p-1.5">
+        <!-- Normal group -->
+        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Normal</span>
+        <button id="sel-normal-single" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white text-gray-900 shadow-sm">Single-step</button>
+        <button id="sel-normal-flex-n" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
+        <button id="sel-normal-full"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
+        <!-- Divider -->
+        <div class="w-px h-5 bg-gray-300 mx-1"></div>
+        <!-- Anon group -->
+        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Anon</span>
+        <button id="sel-anon-single"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Single-step</button>
+        <button id="sel-anon-flex-n"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
       </div>
-      <!-- Inference mode (single / flex-n / full) -->
-      <div class="flex items-start gap-4">
-        <span class="text-sm text-gray-500 font-medium w-16 shrink-0 pt-1.5">Mode</span>
-        <div>
-          <div class="flex gap-1 bg-gray-100 rounded-lg p-1 mb-2">
-            <button id="mode-single" class="mode-btn px-4 py-1.5 rounded-md text-sm font-medium transition-colors bg-white text-gray-900 shadow-sm">Single-step</button>
-            <button id="mode-flex-n" class="mode-btn px-4 py-1.5 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
-            <button id="mode-full"   class="mode-btn px-4 py-1.5 rounded-md text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
-          </div>
-          <p id="mode-description" class="text-sm text-gray-500 max-w-xl leading-relaxed"></p>
-        </div>
-      </div>
+      <p id="combo-description" class="mt-3 text-sm text-gray-500 max-w-xl leading-relaxed"></p>
     </div>
 
     <!-- Overall leaderboard table -->
@@ -152,17 +145,16 @@ const allPacksJson = JSON.stringify(allPacks);
       <p class="text-gray-600 text-sm leading-relaxed mb-4">
         The benchmark tool lives in <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">tools/benchmark/</code>.
         Requires <a href="https://ollama.com" class="text-brand-600 hover:underline" target="_blank">Ollama</a> for local models,
-        and API keys in <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">.env</code> for cloud models.
+        and API keys in <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">.env</code> (copy from <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">.env.example</code>) for cloud models.
       </p>
       <div class="space-y-2">
         {[
-          ['Build the runner',            'make benchmark-build'],
-          ['Install Python deps',         'cd tools/benchmark && pip install -r requirements.txt'],
-          ['Run local non-think (6 modes)','cd tools/benchmark && bash run_local_nothink.sh'],
-          ['Run curated suite (all models)','make benchmark-suite'],
-          ['Run overnight (all × all)',   'make benchmark'],
+          ['Build the runner (once)',      'make benchmark-build'],
+          ['Install Python deps',         'cd tools/benchmark && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'],
+          ['Run local non-think (5 combos)', 'cd tools/benchmark && bash run_local_nothink.sh'],
+          ['Run curated suite (all models)', 'make benchmark-suite'],
+          ['Run all packs × all models',  'make benchmark'],
           ['Aggregate results',           'make benchmark-agg'],
-          ['Ship to website',             'make ship'],
         ].map(([label, code]) => (
           <div class="flex items-start gap-3">
             <span class="text-gray-500 text-sm min-w-[200px] pt-1.5">{label}</span>
@@ -177,16 +169,22 @@ const allPacksJson = JSON.stringify(allPacks);
     const ALL_MODELS = JSON.parse(modelsJson);
     const ALL_PACKS  = JSON.parse(allPacksJson);
 
-    const MODE_DESCRIPTIONS = {
-      'single': 'One action per LLM call. The model sees the current board state and picks exactly one move. This is the baseline interaction mode and the most direct test of single-step reasoning.',
-      'flex-n': 'The model chooses 1–5 actions per call. Extra steps beyond the first are penalised (−0.5 per extra step in the efficiency score), rewarding confident multi-step planning over conservative move-by-move hedging.',
-      'full': 'All actions in a single call — no intermediate feedback. The model must plan the complete solution upfront from the initial board state alone. The hardest setting for state-tracking.',
+    // One description per valid (mode, anon) combination.
+    const COMBO_DESCRIPTIONS = {
+      'single|false': 'One action per LLM call. The model sees the current board state and picks exactly one move. The baseline interaction mode.',
+      'flex-n|false': 'The model chooses 1–5 actions per call. Extra steps beyond the first are penalised (−0.5 per extra step), rewarding confident multi-step planning over move-by-move hedging.',
+      'full|false':   'All actions in a single call — no intermediate feedback. The model must plan the complete solution upfront from the initial board state alone.',
+      'single|true':  'Single-step with anonymised labels: entity kinds and action IDs are replaced with arbitrary codes (e.g. "entity_A", "action_3"). Tests whether performance depends on domain-familiar language rather than pure spatial reasoning.',
+      'flex-n|true':  'Flex-n with anonymised labels: multi-step planning where all entity and action names carry no semantic meaning. The hardest test of label-independent reasoning.',
     };
 
-    const ANON_DESCRIPTIONS = {
-      false: '',
-      true: 'Entity kinds and action IDs are replaced with arbitrary codes (e.g. "entity_A", "action_3"), inspired by ARC-AGI. Tests whether model performance depends on domain-familiar language rather than pure reasoning.',
-    };
+    const COMBOS = [
+      { id: 'sel-normal-single', mode: 'single', anon: false },
+      { id: 'sel-normal-flex-n', mode: 'flex-n', anon: false },
+      { id: 'sel-normal-full',   mode: 'full',   anon: false },
+      { id: 'sel-anon-single',   mode: 'single', anon: true  },
+      { id: 'sel-anon-flex-n',   mode: 'flex-n', anon: true  },
+    ];
 
     let currentMode = 'single';
     let currentAnon = false;
@@ -274,69 +272,36 @@ const allPacksJson = JSON.stringify(allPacks);
       ).join('');
     }
 
+    const BASE_BTN   = 'sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors';
+    const ACTIVE_CLS = 'bg-white text-gray-900 shadow-sm';
+    const INACTIVE   = 'text-gray-500 hover:text-gray-700';
+
+    function updateSelectors() {
+      COMBOS.forEach(({ id, mode, anon }) => {
+        const active = mode === currentMode && anon === currentAnon;
+        document.getElementById(id).className = `${BASE_BTN} ${active ? ACTIVE_CLS : INACTIVE}`;
+      });
+      const key = `${currentMode}|${currentAnon}`;
+      document.getElementById('combo-description').textContent = COMBO_DESCRIPTIONS[key] ?? '';
+    }
+
     function render() {
       const filtered = getFiltered();
       renderOverall(filtered);
       renderPacks(filtered);
-      document.getElementById('mode-description').textContent = MODE_DESCRIPTIONS[currentMode] ?? '';
-      const anonDesc = document.getElementById('anon-description');
-      anonDesc.textContent = ANON_DESCRIPTIONS[currentAnon] ?? '';
+      updateSelectors();
     }
 
-    const BASE_BTN = 'px-4 py-1.5 rounded-md text-sm font-medium transition-colors';
-    const ACTIVE   = 'bg-white text-gray-900 shadow-sm';
-    const INACTIVE = 'text-gray-500 hover:text-gray-700';
-
-    function setModeActive(activeId) {
-      ['mode-single', 'mode-flex-n', 'mode-full'].forEach(id => {
-        document.getElementById(id).className =
-          `mode-btn ${BASE_BTN} ${id === activeId ? ACTIVE : INACTIVE}`;
+    // Wire up all 5 buttons
+    COMBOS.forEach(({ id, mode, anon }) => {
+      document.getElementById(id).addEventListener('click', () => {
+        currentMode = mode;
+        currentAnon = anon;
+        render();
       });
-    }
-
-    function setAnonActive(activeId) {
-      ['anon-normal', 'anon-anon'].forEach(id => {
-        document.getElementById(id).className =
-          `anon-btn ${BASE_BTN} ${id === activeId ? ACTIVE : INACTIVE}`;
-      });
-    }
-
-    const anonRow = document.getElementById('anon-row');
-
-    function applyFullModeConstraint() {
-      // full+anon is not a meaningful benchmark — hide the anon toggle in full mode.
-      if (currentMode === 'full') {
-        anonRow.style.display = 'none';
-        if (currentAnon) {
-          currentAnon = false;
-          setAnonActive('anon-normal');
-        }
-      } else {
-        anonRow.style.display = '';
-      }
-    }
-
-    // Mode buttons
-    document.getElementById('mode-single').addEventListener('click', () => {
-      currentMode = 'single'; setModeActive('mode-single'); applyFullModeConstraint(); render();
-    });
-    document.getElementById('mode-flex-n').addEventListener('click', () => {
-      currentMode = 'flex-n'; setModeActive('mode-flex-n'); applyFullModeConstraint(); render();
-    });
-    document.getElementById('mode-full').addEventListener('click', () => {
-      currentMode = 'full'; setModeActive('mode-full'); applyFullModeConstraint(); render();
-    });
-
-    // Anon buttons
-    document.getElementById('anon-normal').addEventListener('click', () => {
-      currentAnon = false; setAnonActive('anon-normal'); render();
-    });
-    document.getElementById('anon-anon').addEventListener('click', () => {
-      currentAnon = true; setAnonActive('anon-anon'); render();
     });
 
     // Initial render
-    applyFullModeConstraint();
     render();
   </script>
 </Base>
