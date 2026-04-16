@@ -206,7 +206,8 @@ Defines all entity types used by this game. Levels reference kinds by their key 
 |-------|------|----------|-------------|
 | `layer` | string | **yes** | Which board layer this kind belongs to. Must reference a defined layer. |
 | `tags` | array of strings | **yes** | Semantic labels. Systems use tags for entity selection. |
-| `sprite` | string or null | no | Path to sprite asset. `null` means invisible/transparent. |
+| `sprite` | string or null | no | Path to sprite asset. `null` means invisible/transparent. May contain a `{paramName}` placeholder when used with `spriteParam`. |
+| `spriteParam` | string | no | If set, the `{paramName}` placeholder in `sprite` is substituted with this instance parameter's value at render time. Used for entities whose appearance varies by a numeric or string param (e.g. box fragments show different PNG tiles per sides bitmask). `sprite` must contain `{paramName}` when this field is set. |
 | `symbol` | string | **yes** | Single Unicode character used in text grid representations (`TextRenderer`). Must be unique within a game; `@` is reserved for the avatar. Use narrow (display-width 1) characters only — basic ASCII, box-drawing (`═║╬`), math symbols (`≈`), or similar. Wide characters (emoji, CJK) break grid alignment and must not be used. |
 | `symbolParam` | string | no | If set, the symbol is taken from this instance parameter at render time instead of `symbol`. Used for entities whose symbol varies by value (e.g. number tiles show their numeric digit). `symbol` acts as the legend label and fallback. |
 | `params` | object | no | Parameterized fields that instances may set. Each param defines its `type` and optionally `required`. |

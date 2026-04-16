@@ -53,6 +53,12 @@ class EntityKindDef {
   /// legend label and the fallback when the param is absent.
   final String? symbolParam;
 
+  /// If set, the `{paramName}` placeholder in [sprite] is substituted with
+  /// the value of this instance parameter at render time. Used for entities
+  /// whose sprite varies by a param (e.g. box fragments select a PNG tile by
+  /// their sides bitmask). [sprite] must contain `{paramName}`.
+  final String? spriteParam;
+
   const EntityKindDef({
     required this.id,
     required this.layer,
@@ -64,6 +70,7 @@ class EntityKindDef {
     this.uiName,
     this.description,
     this.symbolParam,
+    this.spriteParam,
   });
 
   factory EntityKindDef.fromJson(String id, Map<String, dynamic> j) {
@@ -91,6 +98,7 @@ class EntityKindDef {
       description: j['description'] as String?,
       symbol: symbol,
       symbolParam: j['symbolParam'] as String?,
+      spriteParam: j['spriteParam'] as String?,
     );
   }
 

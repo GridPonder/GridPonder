@@ -357,7 +357,19 @@ class _Cell extends StatelessWidget {
   Widget build(BuildContext context) {
     final pos = Position(x, y);
     final groundEntity = state.board.getEntity('ground', pos);
-    if (groundEntity?.kind == 'void') return const SizedBox.shrink();
+    if (groundEntity?.kind == 'void') {
+      final kindDef = game.entityKinds['void'];
+      final spritePath = _entitySpritePath(kindDef, groundEntity!);
+      if (spritePath != null) {
+        return Image.asset(
+          packService.resolveSprite(spritePath),
+          width: cellSize,
+          height: cellSize,
+          fit: BoxFit.cover,
+        );
+      }
+      return const SizedBox.shrink();
+    }
     return Container(
       decoration:
           BoxDecoration(border: Border.all(color: Colors.black12, width: 0.5)),
@@ -373,13 +385,25 @@ class _Cell extends StatelessWidget {
     );
   }
 
+  /// Resolves the sprite path for an entity instance, substituting the
+  /// `{paramName}` placeholder when the kind uses [EntityKindDef.spriteParam].
+  String? _entitySpritePath(EntityKindDef? kindDef, EntityInstance entity) {
+    final sprite = kindDef?.sprite;
+    if (sprite == null) return null;
+    final spriteParam = kindDef!.spriteParam;
+    if (spriteParam == null) return sprite;
+    final value = entity.param(spriteParam);
+    return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
+  }
+
   Widget _layer(String layerId, Position pos) {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
     final kindDef = game.entityKinds[entity.kind];
-    if (kindDef?.sprite != null) {
+    final spritePath = _entitySpritePath(kindDef, entity);
+    if (spritePath != null) {
       return Image.asset(
-        packService.resolveSprite(kindDef!.sprite!),
+        packService.resolveSprite(spritePath),
         width: cellSize,
         height: cellSize,
         fit: BoxFit.cover,
@@ -452,27 +476,6 @@ class _Cell extends StatelessWidget {
       return Container(color: cellColor);
     }
 
-    if (kind == 'box_fragment') {
-      final sides = (entity.param('sides') as int?) ?? 0;
-      return CustomPaint(
-        size: Size(cellSize, cellSize),
-        painter: _BoxFragmentPainter(sides: sides, cellSize: cellSize),
-      );
-    }
-
-    if (kind == 'box_target') {
-      return Container(
-        margin: EdgeInsets.all(cellSize * 0.15),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: const Color(0xFF8B5E3C).withValues(alpha: 0.5),
-            width: 2,
-          ),
-          borderRadius: BorderRadius.circular(cellSize * 0.08),
-        ),
-      );
-    }
-
     if (kind.startsWith('cell_')) {
       return Container(
         margin: EdgeInsets.all(cellSize * 0.1),
@@ -534,66 +537,6 @@ class _Cell extends StatelessWidget {
 
   Color _numberColor(int v) =>
       HSLColor.fromAHSL(1.0, (v * 37 % 360).toDouble(), 0.6, 0.45).toColor();
-}
-
-// ---------------------------------------------------------------------------
-// Box fragment painter — draws sides as thick coloured walls
-// ---------------------------------------------------------------------------
-
-class _BoxFragmentPainter extends CustomPainter {
-  final int sides;
-  final double cellSize;
-
-  // Side bit constants matching the engine.
-  static const int _sU = 1, _sR = 2, _sD = 4, _sL = 8;
-
-  _BoxFragmentPainter({required this.sides, required this.cellSize});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final full = sides == (_sU | _sR | _sD | _sL);
-    final m = cellSize * 0.1; // margin
-    final rect = Rect.fromLTRB(m, m, size.width - m, size.height - m);
-
-    // Body fill
-    final bodyPaint = Paint()
-      ..color = full
-          ? const Color(0xFF8B5E3C) // solid brown for complete box
-          : const Color(0xFF8B5E3C).withValues(alpha: 0.15);
-    final rr = RRect.fromRectAndRadius(rect, Radius.circular(cellSize * 0.08));
-    canvas.drawRRect(rr, bodyPaint);
-
-    // Draw active sides as thick lines
-    final wallPaint = Paint()
-      ..color = const Color(0xFF8B5E3C)
-      ..strokeWidth = cellSize * 0.12
-      ..strokeCap = StrokeCap.round;
-
-    if (sides & _sU != 0) {
-      canvas.drawLine(rect.topLeft, rect.topRight, wallPaint);
-    }
-    if (sides & _sR != 0) {
-      canvas.drawLine(rect.topRight, rect.bottomRight, wallPaint);
-    }
-    if (sides & _sD != 0) {
-      canvas.drawLine(rect.bottomLeft, rect.bottomRight, wallPaint);
-    }
-    if (sides & _sL != 0) {
-      canvas.drawLine(rect.topLeft, rect.bottomLeft, wallPaint);
-    }
-
-    // Full-box indicator: a small check or star in the center
-    if (full) {
-      final iconPaint = Paint()..color = Colors.white.withValues(alpha: 0.8);
-      final center = rect.center;
-      final r = cellSize * 0.12;
-      canvas.drawCircle(center, r, iconPaint);
-    }
-  }
-
-  @override
-  bool shouldRepaint(_BoxFragmentPainter old) =>
-      old.sides != sides || old.cellSize != cellSize;
 }
 
 // ---------------------------------------------------------------------------

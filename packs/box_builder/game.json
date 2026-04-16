@@ -18,7 +18,7 @@
     "empty": {
       "layer": "ground",
       "tags": ["walkable"],
-      "sprite": null,
+      "sprite": "assets/sprites/grass.png",
       "symbol": "."
     },
     "wall": {
@@ -30,7 +30,7 @@
     "void": {
       "layer": "ground",
       "tags": [],
-      "sprite": "cell_void.png",
+      "sprite": "assets/sprites/oak.png",
       "symbol": "v",
       "description": "impassable, cannot enter"
     },
@@ -40,7 +40,8 @@
       "params": {
         "sides": { "type": "integer" }
       },
-      "sprite": null,
+      "sprite": "assets/sprites/box_{sides}.png",
+      "spriteParam": "sides",
       "symbol": "b",
       "symbolParam": "sides",
       "description": "4-bit sides bitmask in hex: bit0=up, bit1=right, bit2=down, bit3=left; F=all 4 sides connected"
@@ -48,18 +49,18 @@
     "box_target": {
       "layer": "markers",
       "tags": ["goal_target"],
-      "sprite": null,
+      "sprite": "assets/sprites/box_target.png",
       "symbol": "X"
     },
     "rock": {
       "layer": "objects",
       "tags": ["solid", "breakable"],
-      "sprite": "assets/sprites/rock.png",
+      "sprite": "assets/sprites/rock2.png",
       "animations": {
         "breaking": {
           "frames": [
-            "assets/sprites/rock_with_cracks.png",
-            "assets/sprites/rock_broken.png"
+            "assets/sprites/rock2_with_cracks.png",
+            "assets/sprites/rock2_broken.png"
           ],
           "duration": 800,
           "mode": "once"
@@ -187,10 +188,6 @@
     {
       "type": "level",
       "ref": "bb_006"
-    },
-    {
-      "type": "level",
-      "ref": "bb_007"
     },
     {
       "type": "level",

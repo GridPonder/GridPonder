@@ -106,6 +106,7 @@ class GameDef:
             "symbol": j.get("symbol", "?"),
             "symbolParam": j.get("symbolParam"),
             "sprite": j.get("sprite"),
+            "spriteParam": j.get("spriteParam"),
             "uiName": j.get("uiName"),
             "description": j.get("description"),
         }
