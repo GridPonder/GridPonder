@@ -82,8 +82,20 @@ class TurnEngine:
     def undo_depth(self) -> int:
         return len(self._history)
 
-    def execute_turn(self, action_id: str, params: Optional[dict] = None) -> TurnResult:
-        """Execute one turn. Returns TurnResult. State is mutated in place."""
+    def execute_turn(
+        self,
+        action_id: str,
+        params: Optional[dict] = None,
+        save_history: bool = True,
+    ) -> TurnResult:
+        """Execute one turn. Returns TurnResult. State is mutated in place.
+
+        Parameters
+        ----------
+        save_history : bool
+            If False, skip the undo snapshot (useful for solvers that never
+            call undo()).  Default True preserves normal behaviour.
+        """
         params = params or {}
         action = {"actionId": action_id, "params": params}
 
@@ -91,8 +103,9 @@ class TurnEngine:
         if not self._game.is_valid_action(action_id):
             return TurnResult(accepted=False, events=[], is_won=False, is_lost=False)
 
-        # Save undo snapshot
-        self._history.append(self._state.copy())
+        # Save undo snapshot (skip for performance-critical callers like the solver)
+        if save_history:
+            self._history.append(self._state.copy())
 
         state = self._state
         systems = instantiate_systems(self._game)
@@ -105,7 +118,8 @@ class TurnEngine:
 
         # If vetoed → reject (don't count the move)
         if any(e["type"] == "action_vetoed" for e in all_events):
-            self._history.pop()
+            if save_history:
+                self._history.pop()
             return TurnResult(accepted=False, events=all_events, is_won=False, is_lost=False)
 
         # Phase 3: Movement resolution

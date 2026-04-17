@@ -41,6 +41,14 @@ Examples:
     python3 tools/solver/mutate_and_test.py packs/box_builder/levels/bb_017.json \\
         --forbid-constraint '{"type":"must_not","event":"object_removed","kind":"rock"}' \\
         --mode astar --max-depth 35
+
+    # Deep ice levels (30+ moves): twophase is much faster than astar.
+    # Phase 1 (BFS up to 24 moves) rules out short solutions cheaply.
+    # Phase 2 (DFS) finds any path of 25-45 moves without proving optimality.
+    python3 tools/solver/mutate_and_test.py packs/flag_adventure/levels/fw_ice_013.json \\
+        --mode twophase --max-depth 45 --timeout 60 \\
+        --criterion solution_length:min=25:max=45 \\
+        --mc-trials 5000 --criterion mc_difficulty:min=8.0
 """
 
 from __future__ import annotations
@@ -57,7 +65,14 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-sys.path.insert(0, str(Path(__file__).parent))
+_SOLVER_DIR = Path(__file__).parent
+_REPO_ROOT = _SOLVER_DIR.parent.parent  # platform/
+sys.path.insert(0, str(_SOLVER_DIR))
+# Also add the repo root so the parent process can unpickle engine types (Pos, etc.)
+# that appear in event dicts returned by worker subprocesses.
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from game_configs import GAME_CONFIGS
 
 
@@ -420,15 +435,123 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             if sol.path:
                 solution_path = sol.path
                 all_events = [e for step_evts in sol.events for e in step_evts]
+
+        elif mode == "twophase":
+            # Two-phase check for deep levels:
+            #
+            # Phase 1 — BFS up to (min_length - 1): rule out short solutions.
+            #   If BFS finds any solution here, the candidate is too easy.
+            #
+            # Phase 2 — BFS ignoring wins shorter than min_length: confirm the
+            #   level IS solvable (any path ≥ min_length within max_depth).
+            #   Faster than A* because we accept the first valid-length path found
+            #   without proving optimality (Phase 1 already ruled out easy wins).
+            #
+            # Together these answer: "no trivial path exists AND a long path does."
+            #
+            # "min_length" is inferred from the solution_length:min=N criterion.
+            # If absent, falls back to plain BFS (same as before).
+            import time as _time
+
+            # Extract min_length from task criteria (passed via task dict)
+            min_length: int = task.get("twophase_min", 0)
+            phase1_cap = max(0, min_length - 1)
+            deadline = _time.monotonic() + timeout
+
+            # --- Phase 1: BFS exhaustion up to phase1_cap ---
+            too_easy = False
+            if phase1_cap > 0:
+                bfs_queue: deque = deque([(initial, [])])
+                bfs_visited: Dict = {initial: 0}
+                while bfs_queue:
+                    if _time.monotonic() > deadline:
+                        base["timed_out"] = True
+                        base["ok"] = True
+                        return base
+                    bfs_state, bfs_path = bfs_queue.popleft()
+                    bfs_depth = len(bfs_path)
+                    if bfs_depth >= phase1_cap:
+                        continue
+                    for action in module.ACTIONS:
+                        ns, won, _ = module.apply(bfs_state, action, info)
+                        nd = bfs_depth + 1
+                        if won:
+                            too_easy = True
+                            break
+                        if module.can_prune(ns, info, nd, phase1_cap):
+                            continue
+                        prev = bfs_visited.get(ns)
+                        if prev is not None and prev <= nd:
+                            continue
+                        bfs_visited[ns] = nd
+                        bfs_queue.append((ns, bfs_path + [action]))
+                    if too_easy:
+                        break
+
+            if too_easy:
+                # Found a solution shorter than min_length — not interesting
+                base["ok"] = True  # valid, just fails solution_length criterion
+                return base
+
+            # --- Phase 2: BFS to find any solution of length ≥ min_length ---
+            # Use BFS (with dedup) starting from depth min_length, growing up to
+            # max_depth. BFS is complete and won't loop; the depth limit prevents
+            # runaway on large boards. We accept the first solution found.
+            remaining = deadline - _time.monotonic()
+            if remaining <= 0:
+                base["timed_out"] = True
+                base["ok"] = True
+                return base
+
+            # BFS from scratch but ignoring solutions shorter than min_length
+            p2_queue: deque = deque([(initial, [])])
+            p2_visited: Dict = {initial: 0}
+            found_path: Optional[List[str]] = None
+
+            while p2_queue:
+                if _time.monotonic() > deadline:
+                    base["timed_out"] = True
+                    base["ok"] = True
+                    return base
+                p2_state, p2_path = p2_queue.popleft()
+                p2_depth = len(p2_path)
+                if p2_depth >= max_depth:
+                    continue
+                for action in module.ACTIONS:
+                    ns, won, _ = module.apply(p2_state, action, info)
+                    nd = p2_depth + 1
+                    if won:
+                        if nd >= min_length:
+                            found_path = p2_path + [action]
+                            break
+                        # won but too short — don't enqueue, but don't stop
+                        continue
+                    if module.can_prune(ns, info, nd, max_depth):
+                        continue
+                    prev = p2_visited.get(ns)
+                    if prev is not None and prev <= nd:
+                        continue
+                    p2_visited[ns] = nd
+                    p2_queue.append((ns, p2_path + [action]))
+                if found_path:
+                    break
+
+            if found_path is not None:
+                solution_path = found_path
+                state = initial
+                for action in found_path:
+                    state, _, step_evts = module.apply(state, action, info)
+                    all_events.extend(step_evts)
+
         else:
             # BFS — finds shortest solution
-            queue: deque = deque([(initial, [])])
-            visited: Dict = {initial: 0}
+            bfs_q: deque = deque([(initial, [])])
+            bfs_vis: Dict = {initial: 0}
             shortest: Optional[int] = None
             best_path: Optional[List[str]] = None
 
-            while queue:
-                state, path = queue.popleft()
+            while bfs_q:
+                state, path = bfs_q.popleft()
                 depth = len(path)
                 if shortest is not None and depth >= shortest:
                     continue
@@ -445,11 +568,11 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
                         continue
                     if module.can_prune(new_state, info, new_depth, max_depth):
                         continue
-                    prev = visited.get(new_state)
+                    prev = bfs_vis.get(new_state)
                     if prev is not None and prev <= new_depth:
                         continue
-                    visited[new_state] = new_depth
-                    queue.append((new_state, new_path))
+                    bfs_vis[new_state] = new_depth
+                    bfs_q.append((new_state, new_path))
 
             if best_path is not None:
                 solution_path = best_path
@@ -660,7 +783,7 @@ def _path_to_gold(path: List[str], game: str) -> List[Dict]:
     if game == "number_crunch":
         return [{"direction": d} for d in path]
     if game == "flag_adventure":
-        return [{"action": "move", "direction": d} for d in path]
+        return [{"action": "move", "direction": a.removeprefix("move_")} for a in path]
     # Fallback
     return [{"action": a} for a in path]
 
@@ -726,9 +849,21 @@ def _run(args: argparse.Namespace) -> None:
         print(f"Note: '{game}' has no A* heuristic — using BFS")
         mode = "bfs"
 
+    # For twophase mode, extract min_length from solution_length criterion
+    twophase_min = 0
+    if mode == "twophase":
+        for c in criteria:
+            if c["ctype"] == "solution_length" and "min" in c:
+                twophase_min = int(c["min"])
+                break
+        if twophase_min == 0:
+            print("Note: twophase mode works best with --criterion solution_length:min=N; "
+                  "no min found, Phase 1 BFS will be skipped.")
+
     seed_id = seed_json.get("id", path.stem)
     print(f"Seed: {seed_id}  ({game})")
-    print(f"Mode: {mode},  max-depth={args.max_depth},  timeout={args.timeout}s")
+    mode_detail = f"twophase (min={twophase_min})" if mode == "twophase" else mode
+    print(f"Mode: {mode_detail},  max-depth={args.max_depth},  timeout={args.timeout}s")
     print(f"Mutations/candidate: {args.mutations},  workers: {args.workers}")
     if args.criterion:
         print(f"Criteria: {args.criterion}")
@@ -779,6 +914,7 @@ def _run(args: argparse.Namespace) -> None:
             "solver_dir": solver_dir,
             "require_constraints": require_constraints,
             "forbid_constraints": forbid_constraints,
+            "twophase_min": twophase_min,
         }
         for i, c in enumerate(candidates)
     ]
@@ -933,8 +1069,14 @@ def main() -> None:
         help="Max mutation attempts (default: 20 × --candidates)",
     )
     parser.add_argument(
-        "--mode", choices=["bfs", "astar"], default="astar",
-        help="Search algorithm (default: astar)",
+        "--mode", choices=["bfs", "astar", "twophase"], default="astar",
+        help=(
+            "Search algorithm (default: astar). "
+            "'twophase': fast mode for deep levels — BFS up to (min-1) rules out "
+            "short solutions, then BFS confirms the level is solvable (any path ≥ min). "
+            "Skips A*'s expensive optimality proof. "
+            "Best used with --criterion solution_length:min=N."
+        ),
     )
     parser.add_argument(
         "--max-depth", type=int, default=40, metavar="N",

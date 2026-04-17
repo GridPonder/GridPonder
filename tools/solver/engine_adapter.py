@@ -203,7 +203,7 @@ def apply(
     engine._state = state._state.copy()
     engine._history = []
 
-    result = engine.execute_turn(action_id, params)
+    result = engine.execute_turn(action_id, params, save_history=False)
     new_state = EngineState(engine._state)
     return new_state, result.is_won, result.events
 

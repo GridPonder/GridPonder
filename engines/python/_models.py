@@ -7,6 +7,7 @@ runtime state.
 """
 from __future__ import annotations
 
+import bisect
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -93,9 +94,15 @@ class Entity:
         return self.params.get(key)
 
     def copy(self) -> "Entity":
+        # Entities with no params are never mutated in place (only replaced via
+        # board.set_entity / layer.set), so sharing the same object is safe.
+        if not self.params:
+            return self
         return Entity(self.kind, dict(self.params))
 
     def to_key(self) -> tuple:
+        if not self.params:
+            return (self.kind,)
         return (self.kind, tuple(sorted(self.params.items())))
 
     @classmethod
@@ -151,14 +158,42 @@ class MultiCellObject:
 # ---------------------------------------------------------------------------
 
 class BoardLayer:
-    """Dense 2-D grid [y][x] of optional Entity, matching Dart's BoardLayer."""
+    """Dense 2-D grid [y][x] of optional Entity, matching Dart's BoardLayer.
 
-    __slots__ = ("width", "height", "_cells")
+    Also maintains a sparse index ``_sparse`` mapping ``(x, y)`` to the Entity
+    for every cell that is neither None nor a paramless default-kind entity.
+    This lets ``GameState.to_key()`` iterate only meaningful cells (O(sparse
+    cells)) instead of the full W×H grid.
+    """
 
-    def __init__(self, width: int, height: int, cells: list[list[Optional[Entity]]]):
+    __slots__ = ("width", "height", "_cells", "default_kind", "_sparse", "_sparse_sorted")
+
+    def __init__(
+        self,
+        width: int,
+        height: int,
+        cells: list[list[Optional[Entity]]],
+        default_kind: Optional[str] = None,
+        sparse: Optional[dict] = None,
+        sparse_sorted: Optional[list] = None,
+    ):
         self.width = width
         self.height = height
         self._cells = cells
+        self.default_kind = default_kind
+        if sparse is not None:
+            self._sparse = sparse
+            self._sparse_sorted = sparse_sorted if sparse_sorted is not None else sorted(sparse)
+        else:
+            # Build sparse index: non-None cells that aren't the paramless default
+            self._sparse = {
+                (x, y): cells[y][x]
+                for y in range(height)
+                for x in range(width)
+                if (e := cells[y][x]) is not None
+                and not (default_kind and e.kind == default_kind and not e.params)
+            }
+            self._sparse_sorted = sorted(self._sparse)
 
     @classmethod
     def empty(cls, width: int, height: int, default_kind: Optional[str] = None) -> "BoardLayer":
@@ -166,7 +201,8 @@ class BoardLayer:
             [Entity(default_kind) if default_kind else None for _ in range(width)]
             for _ in range(height)
         ]
-        return cls(width, height, cells)
+        # All cells are the paramless default — sparse index is empty
+        return cls(width, height, cells, default_kind, sparse={}, sparse_sorted=[])
 
     @classmethod
     def from_json(cls, json_val, width: int, height: int, default_kind: Optional[str] = None) -> "BoardLayer":
@@ -183,7 +219,8 @@ class BoardLayer:
                 for x, cell in enumerate(row):
                     if x >= width:
                         break
-                    layer._cells[y][x] = Entity.from_json(cell) if cell is not None else None
+                    if cell is not None:
+                        layer.set(Pos(x, y), Entity.from_json(cell))
             return layer
         if isinstance(json_val, dict) and json_val.get("format") == "sparse":
             for entry in json_val.get("entries", []):
@@ -193,7 +230,7 @@ class BoardLayer:
                 kind = entry.get("kind")
                 if kind is not None:
                     params = {k: v for k, v in entry.items() if k not in ("position", "kind")}
-                    layer._cells[pos.y][pos.x] = Entity(kind, params)
+                    layer.set(pos, Entity(kind, params))
             return layer
         raise ValueError(f"Unknown layer format: {json_val!r}")
 
@@ -206,6 +243,23 @@ class BoardLayer:
         if not pos.is_valid(self.width, self.height):
             return
         self._cells[pos.y][pos.x] = entity
+        key = (pos.x, pos.y)
+        # Maintain sparse index: include only non-None, non-paramless-default cells
+        is_default = entity is None or (
+            self.default_kind
+            and entity.kind == self.default_kind
+            and not entity.params
+        )
+        was_present = key in self._sparse
+        if is_default:
+            if was_present:
+                del self._sparse[key]
+                idx = bisect.bisect_left(self._sparse_sorted, key)
+                del self._sparse_sorted[idx]
+        else:
+            if not was_present:
+                bisect.insort(self._sparse_sorted, key)
+            self._sparse[key] = entity
 
     def entries(self):
         """Yield (Pos, Entity) for all non-null cells."""
@@ -217,7 +271,13 @@ class BoardLayer:
 
     def copy(self) -> "BoardLayer":
         cells = [[e.copy() if e is not None else None for e in row] for row in self._cells]
-        return BoardLayer(self.width, self.height, cells)
+        # Rebuild sparse index from the new cell grid (entity refs may differ for params-having entities)
+        new_sparse = {k: cells[k[1]][k[0]] for k in self._sparse}
+        # _sparse_sorted contains immutable (x,y) tuples — safe to share via list copy
+        return BoardLayer(
+            self.width, self.height, cells, self.default_kind,
+            new_sparse, list(self._sparse_sorted),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -415,13 +475,16 @@ class GameState:
         )
 
     def to_key(self) -> tuple:
-        """Hashable snapshot for BFS/A* deduplication."""
+        """Hashable snapshot for BFS/A* deduplication.
+
+        Uses each layer's ``_sparse`` index to iterate only non-default cells
+        instead of the full W×H grid, reducing key computation from O(W·H·L)
+        to O(non-default cells).
+        """
         board_key = tuple(
             (lid, tuple(
-                (x, y, e.to_key())
-                for y in range(layer.height)
-                for x in range(layer.width)
-                if (e := layer._cells[y][x]) is not None
+                (x, y, layer._sparse[(x, y)].to_key())
+                for (x, y) in layer._sparse_sorted
             ))
             for lid, layer in sorted(self.board.layers.items())
         )

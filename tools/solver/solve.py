@@ -89,43 +89,73 @@ def _bfs_shortest(
     constraints: Optional[List[Dict]] = None,
     prune_fn: Optional[Callable] = None,
 ) -> List[List[str]]:
-    """BFS: returns all solutions at the shortest depth found (dedup-limited)."""
+    """BFS: returns all solutions at the shortest depth found.
+
+    Uses key-tuple deduplication (not EngineState objects) to keep the visited
+    dict small — each entry is a plain tuple rather than a full GameState graph.
+    Paths are reconstructed via parent pointers rather than stored per queue
+    entry, avoiding O(depth) memory per queued state.
+
+    Stops collecting new solutions as soon as the frontier exceeds shortest
+    (early-exit).  Pass --all-solutions / --mode dfs for exhaustive counting.
+    """
     if prune_fn is None:
         prune_fn = module.can_prune
 
-    queue: deque = deque([(initial, [])])
-    visited: Dict[Any, int] = {initial: 0}
-    solutions: List[List[str]] = []
+    initial_key = initial._get_key() if hasattr(initial, "_get_key") else initial
+
+    # visited maps key → (parent_key | None, action | None)
+    visited: Dict[Any, tuple] = {initial_key: (None, None)}
+    # queue holds (state, state_key, depth)
+    queue: deque = deque([(initial, initial_key, 0)])
+    win_keys: List[Any] = []   # keys of winning states, in discovery order
     shortest: Optional[int] = None
 
     while queue:
-        state, path = queue.popleft()
-        depth = len(path)
+        state, state_key, depth = queue.popleft()
+
         if shortest is not None and depth >= shortest:
             continue
         if depth >= max_depth:
             continue
+
         for action in module.ACTIONS:
             new_state, module_won, step_events = module.apply(state, action, info)
             if constraints and any(violates_constraint(step_events, c) for c in constraints):
                 continue
             won = module_won or (is_win_fn is not None and is_win_fn(new_state))
             new_depth = depth + 1
-            new_path = path + [action]
+            new_key = new_state._get_key() if hasattr(new_state, "_get_key") else new_state
+
             if won:
-                solutions.append(new_path)
                 if shortest is None:
                     shortest = new_depth
+                # Record parent so we can reconstruct — use new_key if not yet seen
+                if new_key not in visited:
+                    visited[new_key] = (state_key, action)
+                win_keys.append(new_key)
+                continue
+
+            if new_key in visited:
                 continue
             if prune_fn(new_state, info, new_depth, max_depth):
                 continue
-            prev = visited.get(new_state)
-            if prev is not None and prev <= new_depth:
-                continue
-            visited[new_state] = new_depth
-            queue.append((new_state, new_path))
 
-    return solutions
+            visited[new_key] = (state_key, action)
+            queue.append((new_state, new_key, new_depth))
+
+    # Reconstruct paths from parent pointers
+    def _reconstruct(end_key: Any) -> List[str]:
+        path: List[str] = []
+        k = end_key
+        while visited[k][0] is not None:
+            parent_k, act = visited[k]
+            path.append(act)
+            k = parent_k
+        path.reverse()
+        return path
+
+    return [_reconstruct(k) for k in win_keys]
 
 
 def _dfs_all(
@@ -592,7 +622,7 @@ def _solve_flag_adventure(
     print()
 
     gold_raw = level_json.get("solution", {}).get("goldPath", [])
-    gold_actions = [m["direction"] for m in gold_raw] if gold_raw else None
+    gold_actions = ["move_" + m["direction"] for m in gold_raw] if gold_raw else None
     optimal_len = len(gold_actions) if gold_actions else None
 
     if mode == "astar":
