@@ -28,7 +28,10 @@ import json
 import os
 import subprocess
 import sys
+import termios
+import threading
 import time
+import tty
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -359,10 +362,86 @@ def _send_give_up(send: Any, mode: str, memory: str) -> None:
         send({"actions": [{"action": "give_up"}], "memory": memory})
 
 
+# ── Resume helpers ─────────────────────────────────────────────────────────────
+
+def load_completed(results_base: Path, mode: str, anon: bool) -> set[tuple[str, str, str]]:
+    """Scan all existing JSONL runs and return (model_id, pack_id, level_id) triples
+    that already have a successful (non-error) result for the given mode+anon."""
+    done: set[tuple[str, str, str]] = set()
+    if not results_base.exists():
+        return done
+    for jsonl_file in sorted(results_base.glob("**/*.jsonl")):
+        file_mode: str | None = None
+        file_anon: bool = False
+        with open(jsonl_file) as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("type") == "run_meta":
+                    file_mode = rec.get("inference_mode", "single")
+                    file_anon = rec.get("anon", False)
+                elif rec.get("type") == "level" and file_mode == mode and file_anon == anon:
+                    if "error" not in rec:
+                        done.add((rec["model_id"], rec["pack_id"], rec["level_id"]))
+    return done
+
+
+# ── Pause/resume ───────────────────────────────────────────────────────────────
+
+_running = threading.Event()
+_running.set()  # starts unpaused
+
+
+def _keyboard_listener() -> None:
+    """Daemon thread: read raw keypresses to pause/resume the benchmark.
+
+    'p' pauses after the current level finishes.
+    'c' resumes.
+    Ctrl+C / 'q' sends SIGINT to the main process.
+    """
+    import signal as _signal
+
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while True:
+            ch = sys.stdin.read(1)
+            if ch.lower() == "p" and _running.is_set():
+                _running.clear()
+                tqdm.write("\n⏸  Paused — will stop after this level. Press 'c' to resume.")
+            elif ch.lower() == "c" and not _running.is_set():
+                _running.set()
+                tqdm.write("▶  Resumed.")
+            elif ch in ("\x03", "\x04", "q"):  # Ctrl+C, Ctrl+D, q
+                termios.tcsetattr(fd, termios.TCSADRAIN, old)
+                _signal.raise_signal(_signal.SIGINT)
+                break
+    except Exception:
+        pass
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+
+
+def _wait_if_paused() -> None:
+    """Block between levels while paused; returns immediately when running."""
+    _running.wait()
+
+
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     load_dotenv()
+
+    # Keyboard listener for pause/resume (only when stdin is a real terminal).
+    if sys.stdin.isatty():
+        t = threading.Thread(target=_keyboard_listener, daemon=True)
+        t.start()
 
     # Prevent macOS from sleeping during a long benchmark run.
     _caffeinate = subprocess.Popen(
@@ -414,6 +493,8 @@ def main() -> None:
                         help="Efficiency penalty per extra step beyond first in flex-n (default: 0.5)")
     parser.add_argument("--anon", action="store_true",
                         help="Anonymise entity kinds and action IDs (ARC-AGI style)")
+    parser.add_argument("--resume", action="store_true",
+                        help="Skip levels already completed in any previous run for this mode+anon")
 
     args = parser.parse_args()
 
@@ -448,6 +529,17 @@ def main() -> None:
                 for _ in range(args.runs):
                     work.append((pack_id, level_id, model, variant))
 
+    if args.resume:
+        completed = load_completed(RESULTS_BASE, args.mode, args.anon)
+        if completed:
+            before = len(work)
+            work = [
+                (p, l, m, v) for p, l, m, v in work
+                if (f"{m['id']}{v.get('suffix', '')}", p, l) not in completed
+            ]
+            print(f"  Resuming: skipping {before - len(work)} already-completed level(s), "
+                  f"{len(work)} remaining.")
+
     total = len(work)
     mode_label = args.mode
     if args.mode == "fixed-n":
@@ -459,6 +551,8 @@ def main() -> None:
           f"{len(model_variants)} model variant(s) × "
           f"{sum(len(v) for v in levels_by_pack.values())} level(s)"
           f"{f' × {args.runs} runs' if args.runs > 1 else ''}")
+    if sys.stdin.isatty():
+        print("  Controls: p = pause after current level  |  c = continue  |  q = quit")
 
     # ── Output directory for this run ─────────────────────────────────────────
     ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
@@ -487,11 +581,18 @@ def main() -> None:
         json.dump(run_config, f, indent=2)
 
     # Group work by model variant so we write one file per variant.
-    by_variant: dict[str, list[tuple[str, str, dict, dict]]] = defaultdict(list)
+    # Pre-populate in model_variants order so --resume doesn't reorder models
+    # when some levels are already filtered out for a partially-done model.
+    by_variant: dict[str, list[tuple[str, str, dict, dict]]] = {
+        f"{m['id']}{v.get('suffix', '')}": []
+        for m, v in model_variants
+    }
     for item in work:
         pack_id, level_id, model, variant = item
         full_id = f"{model['id']}{variant.get('suffix', '')}"
         by_variant[full_id].append(item)
+    # Drop models with no remaining work (fully skipped by --resume)
+    by_variant = {k: v for k, v in by_variant.items() if v}
 
     # ── Run ───────────────────────────────────────────────────────────────────
     for full_id, items in by_variant.items():
@@ -525,6 +626,7 @@ def main() -> None:
 
             pbar = tqdm(items, desc=full_id, unit="level")
             for pack_id, level_id, model, variant in pbar:
+                _wait_if_paused()
                 pbar.set_postfix(pack=pack_id, level=level_id)
                 try:
                     result = run_level(

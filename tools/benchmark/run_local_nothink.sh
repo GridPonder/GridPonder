@@ -1,16 +1,23 @@
 #!/usr/bin/env bash
-# Run the curated suite for all local non-thinking models (Gemma 4 + Qwen 3.5)
+# Run ALL levels for all local non-thinking models (Gemma 4 + Qwen 3.5)
 # across every combination of inference mode (single / flex-n / full) and
 # anonymisation (normal / anon) — 5 runs in total.
 # full+anon is intentionally skipped: without intermediate feedback and without
 # semantic labels, every model scores near-zero, producing no useful signal.
 #
-# Usage: cd tools/benchmark && bash run_local_nothink.sh
+# Usage:
+#   cd tools/benchmark && bash run_local_nothink.sh           # fresh run
+#   cd tools/benchmark && bash run_local_nothink.sh --resume  # skip completed
 #
-# Note: archive results/run/ before re-running if any curated-suite levels
-# have changed since the last run, to avoid mixing stale and fresh results.
+# Note: archive results/run/ before re-running if any levels have changed
+# since the last run, to avoid mixing stale and fresh results.
 
 set -euo pipefail
+
+RESUME_FLAG=""
+if [ "${1:-}" = "--resume" ]; then
+  RESUME_FLAG="--resume"
+fi
 
 MODELS=(
   --model gemma4-e2b
@@ -29,7 +36,7 @@ for mode in single flex-n full; do
     label="${mode}${anon_flag:+ anon}"
     echo ""
     echo "=== Running: $label ==="
-    python bench.py --suite curated --mode "$mode" "${MODELS[@]}" $anon_flag
+    python bench.py --all --mode "$mode" "${MODELS[@]}" $anon_flag $RESUME_FLAG
   done
 done
 

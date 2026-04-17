@@ -227,6 +227,14 @@ of existing levels. Required fields:
 }
 ```
 
+**Formatting rules** — all level JSON files use a compact style:
+- Short arrays of primitives on one line: `"size": [7, 7]`, `"position": [3, 2]`
+- Board layer entries each on one line: `{"position": [3, 2], "kind": "rock"}`
+- Gold path moves each on one line: `{"action": "move", "direction": "down"}`
+- Small objects (avatar state, goals, portal entries) on one line when they fit in ~90 chars
+- `"hintStops"` as an inline array: `"hintStops": [4, 9, 18]`
+- Bias hint stops toward earlier steps and after critical/non-obvious actions
+
 ## 6. Register in game.json
 
 Add the new level to `packs/<pack_id>/game.json` → `levelSequence`:
