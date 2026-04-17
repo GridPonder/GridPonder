@@ -45,9 +45,7 @@
       }
     }
   },
-  "state": {
-    "avatar": {"enabled": true, "position": [1, 3], "facing": "right"}
-  },
+  "state": {"avatar": {"enabled": true, "position": [1, 3], "facing": "right"}},
   "goals": [
     {"id": "reach_flag", "type": "reach_target", "config": {"targetTag": "goal_target"}}
   ],
@@ -75,6 +73,6 @@
       {"action": "move", "direction": "right"},
       {"action": "move", "direction": "right"}
     ],
-    "hintStops": [7, 12]
+    "hintStops": [3, 7, 12]
   }
 }
