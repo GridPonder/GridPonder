@@ -36,7 +36,7 @@ BFS confirms unique optimal solution at depth 11. MC difficulty: ~10 bits.
 
 ## tw_003 — Garden Gauntlet (30 moves)
 
-Three baskets, three plots. Order and clone placement both matter.
+Two baskets. Order and clone placement both matter.
 
 ```
 python3 tools/solver/solve.py packs/twinseed/levels/tw_003.json --mode astar --max-depth 35 --timeout 60
