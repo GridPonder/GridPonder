@@ -1,0 +1,31 @@
+{
+  "id": "tw_001",
+  "title": "First Roots",
+  "board": {
+    "size": [5, 4],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [4, 2], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 2], "kind": "seed_basket"},
+          {"position": [0, 1], "kind": "wood"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 2], "facing": "right"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": ["right", "right", "right"]
+  }
+}

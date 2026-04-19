@@ -46,10 +46,10 @@ void _replayAndExpectWin(TurnEngine engine, List<GameAction> path) {
 }
 
 void main() {
-  // --- flag_adventure ---
-  group('flag_adventure gold paths', () {
+  // --- carrot_quest ---
+  group('carrot_quest gold paths', () {
     late LoadedPack pack;
-    setUpAll(() => pack = _loadPack('../../packs/flag_adventure'));
+    setUpAll(() => pack = _loadPack('../../packs/carrot_quest'));
 
     for (final id in [
       'fw_001','fw_002','fw_003','fw_004','fw_005','fw_006','pw_001','pw_003','fw_007',
@@ -102,7 +102,7 @@ void main() {
 
   group('undo/reset', () {
     late LoadedPack pack;
-    setUpAll(() => pack = _loadPack('../../packs/flag_adventure'));
+    setUpAll(() => pack = _loadPack('../../packs/carrot_quest'));
     test('undo restores state', () {
       final engine = _engineForLevel(pack, 'fw_001');
       final initialState = engine.state;

@@ -4,7 +4,7 @@ trace_path.py — Replay a level's goldPath step-by-step and output the board
 state after each move, in a canonical format for cross-validation against the
 Dart engine (engines/dart/bin/trace.dart).
 
-Works with any GridPonder game pack (flag_adventure, diagonal_swipes, etc.).
+Works with any GridPonder game pack (carrot_quest, diagonal_swipes, etc.).
 
 Usage:
   python3 trace_path.py path/to/level.json [--max-steps N]

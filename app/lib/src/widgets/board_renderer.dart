@@ -24,8 +24,8 @@ class BoardRenderer extends StatelessWidget {
   final GameDefinition game;
   final PackService packService;
   /// Optional overlay sprites rendered on top of the objects layer, used during
-  /// entity destruction animations. Maps cell position → resolved asset path.
-  final Map<Position, String>? animationOverlays;
+  /// entity destruction animations. Maps cell position → image provider.
+  final Map<Position, ImageProvider>? animationOverlays;
   /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
   final void Function(int x, int y)? onCellTap;
   /// When set, cell_flooded entities are rendered in this color instead of
@@ -245,14 +245,14 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _buildAnimOverlay(Position pos, String spritePath, double cellSize) {
+  Widget _buildAnimOverlay(Position pos, ImageProvider image, double cellSize) {
     return Positioned(
       left: pos.x * cellSize,
       top: pos.y * cellSize,
       width: cellSize,
       height: cellSize,
       child: IgnorePointer(
-        child: Image.asset(spritePath, fit: BoxFit.cover),
+        child: Image(image: image, fit: BoxFit.cover),
       ),
     );
   }
@@ -378,6 +378,7 @@ class _Cell extends StatelessWidget {
           if (!skipGround) _layer('ground', pos),
           _layer('portals', pos),
           _layer('objects', pos),
+          _layer('clone', pos),
           _layer('markers', pos),
           _layer('actors', pos),
         ],
@@ -402,12 +403,19 @@ class _Cell extends StatelessWidget {
     final kindDef = game.entityKinds[entity.kind];
     final spritePath = _entitySpritePath(kindDef, entity);
     if (spritePath != null) {
-      return Image.asset(
-        packService.resolveSprite(spritePath),
+      // Try pack-specific path first; fall back to gridponder-base for shared sprites.
+      return Image(
+        image: packService.resolvePackImage(spritePath),
         width: cellSize,
         height: cellSize,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _fallback(entity),
+        errorBuilder: (_, __, ___) => Image.asset(
+          packService.resolveSprite(spritePath),
+          width: cellSize,
+          height: cellSize,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => _fallback(entity),
+        ),
       );
     }
     return _fallback(entity);

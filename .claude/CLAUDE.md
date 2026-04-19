@@ -11,7 +11,8 @@ See `README.md` for repo structure, `docs/gridponder_platform_overview.md` for a
 
 ## Instructions
 
-- use skills to test levels when needed before declaring that your work is done (usually involves writing an integration test, starting the app, taking screenshots and analysing correctness)
+- use skills to test levels when needed before declaring that your work is done (usually involves writing an integration test and running solvers or for fresh features starting the app and taking screenshots)
+- avoid game-specific engine changes; instead check whether a feature can be supported by the current DSL and, if not, extend the DSL generically (such that re-use of the abstract same idea in other games is possible)
 - do not declare AI models as co-author in git commits
 - when you place hint stops in levels, bias them towards earlier steps in the gold path and after critical/useful actions
 - write screenshots or other temporary files to tmp/ (in this repo) as writing elsewhere needs explicit approval

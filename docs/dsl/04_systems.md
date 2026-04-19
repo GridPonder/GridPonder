@@ -330,6 +330,35 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 
 ---
 
+### 2.10 `anchor_point`
+
+**Purpose:** Maintain a single movable anchor on the board. On the configured action: if no anchor entity exists, place one at the avatar's current position; if one exists, teleport the avatar to the anchor and remove it.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `avatar_exited`, `avatar_entered` (no `direction` field — `ice_slide` will not trigger a slide after teleport)
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `markerKind` | string | — | **Required.** Entity kind to use as the anchor marker. |
+| `markerLayer` | string | — | **Required.** Layer to store the anchor on. Must be declared in the game's `layers` array. |
+| `action` | string | — | **Required.** Action id that triggers the toggle. |
+| `blockedByTags` | array of strings | `["solid"]` | Tags on the `objects` layer that prevent teleportation to the anchor cell. If a matching entity is present, the teleport is skipped and the anchor remains. |
+
+**Behavior:**
+1. On the configured action, scan `markerLayer` for any entity of `markerKind`.
+2. If none found: place `markerKind` at the avatar's current cell in `markerLayer`. No events emitted.
+3. If found: check the `objects` layer at the marker cell. If any entity there has a `blockedByTags` tag, do nothing.
+4. Otherwise: remove the marker, teleport avatar to the marker cell. Emit `avatar_exited` from the old position and `avatar_entered` at the new position (without a `direction` field in the payload).
+
+**Note on ice:** The `avatar_entered` event emitted during teleport intentionally omits `direction`. The `ice_slide` cascade system skips events without a direction, so teleporting onto ice does not trigger a slide. Rules that react to `avatar_entered` (pickup, liquid, etc.) still fire normally since they do not require a direction.
+
+**Reuse:** This system type is game-agnostic. Any game can use it with a different `markerKind`, `markerLayer`, and `action` to implement "save point", "recall beacon", "twin", or similar mechanics.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -343,6 +372,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 | Overlay Cursor | `overlay_cursor` | `action_resolution` | `move` |
 | Region Transform | `region_transform` | `action_resolution` | `rotate`, `flip`, `diagonal_swap` |
 | Flood Fill | `flood_fill` | `action_resolution` | `flood` |
+| Anchor Point | `anchor_point` | `action_resolution` | configurable |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 
@@ -352,6 +382,9 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 
 ### Flag-style games (avatar navigation puzzles)
 `avatar_navigation` + `push_objects` + `portals` + inventory/consumable/liquid rule recipes
+
+### Sokoban-style games with recall mechanic
+`avatar_navigation` + `push_objects` + `anchor_point` + object-on-target rule recipe
 
 ### Number-style games (slide and merge)
 `slide_merge` + `queued_emitters` + `gravity` (with `sequence_match` goal)

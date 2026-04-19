@@ -190,22 +190,27 @@ game has a sequence or board-match goal type.
 
 ### 3.2 Solver (strongly recommended)
 
-If the game's state is enumerable, write a Python solver following the pattern
-in `tools/solver/games/`. The solver must implement:
-- A hashable state dataclass
-- `apply(state, action, info) → (new_state, won, events)` — events are DSL
-  event dicts (same vocabulary as `engine/lib/src/event.dart`); return `[]`
-  if the game does not yet emit events
-- `can_prune(state, info, depth, max_depth) → bool`
-- `load(level_json) → (initial_state, info)`
-- `ACTIONS: List[str]`
+All games run through the shared Python engine (`engines/python/`), so you do
+**not** need to re-implement game logic. Write a thin adapter in
+`tools/solver/games/<game_id>.py` following `carrot_quest.py` as the
+canonical example. The adapter only needs to provide:
+
+- `load(level_json) → (initial_state, info)` — calls `ea.load()` from
+  `engine_adapter.py`, then wraps the result in a game-specific info object
+- `apply(state, action, info) → (new_state, won, events)` — delegates to
+  `ea.apply()`
+- `can_prune(state, info, depth, max_depth) → bool` — return `False` if no
+  pruning logic is available
+- `ACTIONS: List[str]` — list of valid action strings (e.g. `["move_up", ...]`)
 
 If the game design document (§2.8) specifies an admissible heuristic, also
 implement `heuristic(state, info) → float` — return `float('inf')` for
 provably dead states. This enables `--mode astar` in the solver CLI, which is
-significantly faster than BFS for levels with gold paths > 15 moves.
+significantly faster than BFS for levels with gold paths > 15 moves. The
+heuristic is the only part that is game-specific; the simulation itself comes
+from the engine.
 
-Commit the solver to `tools/solver/games/` and register the game in
+Commit the adapter to `tools/solver/games/` and register the game in
 `tools/solver/solve.py` (game detection + `_solve_<game>` function).
 
 ### 3.3 Tiles

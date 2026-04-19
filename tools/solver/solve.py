@@ -48,7 +48,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import games.number_crunch as nc
 import games.rotate_flip as rf
 import games.box_builder as bb
-import games.flag_adventure as fa
+import games.carrot_quest as fa
+import games.twinseed as tw
 import engine_adapter as ea
 from search.astar import astar
 from search.events import format_event, violates_constraint
@@ -67,12 +68,14 @@ def _detect_game(level_path: Path) -> str:
             return "rotate_flip"
         if part == "box_builder":
             return "box_builder"
-        if part == "flag_adventure":
-            return "flag_adventure"
+        if part == "carrot_quest":
+            return "carrot_quest"
         if part == "diagonal_swipes":
             return "diagonal_swipes"
         if part == "flood_colors":
             return "flood_colors"
+        if part == "twinseed":
+            return "twinseed"
     return "number_crunch"
 
 
@@ -600,7 +603,7 @@ def _solve_box_builder(
         _print_mc_results(result, optimal_len)
 
 
-def _solve_flag_adventure(
+def _solve_carrot_quest(
     path: Path,
     level_json: Dict[str, Any],
     mode: str,
@@ -643,6 +646,61 @@ def _solve_flag_adventure(
         steps = mc_steps or max(100, 3 * (optimal_len or 30))
         print()
         result = _monte_carlo(initial, info, fa, mc_trials, steps)
+        _print_mc_results(result, optimal_len)
+
+
+# ---------------------------------------------------------------------------
+# Twinseed solver
+# ---------------------------------------------------------------------------
+
+def _solve_twinseed(
+    path: Path,
+    level_json: Dict[str, Any],
+    mode: str,
+    max_depth: int,
+    timeout: float,
+    trace: bool,
+    constraints: List[Dict],
+    mc_trials: int = 0,
+    mc_steps: int = 0,
+) -> None:
+    initial, info = tw.load(level_json)
+    level_id = info.level_id or path.stem
+    print(f"Solving  {level_id}   (mode: {mode}, max depth: {max_depth})")
+    print(f"  Game:   Twinseed")
+    print(f"  Board:  {info.width}×{info.height}")
+    print(f"  Actions: {', '.join(info.ACTIONS)}")
+    print()
+
+    gold_actions = ea.gold_path_actions(level_json) or None
+    optimal_len = len(gold_actions) if gold_actions else None
+
+    class _mod:
+        ACTIONS = info.ACTIONS
+        apply = staticmethod(tw.apply)
+        can_prune = staticmethod(tw.can_prune)
+        heuristic = staticmethod(tw.heuristic)
+
+    if mode == "astar":
+        _t0 = time.monotonic()
+        sol = astar(initial, info, _mod, timeout, constraints, max_depth=max_depth)
+        _print_astar_result(sol, gold_actions, trace, initial, _mod, info,
+                            elapsed=time.monotonic() - _t0)
+        if sol.path:
+            optimal_len = sol.cost
+    elif mode == "dfs":
+        solutions = _dfs_all(initial, info, _mod, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, _mod, info,
+                       mode=mode)
+    else:
+        solutions = _bfs_shortest(initial, info, _mod, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, _mod, info,
+                       mode=mode)
+
+    if mc_trials > 0:
+        steps = mc_steps or max(100, 3 * (optimal_len or 20))
+        print()
+        result = _monte_carlo(initial, info, _mod, mc_trials, steps)
         _print_mc_results(result, optimal_len)
 
 
@@ -739,8 +797,8 @@ def solve(
     elif game == "number_crunch":
         _solve_number_crunch(path, level_json, mode, max_depth, timeout, trace,
                              constraints, **mc_kw)
-    elif game == "flag_adventure":
-        _solve_flag_adventure(path, level_json, mode, max_depth, timeout, trace,
+    elif game == "carrot_quest":
+        _solve_carrot_quest(path, level_json, mode, max_depth, timeout, trace,
                               constraints, **mc_kw)
     elif game == "diagonal_swipes":
         _solve_generic(path, level_json, "Diagonal Swipes", mode, max_depth, timeout,
@@ -748,6 +806,9 @@ def solve(
     elif game == "flood_colors":
         _solve_generic(path, level_json, "Flood Colors", mode, max_depth, timeout,
                        trace, constraints, **mc_kw)
+    elif game == "twinseed":
+        _solve_twinseed(path, level_json, mode, max_depth, timeout, trace,
+                        constraints, **mc_kw)
     else:
         print(f"Error: unsupported game '{game}'", file=sys.stderr)
         sys.exit(1)

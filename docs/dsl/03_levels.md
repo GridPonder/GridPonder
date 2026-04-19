@@ -400,14 +400,22 @@ The gold path and hint system.
 
 ### Gold Path Entry
 
-Each entry is an action with its parameters:
+Each entry is either a JSON object or a string shorthand (added in DSL 0.6).
 
+**Object form** (all games, all action types):
 ```json
 { "action": "move", "direction": "right" }
 { "action": "diagonal_swap", "direction": "up_right" }
 { "action": "rotate", "rotation": "clockwise" }
 { "action": "flood" }
 ```
+
+**String shorthand** (compact form for simple actions):
+- Cardinal direction strings (`"up"`, `"down"`, `"left"`, `"right"`) expand to `{ "action": "move", "direction": X }`.
+- Any other string expands to `{ "action": X }` with no parameters (e.g. `"clone"`, `"rotate"`, `"flip"`).
+- Actions that require non-cardinal direction params (e.g. `diagonal_swap`) must use the object form.
+
+Both forms are valid and can be mixed within a single `goldPath` array. Object form remains the canonical representation for tools that need to be explicit.
 
 ### Hint System
 
@@ -419,7 +427,7 @@ Each entry is an action with its parameters:
 
 1. `hintStops` must be strictly increasing: `stops[i] < stops[i+1]`.
 2. Every stop must be `<= goldPath.length`.
-3. Maximum 3 hint stops in v0.5.
+3. Maximum 3 hint stops.
 4. Each gold path action must be a valid action type for this game.
 5. Replaying the gold path from the initial state must reach a goal state.
 

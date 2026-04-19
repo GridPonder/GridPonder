@@ -1,5 +1,6 @@
 import '../engine/game_system.dart';
 import '../models/game_definition.dart';
+import 'anchor_point_system.dart';
 import 'avatar_navigation_system.dart';
 import 'flood_fill_system.dart';
 import 'ice_slide_system.dart';
@@ -18,6 +19,7 @@ typedef SystemFactory = GameSystem Function(String id, Map<String, dynamic> conf
 
 class SystemRegistry {
   static final Map<String, SystemFactory> _factories = {
+    'anchor_point': (id, _) => AnchorPointSystem(id: id),
     'avatar_navigation': (id, _) => AvatarNavigationSystem(id: id),
     'push_objects': (id, _) => PushObjectsSystem(id: id),
     'portals': (id, _) => PortalsSystem(id: id),

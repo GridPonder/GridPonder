@@ -45,7 +45,7 @@ Examples:
     # Deep ice levels (30+ moves): twophase is much faster than astar.
     # Phase 1 (BFS up to 24 moves) rules out short solutions cheaply.
     # Phase 2 (DFS) finds any path of 25-45 moves without proving optimality.
-    python3 tools/solver/mutate_and_test.py packs/flag_adventure/levels/fw_ice_013.json \\
+    python3 tools/solver/mutate_and_test.py packs/carrot_quest/levels/fw_ice_013.json \\
         --mode twophase --max-depth 45 --timeout 60 \\
         --criterion solution_length:min=25:max=45 \\
         --mc-trials 5000 --criterion mc_difficulty:min=8.0
@@ -90,8 +90,10 @@ def _detect_game(path: Path) -> str:
             return "box_builder"
         if part == "flood_colors":
             return "flood_colors"
-        if part == "flag_adventure":
-            return "flag_adventure"
+        if part == "carrot_quest":
+            return "carrot_quest"
+        if part == "twinseed":
+            return "twinseed"
     raise ValueError(
         f"Cannot detect game from path: {path}\n"
         "  Ensure the path contains the pack folder name (e.g. box_builder)."
@@ -411,8 +413,10 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             import games.rotate_flip as module
         elif game == "number_crunch":
             import games.number_crunch as module
-        elif game == "flag_adventure":
-            import games.flag_adventure as module
+        elif game == "carrot_quest":
+            import games.carrot_quest as module
+        elif game == "twinseed":
+            import games.twinseed as module
         else:
             base["error"] = f"No solver for game '{game}'"
             return base
@@ -782,8 +786,14 @@ def _path_to_gold(path: List[str], game: str) -> List[Dict]:
         return gold
     if game == "number_crunch":
         return [{"direction": d} for d in path]
-    if game == "flag_adventure":
-        return [{"action": "move", "direction": a.removeprefix("move_")} for a in path]
+    if game in ("carrot_quest", "twinseed"):
+        gold = []
+        for a in path:
+            if a.startswith("move_"):
+                gold.append(a[5:])  # shorthand: "left", "right", etc.
+            else:
+                gold.append(a)  # shorthand: "clone", etc.
+        return gold
     # Fallback
     return [{"action": a} for a in path]
 

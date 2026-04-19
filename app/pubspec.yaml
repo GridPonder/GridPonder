@@ -63,9 +63,9 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/packs/flag_adventure/
-    - assets/packs/flag_adventure/levels/
-    - assets/packs/flag_adventure/assets/
+    - assets/packs/carrot_quest/
+    - assets/packs/carrot_quest/levels/
+    - assets/packs/carrot_quest/assets/
     - assets/packs/number_cells/
     - assets/packs/number_cells/levels/
     - assets/packs/number_cells/assets/
@@ -81,8 +81,11 @@ flutter:
     - assets/packs/box_builder/
     - assets/packs/box_builder/levels/
     - assets/packs/box_builder/assets/
+    - assets/packs/twinseed/
+    - assets/packs/twinseed/levels/
+    - assets/packs/twinseed/assets/
+    - assets/packs/twinseed/assets/sprites/
     - assets/packs/gridponder-base/sprites/tiles/
-    - assets/packs/rabbit-character/sprites/avatar/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

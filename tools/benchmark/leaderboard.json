@@ -19,7 +19,7 @@
           "avg_efficiency": 0.425,
           "p50_latency_ms": 1763.6952500006373
         },
-        "flag_adventure": {
+        "carrot_quest": {
           "levels_run": 5,
           "success_rate": 0.0,
           "avg_efficiency": null,
@@ -69,7 +69,7 @@
           "avg_efficiency": 1.0,
           "p50_latency_ms": 4868.4057909999865
         },
-        "flag_adventure": {
+        "carrot_quest": {
           "levels_run": 5,
           "success_rate": 0.0,
           "avg_efficiency": null,
@@ -119,7 +119,7 @@
           "avg_efficiency": 0.6666666666666666,
           "p50_latency_ms": 876.2042090002069
         },
-        "flag_adventure": {
+        "carrot_quest": {
           "levels_run": 5,
           "success_rate": 0.0,
           "avg_efficiency": null,
@@ -169,7 +169,7 @@
           "avg_efficiency": 1.0,
           "p50_latency_ms": 1014.3617499999991
         },
-        "flag_adventure": {
+        "carrot_quest": {
           "levels_run": 14,
           "success_rate": 0.0,
           "avg_efficiency": null,
@@ -219,7 +219,7 @@
           "avg_efficiency": 1.0,
           "p50_latency_ms": 2489.2958749987883
         },
-        "flag_adventure": {
+        "carrot_quest": {
           "levels_run": 5,
           "success_rate": 0.0,
           "avg_efficiency": null,
@@ -269,7 +269,7 @@
           "avg_efficiency": 0.3333333333333333,
           "p50_latency_ms": 913.6136669994812
         },
-        "flag_adventure": {
+        "carrot_quest": {
           "levels_run": 5,
           "success_rate": 0.0,
           "avg_efficiency": null,

@@ -137,7 +137,7 @@ class _Header extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
             child: Image.asset(
-              'assets/packs/rabbit-character/sprites/avatar/rabbit_idea_grid_medium_resolution.png',
+              'assets/packs/gridponder-base/sprites/tiles/rabbit_idea_grid_medium_resolution.png',
               width: 48,
               height: 48,
               fit: BoxFit.cover,

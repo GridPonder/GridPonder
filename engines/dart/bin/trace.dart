@@ -6,8 +6,8 @@
 ///   dart run bin/trace.dart <pack_dir> <level_id> [max_steps]
 ///
 /// Example:
-///   dart run bin/trace.dart ../packs/flag_adventure fw_ice_006c
-///   dart run bin/trace.dart ../packs/flag_adventure fw_ice_006c 30
+///   dart run bin/trace.dart ../packs/carrot_quest fw_ice_006c
+///   dart run bin/trace.dart ../packs/carrot_quest fw_ice_006c 30
 
 import 'dart:io';
 

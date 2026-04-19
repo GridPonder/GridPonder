@@ -31,7 +31,7 @@ Each level is a standalone JSON file. Map the level ID prefix to its pack:
 
 | Prefix | Pack folder |
 |--------|-------------|
-| `fw_`, `pw_`, `sw_` | `platform/packs/flag_adventure/levels/` |
+| `fw_`, `pw_`, `sw_` | `platform/packs/carrot_quest/levels/` |
 | `nc_` | `platform/packs/number_cells/levels/` |
 | `ds_` | `platform/packs/diagonal_swipes/levels/` |
 | `rf_` | `platform/packs/rotate_flip/levels/` |
@@ -51,7 +51,7 @@ Read `platform/packs/<pack>/levels/<level_id>.json`. The fields you need:
   take the first `num_moves` entries (or all if omitted)
 
 Also note which pack this level belongs to — you'll need `kPackId` below.
-Pack folder name = pack ID (e.g. `flag_adventure`, `number_cells`).
+Pack folder name = pack ID (e.g. `carrot_quest`, `number_cells`).
 
 Convert each gold-path move to a drag offset for the test:
 - `right` → `(100, 0)` · `left` → `(-100, 0)`
@@ -63,7 +63,7 @@ Edit `platform/app/integration_test/app_test.dart`.
 Replace the two configuration constants in the marked block at the top:
 
 ```dart
-const String kPackId = '<pack_id>';   // e.g. 'flag_adventure'
+const String kPackId = '<pack_id>';   // e.g. 'carrot_quest'
 const String kLevelId = '<level_id>'; // e.g. 'pw_001'
 const List<(double, double)> kMoves = [
   // one entry per move with a direction comment, e.g.:

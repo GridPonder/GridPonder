@@ -39,7 +39,7 @@ def _parse_gold_actions(gold_raw: list, module: Any) -> list[str]:
     Convert raw goldPath entries to a flat list of action strings.
 
     Handles two known formats:
-      - flag_adventure:  [{"direction": "left"}, ...]
+      - carrot_quest:  [{"direction": "left"}, ...]
       - box_builder:     [{"action": "move", "direction": "left"}, ...]
 
     Entries whose "action" key is something other than "move" are skipped

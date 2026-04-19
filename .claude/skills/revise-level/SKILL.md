@@ -25,7 +25,7 @@ Locate `packs/<pack_id>/levels/<level_id>.json` using the prefix:
 
 | Prefix | Pack |
 |--------|------|
-| fw\_, pw\_, sw\_ | flag_adventure |
+| fw\_, pw\_, sw\_ | carrot_quest |
 | nc\_ | number_cells |
 | ds\_ | diagonal_swipes |
 | rf\_ | rotate_flip |

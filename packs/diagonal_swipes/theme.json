@@ -11,7 +11,9 @@
         "gesture": "swipe_diagonal",
         "action": "diagonal_swap",
         "paramMapping": {"direction": "swipe_direction"}
-      }
+      },
+      {"gesture": "key_press", "key": "l", "action": "diagonal_swap", "params": {"direction": "up_left"}},
+      {"gesture": "key_press", "key": "r", "action": "diagonal_swap", "params": {"direction": "up_right"}}
     ]
   }
 }

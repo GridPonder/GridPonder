@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart';
+
 /// Tracks hint availability and usage for a single level session.
 class HintStatus {
   final bool isAvailable;
@@ -8,7 +10,9 @@ class HintStatus {
 class HintService {
   /// Minutes after level start when each hint unlocks.
   /// Hint 1: 30 s, Hint 2: 2 min, Hint 3: 4 min.
-  static const List<double> timingsMinutes = [0.5, 2.0, 4.0];
+  /// In debug builds all hints are available immediately.
+  static List<double> get _timingsMinutes =>
+      kDebugMode ? [0.0, 0.0, 0.0] : [0.5, 2.0, 4.0];
 
   final List<int> hintStops;
   final DateTime _startTime;
@@ -23,7 +27,8 @@ class HintService {
 
   bool isAvailable(int i) {
     if (i >= hintStops.length) return false;
-    final t = i < timingsMinutes.length ? timingsMinutes[i] : timingsMinutes.last;
+    final timings = _timingsMinutes;
+    final t = i < timings.length ? timings[i] : timings.last;
     return elapsedMinutes >= t;
   }
 

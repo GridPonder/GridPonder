@@ -41,9 +41,26 @@ path manually step by step.
 ### 3a. Start with mutate_and_test.py (when solver exists)
 
 Write a **rough seed JSON** (approximate positions, don't overthink) and run
-`mutate_and_test.py --mode astar` immediately as the first action. The mutator
-explores hundreds of structurally-valid variants automatically — manual
-placement reasoning before this step is wasted effort.
+`mutate_and_test.py` immediately as the first action. The mutator explores
+hundreds of structurally-valid variants automatically — manual placement
+reasoning before this step is wasted effort.
+
+**Recommended mode: `twophase`** — the fastest way to screen candidates.
+Phase 1 runs BFS exhaustively up to `min_length − 1` moves, proving no short
+path exists. Phase 2 runs BFS until it finds *any* win at ≥ `min_length`
+moves, confirming the level is solvable. No optimality proof is needed at this
+stage — that comes later with A*.
+
+```bash
+python3 tools/solver/mutate_and_test.py packs/<pack_id>/levels/<seed>.json \
+  --mode twophase \
+  --criterion solution_length:min=<min>:max=<max> \
+  --mc-trials 5000 --criterion mc_difficulty:min=8.0 \
+  --candidates 10 --output-dir /tmp/<pack>_variants/
+```
+
+Use `--mode astar` instead if you need the mutator to also compute exact
+optimal path lengths per candidate (slower, but gives you a gold path directly):
 
 ```bash
 python3 tools/solver/mutate_and_test.py packs/<pack_id>/levels/<seed>.json \
@@ -75,21 +92,38 @@ Pick the most interesting passing candidate as the level basis.
 
 ### 3b. Validate the chosen candidate with solve.py
 
-After picking a candidate, confirm it with `solve.py` directly:
+Each tool plays a distinct role — use them in order:
 
-- **Short gold paths (≤ 15 moves):** BFS:
-  ```
-  python3 tools/solver/solve.py packs/<pack_id>/levels/<level_id>.json \
-    --mode bfs --max-depth <gold_len + 3>
-  ```
-- **Longer gold paths (> 15 moves):** A*:
-  ```
-  python3 tools/solver/solve.py packs/<pack_id>/levels/<level_id>.json \
-    --mode astar --max-depth <gold_len + 8> --timeout 120
-  ```
-  A* reports `OPTIMAL` when it confirms the gold path is globally shortest.
-- **Event trace** — add `--trace` to print a step-by-step account of each
-  move. Useful for understanding what the solver actually found.
+**Step 1 — Rule out shorter solutions (BFS to gold_len − 1):**
+```
+python3 tools/solver/solve.py packs/<pack_id>/levels/<level_id>.json \
+  --mode bfs --max-depth <gold_len - 1>
+```
+BFS is complete up to `max-depth`: if it reports "no solution found", no
+shorter path exists. This is a hard guarantee, not a heuristic. For deep
+levels (gold > 20 moves) BFS may be slow or run out of memory — in that case
+`twophase` in mutate_and_test already covered this in the screening step.
+
+**Step 2 — Confirm the gold path is valid:**
+```
+python3 tools/solver/solve.py packs/<pack_id>/levels/<level_id>.json \
+  --mode bfs --max-depth <gold_len>
+```
+BFS will find the gold path (and any alternatives at the same depth). If the
+gold path is not among the solutions, there is a bug in the level JSON.
+
+**Step 3 — Prove optimality for long gold paths (A*):**
+```
+python3 tools/solver/solve.py packs/<pack_id>/levels/<level_id>.json \
+  --mode astar --max-depth <gold_len + 8> --timeout 120
+```
+A* with an admissible heuristic reports `OPTIMAL` when it has confirmed no
+shorter solution exists. Use this for gold paths > 15 moves where BFS is
+impractical. If A* times out, steps 1 + 2 are sufficient — optimality is
+a nice-to-have, not a blocker.
+
+**Event trace** — add `--trace` to any of the above to print a step-by-step
+account of each move. Useful for verifying what the solver actually found.
 
 A level is accepted when the solver confirms:
   - The gold path reaches the goal.

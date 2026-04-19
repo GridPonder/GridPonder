@@ -231,9 +231,10 @@ def gold_path_actions(level_json: dict) -> list[str]:
     """
     gold_raw = level_json.get("solution", {}).get("goldPath", [])
     actions: list[str] = []
+    _cardinals = {"up", "down", "left", "right"}
     for entry in gold_raw:
         if isinstance(entry, str):
-            actions.append(entry)
+            actions.append(f"move_{entry}" if entry in _cardinals else entry)
         elif isinstance(entry, dict):
             action_id = entry.get("action", "move")
             direction = entry.get("direction")

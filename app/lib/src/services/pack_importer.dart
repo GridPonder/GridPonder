@@ -22,7 +22,7 @@ class PackConflictError extends PackImportError {
 
 /// IDs of packs compiled into the app binary — these can never be replaced.
 const _kBundledPackIds = [
-  'flag_adventure',
+  'carrot_quest',
   'number_cells',
   'rotate_flip',
   'flood_colors',

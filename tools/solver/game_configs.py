@@ -69,8 +69,8 @@ GAME_CONFIGS: dict = {
         "has_heuristic": False,
     },
 
-    "flag_adventure": {
-        "game_module": "flag_adventure",
+    "carrot_quest": {
+        "game_module": "carrot_quest",
         "mutable_layers": {
             # Rocks, wood, crates, pickups (torch/pickaxe) can be repositioned
             "objects": {
@@ -91,6 +91,24 @@ GAME_CONFIGS: dict = {
             "ground": {
                 "format": "sparse",
                 "mutable_kinds": ["water", "ice"],
+            },
+        },
+        "mutable_avatar": True,
+        "has_heuristic": True,
+    },
+
+    "twinseed": {
+        "game_module": "twinseed",
+        "mutable_layers": {
+            # Seed baskets and hazard objects can be repositioned
+            "objects": {
+                "format": "sparse",
+                "mutable_kinds": ["seed_basket", "rock", "wood", "metal_crate", "torch", "pickaxe"],
+            },
+            # Garden plots and void cells can be repositioned
+            "ground": {
+                "format": "sparse",
+                "mutable_kinds": ["garden_plot", "void"],
             },
         },
         "mutable_avatar": True,

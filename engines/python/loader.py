@@ -4,7 +4,7 @@ Pack loader: reads a pack directory and returns (GameDef, levels_dict).
 Usage::
 
     from engines.python.loader import load_pack
-    game, levels = load_pack('/path/to/packs/flag_adventure')
+    game, levels = load_pack('/path/to/packs/carrot_quest')
     engine = TurnEngine(game, levels['fw_001'])
 """
 from __future__ import annotations

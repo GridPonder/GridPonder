@@ -1,0 +1,23 @@
+{
+  "primaryColor": "#5D8A3C",
+  "backgroundColor": "#2E1F0F",
+  "controls": {
+    "gestureMap": [
+      {
+        "gesture": "swipe_cardinal",
+        "action": "move",
+        "paramMapping": {"direction": "swipe_direction"}
+      },
+      {
+        "gesture": "button",
+        "buttonId": "clone",
+        "action": "clone"
+      },
+      {
+        "gesture": "key_press",
+        "key": "c",
+        "action": "clone"
+      }
+    ]
+  }
+}

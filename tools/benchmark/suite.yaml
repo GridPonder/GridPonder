@@ -14,7 +14,7 @@ levels:
     - nc_004
     - nc_005
 
-  flag_adventure:
+  carrot_quest:
     - fw_001
     - fw_002
     - fw_003

@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
@@ -58,7 +58,7 @@ class _PlayScreenState extends State<PlayScreen> {
 
   // Animation state: non-null while an entity animation is playing.
   LevelState? _preAnimState;
-  Map<Position, String>? _animOverlays;
+  Map<Position, ImageProvider>? _animOverlays;
   bool _animating = false;
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
@@ -146,18 +146,6 @@ class _PlayScreenState extends State<PlayScreen> {
 
     setState(() => _animating = true);
 
-    if (entityAnims.isNotEmpty) {
-      for (final step in entityAnims) {
-        if (!mounted) return;
-        await _playEntityAnimation(preState, step);
-      }
-      if (!mounted) return;
-      setState(() {
-        _preAnimState = null;
-        _animOverlays = null;
-      });
-    }
-
     // Avatar ice-slide: hold the pre-turn board so pushed objects stay at their
     // original positions while Pip slides. Skip last avatarMove — it's the
     // final position already shown by the engine state.
@@ -204,6 +192,18 @@ class _PlayScreenState extends State<PlayScreen> {
       });
     }
 
+    if (entityAnims.isNotEmpty) {
+      for (final step in entityAnims) {
+        if (!mounted) return;
+        await _playEntityAnimation(preState, step);
+      }
+      if (!mounted) return;
+      setState(() {
+        _preAnimState = null;
+        _animOverlays = null;
+      });
+    }
+
     if (!mounted) return;
     setState(() => _animating = false);
   }
@@ -217,7 +217,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final kindDef = widget.packService.game.entityKinds[kind];
     final sprite = kindDef?.sprite;
     if (sprite == null) return;
-    final spritePath = widget.packService.resolveSprite(sprite);
+    final spritePath = widget.packService.resolvePackImage(sprite);
 
     // Build full position sequence: [from of first push, to of each push].
     Position posFromPayload(dynamic p) =>
@@ -274,7 +274,7 @@ class _PlayScreenState extends State<PlayScreen> {
       if (!mounted) return;
       setState(() {
         _preAnimState = cleanState;
-        _animOverlays = {step.position: widget.packService.resolveSprite(framePath)};
+        _animOverlays = {step.position: widget.packService.resolvePackImage(framePath)};
       });
       await Future.delayed(Duration(milliseconds: frameMs));
     }
@@ -563,18 +563,30 @@ class _PlayScreenState extends State<PlayScreen> {
     return result == true;
   }
 
+  Future<void> _onSolve() async {
+    final goldPath = _levelDef.solution.goldPath;
+    if (goldPath.isEmpty) return;
+    setState(() => _engine.reset());
+    await Future.delayed(Duration.zero);
+    for (int i = 0; i < goldPath.length; i++) {
+      if (!mounted) return;
+      setState(() => _engine.executeTurn(goldPath[i]));
+      await Future.delayed(const Duration(milliseconds: 200));
+    }
+  }
+
   Future<void> _playHint(int hintIndex) async {
     _hintService.markUsed(hintIndex);
     final stopCount = _levelDef.solution.hintStops[hintIndex];
     final goldPath = _levelDef.solution.goldPath;
 
     setState(() => _engine.reset());
-    await Future.delayed(const Duration(milliseconds: 200));
+    await Future.delayed(kDebugMode ? Duration.zero : const Duration(milliseconds: 200));
 
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
       if (!mounted) return;
       setState(() => _engine.executeTurn(goldPath[i]));
-      await Future.delayed(const Duration(milliseconds: 900));
+      await Future.delayed(kDebugMode ? const Duration(milliseconds: 200) : const Duration(milliseconds: 900));
     }
   }
 
@@ -848,6 +860,25 @@ class _PlayScreenState extends State<PlayScreen> {
     }
   }
 
+  static LogicalKeyboardKey? _keyForChar(String char) {
+    const map = {
+      'a': LogicalKeyboardKey.keyA, 'b': LogicalKeyboardKey.keyB,
+      'c': LogicalKeyboardKey.keyC, 'd': LogicalKeyboardKey.keyD,
+      'e': LogicalKeyboardKey.keyE, 'f': LogicalKeyboardKey.keyF,
+      'g': LogicalKeyboardKey.keyG, 'h': LogicalKeyboardKey.keyH,
+      'i': LogicalKeyboardKey.keyI, 'j': LogicalKeyboardKey.keyJ,
+      'k': LogicalKeyboardKey.keyK, 'l': LogicalKeyboardKey.keyL,
+      'm': LogicalKeyboardKey.keyM, 'n': LogicalKeyboardKey.keyN,
+      'o': LogicalKeyboardKey.keyO, 'p': LogicalKeyboardKey.keyP,
+      'q': LogicalKeyboardKey.keyQ, 'r': LogicalKeyboardKey.keyR,
+      's': LogicalKeyboardKey.keyS, 't': LogicalKeyboardKey.keyT,
+      'u': LogicalKeyboardKey.keyU, 'v': LogicalKeyboardKey.keyV,
+      'w': LogicalKeyboardKey.keyW, 'x': LogicalKeyboardKey.keyX,
+      'y': LogicalKeyboardKey.keyY, 'z': LogicalKeyboardKey.keyZ,
+    };
+    return map[char.toLowerCase()];
+  }
+
   // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
@@ -907,8 +938,18 @@ class _PlayScreenState extends State<PlayScreen> {
         onKeyEvent: (_, event) {
           if (_aiRunning) return KeyEventResult.ignored;
           if (event is! KeyDownEvent) return KeyEventResult.ignored;
-          if (event.logicalKey == LogicalKeyboardKey.keyZ) {
+          if (event.logicalKey == LogicalKeyboardKey.keyZ ||
+              event.logicalKey == LogicalKeyboardKey.keyU) {
             _onUndo();
+            return KeyEventResult.handled;
+          }
+          final gestureMap =
+              widget.packService.theme?.controls?.gestureMap ?? const [];
+          for (final binding in gestureMap) {
+            if (binding.gesture != 'key_press') continue;
+            final mappedKey = _keyForChar(binding.key ?? '');
+            if (mappedKey == null || event.logicalKey != mappedKey) continue;
+            _onAction(GameAction(binding.action, binding.params ?? {}));
             return KeyEventResult.handled;
           }
           final String? dir = switch (event.logicalKey) {
@@ -964,6 +1005,7 @@ class _PlayScreenState extends State<PlayScreen> {
                 onReset: _onReset,
                 onExit: _onExit,
                 onHint: hintAvailable ? _onHint : null,
+                onSolve: kDebugMode ? _onSolve : null,
                 canUndo: _engine.undoDepth > 0 && !_aiRunning,
                 hintStatuses: hintStatuses,
                 availableActionIds: _availableFloodActions(state),

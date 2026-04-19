@@ -1,5 +1,15 @@
 {
   "primaryColor": "#4CAF50",
+  "controls": {
+    "gestureMap": [
+      {"gesture": "key_press", "key": "r", "action": "flood_red"},
+      {"gesture": "key_press", "key": "b", "action": "flood_blue"},
+      {"gesture": "key_press", "key": "y", "action": "flood_yellow"},
+      {"gesture": "key_press", "key": "o", "action": "flood_orange"},
+      {"gesture": "key_press", "key": "p", "action": "flood_purple"},
+      {"gesture": "key_press", "key": "t", "action": "flood_teal"}
+    ]
+  },
   "entityColors": {
     "cell_red":     "#E53935",
     "cell_blue":    "#1E88E5",

@@ -104,35 +104,132 @@ Levels should introduce mechanics one at a time before combining them:
 - **Ice is only interesting when the landing cell matters.** A strip of ice that deposits Pip in a cell she could have walked to anyway is decoration. The design earns ice when exactly one landing position lets Pip proceed — every other blocker arrangement either misses the goal or overshoots into a hazard.
 - **Use ice to make crate placement long-range but still precise.** An ice strip between a pushable crate and a water cell forces the player to approach the crate from exactly the right direction. Approaching from the wrong side slides the crate away from the water or into a wall, leaving no bridge.
 - **Place hint stops immediately before irreversible actions.** Burning a wood block, expending the pickaxe, and pushing a crate into water are the three irreversible moves in the game. `hintStops` in the gold path should land at the index just before each such commitment, not after.
-- **Harder levels should resist flat search.** A level solvable by BFS over raw position-space is too shallow. Build in clear subgoals (collect tool, clear obstacle, create bridge) where the dependency ordering is non-obvious. Levels where A* with a good heuristic terminates quickly but plain BFS would explode are the right difficulty target from level 5 onward.
+- **Harder levels should resist flat search.** A level solvable by BFS over raw position-space is too shallow. Build in clear subgoals (collect tool, clear obstacle, create bridge) where the dependency ordering is non-obvious. Use `--mode twophase` in `mutate_and_test.py` to screen candidates cheaply (rules out short paths + confirms solvability), then run A* only on the highest-scoring finalists to prove optimality and extract the gold path.
 
-## Solver Heuristics
+## Solver
 
-**State representation:**
-`(avatar_x, avatar_y, frozenset(rock_positions), frozenset(wood_positions), frozenset(crate_positions), frozenset(pickup_positions: torch and pickaxe still on ground), frozenset(bridge_cells), frozenset(ice_cells), inventory)` where inventory ∈ {None, "torch", "pickaxe"}.
+The solver adapter lives in `tools/solver/games/carrot_quest.py`. It is a thin
+wrapper around the shared Python engine (`engines/python/`) via
+`engine_adapter.py`; all game simulation is handled by the engine, and the
+adapter adds only the game-specific precomputed heuristic for A*.
 
-Note: ice cells are mutable state because the torch melts ice → water and the pickaxe breaks ice → empty. Initial ice positions are static (part of LevelInfo), but the current ice set must be tracked in the state hash once either tool is in play.
+### State representation
 
-Static per-level data in LevelInfo (not part of the state hash): board dimensions, permanently impassable cells (borders), initial water cells, portal pairs, and flag position.
+The engine's `GameState` is the canonical state. For BFS/A* deduplication its
+`to_key()` method produces a hashable tuple covering:
+- All board layers (ground, objects, markers), using a sparse index so only
+  non-default cells are hashed — O(changed cells), not O(W×H).
+- Avatar position, facing, and inventory item.
+- Game variables (turn count etc.).
 
-**Precomputation (once per level):**
-- *Walkable-cell BFS from flag* — run reverse BFS from the flag cell treating all rocks, wood, and metal crates as walls, to establish the minimum distance from every free cell to the flag ignoring all tool use. Adds O(board_size) at load time; produces O(1) heuristic lookups for the Manhattan-fallback case.
-- *Portal connectivity* — record each portal pair as an undirected teleport edge so BFS can traverse them at unit cost.
-- No per-rock-subset tables are needed for current levels (at most two rocks per board); they become worth adding when rock counts reach three or more on large boards.
+This means ice cells that have been melted or broken, bridges that have been
+created, and objects that have been removed are all automatically reflected in
+the state key without any manual tracking.
 
-**Heuristic h(s):**
+### Admissible heuristic
 
-1. *BFS shortest path on current walkable cells* — run BFS from the avatar's current position to the flag treating all rocks, wood, and metal crates as walls, traversing existing bridge cells and portal edges freely. The result is admissible because any real solution must travel at least this many steps: clearing an obstacle requires additional moves before the open path exists, and the BFS ignores all of that cost. This is the preferred heuristic when per-node BFS is affordable (boards ≤ 10×10, state-space depth ≤ 40).
+**What went wrong before:** an earlier heuristic treated every ice cell as
+costing one action per cell traversed, ignoring that a single `move` action
+slides Pip across an entire ice strip. This overestimated the cost of
+ice-heavy paths, making the heuristic inadmissible and causing A* to return
+non-optimal solutions.
 
-2. *Fallback: Manhattan distance* — `|avatar_x − flag_x| + |avatar_y − flag_y|`. Always O(1), always admissible. Use this on large boards when the per-node BFS becomes a bottleneck. Weaker guidance but zero overhead.
+**Current approach — precomputed backwards BFS on the ice-slide graph:**
 
-**Dead-end detection:**
-- If the BFS in step 1 returns no path AND inventory is empty AND no pickaxe or torch remains anywhere on the board, return ∞. Flag is permanently unreachable: this is a provable dead end.
-- If the BFS returns no path but a tool remains (in inventory or on the board), do NOT prune — a future rock-break or wood-burn may open the path. Use Manhattan distance as h(s) in these intermediate states to preserve admissibility.
-- If the only route to a remaining pickup leads through a water cell (which would destroy the held tool needed to clear an obstacle beyond), and no dry route to the pickup exists, return ∞. This check is worth implementing once the solver is in use on levels with both water and multiple pickups.
+At load time, run a reverse BFS from the flag position across the
+*obstacle-free* board (no objects, no rocks, no wood — they can only block
+paths, never shorten them). Crucially, ice-slide physics are modelled: one
+action slides Pip until she hits a wall, a void, or a non-ice cell. Every
+intermediate cell along a potential slide is also marked reachable at the same
+action cost as the landing cell (because an object that doesn't exist yet could
+stop the slide earlier, making the cell reachable in no more steps).
 
-**Tiebreaking:**
-Among states with equal `f = g + h`, prefer states with fewer remaining obstacles (`|rocks| + |wood| + |crates|`). This biases the search toward states that have made irreversible clearing progress without affecting admissibility.
+Portals are traversed at unit cost (one action = enter portal, land at partner).
 
-**Practical note on current levels:**
-The eight existing levels reach at most 31 moves on an 8×7 board. For these, plain BFS over the full state space terminates in milliseconds, and the heuristic quality has no measurable effect on wall-clock time. The heuristic design above targets future levels in the 30–50 move range on larger boards, where A* with BFS-on-current-board guidance cuts the state space by an order of magnitude compared to uninformed search.
+The result is a table `h_table: (x, y) → float` giving the minimum number of
+actions to reach the flag from each cell under ideal conditions. Lookup is O(1)
+during search.
+
+**Admissibility argument:**
+
+- Objects are ignored → actual path can only be equal or longer. ✓
+- Ice is modelled using the *initial* configuration. Ice only disappears during
+  play (torch melts → water; pickaxe breaks → empty). Fewer ice cells means
+  shorter slides, which means more actions required per unit distance. So the
+  precomputed table with maximum ice is always a lower bound on the actual
+  cost. ✓
+- Intermediate slide cells are costed equal to the landing cell. A real object
+  could stop the slide at an intermediate, which costs the same one action, so
+  this is still a lower bound. ✓
+
+Cells absent from the h_table are unreachable even in the obstacle-free graph
+(walled off by voids or board edges); for these, `heuristic()` returns `inf`,
+which prunes provably dead states from the A* open set.
+
+**Practical performance:**
+
+On current levels (≤ 9×9 board, gold paths up to 34 moves) the precomputed
+heuristic makes A* viable for moderate-length paths. Very deep levels
+(fw_ice_013: 34 moves, ~4.2M states in BFS) are at the edge of tractability
+for any Python-based search — BFS is faster per state but explores more states;
+A* explores fewer but has higher per-state overhead. For such levels, the
+twophase screening strategy (see below) is preferred over proving exact
+optimality.
+
+### Level validation strategy
+
+Use these three tools in sequence; do not skip straight to A*:
+
+**Step 1 — Rule out shorter solutions (BFS exhaustion):**
+```bash
+python3 tools/solver/solve.py packs/carrot_quest/levels/<id>.json \
+  --mode bfs --max-depth <gold_len - 1>
+```
+BFS is *complete* up to `max-depth`: "no solution found" is a hard proof that
+no shorter path exists. This is the only tool that can rule out shorter
+solutions unconditionally. For gold paths ≤ ~20 moves this runs in seconds to
+minutes.
+
+**Step 2 — Confirm solvability for candidate screening (twophase):**
+
+When evaluating many candidates from `mutate_and_test.py`, use `--mode
+twophase`:
+- Phase 1: BFS exhausts the state space up to `min_length − 1`, proving no
+  short solution exists.
+- Phase 2: BFS finds *any* win ≥ `min_length` without a depth cap, confirming
+  the level is solvable.
+
+No optimality is needed at screening time — that comes later. `twophase` is
+significantly cheaper than A* when the goal is filtering a large candidate set:
+it stops as soon as one valid long solution is found, and Phase 1 can short-
+circuit immediately if the BFS finds no short solution quickly.
+
+```bash
+python3 tools/solver/mutate_and_test.py packs/carrot_quest/levels/<seed>.json \
+  --mode twophase \
+  --criterion solution_length:min=<min>:max=<max> \
+  --mc-trials 5000 --criterion mc_difficulty:min=8.0 \
+  --candidates 10 --output-dir /tmp/cq_variants/
+```
+
+**Step 3 — Prove optimality and find the gold path (A*):**
+
+Only run A* on candidates that passed twophase screening and scored well on
+Monte Carlo difficulty:
+```bash
+python3 tools/solver/solve.py packs/carrot_quest/levels/<id>.json \
+  --mode astar --max-depth <gold_len + 8> --timeout 120
+```
+A* with the admissible heuristic confirms `OPTIMAL` when the gold path is
+globally shortest, and produces the gold path itself. If A* times out (very
+deep levels), Steps 1 + 2 are sufficient — optimality is a nice-to-have for
+deep levels, not a blocker.
+
+### Memory and depth limits
+
+BFS state space grows sharply with board size and gold path depth. Observed
+for fw_ice_013 (9×9 board, 34 moves): ~4.2M unique states expanded, ~5.8M in
+the visited set, ~6 GB RAM. The visited dict uses key tuples (not full
+GameState objects) to avoid catastrophic swap growth. Even so, levels with gold
+paths > ~25 moves on 9×9 boards take hours of BFS and are better validated via
+twophase + Monte Carlo than via full BFS exhaustion.

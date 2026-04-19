@@ -10,7 +10,7 @@ Quick start::
     from engines.python import TurnEngine
     from engines.python.loader import load_pack
 
-    game, levels = load_pack('packs/flag_adventure')
+    game, levels = load_pack('packs/carrot_quest')
     engine = TurnEngine(game, levels['fw_001'])
     result = engine.execute_turn('move', {'direction': 'right'})
     print(engine.is_won)
@@ -20,7 +20,7 @@ For solver use, state snapshots are available via::
     key = engine.state_key()   # hashable tuple for BFS/A* visited tracking
     snap = engine.state.copy() # full mutable copy for branching
 """
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 from ._game_def import GameDef
 from ._models import GameState, Pos, Entity, Board, AvatarState

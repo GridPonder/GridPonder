@@ -38,7 +38,7 @@ _DELTA: Dict[str, Tuple[int, int]] = {
 }
 
 # Pack directory for engine_adapter
-_PACK_DIR = Path(__file__).parent.parent.parent.parent / "packs" / "flag_adventure"
+_PACK_DIR = Path(__file__).parent.parent.parent.parent / "packs" / "carrot_quest"
 
 
 # ---------------------------------------------------------------------------
@@ -208,7 +208,7 @@ def _extract_level_geometry(level_json: dict) -> tuple:
 # ---------------------------------------------------------------------------
 
 def load(level_json: Dict[str, Any]) -> Tuple[ea.EngineState, FAInfo]:
-    """Load a flag_adventure level for solving."""
+    """Load a carrot_quest level for solving."""
     initial, engine_info = ea.load(level_json, _PACK_DIR)
 
     cols, rows, ice_cells, void_cells, water_cells, portals, flag = \

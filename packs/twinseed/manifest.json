@@ -1,0 +1,10 @@
+{
+  "dslVersion": "0.6",
+  "packVersion": 1,
+  "gameId": "twinseed",
+  "title": "Twinseed",
+  "description": "Push carrot seed baskets to garden plots to grow carrots. Once planted, seeds can never be moved. Use your ghostly twin to save your position and teleport back to places that might otherwise become unreachable.",
+  "coverImage": "assets/twinseed.png",
+  "version": "1.0.0",
+  "minEngineVersion": "0.6.0"
+}

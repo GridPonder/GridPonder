@@ -16,6 +16,16 @@
         "gesture": "button",
         "buttonId": "flip",
         "action": "flip"
+      },
+      {
+        "gesture": "key_press",
+        "key": "r",
+        "action": "rotate"
+      },
+      {
+        "gesture": "key_press",
+        "key": "f",
+        "action": "flip"
       }
     ]
   }

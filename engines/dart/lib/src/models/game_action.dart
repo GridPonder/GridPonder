@@ -16,6 +16,14 @@ class GameAction {
     return GameAction(id, params);
   }
 
+  /// Parse from shorthand string: cardinal directions expand to move+direction,
+  /// any other string becomes a param-less action (e.g. "clone", "rotate").
+  factory GameAction.fromShorthand(String s) {
+    const cardinals = {'up', 'down', 'left', 'right'};
+    if (cardinals.contains(s)) return GameAction('move', {'direction': s});
+    return GameAction(s);
+  }
+
   Direction? get direction {
     final d = params['direction'];
     if (d == null) return null;

@@ -1,0 +1,44 @@
+{
+  "id": "tw_003",
+  "title": "Garden Gauntlet",
+  "board": {
+    "size": [5, 4],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [1, 0], "kind": "void"},
+          {"position": [3, 0], "kind": "void"},
+          {"position": [4, 0], "kind": "void"},
+          {"position": [0, 2], "kind": "garden_plot"},
+          {"position": [1, 3], "kind": "garden_plot"},
+          {"position": [3, 3], "kind": "void"},
+          {"position": [4, 3], "kind": "void"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 2], "kind": "seed_basket"},
+          {"position": [3, 2], "kind": "seed_basket"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [4, 1], "facing": "right"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": [
+      "left", "clone", "left", "left", "down", "down", "right", "up",
+      "clone", "left", "up", "clone", "down", "right", "right", "down",
+      "left", "left", "left", "left", "up", "right",
+      "clone", "down", "right", "down", "left", "up", "left", "down"
+    ],
+    "hintStops": [2, 8, 22]
+  }
+}

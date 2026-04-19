@@ -33,7 +33,11 @@ def gold_path_actions(level_json: dict) -> list[tuple[str, dict]]:
                     params[k] = v
             actions.append((action_type, params))
         elif isinstance(entry, str):
-            actions.append(("move", {"direction": entry}))
+            _cardinals = {"up", "down", "left", "right"}
+            if entry in _cardinals:
+                actions.append(("move", {"direction": entry}))
+            else:
+                actions.append((entry, {}))
     return actions
 
 

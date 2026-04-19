@@ -1,9 +1,10 @@
 /// Non-normative theme and controls configuration.
 
 class GestureBinding {
-  final String gesture; // swipe_cardinal, swipe_diagonal, tap_cell, button
+  final String gesture; // swipe_cardinal, swipe_diagonal, tap_cell, button, key_press
   final String action;
   final String? buttonId;
+  final String? key; // for key_press: single character, e.g. "c"
   final Map<String, String>? paramMapping;
   final Map<String, dynamic>? params;
 
@@ -11,6 +12,7 @@ class GestureBinding {
     required this.gesture,
     required this.action,
     this.buttonId,
+    this.key,
     this.paramMapping,
     this.params,
   });
@@ -19,6 +21,7 @@ class GestureBinding {
         gesture: j['gesture'] as String,
         action: j['action'] as String,
         buttonId: j['buttonId'] as String?,
+        key: j['key'] as String?,
         paramMapping: j['paramMapping'] != null
             ? Map<String, String>.from(j['paramMapping'] as Map)
             : null,

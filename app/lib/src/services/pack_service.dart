@@ -201,7 +201,7 @@ class PackService {
   }
 
   /// Legacy path-based resolver — still used by the shared sprite systems
-  /// (gridponder-base and rabbit-character) which are always bundled.
+  /// (gridponder-base) which is always bundled.
   String resolvePackAsset(String packRelativePath) =>
       'assets/packs/${info.id}/$packRelativePath';
 
@@ -211,7 +211,7 @@ class PackService {
   }
 
   String resolveAvatarSprite(String filename) =>
-      'assets/packs/rabbit-character/sprites/avatar/$filename';
+      'assets/packs/gridponder-base/sprites/tiles/$filename';
 
   // ---------------------------------------------------------------------------
 

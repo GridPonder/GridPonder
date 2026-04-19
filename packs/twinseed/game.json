@@ -1,0 +1,376 @@
+{
+  "layers": [
+    {
+      "id": "ground",
+      "occupancy": "exactly_one",
+      "default": "empty"
+    },
+    {
+      "id": "objects",
+      "occupancy": "zero_or_one"
+    },
+    {
+      "id": "clone",
+      "occupancy": "zero_or_one"
+    }
+  ],
+  "entityKinds": {
+    "void": {
+      "layer": "ground",
+      "tags": [],
+      "symbol": " "
+    },
+    "empty": {
+      "layer": "ground",
+      "tags": ["walkable"],
+      "sprite": "assets/sprites/grass.png",
+      "symbol": "."
+    },
+    "garden_plot": {
+      "layer": "ground",
+      "tags": ["walkable", "plot_target"],
+      "sprite": "assets/sprites/garden_plot2.png",
+      "animations": {
+        "growing": {
+          "frames": ["assets/sprites/garden_plot_seeds2.png", "assets/sprites/garden_plot_early_growth2.png", "assets/sprites/garden_plot_growth2.png", "assets/sprites/garden_plot_grown2.png"],
+          "duration": 1200,
+          "mode": "once"
+        }
+      },
+      "symbol": "G"
+    },
+    "planted_garden": {
+      "layer": "ground",
+      "tags": ["walkable"],
+      "sprite": "assets/sprites/garden_plot_grown2.png",
+      "symbol": "♣"
+    },
+    "water": {
+      "layer": "ground",
+      "tags": ["liquid", "walkable"],
+      "sprite": "assets/sprites/water.png",
+      "symbol": "≈"
+    },
+    "bridge": {
+      "layer": "ground",
+      "tags": ["walkable"],
+      "sprite": "assets/sprites/bridge.png",
+      "symbol": "="
+    },
+    "ice": {
+      "layer": "ground",
+      "tags": ["slippery", "walkable"],
+      "sprite": "assets/sprites/ice.png",
+      "animations": {
+        "melting": {
+          "frames": ["assets/sprites/ice_melting.png"],
+          "duration": 800,
+          "mode": "once"
+        },
+        "breaking": {
+          "frames": ["assets/sprites/ice_breaks_1.png", "assets/sprites/ice_breaks_2.png"],
+          "duration": 400,
+          "mode": "once"
+        }
+      },
+      "symbol": "I"
+    },
+    "seed_basket": {
+      "layer": "objects",
+      "tags": ["solid", "pushable"],
+      "sprite": "assets/sprites/seeds.png",
+      "symbol": "S"
+    },
+    "rock": {
+      "layer": "objects",
+      "tags": ["solid", "breakable"],
+      "sprite": "assets/sprites/rock.png",
+      "animations": {
+        "breaking": {
+          "frames": ["assets/sprites/rock_with_cracks.png", "assets/sprites/rock_broken.png"],
+          "duration": 800,
+          "mode": "once"
+        }
+      },
+      "symbol": "R"
+    },
+    "wood": {
+      "layer": "objects",
+      "tags": ["solid", "pushable", "burnable"],
+      "sprite": "assets/sprites/wood.png",
+      "animations": {
+        "burning": {
+          "frames": ["assets/sprites/wood_fire_ignites.png", "assets/sprites/wood_full_burn.png", "assets/sprites/wood_smoke_and_ash.png"],
+          "duration": 1200,
+          "mode": "once"
+        }
+      },
+      "symbol": "W"
+    },
+    "metal_crate": {
+      "layer": "objects",
+      "tags": ["solid", "pushable"],
+      "sprite": "assets/sprites/metal_crate.png",
+      "symbol": "C"
+    },
+    "torch": {
+      "layer": "objects",
+      "tags": ["pickup"],
+      "sprite": "assets/sprites/torch.png",
+      "symbol": "T"
+    },
+    "pickaxe": {
+      "layer": "objects",
+      "tags": ["pickup"],
+      "sprite": "assets/sprites/pickaxe.png",
+      "symbol": "P"
+    },
+    "rabbit_clone": {
+      "layer": "clone",
+      "tags": [],
+      "sprite": "assets/sprites/rabbit_clone.png",
+      "symbol": "~"
+    }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": {
+        "direction": {
+          "type": "direction",
+          "values": ["up", "down", "left", "right"]
+        }
+      }
+    },
+    {
+      "id": "clone"
+    }
+  ],
+  "systems": [
+    {
+      "id": "nav",
+      "type": "avatar_navigation",
+      "config": {
+        "solidHandling": "delegate"
+      }
+    },
+    {
+      "id": "push",
+      "type": "push_objects",
+      "config": {
+        "pushableTags": ["pushable"],
+        "validTargetTags": ["walkable"],
+        "toolInteractions": [
+          {
+            "item": "torch",
+            "targetTag": "burnable",
+            "consumeItem": false,
+            "animation": "burning"
+          },
+          {
+            "item": "pickaxe",
+            "targetTag": "breakable",
+            "consumeItem": true,
+            "animation": "breaking"
+          }
+        ]
+      }
+    },
+    {
+      "id": "twin",
+      "type": "anchor_point",
+      "config": {
+        "markerKind": "rabbit_clone",
+        "markerLayer": "clone",
+        "action": "clone",
+        "blockedByTags": ["solid"]
+      }
+    },
+    {
+      "id": "ice_slide",
+      "type": "ice_slide",
+      "config": {
+        "slipperyTag": "slippery"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "seeds_planted",
+      "on": "object_placed",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "plot_target"
+        }
+      },
+      "if": {
+        "event": {
+          "kind": "seed_basket"
+        }
+      },
+      "then": [
+        {
+          "transform": {
+            "layer": "ground",
+            "position": "$event.position",
+            "toKind": "planted_garden",
+            "animation": "growing"
+          }
+        },
+        {
+          "destroy": {
+            "layer": "objects",
+            "position": "$event.position"
+          }
+        }
+      ]
+    },
+    {
+      "id": "pickup_item",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "objects",
+          "tag": "pickup"
+        }
+      },
+      "then": [
+        {
+          "set_inventory": {
+            "item": "$cell.objects.kind"
+          }
+        },
+        {
+          "destroy": {
+            "position": "$event.position",
+            "layer": "objects"
+          }
+        }
+      ]
+    },
+    {
+      "id": "water_clears_items",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "liquid"
+        }
+      },
+      "if": {
+        "avatar": {
+          "hasItem": true
+        }
+      },
+      "then": [
+        {
+          "clear_inventory": {}
+        }
+      ]
+    },
+    {
+      "id": "torch_melts_ice",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "slippery"
+        }
+      },
+      "if": {
+        "avatar": {
+          "hasItem": "torch"
+        }
+      },
+      "then": [
+        {
+          "transform": {
+            "layer": "ground",
+            "position": "$event.position",
+            "toKind": "water",
+            "animation": "melting"
+          }
+        }
+      ],
+      "priority": 10
+    },
+    {
+      "id": "pickaxe_breaks_ice",
+      "on": "avatar_entered",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "slippery"
+        }
+      },
+      "if": {
+        "avatar": {
+          "hasItem": "pickaxe"
+        }
+      },
+      "then": [
+        {
+          "transform": {
+            "layer": "ground",
+            "position": "$event.position",
+            "toKind": "empty",
+            "animation": "breaking"
+          }
+        },
+        {
+          "clear_inventory": {}
+        }
+      ],
+      "priority": 10
+    },
+    {
+      "id": "crate_creates_bridge",
+      "on": "object_placed",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "liquid"
+        }
+      },
+      "if": {
+        "event": {
+          "kind": "metal_crate"
+        }
+      },
+      "then": [
+        {
+          "destroy": {
+            "layer": "objects",
+            "position": "$event.position"
+          }
+        },
+        {
+          "transform": {
+            "layer": "ground",
+            "position": "$event.position",
+            "toKind": "bridge"
+          }
+        }
+      ]
+    }
+  ],
+  "levelSequence": [
+    {
+      "type": "story",
+      "title": "Pip's Phantom Garden",
+      "text": "Pip the rabbit has a problem: he needs to plant carrot seeds, but the garden plots are always in the most awkward spots.\n\nLuckily, Pip recently discovered he can conjure a ghostly copy of himself — a shimmery twin that hovers in place while the real Pip goes off to do things. One press later, Pip teleports back to the ghost's position. Very spooky. Very useful.\n\nThe bad news: once a seed basket lands on a garden plot, the carrots start growing immediately and absolutely refuse to budge. So the order in which you plant things matters — a lot.\n\nPlan carefully, use your ghost wisely, and for carrot's sake don't plant the wrong one first!",
+      "image": "assets/twinseed.png"
+    },
+    {"type": "level", "ref": "tw_001"},
+    {"type": "level", "ref": "tw_002"},
+    {"type": "level", "ref": "tw_003"}
+  ],
+  "defaults": {
+    "maxCascadeDepth": 10,
+    "avatar": {
+      "enabled": true,
+      "facing": "right"
+    }
+  }
+}

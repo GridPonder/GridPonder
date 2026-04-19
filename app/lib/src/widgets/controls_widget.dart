@@ -15,6 +15,7 @@ class ControlsWidget extends StatefulWidget {
   final VoidCallback onReset;
   final VoidCallback onExit;
   final VoidCallback? onHint;
+  final VoidCallback? onSolve;
   final bool canUndo;
   final GameDefinition game;
   final List<HintStatus> hintStatuses;
@@ -29,6 +30,7 @@ class ControlsWidget extends StatefulWidget {
     required this.onReset,
     required this.onExit,
     this.onHint,
+    this.onSolve,
     required this.canUndo,
     required this.game,
     this.hintStatuses = const [],
@@ -55,6 +57,12 @@ class _ControlsWidgetState extends State<ControlsWidget> {
       children: [
         if (widget.hintStatuses.isNotEmpty)
           _HintBtn(statuses: widget.hintStatuses, onTap: widget.onHint),
+        if (widget.onSolve != null)
+          _CtrlBtn(
+            icon: Icons.skip_next,
+            label: 'Solve',
+            onTap: widget.onSolve,
+          ),
         _CtrlBtn(
           icon: Icons.undo,
           label: 'Undo',
@@ -114,11 +122,13 @@ class _ControlsWidgetState extends State<ControlsWidget> {
       final icon = switch (actionDef.id) {
         'rotate' => Icons.rotate_right,
         'flip' => Icons.flip,
+        'clone' => Icons.blur_on,
         _ => Icons.play_arrow_outlined,
       };
       final label = switch (actionDef.id) {
         'rotate' => 'Rotate',
         'flip' => 'Flip',
+        'clone' => 'Clone',
         _ => actionDef.id,
       };
       return _CtrlBtn(

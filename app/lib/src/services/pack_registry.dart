@@ -3,12 +3,13 @@ import 'pack_storage.dart';
 
 /// The IDs of packs that ship with the app binary.
 const kBundledPackIds = [
-  'flag_adventure',
+  'carrot_quest',
   'number_cells',
   'rotate_flip',
   'flood_colors',
   'diagonal_swipes',
   'box_builder',
+  'twinseed',
 ];
 
 /// A pack entry — knows its ID, whether it was user-installed, and how to
