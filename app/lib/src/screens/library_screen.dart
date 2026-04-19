@@ -7,6 +7,8 @@ import 'manage_packs_sheet.dart';
 import 'play_screen.dart';
 import 'settings_screen.dart';
 
+enum _PackGroup { inProgress, notStarted, completed }
+
 class LibraryScreen extends StatefulWidget {
   final SettingsService settings;
   final PackRegistry registry;
@@ -44,6 +46,86 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   void _refresh() => setState(() => _packsFuture = _loadPacks());
 
+  _PackGroup _classify(PackInfo info) {
+    final ids = info.levelIds;
+    if (ids.isEmpty) return _PackGroup.notStarted;
+    final done = widget.progress.completedCount(ids);
+    if (done >= ids.length) return _PackGroup.completed;
+    if (done > 0) return _PackGroup.inProgress;
+    return _PackGroup.notStarted;
+  }
+
+  Widget _packCard(PackEntry entry, PackInfo info) => _PackCard(
+        entry: entry,
+        info: info,
+        settings: widget.settings,
+        progress: widget.progress,
+      );
+
+  static const _gridDelegate = SliverGridDelegateWithFixedCrossAxisCount(
+    crossAxisCount: 2,
+    crossAxisSpacing: 12,
+    mainAxisSpacing: 12,
+    childAspectRatio: 1.1,
+  );
+
+  Widget _flatGrid(List<(PackEntry, PackInfo)> packs) => GridView.builder(
+        padding: const EdgeInsets.symmetric(horizontal: 16)
+            .copyWith(top: 12, bottom: 16),
+        gridDelegate: _gridDelegate,
+        itemCount: packs.length,
+        itemBuilder: (_, i) => _packCard(packs[i].$1, packs[i].$2),
+      );
+
+  Widget _groupedList(List<(PackEntry, PackInfo)> packs) {
+    final groups = {
+      _PackGroup.inProgress: <(PackEntry, PackInfo)>[],
+      _PackGroup.notStarted: <(PackEntry, PackInfo)>[],
+      _PackGroup.completed: <(PackEntry, PackInfo)>[],
+    };
+    for (final p in packs) {
+      groups[_classify(p.$2)]!.add(p);
+    }
+
+    Widget section(String label, List<(PackEntry, PackInfo)> items) {
+      if (items.isEmpty) return const SizedBox.shrink();
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+            child: Text(
+              label,
+              style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: Colors.black45,
+                letterSpacing: 0.6,
+              ),
+            ),
+          ),
+          GridView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            gridDelegate: _gridDelegate,
+            itemCount: items.length,
+            itemBuilder: (_, i) => _packCard(items[i].$1, items[i].$2),
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 24),
+      children: [
+        section('In Progress', groups[_PackGroup.inProgress]!),
+        section('More Games', groups[_PackGroup.notStarted]!),
+        section('Play Again', groups[_PackGroup.completed]!),
+      ],
+    );
+  }
+
   void _openManagePacks() {
     showModalBottomSheet<void>(
       context: context,
@@ -79,27 +161,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
                       packs.isEmpty) {
                     return const Center(child: CircularProgressIndicator());
                   }
-                  return GridView.builder(
-                    padding: const EdgeInsets.symmetric(horizontal: 16)
-                        .copyWith(top: 12, bottom: 16),
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
-                      childAspectRatio: 1.1,
-                    ),
-                    itemCount: packs.length,
-                    itemBuilder: (context, i) {
-                      final (entry, info) = packs[i];
-                      return _PackCard(
-                        entry: entry,
-                        info: info,
-                        settings: widget.settings,
-                        progress: widget.progress,
-                      );
-                    },
-                  );
+                  if (widget.progress.isDeveloperMode) {
+                    return _flatGrid(packs);
+                  }
+                  return _groupedList(packs);
                 },
               ),
             ),

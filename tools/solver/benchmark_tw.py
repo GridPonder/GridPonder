@@ -102,24 +102,27 @@ def _verify_fast(level_json, level_path):
 # Cython wrapper (flat neighbor list)
 # ---------------------------------------------------------------------------
 
-def _make_cy_apply(info_fast):
-    """Return an apply function compatible with _astar_bench using Cython."""
-    from games.twinseed_cython import apply_cy, CYTHON_AVAILABLE
+def _make_cy_fns(info_fast):
+    """Return (apply_fn, heuristic_fn) using Cython. None if not available."""
+    from games.twinseed_cython import apply_cy, heuristic_and_prune_cy, CYTHON_AVAILABLE
     if not CYTHON_AVAILABLE:
-        return None
+        return None, None
 
-    # Flatten the neighbors list: neighbors_flat[pos*4 + dir] = neighbor
-    neighbors_flat = []
-    for nb in info_fast.neighbors:
-        neighbors_flat.extend(nb)
-    cells_len = info_fast.cells_len
+    neighbors_flat = list(info_fast.neighbors_flat)
+    cells_len  = info_fast.cells_len
+    cost_table = info_fast.cost_table
+    width      = info_fast.width
 
     def cy_apply(state, action, info):
-        action_idx = tw_fast._DIR_OF.get(action, 4)  # 4 = clone
+        action_idx = tw_fast._DIR_OF.get(action, 4)
         ns, won = apply_cy(state, action_idx, neighbors_flat, cells_len)
         return ns, won, []
 
-    return cy_apply
+    def cy_h(state, info):
+        h, prune = heuristic_and_prune_cy(state, cost_table, cells_len, width)
+        return h if not prune else float("inf")
+
+    return cy_apply, cy_h
 
 
 # ---------------------------------------------------------------------------
@@ -190,13 +193,13 @@ def main():
     print(f"    Speedup vs original: {speedup_py:.1f}×")
     print()
 
-    # --- Backend 3: Cython ---
-    print(f"[3/3] Cython fast solver …")
+    # --- Backend 3: Cython (apply only, Python heuristic) ---
+    print(f"[3/4] Cython apply + Python heuristic …")
     try:
         from games.twinseed_cython import CYTHON_AVAILABLE
         if not CYTHON_AVAILABLE:
             raise ImportError("not built")
-        cy_apply = _make_cy_apply(info_fast)
+        cy_apply, cy_h = _make_cy_fns(info_fast)
         if cy_apply is None:
             raise ImportError("apply_cy returned None")
         states_cy, elapsed_cy = _astar_bench(
@@ -204,14 +207,33 @@ def main():
             cy_apply, tw_fast.heuristic, tw_fast.ACTIONS, args.duration
         )
         sps_cy = states_cy / elapsed_cy
-        results["cython"] = (states_cy, elapsed_cy, sps_cy)
+        results["cython_apply"] = (states_cy, elapsed_cy, sps_cy)
         print(f"    {states_cy:,} states  in {elapsed_cy:.2f}s  →  {sps_cy:,.0f} states/sec")
-        speedup_cy = sps_cy / sps_orig
-        print(f"    Speedup vs original: {speedup_cy:.1f}×  (vs Python fast: {sps_cy/sps_fast:.1f}×)")
+        print(f"    Speedup vs original: {sps_cy/sps_orig:.1f}×  (vs Python fast: {sps_cy/sps_fast:.1f}×)")
     except ImportError as e:
         print(f"    Cython not available ({e}).")
         print(f"    Build with:")
         print(f"      cd tools/solver/games/twinseed_cython && python setup.py build_ext --inplace")
+    print()
+
+    # --- Backend 4: Cython (apply + heuristic/prune) ---
+    print(f"[4/4] Cython apply + Cython heuristic/prune …")
+    try:
+        from games.twinseed_cython import CYTHON_AVAILABLE
+        if not CYTHON_AVAILABLE:
+            raise ImportError("not built")
+        if cy_h is None:
+            raise ImportError("heuristic_and_prune_cy not available")
+        states_cy2, elapsed_cy2 = _astar_bench(
+            initial_fast, info_fast,
+            cy_apply, cy_h, tw_fast.ACTIONS, args.duration
+        )
+        sps_cy2 = states_cy2 / elapsed_cy2
+        results["cython_full"] = (states_cy2, elapsed_cy2, sps_cy2)
+        print(f"    {states_cy2:,} states  in {elapsed_cy2:.2f}s  →  {sps_cy2:,.0f} states/sec")
+        print(f"    Speedup vs original: {sps_cy2/sps_orig:.1f}×  (vs Python fast: {sps_cy2/sps_fast:.1f}×)")
+    except (ImportError, NameError) as e:
+        print(f"    Cython not available ({e}).")
     print()
 
     # --- Summary ---
@@ -221,9 +243,11 @@ def main():
     for name, (states, elapsed, sps) in results.items():
         print(f"  {name:15s}  {sps:>12,.0f} states/sec")
     if "original" in results and "python_fast" in results:
-        print(f"\n  Python fast speedup:  {results['python_fast'][2] / results['original'][2]:.1f}×")
-    if "original" in results and "cython" in results:
-        print(f"  Cython speedup:       {results['cython'][2] / results['original'][2]:.1f}×")
+        print(f"\n  Python fast speedup:       {results['python_fast'][2] / results['original'][2]:.1f}×")
+    if "original" in results and "cython_apply" in results:
+        print(f"  Cython apply speedup:      {results['cython_apply'][2] / results['original'][2]:.1f}×")
+    if "original" in results and "cython_full" in results:
+        print(f"  Cython full speedup:       {results['cython_full'][2] / results['original'][2]:.1f}×")
 
 
 if __name__ == "__main__":

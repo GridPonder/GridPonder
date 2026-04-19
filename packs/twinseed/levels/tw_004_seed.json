@@ -1,0 +1,72 @@
+{
+  "id": "tw_004_seed",
+  "title": "Seed 4",
+  "board": {
+    "size": [6, 9],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [2, 0], "kind": "void"},
+          {"position": [3, 0], "kind": "void"},
+          {"position": [4, 0], "kind": "void"},
+          {"position": [5, 0], "kind": "void"},
+          {"position": [0, 1], "kind": "void"},
+          {"position": [0, 2], "kind": "void"},
+          {"position": [5, 4], "kind": "void"},
+          {"position": [0, 5], "kind": "void"},
+          {"position": [1, 5], "kind": "void"},
+          {"position": [2, 5], "kind": "void"},
+          {"position": [0, 6], "kind": "void"},
+          {"position": [1, 6], "kind": "void"},
+          {"position": [2, 6], "kind": "void"},
+          {"position": [0, 7], "kind": "void"},
+          {"position": [1, 7], "kind": "void"},
+          {"position": [2, 7], "kind": "void"},
+          {"position": [4, 7], "kind": "void"},
+          {"position": [0, 8], "kind": "void"},
+          {"position": [1, 8], "kind": "void"},
+          {"position": [2, 8], "kind": "void"},
+          {"position": [4, 8], "kind": "void"},
+          {"position": [5, 8], "kind": "void"},
+          {"position": [3, 6], "kind": "garden_plot"},
+          {"position": [4, 6], "kind": "garden_plot"},
+          {"position": [5, 6], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 1], "kind": "seed_basket"},
+          {"position": [3, 2], "kind": "seed_basket"},
+          {"position": [2, 2], "kind": "wood"},
+          {"position": [3, 3], "kind": "seed_basket"},
+          {"position": [3, 4], "kind": "rock"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 3], "facing": "right"}
+  },
+  "goals": [
+    {
+      "id": "plant_all",
+      "type": "all_cleared",
+      "config": {"kind": "garden_plot"}
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      "right", "right", "right", "left", "left", "up", "up", "up", "clone", "down",
+      "right", "right", "down", "right", "down", "down", "down", "up", "up", "up",
+      "right", "up", "left", "left", "left", "clone", "down", "down", "right", "down",
+      "clone", "right", "up", "right", "down", "down", "down", "left", "down", "right",
+      "clone", "down", "left", "left", "up", "right", "right", "right", "up", "right",
+      "down", "down", "down", "right", "down", "left"
+    ],
+    "hintStops": [9, 26, 41]
+  }
+}

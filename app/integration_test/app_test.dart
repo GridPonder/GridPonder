@@ -14,19 +14,17 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
 const String kPackId = 'twinseed';
-const String kLevelId = 'tw_002';
+const String kLevelId = 'tw_004_seed';
 // Gold-path moves: a direction string or button label.
 //   Swipes:  'right' | 'left' | 'up' | 'down'
-//   Buttons: 'rotate' | 'flip' | 'flood'  (taps the labelled button)
+//   Buttons: 'clone'
 const List<String> kMoves = [
-  'right', // 1 — push basket A right to (2,1)
-  'down',  // 2 — Pip loops below
-  'right', // 3 — Pip (2,2)
-  'up',    // 4 — push basket A up to (2,0)=plot A → PLANTED
-  'right', // 5 — push basket B right to (4,1)
-  'down',  // 6 — Pip loops below
-  'right', // 7 — Pip (4,2)
-  'up',    // 8 — push basket B up to (4,0)=plot B → WIN
+  'right', 'right', 'right', 'left', 'left', 'up', 'up', 'up', 'clone', 'down',
+  'right', 'right', 'down', 'right', 'down', 'down', 'down', 'up', 'up', 'up',
+  'right', 'up', 'left', 'left', 'left', 'clone', 'down', 'down', 'right', 'down',
+  'clone', 'right', 'up', 'right', 'down', 'down', 'down', 'left', 'down', 'right',
+  'clone', 'down', 'left', 'left', 'up', 'right', 'right', 'right', 'up', 'right',
+  'down', 'down', 'down', 'right', 'down', 'left',
 ];
 // ---------------------------------------------------------------------------
 

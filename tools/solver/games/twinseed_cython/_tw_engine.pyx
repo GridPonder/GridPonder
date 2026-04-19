@@ -292,3 +292,165 @@ def apply_cy(bytes state not None, int action_idx, list neighbors_list,
 
     won = check_win(out, cells_len)
     return PyBytes_FromStringAndSize(<char*>out, cells_len + 3), bool(won)
+
+
+# ---------------------------------------------------------------------------
+# Heuristic and pruning in C
+#
+# cost_table: array.array('d') of length cells_len*cells_len
+#   cost_table[plot_pos * cells_len + basket_pos] = Dijkstra push cost
+#   INF (1e300) means no path.
+# ---------------------------------------------------------------------------
+
+DEF MAX_BASKETS = 16  # upper bound on baskets/plots per level
+
+cdef double _min_assign(double* ct, int cl,
+                        int* baskets, int nb,
+                        int* plots, int np_) noexcept nogil:
+    """Minimum-cost basket→plot assignment (admissible).
+
+    For nb ≤ 4: exact enumeration of all nb! permutations.
+    For nb > 4: sum of each basket's minimum (still admissible).
+    """
+    cdef double best, c, row_min
+    cdef int i, j, k
+    cdef int used[MAX_BASKETS]
+
+    if nb == 0:
+        return 0.0
+    if np_ == 0:
+        return 1e300
+
+    if nb > 4:
+        # Sum-of-minima fallback
+        best = 0.0
+        for i in range(nb):
+            row_min = 1e300
+            for j in range(np_):
+                c = ct[plots[j] * cl + baskets[i]]
+                if c < row_min:
+                    row_min = c
+            if row_min >= 1e300:
+                return 1e300
+            best += row_min
+        return best
+
+    # Exact enumeration for nb ≤ 4
+    # Generate all permutations of np_ items taken nb at a time via backtrack.
+    best = 1e300
+    for i in range(MAX_BASKETS):
+        used[i] = 0
+
+    # For nb ≤ 4, inline recursive permutation via iterative approach with a small stack.
+    # We enumerate all choices of nb distinct plots for the nb baskets.
+    # Depth-first: perm[i] = plot index for basket i.
+
+    cdef int depth
+    cdef int choice_stack[4]
+    cdef int idx_stack[4]   # current plot index we're trying at each depth
+
+    for i in range(4):
+        choice_stack[i] = -1
+        idx_stack[i] = 0
+
+    depth = 0
+    idx_stack[0] = 0
+    best = 1e300
+
+    while depth >= 0:
+        if depth == nb:
+            # Evaluate this permutation
+            c = 0.0
+            for i in range(nb):
+                c += ct[plots[choice_stack[i]] * cl + baskets[i]]
+                if c >= best:
+                    break
+            if c < best:
+                best = c
+            depth -= 1
+            if depth >= 0:
+                used[choice_stack[depth]] = 0
+                idx_stack[depth] += 1
+            continue
+
+        # Try next available plot at this depth
+        found = 0
+        for j in range(idx_stack[depth], np_):
+            if not used[j]:
+                choice_stack[depth] = j
+                used[j] = 1
+                idx_stack[depth] = j  # remember where we are
+                idx_stack[depth + 1] = 0  # reset next level
+                depth += 1
+                found = 1
+                break
+
+        if not found:
+            # Backtrack
+            depth -= 1
+            if depth >= 0:
+                used[choice_stack[depth]] = 0
+                idx_stack[depth] += 1
+
+    return best
+
+
+def heuristic_and_prune_cy(bytes state not None,
+                            double[::1] cost_table,
+                            int cells_len, int width):
+    """
+    Compute heuristic and prune flag in one C pass over state.
+
+    Returns (h: float, prune: bool).
+      h     = min-cost basket→plot assignment (admissible heuristic).
+              float('inf') if any basket has no path to any plot.
+      prune = True if any basket has push_dist=inf to every remaining plot.
+
+    Parameters
+    ----------
+    state      : bytes of length cells_len + 3
+    cost_table : array.array('d') of length cells_len * cells_len
+    cells_len  : W * H
+    width      : board width
+    """
+    cdef:
+        const unsigned char* s = state
+        double* ct = &cost_table[0]
+        int baskets[MAX_BASKETS]
+        int plots[MAX_BASKETS]
+        int nb = 0, np_ = 0
+        int i, j
+        double h, row_min
+
+    # Scan cells for baskets and remaining garden_plot ground
+    for i in range(cells_len):
+        g = s[i] & 7
+        o = (s[i] >> 3) & 7
+        if g == GROUND_GARDEN_PLOT:
+            if np_ < MAX_BASKETS:
+                plots[np_] = i
+                np_ += 1
+        if o == OBJ_SEED_BASKET:
+            if nb < MAX_BASKETS:
+                baskets[nb] = i
+                nb += 1
+
+    if nb == 0:
+        return 0.0, False
+
+    if np_ == 0:
+        return float("inf"), True  # baskets with no plots → dead state
+
+    # Prune check: if any basket can't reach any plot, return inf immediately
+    for i in range(nb):
+        row_min = 1e300
+        for j in range(np_):
+            if ct[plots[j] * cells_len + baskets[i]] < row_min:
+                row_min = ct[plots[j] * cells_len + baskets[i]]
+        if row_min >= 1e300:
+            return float("inf"), True
+
+    # Min-cost assignment
+    h = _min_assign(ct, cells_len, baskets, nb, plots, np_)
+
+    return h, False

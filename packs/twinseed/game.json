@@ -359,12 +359,13 @@
     {
       "type": "story",
       "title": "Pip's Phantom Garden",
-      "text": "Pip the rabbit has a problem: he needs to plant carrot seeds, but the garden plots are always in the most awkward spots.\n\nLuckily, Pip recently discovered he can conjure a ghostly copy of himself — a shimmery twin that hovers in place while the real Pip goes off to do things. One press later, Pip teleports back to the ghost's position. Very spooky. Very useful.\n\nThe bad news: once a seed basket lands on a garden plot, the carrots start growing immediately and absolutely refuse to budge. So the order in which you plant things matters — a lot.\n\nPlan carefully, use your ghost wisely, and for carrot's sake don't plant the wrong one first!",
+      "text": "Pip the rabbit has a problem: he needs to plant carrot seeds, but the garden plots are always in the most awkward spots.\n\nLuckily, Pip recently discovered he can conjure a ghostly copy of himself — a shimmery twin that hovers in place while the real Pip goes off to do things. One press later, Pip teleports back to the ghost's position. Very spooky. Very useful.\n\nPlan carefully, use your ghost wisely, and for carrot's sake don't move your seeds in a corner!",
       "image": "assets/twinseed.png"
     },
     {"type": "level", "ref": "tw_001"},
     {"type": "level", "ref": "tw_002"},
-    {"type": "level", "ref": "tw_003"}
+    {"type": "level", "ref": "tw_003"},
+    {"type": "level", "ref": "tw_004_seed"}
   ],
   "defaults": {
     "maxCascadeDepth": 10,

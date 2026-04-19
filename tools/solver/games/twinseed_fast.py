@@ -21,6 +21,7 @@ Actions: move_up(0), move_down(1), move_left(2), move_right(3), clone(4)
 
 from __future__ import annotations
 
+import array as _array
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -103,6 +104,11 @@ class FastInfo:
     neighbors: List[List[int]]          # neighbors[pos] = [up, down, left, right]
     htable: _tw._HeuristicTable
     level_id: Optional[str] = None
+    # Flat cost table: cost_table[plot_pos * cells_len + basket_pos] = Dijkstra cost.
+    # Stored as array.array('d') for O(1) C-level access from Cython.
+    cost_table: object = None           # array.array('d', ...)
+    # Flat neighbor list for Cython (cells_len * 4 ints, order: up/down/left/right)
+    neighbors_flat: object = None       # array.array('i', ...)
 
 
 # ---------------------------------------------------------------------------
@@ -163,6 +169,21 @@ def load(level_json: Dict[str, Any]) -> Tuple[bytes, FastInfo]:
     _, tw_info = _tw.load(level_json)
     htable = tw_info.htable
 
+    # Build flat cost table: cost_table[plot_pos * cells_len + basket_pos]
+    # Stored as C-accessible array.array('d') for O(1) access in Cython.
+    inf = float("inf")
+    cost_table = _array.array("d", [inf] * (cells_len * cells_len))
+    for (gx, gy), dist_map in htable.push_dist.items():
+        plot_pos = gy * width + gx
+        for (bx, by), cost in dist_map.items():
+            basket_pos = by * width + bx
+            cost_table[plot_pos * cells_len + basket_pos] = cost
+
+    # Flat neighbor list for Cython: neighbors_flat[pos*4 + dir]
+    neighbors_flat = _array.array("i")
+    for nb in neighbors:
+        neighbors_flat.extend(nb)
+
     info = FastInfo(
         width=width,
         height=height,
@@ -170,6 +191,8 @@ def load(level_json: Dict[str, Any]) -> Tuple[bytes, FastInfo]:
         neighbors=neighbors,
         htable=htable,
         level_id=level_json.get("id"),
+        cost_table=cost_table,
+        neighbors_flat=neighbors_flat,
     )
 
     return initial, info
