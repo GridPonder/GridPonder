@@ -178,31 +178,25 @@ optimality.
 
 ### Level validation strategy
 
-Use these three tools in sequence; do not skip straight to A*:
+When building a new level you do not yet have a gold path — that is the output
+of Step 3, not the input to Step 1. The workflow is:
 
-**Step 1 — Rule out shorter solutions (BFS exhaustion):**
-```bash
-python3 tools/solver/solve.py packs/carrot_quest/levels/<id>.json \
-  --mode bfs --max-depth <gold_len - 1>
-```
-BFS is *complete* up to `max-depth`: "no solution found" is a hard proof that
-no shorter path exists. This is the only tool that can rule out shorter
-solutions unconditionally. For gold paths ≤ ~20 moves this runs in seconds to
-minutes.
+**Step 1 — Screen candidates with twophase (mutate_and_test.py):**
 
-**Step 2 — Confirm solvability for candidate screening (twophase):**
+`--mode twophase` in `mutate_and_test.py` is the right tool for bulk candidate
+generation. It enforces a user-specified minimum solution length `min`:
+- **Phase 1 (BFS up to `min − 1`):** exhausts all states reachable in fewer
+  than `min` moves. If any win is found, the candidate is rejected immediately
+  (too easy). This is a complete proof — no short solution exists.
+- **Phase 2 (A*):** races toward the goal via the heuristic and stops at the
+  first win ≥ `min` moves, confirming the level is solvable. Much faster than
+  BFS on deep levels because the heuristic skips irrelevant states. No
+  optimality proof — Phase 1 already ruled out short paths.
 
-When evaluating many candidates from `mutate_and_test.py`, use `--mode
-twophase`:
-- Phase 1: BFS exhausts the state space up to `min_length − 1`, proving no
-  short solution exists.
-- Phase 2: BFS finds *any* win ≥ `min_length` without a depth cap, confirming
-  the level is solvable.
-
-No optimality is needed at screening time — that comes later. `twophase` is
-significantly cheaper than A* when the goal is filtering a large candidate set:
-it stops as soon as one valid long solution is found, and Phase 1 can short-
-circuit immediately if the BFS finds no short solution quickly.
+`min` comes from your design intent ("I want at least 20 moves"), not from a
+pre-existing gold path. `twophase` is far cheaper than A* per candidate, making
+it the right mode for filtering hundreds of mutations before committing to
+exact optimality.
 
 ```bash
 python3 tools/solver/mutate_and_test.py packs/carrot_quest/levels/<seed>.json \
@@ -212,18 +206,34 @@ python3 tools/solver/mutate_and_test.py packs/carrot_quest/levels/<seed>.json \
   --candidates 10 --output-dir /tmp/cq_variants/
 ```
 
-**Step 3 — Prove optimality and find the gold path (A*):**
+**Step 2 — Prove optimality and find the gold path (A*):**
 
-Only run A* on candidates that passed twophase screening and scored well on
-Monte Carlo difficulty:
+Run A* on the handful of candidates that passed twophase and scored well on
+Monte Carlo difficulty. A* with the admissible heuristic confirms `OPTIMAL`
+when the gold path is globally shortest, and produces the path itself:
+
 ```bash
 python3 tools/solver/solve.py packs/carrot_quest/levels/<id>.json \
-  --mode astar --max-depth <gold_len + 8> --timeout 120
+  --mode astar --max-depth <estimated_max> --timeout 120
 ```
-A* with the admissible heuristic confirms `OPTIMAL` when the gold path is
-globally shortest, and produces the gold path itself. If A* times out (very
-deep levels), Steps 1 + 2 are sufficient — optimality is a nice-to-have for
-deep levels, not a blocker.
+
+The gold path from A* goes into the level JSON. If A* times out (very deep
+levels, > ~25 moves on a 9×9 board), fall back to BFS:
+
+```bash
+# Confirm there is no solution shorter than your target minimum:
+python3 tools/solver/solve.py packs/carrot_quest/levels/<id>.json \
+  --mode bfs --max-depth <min - 1>
+# Then find the shortest actual solution:
+python3 tools/solver/solve.py packs/carrot_quest/levels/<id>.json \
+  --mode bfs --max-depth <estimated_max>
+```
+
+BFS is *complete* up to `max-depth`: "no solution found" is a hard proof. For
+very deep levels (> ~25 moves), BFS may also be slow — in that case, twophase
+screening already gave you a confirmed-solvable candidate, and you can use
+`--trace` on a BFS run with a generous depth to extract the path even if
+optimality is not proven.
 
 ### Memory and depth limits
 

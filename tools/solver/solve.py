@@ -3,9 +3,11 @@
 GridPonder puzzle solver.
 
 Three search modes:
-  bfs (default)  BFS with state deduplication — finds the shortest solution(s)
-  dfs            DFS without cross-path dedup — finds every solution up to max-depth
-  astar          A* with heuristic — finds the optimal solution; best for deep levels
+  bfs (default)  BFS with state deduplication — finds the shortest solution(s).
+                 Complete up to --max-depth: "no solution found" is a proof.
+  dfs            DFS without cross-path dedup — finds every solution up to max-depth.
+  astar          A* with admissible heuristic — finds the optimal solution.
+                 Best for confirming gold paths on deep levels (> 15 moves).
 
 Usage:
     python solve.py <path/to/level.json> [options]
@@ -22,6 +24,24 @@ Options:
     --all-solutions       Alias for --mode dfs
     --override-start JSON Override initial board state (box_builder only). JSON or @file.
     --partial-goal JSON   Partial intermediate goal (box_builder only). JSON or @file.
+
+Level design workflow (use these tools in order):
+  1. SCREEN candidates — use mutate_and_test.py --mode twophase with
+     --criterion solution_length:min=N. twophase runs BFS exhaustively up to
+     N-1 moves (proving no short solution exists) then BFS to find the shortest
+     solution >= N (confirming solvability). Cheaper than full A* per candidate
+     because it stops at the first valid solution; no gold path needed yet.
+
+  2. EXTRACT gold path — run A* (or BFS for shorter levels) on the best
+     candidates from step 1 to find and confirm the optimal solution:
+       python solve.py <level> --mode astar --max-depth <N+10> --timeout 120
+     A* reports OPTIMAL when no shorter path exists. Use --trace to print
+     the path step-by-step for inclusion in the level JSON.
+
+  3. VERIFY mechanics — use --constraint to confirm that key actions are
+     required (no solution exists if that action is forbidden):
+       python solve.py <level> --mode astar --max-depth <N+5> \\
+           --constraint '{"type":"must_not","event":"object_removed","kind":"rock"}'
 
 Examples:
     python solve.py ../../packs/box_builder/levels/bb_007.json --mode astar --trace
@@ -663,6 +683,7 @@ def _solve_twinseed(
     constraints: List[Dict],
     mc_trials: int = 0,
     mc_steps: int = 0,
+    log_interval: float = 0.0,
 ) -> None:
     initial, info = tw.load(level_json)
     level_id = info.level_id or path.stem
@@ -683,7 +704,8 @@ def _solve_twinseed(
 
     if mode == "astar":
         _t0 = time.monotonic()
-        sol = astar(initial, info, _mod, timeout, constraints, max_depth=max_depth)
+        sol = astar(initial, info, _mod, timeout, constraints, max_depth=max_depth,
+                    log_interval_s=log_interval)
         _print_astar_result(sol, gold_actions, trace, initial, _mod, info,
                             elapsed=time.monotonic() - _t0)
         if sol.path:
@@ -808,7 +830,8 @@ def solve(
                        trace, constraints, **mc_kw)
     elif game == "twinseed":
         _solve_twinseed(path, level_json, mode, max_depth, timeout, trace,
-                        constraints, **mc_kw)
+                        constraints, log_interval=kwargs.get("log_interval", 0.0),
+                        **mc_kw)
     else:
         print(f"Error: unsupported game '{game}'", file=sys.stderr)
         sys.exit(1)
@@ -867,6 +890,10 @@ def main() -> None:
         "--partial-goal", metavar="JSON",
         help="Use a partial intermediate goal (box_builder). JSON string or @file.",
     )
+    parser.add_argument(
+        "--log-interval", type=float, default=0.0, metavar="S",
+        help="Print A* progress every S seconds (0 = disabled).",
+    )
     args = parser.parse_args()
 
     mode = "dfs" if args.all_solutions else args.mode
@@ -883,6 +910,7 @@ def main() -> None:
         mc_steps=args.mc_steps,
         override_start=args.override_start,
         partial_goal=args.partial_goal,
+        log_interval=args.log_interval,
     )
 
 

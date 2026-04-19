@@ -42,9 +42,9 @@ Examples:
         --forbid-constraint '{"type":"must_not","event":"object_removed","kind":"rock"}' \\
         --mode astar --max-depth 35
 
-    # Deep ice levels (30+ moves): twophase is much faster than astar.
-    # Phase 1 (BFS up to 24 moves) rules out short solutions cheaply.
-    # Phase 2 (DFS) finds any path of 25-45 moves without proving optimality.
+    # Deep levels (30+ moves): twophase is much faster than astar.
+    # Phase 1 (BFS up to min-1 moves) rules out short solutions — complete proof.
+    # Phase 2 (A*) finds a solution >= min quickly via the heuristic, confirming solvability.
     python3 tools/solver/mutate_and_test.py packs/carrot_quest/levels/fw_ice_013.json \\
         --mode twophase --max-depth 45 --timeout 60 \\
         --criterion solution_length:min=25:max=45 \\
@@ -446,10 +446,10 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             # Phase 1 — BFS up to (min_length - 1): rule out short solutions.
             #   If BFS finds any solution here, the candidate is too easy.
             #
-            # Phase 2 — BFS ignoring wins shorter than min_length: confirm the
-            #   level IS solvable (any path ≥ min_length within max_depth).
-            #   Faster than A* because we accept the first valid-length path found
-            #   without proving optimality (Phase 1 already ruled out easy wins).
+            # Phase 2 — A* (BFS fallback when no heuristic): confirm the level IS
+            #   solvable by finding any path ≥ min_length. A* races toward the goal
+            #   via the heuristic, stopping at the first valid win. No optimality
+            #   proof needed — Phase 1 already ruled out easy wins.
             #
             # Together these answer: "no trivial path exists AND a long path does."
             #
@@ -497,48 +497,106 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
                 base["ok"] = True  # valid, just fails solution_length criterion
                 return base
 
-            # --- Phase 2: BFS to find any solution of length ≥ min_length ---
-            # Use BFS (with dedup) starting from depth min_length, growing up to
-            # max_depth. BFS is complete and won't loop; the depth limit prevents
-            # runaway on large boards. We accept the first solution found.
+            # --- Phase 2: A* (or BFS fallback) to confirm solvability ---
+            # Use A* when the module has a heuristic: the heuristic guides the
+            # search toward the goal, finding a solution much faster than BFS on
+            # deep levels. We accept the first win >= min_length and stop — no
+            # optimality proof needed, just confirmation a long path exists.
+            # Falls back to BFS for games without a heuristic.
             remaining = deadline - _time.monotonic()
             if remaining <= 0:
                 base["timed_out"] = True
                 base["ok"] = True
                 return base
 
-            # BFS from scratch but ignoring solutions shorter than min_length
-            p2_queue: deque = deque([(initial, [])])
-            p2_visited: Dict = {initial: 0}
             found_path: Optional[List[str]] = None
 
-            while p2_queue:
-                if _time.monotonic() > deadline:
-                    base["timed_out"] = True
-                    base["ok"] = True
-                    return base
-                p2_state, p2_path = p2_queue.popleft()
-                p2_depth = len(p2_path)
-                if p2_depth >= max_depth:
-                    continue
-                for action in module.ACTIONS:
-                    ns, won, _ = module.apply(p2_state, action, info)
-                    nd = p2_depth + 1
-                    if won:
-                        if nd >= min_length:
-                            found_path = p2_path + [action]
-                            break
-                        # won but too short — don't enqueue, but don't stop
+            if hasattr(module, "heuristic"):
+                # A* phase 2: custom loop with a min_length gate on wins.
+                # Races toward the goal via the heuristic; stops at the first
+                # win >= min_length without proving optimality.
+                import heapq as _heapq
+
+                heuristic_fn = module.heuristic
+                p2_visited: Dict = {initial: (0, None, None)}
+                h0 = heuristic_fn(initial, info)
+                _ctr = 0
+                p2_heap: list = [(h0, 0, _ctr, initial)]
+
+                while p2_heap:
+                    if _time.monotonic() > deadline:
+                        base["timed_out"] = True
+                        base["ok"] = True
+                        return base
+                    _, _g, _, _state = _heapq.heappop(p2_heap)
+                    cur_g = p2_visited[_state][0]
+                    if cur_g < _g:
                         continue
-                    if module.can_prune(ns, info, nd, max_depth):
+                    if _g >= max_depth:
                         continue
-                    prev = p2_visited.get(ns)
-                    if prev is not None and prev <= nd:
+                    for action in module.ACTIONS:
+                        ns, won, _ = module.apply(_state, action, info)
+                        nd = _g + 1
+                        if won:
+                            if nd >= min_length:
+                                # Reconstruct path
+                                path_rev = [action]
+                                cur = _state
+                                while p2_visited[cur][1] is not None:
+                                    _, par, act = p2_visited[cur]
+                                    path_rev.append(act)
+                                    cur = par
+                                path_rev.reverse()
+                                found_path = path_rev
+                                break
+                            # win but too short — continue searching
+                            continue
+                        if nd >= max_depth:
+                            continue
+                        if module.can_prune(ns, info, nd, max_depth):
+                            continue
+                        prev = p2_visited.get(ns)
+                        if prev is not None and prev[0] <= nd:
+                            continue
+                        nh = heuristic_fn(ns, info)
+                        if nh == float("inf"):
+                            continue
+                        p2_visited[ns] = (nd, _state, action)
+                        _ctr += 1
+                        _heapq.heappush(p2_heap, (nd + nh, nd, _ctr, ns))
+                    if found_path:
+                        break
+            else:
+                # BFS fallback when no heuristic is available
+                p2_queue: deque = deque([(initial, [])])
+                p2_bfs_visited: Dict = {initial: 0}
+
+                while p2_queue:
+                    if _time.monotonic() > deadline:
+                        base["timed_out"] = True
+                        base["ok"] = True
+                        return base
+                    p2_state, p2_path = p2_queue.popleft()
+                    p2_depth = len(p2_path)
+                    if p2_depth >= max_depth:
                         continue
-                    p2_visited[ns] = nd
-                    p2_queue.append((ns, p2_path + [action]))
-                if found_path:
-                    break
+                    for action in module.ACTIONS:
+                        ns, won, _ = module.apply(p2_state, action, info)
+                        nd = p2_depth + 1
+                        if won:
+                            if nd >= min_length:
+                                found_path = p2_path + [action]
+                                break
+                            continue
+                        if module.can_prune(ns, info, nd, max_depth):
+                            continue
+                        prev = p2_bfs_visited.get(ns)
+                        if prev is not None and prev <= nd:
+                            continue
+                        p2_bfs_visited[ns] = nd
+                        p2_queue.append((ns, p2_path + [action]))
+                    if found_path:
+                        break
 
             if found_path is not None:
                 solution_path = found_path
