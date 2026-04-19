@@ -34,6 +34,7 @@ def astar(
     constraints: List[Dict[str, Any]],
     max_depth: int = 300,
     is_win_fn: Optional[Callable[[Any], bool]] = None,
+    log_interval_s: float = 0.0,
 ) -> Solution:
     """
     A* search with timeout and constraint support.
@@ -63,6 +64,7 @@ def astar(
         return heuristic_fn(state, info)
 
     start_time = time.monotonic()
+    _last_log = start_time
     states_explored = 0
 
     # visited: state → (best_g, parent_state, action, step_events)
@@ -92,6 +94,17 @@ def astar(
             continue
 
         states_explored += 1
+
+        if log_interval_s > 0:
+            now = time.monotonic()
+            if now - _last_log >= log_interval_s:
+                elapsed = now - start_time
+                # Cheapest g in heap = heap[0][1] (the min-f entry's g value)
+                min_f_in_heap = heap[0][0] if heap else f
+                print(f"  [A* {elapsed:6.1f}s]  states={states_explored:,}  "
+                      f"f_done={f:.0f}  f_next={min_f_in_heap:.0f}  heap={len(heap):,}",
+                      flush=True)
+                _last_log = now
 
         for action in module.ACTIONS:
             new_state, module_won, step_events = module.apply(state, action, info)
