@@ -1,0 +1,49 @@
+{
+  "id": "tw_007",
+  "title": "Four Anchors",
+  "board": {
+    "size": [5, 5],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [0, 3], "kind": "void"},
+          {"position": [3, 0], "kind": "void"},
+          {"position": [4, 0], "kind": "void"},
+          {"position": [4, 1], "kind": "void"},
+          {"position": [4, 4], "kind": "void"},
+          {"position": [1, 0], "kind": "garden_plot"},
+          {"position": [1, 1], "kind": "garden_plot"},
+          {"position": [2, 4], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 1], "kind": "seed_basket"},
+          {"position": [3, 2], "kind": "seed_basket"},
+          {"position": [3, 3], "kind": "seed_basket"},
+          {"position": [2, 0], "kind": "rock"},
+          {"position": [2, 3], "kind": "rock"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [4, 3], "facing": "right"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": [
+      "up", "left", "up", "left", "left", "down", "down", "down", "left", "clone",
+      "right", "up", "up", "up", "right", "right", "down", "left", "up", "left",
+      "down", "down", "clone", "right", "clone", "right", "right", "up", "right", "up",
+      "left", "left", "clone", "up", "up", "up"
+    ],
+    "hintStops": [10, 23]
+  }
+}

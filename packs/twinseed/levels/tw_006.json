@@ -1,0 +1,48 @@
+{
+  "id": "tw_006",
+  "title": "The Return",
+  "board": {
+    "size": [5, 5],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [0, 3], "kind": "void"},
+          {"position": [0, 4], "kind": "void"},
+          {"position": [3, 0], "kind": "void"},
+          {"position": [4, 0], "kind": "void"},
+          {"position": [4, 1], "kind": "void"},
+          {"position": [4, 4], "kind": "void"},
+          {"position": [1, 0], "kind": "garden_plot"},
+          {"position": [2, 1], "kind": "garden_plot"},
+          {"position": [2, 4], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 1], "kind": "seed_basket"},
+          {"position": [1, 2], "kind": "seed_basket"},
+          {"position": [3, 3], "kind": "seed_basket"},
+          {"position": [3, 2], "kind": "wood"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 2], "facing": "right"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": [
+      "right", "up", "right", "down", "right", "left", "down", "down", "right", "up",
+      "right", "clone", "left", "left", "up", "up", "right", "down", "clone", "left",
+      "down", "left", "up", "up"
+    ],
+    "hintStops": [12, 19]
+  }
+}

@@ -14,17 +14,14 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
 const String kPackId = 'twinseed';
-const String kLevelId = 'tw_004';
+const String kLevelId = 'tw_005';
 // Gold-path moves: a direction string or button label.
 //   Swipes:  'right' | 'left' | 'up' | 'down'
 //   Buttons: 'clone'
 const List<String> kMoves = [
-  'right', 'right', 'right', 'left', 'left', 'up', 'up', 'up', 'clone', 'down',
-  'right', 'right', 'down', 'right', 'down', 'down', 'down', 'up', 'up', 'up',
-  'right', 'up', 'left', 'left', 'left', 'clone', 'down', 'down', 'right', 'down',
-  'clone', 'right', 'up', 'right', 'down', 'down', 'down', 'left', 'down', 'right',
-  'clone', 'down', 'left', 'left', 'up', 'right', 'right', 'right', 'up', 'right',
-  'down', 'down', 'down', 'right', 'down', 'left',
+  'up', 'up', 'left', 'clone', 'right', 'right', 'right', 'right', 'up', 'left',
+  'up', 'left', 'left', 'down', 'up', 'right', 'down', 'down', 'down', 'clone',
+  'right', 'right', 'right',
 ];
 // ---------------------------------------------------------------------------
 

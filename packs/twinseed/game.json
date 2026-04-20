@@ -84,10 +84,10 @@
     "rock": {
       "layer": "objects",
       "tags": ["solid", "breakable"],
-      "sprite": "assets/sprites/rock.png",
+      "sprite": "assets/sprites/rock2.png",
       "animations": {
         "breaking": {
-          "frames": ["assets/sprites/rock_with_cracks.png", "assets/sprites/rock_broken.png"],
+          "frames": ["assets/sprites/rock_with_cracks2.png", "assets/sprites/rock_broken2.png"],
           "duration": 800,
           "mode": "once"
         }
@@ -365,6 +365,9 @@
     {"type": "level", "ref": "tw_001"},
     {"type": "level", "ref": "tw_002"},
     {"type": "level", "ref": "tw_003"},
+    {"type": "level", "ref": "tw_005"},
+    {"type": "level", "ref": "tw_006"},
+    {"type": "level", "ref": "tw_007"},
     {"type": "level", "ref": "tw_004"}
   ],
   "defaults": {
