@@ -368,7 +368,12 @@
     {"type": "level", "ref": "tw_005"},
     {"type": "level", "ref": "tw_006"},
     {"type": "level", "ref": "tw_007"},
-    {"type": "level", "ref": "tw_004"}
+    {"type": "level", "ref": "tw_004"},
+    {"type": "level", "ref": "tw_008a"},
+    {"type": "level", "ref": "tw_008b"},
+    {"type": "level", "ref": "tw_008c"},
+    {"type": "level", "ref": "tw_008d"},
+    {"type": "level", "ref": "tw_008e"}
   ],
   "defaults": {
     "maxCascadeDepth": 10,

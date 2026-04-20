@@ -280,6 +280,8 @@ def _mutate(
             )
             if new_layer is not None:
                 layers[layer_name] = new_layer
+                if layer_name == "ground":
+                    walkable = _get_walkable_cells(result)  # shape changed (sparse void move)
                 applied += 1
 
         elif op_type == "dense":
@@ -332,6 +334,33 @@ def _bb_valid(level_json: Dict) -> bool:
         return False
 
 
+def _twinseed_valid(level_json: Dict) -> bool:
+    """Twinseed: reject levels with
+       (a) a seed_basket already on a garden_plot, or
+       (b) any object sitting on a void cell (unreachable, purely cosmetic clutter).
+    """
+    layers = level_json["board"]["layers"]
+    ground = layers.get("ground", {})
+    objects = layers.get("objects", {})
+    plots = {
+        (e["position"][0], e["position"][1])
+        for e in ground.get("entries", [])
+        if e.get("kind") == "garden_plot"
+    }
+    voids = {
+        (e["position"][0], e["position"][1])
+        for e in ground.get("entries", [])
+        if e.get("kind") == "void"
+    }
+    for e in objects.get("entries", []):
+        pos = (e["position"][0], e["position"][1])
+        if pos in voids:
+            return False
+        if e.get("kind") == "seed_basket" and pos in plots:
+            return False
+    return True
+
+
 def _is_structurally_valid(level_json: Dict, game: str) -> bool:
     """
     Return True iff the mutated level passes basic structural checks:
@@ -364,6 +393,8 @@ def _is_structurally_valid(level_json: Dict, game: str) -> bool:
 
     if game == "box_builder":
         return _bb_valid(level_json)
+    if game == "twinseed":
+        return _twinseed_valid(level_json)
 
     return True
 
@@ -405,6 +436,8 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             "timed_out": False, "candidate_idx": candidate_idx,
             "constraints_ok": True}
 
+    use_cython = bool(task.get("cython"))
+
     # Load game module
     try:
         if game == "box_builder":
@@ -416,7 +449,10 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
         elif game == "carrot_quest":
             import games.carrot_quest as module
         elif game == "twinseed":
-            import games.twinseed as module
+            if use_cython:
+                import games.twinseed_cy as module
+            else:
+                import games.twinseed as module
         else:
             base["error"] = f"No solver for game '{game}'"
             return base
@@ -647,6 +683,19 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         base["error"] = str(e)
         return base
+
+    # --- Extract events via engine-adapter replay (Cython apply returns []) ---
+    if solution_path and use_cython and game == "twinseed":
+        try:
+            import games.twinseed as _tw_slow
+            _init_slow, _info_slow = _tw_slow.load(level_json)
+            _state = _init_slow
+            all_events = []
+            for action in solution_path:
+                _state, _, step_evts = _tw_slow.apply(_state, action, _info_slow)
+                all_events.extend(step_evts)
+        except Exception:
+            all_events = []
 
     # --- Constraint filter checks ---
     # Each require_constraint must have a solution; each forbid_constraint must not.
@@ -983,6 +1032,7 @@ def _run(args: argparse.Namespace) -> None:
             "require_constraints": require_constraints,
             "forbid_constraints": forbid_constraints,
             "twophase_min": twophase_min,
+            "cython": args.cython,
         }
         for i, c in enumerate(candidates)
     ]
@@ -1005,10 +1055,19 @@ def _run(args: argparse.Namespace) -> None:
                    if r.get("ok") and r.get("solution_length") is not None)
     n_timed_out = sum(1 for r in results if r.get("timed_out"))
 
+    required_actions: List[str] = list(getattr(args, "must_contain_action", []))
+
+    def _passes_action_filter(r: Dict) -> bool:
+        if not required_actions:
+            return True
+        path = r.get("solution_path") or []
+        return all(any(a == req or a == f"move_{req}" for a in path)
+                   for req in required_actions)
+
     passing = [
         (candidates[r["candidate_idx"]], r)
         for r in results
-        if _check_criteria(r, criteria)
+        if _check_criteria(r, criteria) and _passes_action_filter(r)
     ]
 
     print(f"Solved: {n_solved}/{len(candidates)}  "
@@ -1192,6 +1251,16 @@ def main() -> None:
     parser.add_argument(
         "--workers", type=int, default=8, metavar="N",
         help="Parallel worker processes (default: 8)",
+    )
+    parser.add_argument(
+        "--cython", action="store_true",
+        help="Twinseed only: use the Cython fast A* backend. Requires the "
+             "extension in tools/solver/games/twinseed_cython to be built.",
+    )
+    parser.add_argument(
+        "--must-contain-action", action="append", default=[], metavar="ACTION",
+        help="Post-solve filter (repeatable): drop candidates whose gold "
+             "path does not contain this action (e.g. 'clone').",
     )
     parser.add_argument(
         "--output-dir", metavar="DIR",

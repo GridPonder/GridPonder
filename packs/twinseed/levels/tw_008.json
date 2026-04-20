@@ -1,0 +1,40 @@
+{
+  "id": "tw_008",
+  "title": "Stoneseed",
+  "board": {
+    "size": [6, 4],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [5, 0], "kind": "void"},
+          {"position": [0, 2], "kind": "void"},
+          {"position": [5, 2], "kind": "void"},
+          {"position": [0, 3], "kind": "void"},
+          {"position": [5, 3], "kind": "void"},
+          {"position": [2, 2], "kind": "garden_plot"},
+          {"position": [4, 2], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 0], "kind": "seed_basket"},
+          {"position": [2, 3], "kind": "seed_basket"},
+          {"position": [1, 1], "kind": "rock"},
+          {"position": [2, 1], "kind": "rock"},
+          {"position": [3, 1], "kind": "rock"},
+          {"position": [4, 1], "kind": "pickaxe"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [3, 3], "facing": "up"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ]
+}

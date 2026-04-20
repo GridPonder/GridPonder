@@ -1,0 +1,48 @@
+{
+  "id": "tw_008e",
+  "title": "Stoneseed E",
+  "board": {
+    "size": [6, 4],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [5, 0], "kind": "void"},
+          {"position": [0, 2], "kind": "void"},
+          {"position": [5, 2], "kind": "void"},
+          {"position": [0, 1], "kind": "void"},
+          {"position": [5, 3], "kind": "void"},
+          {"position": [1, 1], "kind": "garden_plot"},
+          {"position": [3, 0], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 2], "kind": "seed_basket"},
+          {"position": [4, 2], "kind": "seed_basket"},
+          {"position": [1, 1], "kind": "rock"},
+          {"position": [1, 3], "kind": "rock"},
+          {"position": [4, 0], "kind": "rock"},
+          {"position": [4, 1], "kind": "pickaxe"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [3, 3], "facing": "up"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": [
+      "up", "up", "right", "right", "clone", "left", "left", "down", "down",
+      "right", "up", "left", "up", "left", "left", "clone", "left", "left",
+      "left"
+    ],
+    "hintStops": [6]
+  }
+}
