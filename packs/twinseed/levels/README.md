@@ -91,3 +91,15 @@ Clone required four times. Optimal proved by A* (fast solver, ~16 s).
 ```
 python3 tools/solver/solve.py packs/twinseed/levels/tw_007.json --mode astar --max-depth 45 --timeout 60
 ```
+
+---
+
+## tw_008 — Stoneseed (25 moves)
+
+Introduces the pickaxe: the path to both plots is blocked by rocks, so the
+avatar must grab the pickaxe before tackling either basket. Clone required
+three times to stage positions around the rock wall.
+
+```
+python3 tools/solver/solve.py packs/twinseed/levels/tw_008.json --mode astar --max-depth 30 --timeout 60
+```
