@@ -61,3 +61,33 @@ python3 tools/solver/solve.py packs/twinseed/levels/tw_004.json --mode astar --m
 Without the Cython extension the same search takes ~67 minutes. Without an
 admissible heuristic (pure BFS at depth 56) the search is completely
 intractable regardless of speed.
+
+---
+
+## tw_005 — The Shortcut (23 moves)
+
+Clone required. Optimal proved by A* (fast solver, ~15 s).
+
+```
+python3 tools/solver/solve.py packs/twinseed/levels/tw_005.json --mode astar --max-depth 30 --timeout 60
+```
+
+---
+
+## tw_006 — The Return (24 moves)
+
+Clone required. Optimal proved by A* (fast solver, ~37 s).
+
+```
+python3 tools/solver/solve.py packs/twinseed/levels/tw_006.json --mode astar --max-depth 30 --timeout 60
+```
+
+---
+
+## tw_007 — Four Anchors (36 moves)
+
+Clone required four times. Optimal proved by A* (fast solver, ~16 s).
+
+```
+python3 tools/solver/solve.py packs/twinseed/levels/tw_007.json --mode astar --max-depth 45 --timeout 60
+```
