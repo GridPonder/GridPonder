@@ -87,7 +87,7 @@
       "sprite": "assets/sprites/rock2.png",
       "animations": {
         "breaking": {
-          "frames": ["assets/sprites/rock2_with_cracks.png", "assets/sprites/rock2_broken2.png"],
+          "frames": ["assets/sprites/rock2_with_cracks.png", "assets/sprites/rock2_broken.png"],
           "duration": 800,
           "mode": "once"
         }
@@ -369,7 +369,11 @@
     {"type": "level", "ref": "tw_006"},
     {"type": "level", "ref": "tw_007"},
     {"type": "level", "ref": "tw_004"},
-    {"type": "level", "ref": "tw_008"}
+    {"type": "level", "ref": "tw_008"},
+    {"type": "level", "ref": "tw_009"},
+    {"type": "level", "ref": "tw_010"},
+    {"type": "level", "ref": "tw_011"},
+    {"type": "level", "ref": "tw_012"}
   ],
   "defaults": {
     "maxCascadeDepth": 10,

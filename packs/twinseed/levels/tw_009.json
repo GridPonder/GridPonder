@@ -1,0 +1,53 @@
+{
+  "id": "tw_009",
+  "title": "Tangled Roots",
+  "board": {
+    "size": [6, 5],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [5, 2], "kind": "void"},
+          {"position": [2, 0], "kind": "void"},
+          {"position": [4, 0], "kind": "void"},
+          {"position": [0, 4], "kind": "void"},
+          {"position": [0, 1], "kind": "void"},
+          {"position": [5, 0], "kind": "void"},
+          {"position": [4, 2], "kind": "garden_plot"},
+          {"position": [3, 4], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 1], "kind": "seed_basket"},
+          {"position": [2, 4], "kind": "seed_basket"},
+          {"position": [3, 2], "kind": "rock"},
+          {"position": [2, 1], "kind": "rock"},
+          {"position": [5, 1], "kind": "rock"},
+          {"position": [4, 4], "kind": "pickaxe"},
+          {"position": [1, 2], "kind": "wood"},
+          {"position": [3, 3], "kind": "wood"},
+          {"position": [0, 2], "kind": "wood"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 3], "facing": "up"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": [
+      "right", "down", "right", "right", "right", "left", "left", "up", "up", "up",
+      "left", "up", "clone", "down", "down", "down", "right", "right", "right", "up",
+      "up", "left", "left", "clone", "down", "right", "down", "down", "left", "left",
+      "clone", "right", "right", "up", "up", "left", "down", "clone", "right", "right",
+      "right", "down", "right", "up"
+    ],
+    "hintStops": [12, 24]
+  }
+}

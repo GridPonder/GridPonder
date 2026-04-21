@@ -24,8 +24,9 @@ class BoardRenderer extends StatelessWidget {
   final GameDefinition game;
   final PackService packService;
   /// Optional overlay sprites rendered on top of the objects layer, used during
-  /// entity destruction animations. Maps cell position → image provider.
-  final Map<Position, ImageProvider>? animationOverlays;
+  /// entity destruction animations. Maps cell position → DSL sprite path.
+  /// Resolved pack-first then gridponder-base, matching static sprite behaviour.
+  final Map<Position, String>? animationOverlays;
   /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
   final void Function(int x, int y)? onCellTap;
   /// When set, cell_flooded entities are rendered in this color instead of
@@ -245,14 +246,21 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _buildAnimOverlay(Position pos, ImageProvider image, double cellSize) {
+  Widget _buildAnimOverlay(Position pos, String dslPath, double cellSize) {
     return Positioned(
       left: pos.x * cellSize,
       top: pos.y * cellSize,
       width: cellSize,
       height: cellSize,
       child: IgnorePointer(
-        child: Image(image: image, fit: BoxFit.cover),
+        child: Image(
+          image: packService.resolvePackImage(dslPath),
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Image.asset(
+            packService.resolveSprite(dslPath),
+            fit: BoxFit.cover,
+          ),
+        ),
       ),
     );
   }

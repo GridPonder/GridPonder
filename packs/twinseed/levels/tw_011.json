@@ -1,0 +1,53 @@
+{
+  "id": "tw_011",
+  "title": "Stone Maze",
+  "board": {
+    "size": [6, 5],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [2, 3], "kind": "void"},
+          {"position": [4, 0], "kind": "void"},
+          {"position": [5, 2], "kind": "void"},
+          {"position": [0, 2], "kind": "void"},
+          {"position": [0, 3], "kind": "void"},
+          {"position": [1, 4], "kind": "garden_plot"},
+          {"position": [3, 4], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 1], "kind": "seed_basket"},
+          {"position": [2, 4], "kind": "seed_basket"},
+          {"position": [3, 2], "kind": "rock"},
+          {"position": [5, 4], "kind": "rock"},
+          {"position": [3, 3], "kind": "rock"},
+          {"position": [4, 1], "kind": "pickaxe"},
+          {"position": [1, 2], "kind": "wood"},
+          {"position": [4, 3], "kind": "wood"},
+          {"position": [5, 3], "kind": "wood"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 1], "facing": "up"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": [
+      "right", "up", "right", "right", "down", "right", "clone", "left", "up",
+      "left", "left", "down", "right", "clone", "down", "down", "left", "down",
+      "left", "left", "clone", "up", "up", "right", "up", "left", "clone", "left",
+      "clone", "right", "right", "right", "up", "right", "up", "up", "left", "left",
+      "up", "left", "down", "down", "down", "clone", "right", "right"
+    ],
+    "hintStops": [12, 26]
+  }
+}

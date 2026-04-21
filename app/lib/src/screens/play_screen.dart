@@ -58,7 +58,7 @@ class _PlayScreenState extends State<PlayScreen> {
 
   // Animation state: non-null while an entity animation is playing.
   LevelState? _preAnimState;
-  Map<Position, ImageProvider>? _animOverlays;
+  Map<Position, String>? _animOverlays;
   bool _animating = false;
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
@@ -217,7 +217,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final kindDef = widget.packService.game.entityKinds[kind];
     final sprite = kindDef?.sprite;
     if (sprite == null) return;
-    final spritePath = widget.packService.resolvePackImage(sprite);
+    final spritePath = sprite;
 
     // Build full position sequence: [from of first push, to of each push].
     Position posFromPayload(dynamic p) =>
@@ -274,7 +274,7 @@ class _PlayScreenState extends State<PlayScreen> {
       if (!mounted) return;
       setState(() {
         _preAnimState = cleanState;
-        _animOverlays = {step.position: widget.packService.resolvePackImage(framePath)};
+        _animOverlays = {step.position: framePath};
       });
       await Future.delayed(Duration(milliseconds: frameMs));
     }

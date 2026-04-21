@@ -337,7 +337,8 @@ def _bb_valid(level_json: Dict) -> bool:
 def _twinseed_valid(level_json: Dict) -> bool:
     """Twinseed: reject levels with
        (a) a seed_basket already on a garden_plot, or
-       (b) any object sitting on a void cell (unreachable, purely cosmetic clutter).
+       (b) the avatar starting on a seed_basket cell.
+    (Object-on-void is handled generically in _is_structurally_valid.)
     """
     layers = level_json["board"]["layers"]
     ground = layers.get("ground", {})
@@ -347,16 +348,17 @@ def _twinseed_valid(level_json: Dict) -> bool:
         for e in ground.get("entries", [])
         if e.get("kind") == "garden_plot"
     }
-    voids = {
-        (e["position"][0], e["position"][1])
-        for e in ground.get("entries", [])
-        if e.get("kind") == "void"
-    }
+    basket_positions = set()
     for e in objects.get("entries", []):
         pos = (e["position"][0], e["position"][1])
-        if pos in voids:
-            return False
-        if e.get("kind") == "seed_basket" and pos in plots:
+        if e.get("kind") == "seed_basket":
+            if pos in plots:
+                return False
+            basket_positions.add(pos)
+    avatar = level_json.get("state", {}).get("avatar", {})
+    if avatar.get("enabled", True) and "position" in avatar:
+        ax, ay = avatar["position"]
+        if (ax, ay) in basket_positions:
             return False
     return True
 
@@ -367,6 +369,7 @@ def _is_structurally_valid(level_json: Dict, game: str) -> bool:
     - All sparse entries within board bounds
     - No two entries at the same position in the same sparse layer
     - Avatar (if enabled) on a walkable cell
+    - No non-ground object sitting on a void cell (unreachable clutter)
     - Game-specific check (box_builder fragment pairing)
     """
     board = level_json["board"]
@@ -390,6 +393,18 @@ def _is_structurally_valid(level_json: Dict, game: str) -> bool:
         ax, ay = avatar["position"]
         if (ax, ay) not in _get_walkable_cells(level_json):
             return False
+
+    # No objects on void cells — purely cosmetic clutter, never interesting.
+    walkable = _get_walkable_cells(level_json)
+    for layer_id, layer_data in layers.items():
+        if layer_id == "ground":
+            continue
+        if not (isinstance(layer_data, dict) and layer_data.get("format") == "sparse"):
+            continue
+        for entry in layer_data.get("entries", []):
+            x, y = entry["position"]
+            if (x, y) not in walkable:
+                return False
 
     if game == "box_builder":
         return _bb_valid(level_json)
@@ -733,6 +748,11 @@ def _evaluate_worker(task: Dict[str, Any]) -> Dict[str, Any]:
             interaction_score += 2
         elif etype == "avatar_entered":
             interaction_score += 1
+    # Clone action scoring (non-trivial use of the twinseed mechanic).
+    # Counted from solution_path directly so it works with any backend
+    # (Cython path does not emit events).
+    if solution_path:
+        interaction_score += 3 * sum(1 for a in solution_path if a == "clone")
 
     result = {
         "ok": True,

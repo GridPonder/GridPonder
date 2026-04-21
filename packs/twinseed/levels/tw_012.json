@@ -1,0 +1,54 @@
+{
+  "id": "tw_012",
+  "title": "The Grand Design",
+  "board": {
+    "size": [6, 5],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [2, 0], "kind": "void"},
+          {"position": [4, 0], "kind": "void"},
+          {"position": [5, 0], "kind": "void"},
+          {"position": [0, 4], "kind": "void"},
+          {"position": [2, 2], "kind": "void"},
+          {"position": [1, 4], "kind": "garden_plot"},
+          {"position": [3, 4], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 1], "kind": "seed_basket"},
+          {"position": [3, 3], "kind": "seed_basket"},
+          {"position": [3, 2], "kind": "rock"},
+          {"position": [2, 1], "kind": "rock"},
+          {"position": [3, 0], "kind": "rock"},
+          {"position": [4, 1], "kind": "pickaxe"},
+          {"position": [1, 2], "kind": "wood"},
+          {"position": [4, 3], "kind": "wood"},
+          {"position": [5, 2], "kind": "wood"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [4, 4], "facing": "up"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": [
+      "right", "clone", "up", "up", "left", "down", "left", "down", "left", "left",
+      "up", "right", "right", "clone", "left", "left", "right", "right", "clone",
+      "up", "up", "left", "down", "up", "up", "clone", "left", "up", "left", "left",
+      "left", "left", "up", "up", "right", "up", "clone", "down", "right", "left",
+      "down", "left", "down", "right", "right", "right", "right", "up", "up", "left",
+      "left", "clone", "down", "down", "down"
+    ],
+    "hintStops": [13, 30]
+  }
+}
