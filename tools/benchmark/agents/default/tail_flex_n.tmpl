@@ -1,0 +1,9 @@
+{{#max_n}}Respond with ONLY a JSON array of 1 to {{max_n}} actions on a single line, no explanation or surrounding text.{{/max_n}}{{^max_n}}Respond with ONLY a JSON array of one or more actions on a single line, no explanation or surrounding text.{{/max_n}}
+Each action beyond the first counts as only 0.5 toward your total action score (e.g. outputting 3 actions = 2 effective actions). Minimize your effective total across all attempts.
+Add a "memory" field to the last action to update your notes (replaces previous memory).
+Examples:
+  [{{example_action_1}}]
+  [{{example_action_1}}, {{example_action_2}}, {{example_action_2_with_memory}}]
+  [{"action": "give_up", "memory": "Dead end. Must try a different approach."}]
+
+Choose actions most likely to reach the goal in fewest effective actions (summed across attempts).

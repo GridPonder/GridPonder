@@ -79,6 +79,12 @@ def call_llm(
         if ollama_body.get("think") is True or "reasoning_effort" in ollama_body:
             effective_max_tokens = max(max_tokens, 32768)
 
+    # Anthropic/Bedrock extended thinking: max_tokens must exceed budget_tokens.
+    thinking_cfg = extra_params.get("thinking")
+    if isinstance(thinking_cfg, dict) and thinking_cfg.get("type") == "enabled":
+        budget = thinking_cfg.get("budget_tokens", 0)
+        effective_max_tokens = max(effective_max_tokens, budget + max_tokens)
+
     params: dict[str, Any] = {
         "model": litellm_model,
         "messages": [{"role": "user", "content": prompt}],

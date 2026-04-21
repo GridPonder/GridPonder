@@ -57,7 +57,15 @@ MAX_CONSECUTIVE_REJECTIONS = 3
 
 def load_models() -> list[dict]:
     with open(MODELS_FILE) as f:
-        return yaml.safe_load(f)["models"]
+        base = yaml.safe_load(f)["models"]
+    local_file = MODELS_FILE.with_suffix(".local.yaml")
+    if local_file.exists():
+        with open(local_file) as f:
+            local = yaml.safe_load(f).get("models", [])
+        local_ids = {m["id"] for m in local}
+        base = [m for m in base if m["id"] not in local_ids]
+        base.extend(local)
+    return base
 
 
 def load_suite() -> dict[str, list[str]]:
@@ -122,6 +130,7 @@ def run_level(
     max_n: int = 5,
     flex_penalty: float = 0.5,
     anon: bool = False,
+    runner: str = "auto",
 ) -> dict[str, Any]:
     """Run one level with one model variant. Returns a result dict.
 
@@ -131,8 +140,10 @@ def run_level(
         step_size:       Max actions per call for fixed-n mode.
         max_n:           Max actions per call for flex-n mode.
         flex_penalty:    Cost per extra step beyond the first (flex-n only).
+        runner:          'dart' | 'python' | 'auto' (auto-detects by binary presence).
     """
-    if not RUNNER_BIN.exists():
+    use_python = runner == "python" or (runner == "auto" and not RUNNER_BIN.exists())
+    if not use_python and not RUNNER_BIN.exists():
         sys.exit(
             f"Runner binary not found: {RUNNER_BIN}\n"
             "Build it first: make benchmark-build"
@@ -149,8 +160,14 @@ def run_level(
             "full": 4096,
         }.get(mode, 1024)
 
+    runner_script = SCRIPT_DIR / "runner.py"
+    runner_cmd = (
+        [sys.executable, str(runner_script)]
+        if use_python
+        else [str(RUNNER_BIN)]
+    )
     cmd = [
-        str(RUNNER_BIN),
+        *runner_cmd,
         "--pack", pack_id,
         "--level", level_id,
         "--packs-dir", str(PACKS_DIR),
@@ -324,6 +341,7 @@ def run_level(
         "reasoning": variant.get("reasoning", False),
         "inference_mode": mode,
         "anon": anon,
+        "runner": "python" if use_python else "dart",
         "success": success,
         "actions_total": actions_total,
         "gold_path_length": gold_path_length,
@@ -493,6 +511,9 @@ def main() -> None:
                         help="Efficiency penalty per extra step beyond first in flex-n (default: 0.5)")
     parser.add_argument("--anon", action="store_true",
                         help="Anonymise entity kinds and action IDs (ARC-AGI style)")
+    parser.add_argument("--runner", choices=["auto", "dart", "python"], default="auto",
+                        help="Game-loop runner: dart (compiled binary), python, or auto "
+                             "(uses Dart if binary exists, else Python; default: auto)")
     parser.add_argument("--resume", action="store_true",
                         help="Skip levels already completed in any previous run for this mode+anon")
 
@@ -638,6 +659,7 @@ def main() -> None:
                         max_n=args.max_n,
                         flex_penalty=args.flex_penalty,
                         anon=args.anon,
+                        runner=args.runner,
                     )
                 except Exception as exc:
                     result = {

@@ -1,0 +1,23 @@
+{{#anonymize}}You are playing a grid puzzle.{{/anonymize}}{{^anonymize}}You are playing a grid puzzle called "{{game_title}}".{{/anonymize}}
+Minimize total actions — give up early if stuck rather than wasting moves.
+Attempt {{attempt_number}} | Total actions across all attempts: {{total_actions}}
+{{description_section}}{{memory_section}}
+GOAL: {{goal_descriptions}}
+{{#has_last_action}}LAST ACTION: {{last_action_json}}
+BOARD BEFORE:
+{{previous_board_text}}{{previous_inventory_line}}
+
+BOARD AFTER (current):
+{{board_text}}{{inventory_line}}{{moves_line}}
+
+Compare the two boards to understand exactly what your last action did (tiles removed, pushed, merged, etc.).
+{{#inventory_changed}}If your inventory changed, note what was gained or lost.
+{{/inventory_changed}}Update your memory with any new observations about game mechanics or level layout.
+Memory is your only way to retain knowledge across actions.{{/has_last_action}}{{^has_last_action}}CURRENT BOARD (first move of this attempt):
+{{board_text}}{{inventory_line}}{{moves_line}}{{/has_last_action}}
+
+AVAILABLE ACTIONS:
+{{actions_desc}}
+{"action": "give_up"} — reset and start a fresh attempt
+
+{{inference_tail}}

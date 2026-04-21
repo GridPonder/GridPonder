@@ -1,0 +1,9 @@
+Respond with ONLY a JSON array of up to {{step_size}} actions on a single line, no explanation or surrounding text. You may output fewer if the goal is reachable in fewer steps.
+You will receive updated board state after the batch is applied.
+Add a "memory" field to the last action to update your notes (replaces previous memory).
+Examples:
+  [{{example_action_1}}, {{example_action_2}}]
+  [{{example_action_2_with_memory}}]
+  [{"action": "give_up", "memory": "Dead end. Must try a different approach."}]
+
+Choose actions most likely to reach the goal in fewest total actions (summed across attempts).
