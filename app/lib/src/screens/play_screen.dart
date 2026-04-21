@@ -571,7 +571,7 @@ class _PlayScreenState extends State<PlayScreen> {
     for (int i = 0; i < goldPath.length; i++) {
       if (!mounted) return;
       setState(() => _engine.executeTurn(goldPath[i]));
-      await Future.delayed(const Duration(milliseconds: 200));
+      await Future.delayed(const Duration(milliseconds: 250));
     }
   }
 

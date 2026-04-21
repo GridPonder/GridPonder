@@ -1066,16 +1066,39 @@ def _run(args: argparse.Namespace) -> None:
     ]
 
     n_workers = min(args.workers, len(tasks))
-    print(f"Evaluating {len(tasks)} candidates ({n_workers} workers)...",
-          end=" ", flush=True)
+    total_tasks = len(tasks)
+    print(f"Evaluating {total_tasks} candidates ({n_workers} workers)...")
     t0 = time.monotonic()
 
     ctx = multiprocessing.get_context("spawn")
+    results: List[Dict] = []
+    _last_progress = t0
+    _PROGRESS_INTERVAL = 30  # seconds between progress lines
+    _width = len(str(total_tasks))
+
     with ctx.Pool(processes=n_workers) as pool:
-        results = pool.map(_evaluate_worker, tasks)
+        for result in pool.imap_unordered(_evaluate_worker, tasks):
+            results.append(result)
+            now = time.monotonic()
+            if now - _last_progress >= _PROGRESS_INTERVAL or len(results) == total_tasks:
+                done = len(results)
+                pct = 100.0 * done / total_tasks
+                elapsed_s = now - t0
+                n_sv = sum(1 for r in results if r.get("solution_length") is not None)
+                n_to = sum(1 for r in results if r.get("timed_out"))
+                solved_rs = [r for r in results if r.get("solution_length") is not None]
+                extra = ""
+                if solved_rs:
+                    lens = [r["solution_length"] for r in solved_rs]
+                    scores = [r.get("interaction_score") or 0 for r in solved_rs]
+                    extra = (f"  lengths: {min(lens)}-{max(lens)}"
+                             f"  scores: {min(scores)}-{max(scores)}")
+                print(f"  [{done:{_width}}/{total_tasks} | {pct:5.1f}% | {elapsed_s:5.0f}s]"
+                      f"  solved: {n_sv}  timeout: {n_to}{extra}", flush=True)
+                _last_progress = now
 
     elapsed = time.monotonic() - t0
-    print(f"done in {elapsed:.1f}s")
+    print(f"\nEvaluation complete in {elapsed:.1f}s")
     print()
 
     # --- Phase 3: Filter and rank ---

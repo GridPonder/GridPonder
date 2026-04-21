@@ -1,22 +1,21 @@
 {
-  "id": "tw_seed_water",
-  "title": "Seed — Water & Torch",
+  "id": "tw_015",
+  "title": "Rising Waters",
   "board": {
     "size": [4, 8],
     "layers": {
       "ground": {
         "format": "sparse",
-        "default": "empty",
         "entries": [
           {"position": [0, 0], "kind": "void"},
-          {"position": [3, 0], "kind": "void"},
+          {"position": [3, 4], "kind": "void"},
           {"position": [0, 4], "kind": "void"},
-          {"position": [1, 4], "kind": "void"},
+          {"position": [0, 2], "kind": "void"},
           {"position": [0, 6], "kind": "void"},
           {"position": [3, 7], "kind": "void"},
           {"position": [2, 3], "kind": "water"},
           {"position": [2, 5], "kind": "water"},
-          {"position": [3, 2], "kind": "garden_plot"},
+          {"position": [3, 3], "kind": "garden_plot"},
           {"position": [0, 7], "kind": "garden_plot"}
         ]
       },
@@ -29,18 +28,38 @@
           {"position": [2, 6], "kind": "rock"},
           {"position": [2, 1], "kind": "wood"},
           {"position": [3, 5], "kind": "wood"},
-          {"position": [2, 7], "kind": "wood"},
+          {"position": [2, 4], "kind": "wood"},
           {"position": [0, 3], "kind": "torch"},
-          {"position": [3, 4], "kind": "pickaxe"},
+          {"position": [3, 2], "kind": "pickaxe"},
           {"position": [1, 5], "kind": "metal_crate"}
         ]
       }
     }
   },
   "state": {
-    "avatar": {"enabled": true, "position": [0, 5], "facing": "right"}
+    "avatar": {
+      "enabled": true,
+      "position": [0, 5],
+      "facing": "right"
+    }
   },
   "goals": [
-    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
-  ]
+    {
+      "id": "plant_all",
+      "type": "all_cleared",
+      "config": {
+        "kind": "garden_plot"
+      }
+    }
+  ],
+  "solution": {
+        "goldPath": [
+      "right", "up", "up", "right", "right", "up", "up", "left", "left", "clone",
+      "down", "down", "down", "down", "right", "down", "down", "left", "up", "up",
+      "up", "up", "left", "clone", "left", "clone", "right", "right", "right", "down",
+      "down", "left", "left", "up", "clone", "right", "right", "up", "right", "down",
+      "down"
+    ],
+    "hintStops": [5, 15, 28]
+  }
 }
