@@ -52,3 +52,4 @@ website/public/game/
 .claude/settings.json
 .claude/settings.local.json
 .claude/memory/
+.claude/scheduled_tasks.lock
