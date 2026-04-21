@@ -88,6 +88,8 @@ class _HeuristicTable:
             return 0.0
         if not remaining_plots:
             return float("inf")
+        if n < len(remaining_plots):
+            return float("inf")    # drowned basket(s) — can't fill all plots
 
         inf = float("inf")
 

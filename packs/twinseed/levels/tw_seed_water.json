@@ -1,0 +1,46 @@
+{
+  "id": "tw_seed_water",
+  "title": "Seed — Water & Torch",
+  "board": {
+    "size": [4, 8],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "default": "empty",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [3, 0], "kind": "void"},
+          {"position": [0, 4], "kind": "void"},
+          {"position": [1, 4], "kind": "void"},
+          {"position": [0, 6], "kind": "void"},
+          {"position": [3, 7], "kind": "void"},
+          {"position": [2, 3], "kind": "water"},
+          {"position": [2, 5], "kind": "water"},
+          {"position": [3, 2], "kind": "garden_plot"},
+          {"position": [0, 7], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 2], "kind": "seed_basket"},
+          {"position": [1, 7], "kind": "seed_basket"},
+          {"position": [2, 2], "kind": "rock"},
+          {"position": [2, 6], "kind": "rock"},
+          {"position": [2, 1], "kind": "wood"},
+          {"position": [3, 5], "kind": "wood"},
+          {"position": [2, 7], "kind": "wood"},
+          {"position": [0, 3], "kind": "torch"},
+          {"position": [3, 4], "kind": "pickaxe"},
+          {"position": [1, 5], "kind": "metal_crate"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 5], "facing": "right"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ]
+}

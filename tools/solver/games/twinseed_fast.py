@@ -45,6 +45,7 @@ GROUND_PLANTED     = 3
 GROUND_WATER       = 4
 GROUND_BRIDGE      = 5
 GROUND_ICE         = 6
+GROUND_WATER_CRATE = 7
 
 OBJ_NONE        = 0
 OBJ_SEED_BASKET = 1
@@ -62,7 +63,7 @@ CLONE_INACTIVE = 255
 
 # Frozenset lookups (O(1) membership)
 _WALKABLE  = frozenset({GROUND_EMPTY, GROUND_GARDEN_PLOT, GROUND_PLANTED,
-                        GROUND_WATER, GROUND_BRIDGE, GROUND_ICE})
+                        GROUND_WATER, GROUND_BRIDGE, GROUND_ICE, GROUND_WATER_CRATE})
 _SOLID     = frozenset({OBJ_SEED_BASKET, OBJ_ROCK, OBJ_WOOD, OBJ_METAL_CRATE})
 _PUSHABLE  = frozenset({OBJ_SEED_BASKET, OBJ_WOOD, OBJ_METAL_CRATE})
 _PICKUP    = frozenset({OBJ_TORCH, OBJ_PICKAXE})
@@ -75,6 +76,7 @@ _GROUND_STR = {
     "water":          GROUND_WATER,
     "bridge":         GROUND_BRIDGE,
     "ice":            GROUND_ICE,
+    "water_crate":    GROUND_WATER_CRATE,
 }
 _OBJ_STR = {
     "seed_basket": OBJ_SEED_BASKET,
@@ -226,9 +228,12 @@ def _slide_obj(cells: bytearray, pos: int, obj: int, dir_idx: int,
             cells[pos] = (cells[pos] & ~7) | GROUND_PLANTED
             cells[pos] &= 7     # clear object (basket consumed)
             break               # seed is planted, stop sliding
+        elif obj == OBJ_SEED_BASKET and pg == GROUND_WATER:
+            cells[pos] &= 7     # basket drowns — remove, keep water
+            break
         elif obj == OBJ_METAL_CRATE and pg == GROUND_WATER:
-            cells[pos] = (cells[pos] & ~7) | GROUND_BRIDGE
-            cells[pos] &= 7     # clear object
+            cells[pos] = (cells[pos] & ~7) | GROUND_WATER_CRATE
+            cells[pos] &= 7     # crate consumed into water_crate ground
             break
         elif pg != GROUND_ICE:
             break               # left ice, stop
@@ -267,8 +272,10 @@ def _slide_avatar(cells: bytearray, pos: int, dir_idx: int,
                 if no == OBJ_SEED_BASKET and pg == GROUND_GARDEN_PLOT:
                     cells[push_dest] = (cells[push_dest] & ~7) | GROUND_PLANTED
                     cells[push_dest] &= 7
+                elif no == OBJ_SEED_BASKET and pg == GROUND_WATER:
+                    cells[push_dest] &= 7   # basket drowns during ice-slide push
                 elif no == OBJ_METAL_CRATE and pg == GROUND_WATER:
-                    cells[push_dest] = (cells[push_dest] & ~7) | GROUND_BRIDGE
+                    cells[push_dest] = (cells[push_dest] & ~7) | GROUND_WATER_CRATE
                     cells[push_dest] &= 7
                 elif pg == GROUND_ICE:
                     _slide_obj(cells, push_dest, no, dir_idx, neighbors)
@@ -341,9 +348,11 @@ def _apply_move(state: bytes, dir_idx: int, info: FastInfo) -> Tuple[bytes, bool
             if to == OBJ_SEED_BASKET and pg == GROUND_GARDEN_PLOT:
                 cells[push_dest] = (cells[push_dest] & ~7) | GROUND_PLANTED
                 cells[push_dest] &= 7           # remove basket
+            elif to == OBJ_SEED_BASKET and pg == GROUND_WATER:
+                cells[push_dest] &= 7           # basket drowns
             elif to == OBJ_METAL_CRATE and pg == GROUND_WATER:
-                cells[push_dest] = (cells[push_dest] & ~7) | GROUND_BRIDGE
-                cells[push_dest] &= 7           # remove crate
+                cells[push_dest] = (cells[push_dest] & ~7) | GROUND_WATER_CRATE
+                cells[push_dest] &= 7           # crate consumed into water_crate ground
             elif pg == GROUND_ICE:
                 _slide_obj(cells, push_dest, to, dir_idx, neighbors)
         else:
@@ -428,7 +437,9 @@ def heuristic(state: bytes, info: FastInfo) -> float:
     if not baskets:
         return 0.0
     if not plots:
-        return float("inf")    # baskets remain but no plots — dead state
+        return float("inf")
+    if len(baskets) < len(plots):
+        return float("inf")    # drowned basket(s) — can't fill all remaining plots
 
     return info.htable.min_cost_assignment(baskets, plots)
 
@@ -446,7 +457,11 @@ def can_prune(state: bytes, info: FastInfo, depth: int, max_depth: int) -> bool:
             plots.append((i % width, i // width))
 
     if not plots:
-        return False  # no plots → either won or dead state caught by heuristic
+        return False
+
+    baskets_count = sum(1 for i in range(cells_len) if ((state[i] >> 3) & 7) == OBJ_SEED_BASKET)
+    if baskets_count < len(plots):
+        return True  # drowned basket(s) — dead state
 
     for i in range(cells_len):
         if ((state[i] >> 3) & 7) != OBJ_SEED_BASKET:

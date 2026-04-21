@@ -336,8 +336,9 @@ def _bb_valid(level_json: Dict) -> bool:
 
 def _twinseed_valid(level_json: Dict) -> bool:
     """Twinseed: reject levels with
-       (a) a seed_basket already on a garden_plot, or
-       (b) the avatar starting on a seed_basket cell.
+       (a) a seed_basket already on a garden_plot,
+       (b) a seed_basket starting on water (immediately drowns — no puzzle),
+       (c) the avatar starting on any object cell.
     (Object-on-void is handled generically in _is_structurally_valid.)
     """
     layers = level_json["board"]["layers"]
@@ -348,17 +349,24 @@ def _twinseed_valid(level_json: Dict) -> bool:
         for e in ground.get("entries", [])
         if e.get("kind") == "garden_plot"
     }
-    basket_positions = set()
+    water_cells = {
+        (e["position"][0], e["position"][1])
+        for e in ground.get("entries", [])
+        if e.get("kind") == "water"
+    }
+    object_positions = set()
     for e in objects.get("entries", []):
         pos = (e["position"][0], e["position"][1])
+        object_positions.add(pos)
         if e.get("kind") == "seed_basket":
             if pos in plots:
                 return False
-            basket_positions.add(pos)
+            if pos in water_cells:
+                return False
     avatar = level_json.get("state", {}).get("avatar", {})
     if avatar.get("enabled", True) and "position" in avatar:
         ax, ay = avatar["position"]
-        if (ax, ay) in basket_positions:
+        if (ax, ay) in object_positions:
             return False
     return True
 

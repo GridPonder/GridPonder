@@ -25,6 +25,7 @@ DEF GROUND_PLANTED     = 3
 DEF GROUND_WATER       = 4
 DEF GROUND_BRIDGE      = 5
 DEF GROUND_ICE         = 6
+DEF GROUND_WATER_CRATE = 7
 
 DEF OBJ_NONE        = 0
 DEF OBJ_SEED_BASKET = 1
@@ -55,7 +56,8 @@ cdef inline int obj_of(unsigned char* cells, int pos) nogil:
 
 cdef inline bint is_walkable(int g) nogil:
     return g == GROUND_EMPTY or g == GROUND_GARDEN_PLOT or g == GROUND_PLANTED \
-        or g == GROUND_WATER or g == GROUND_BRIDGE or g == GROUND_ICE
+        or g == GROUND_WATER or g == GROUND_BRIDGE or g == GROUND_ICE \
+        or g == GROUND_WATER_CRATE
 
 cdef inline bint is_solid(int o) nogil:
     return o == OBJ_SEED_BASKET or o == OBJ_ROCK or o == OBJ_WOOD or o == OBJ_METAL_CRATE
@@ -105,9 +107,12 @@ cdef void slide_obj(unsigned char* cells, int pos, int obj, int dir_idx,
             cells[pos] = (cells[pos] & 0xF8) | GROUND_PLANTED
             cells[pos] = cells[pos] & 7    # clear object
             break
+        elif obj == OBJ_SEED_BASKET and pg == GROUND_WATER:
+            cells[pos] = cells[pos] & 7    # basket drowns — remove, keep water
+            break
         elif obj == OBJ_METAL_CRATE and pg == GROUND_WATER:
-            cells[pos] = (cells[pos] & 0xF8) | GROUND_BRIDGE
-            cells[pos] = cells[pos] & 7
+            cells[pos] = (cells[pos] & 0xF8) | GROUND_WATER_CRATE
+            cells[pos] = cells[pos] & 7    # crate consumed into water_crate ground
             break
         elif pg != GROUND_ICE:
             break
@@ -147,8 +152,10 @@ cdef int slide_avatar(unsigned char* cells, int pos, int dir_idx,
                 if no == OBJ_SEED_BASKET and pg == GROUND_GARDEN_PLOT:
                     cells[push_dest] = (cells[push_dest] & 0xF8) | GROUND_PLANTED
                     cells[push_dest] = cells[push_dest] & 7
+                elif no == OBJ_SEED_BASKET and pg == GROUND_WATER:
+                    cells[push_dest] = cells[push_dest] & 7   # basket drowns
                 elif no == OBJ_METAL_CRATE and pg == GROUND_WATER:
-                    cells[push_dest] = (cells[push_dest] & 0xF8) | GROUND_BRIDGE
+                    cells[push_dest] = (cells[push_dest] & 0xF8) | GROUND_WATER_CRATE
                     cells[push_dest] = cells[push_dest] & 7
                 elif pg == GROUND_ICE:
                     slide_obj(cells, push_dest, no, dir_idx, neighbors)
@@ -262,9 +269,11 @@ def apply_cy(bytes state not None, int action_idx, list neighbors_list,
             if to == OBJ_SEED_BASKET and pg == GROUND_GARDEN_PLOT:
                 out[push_dest] = (out[push_dest] & 0xF8) | GROUND_PLANTED
                 out[push_dest] = out[push_dest] & 7   # remove basket
+            elif to == OBJ_SEED_BASKET and pg == GROUND_WATER:
+                out[push_dest] = out[push_dest] & 7   # basket drowns
             elif to == OBJ_METAL_CRATE and pg == GROUND_WATER:
-                out[push_dest] = (out[push_dest] & 0xF8) | GROUND_BRIDGE
-                out[push_dest] = out[push_dest] & 7   # remove crate
+                out[push_dest] = (out[push_dest] & 0xF8) | GROUND_WATER_CRATE
+                out[push_dest] = out[push_dest] & 7   # crate consumed into water_crate
             elif pg == GROUND_ICE:
                 slide_obj(out, push_dest, to, action_idx, neighbors)
         else:
@@ -320,6 +329,8 @@ cdef double _min_assign(double* ct, int cl,
         return 0.0
     if np_ == 0:
         return 1e300
+    if nb < np_:
+        return 1e300  # drowned basket(s)
 
     if nb > 4:
         # Sum-of-minima fallback
@@ -439,7 +450,10 @@ def heuristic_and_prune_cy(bytes state not None,
         return 0.0, False
 
     if np_ == 0:
-        return float("inf"), True  # baskets with no plots → dead state
+        return float("inf"), True  # baskets remain but no plots — dead state
+
+    if nb < np_:
+        return float("inf"), True  # drowned basket(s) — can't fill all remaining plots
 
     # Prune check: if any basket can't reach any plot, return inf immediately
     for i in range(nb):

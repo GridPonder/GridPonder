@@ -48,13 +48,13 @@
     "water": {
       "layer": "ground",
       "tags": ["liquid", "walkable"],
-      "sprite": "assets/sprites/water.png",
+      "sprite": "assets/sprites/water4.png",
       "symbol": "≈"
     },
-    "bridge": {
+    "water_crate": {
       "layer": "ground",
       "tags": ["walkable"],
-      "sprite": "assets/sprites/bridge.png",
+      "sprite": "assets/sprites/water_crate2.png",
       "symbol": "="
     },
     "ice": {
@@ -79,6 +79,13 @@
       "layer": "objects",
       "tags": ["solid", "pushable"],
       "sprite": "assets/sprites/seeds.png",
+      "animations": {
+        "drowning": {
+          "frames": ["assets/sprites/seeds_drowning.png"],
+          "duration": 800,
+          "mode": "once"
+        }
+      },
       "symbol": "S"
     },
     "rock": {
@@ -110,7 +117,7 @@
     "metal_crate": {
       "layer": "objects",
       "tags": ["solid", "pushable"],
-      "sprite": "assets/sprites/metal_crate.png",
+      "sprite": "assets/sprites/metal_crate2.png",
       "symbol": "C"
     },
     "torch": {
@@ -195,6 +202,30 @@
     }
   ],
   "rules": [
+    {
+      "id": "seeds_drown",
+      "on": "object_placed",
+      "where": {
+        "position_has_tag": {
+          "layer": "ground",
+          "tag": "liquid"
+        }
+      },
+      "if": {
+        "event": {
+          "kind": "seed_basket"
+        }
+      },
+      "then": [
+        {
+          "destroy": {
+            "layer": "objects",
+            "position": "$event.position",
+            "animation": "drowning"
+          }
+        }
+      ]
+    },
     {
       "id": "seeds_planted",
       "on": "object_placed",
@@ -325,7 +356,7 @@
       "priority": 10
     },
     {
-      "id": "crate_creates_bridge",
+      "id": "crate_floats_on_water",
       "on": "object_placed",
       "where": {
         "position_has_tag": {
@@ -349,7 +380,7 @@
           "transform": {
             "layer": "ground",
             "position": "$event.position",
-            "toKind": "bridge"
+            "toKind": "water_crate"
           }
         }
       ]
@@ -373,7 +404,8 @@
     {"type": "level", "ref": "tw_009"},
     {"type": "level", "ref": "tw_010"},
     {"type": "level", "ref": "tw_011"},
-    {"type": "level", "ref": "tw_012"}
+    {"type": "level", "ref": "tw_012"},
+    {"type": "level", "ref": "tw_seed_water"}
   ],
   "defaults": {
     "maxCascadeDepth": 10,
