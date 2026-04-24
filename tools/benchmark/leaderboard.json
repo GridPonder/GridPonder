@@ -1,303 +1,3283 @@
 {
-  "generated": "2026-04-11T07:08:31.668476+00:00",
+  "generated": "2026-04-24T20:00:40.701099+00:00",
   "models": [
     {
-      "id": "qwen3.5-4b",
-      "display_name": "Qwen 3.5 4B",
-      "local": true,
-      "reasoning": false,
+      "id": "br-claude-opus-4.7-think",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "single",
+      "anon": false,
       "overall": {
-        "levels_run": 30,
-        "success_rate": 0.16666666666666666,
-        "avg_efficiency": 0.5788888888888889,
-        "p50_latency_ms": 1648.1049170006372
+        "levels_run": 128,
+        "success_rate": 0.390625,
+        "avg_efficiency": 0.8650616605616606,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.3642698555784493,
+        "p50_latency_ms": 18335.364312457386,
+        "avg_cost_usd": 1.3573711484375
       },
       "by_pack": {
-        "number_cells": {
-          "levels_run": 5,
-          "success_rate": 0.4,
-          "avg_efficiency": 0.425,
-          "p50_latency_ms": 1763.6952500006373
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.3333333333333333,
+          "avg_efficiency": 0.95,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.325,
+          "p50_latency_ms": 16936.84450001456,
+          "avg_cost_usd": 0.6551238
         },
         "carrot_quest": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 1570.1239580002948
-        },
-        "rotate_flip": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 2261.1909170000217
-        },
-        "flood_colors": {
-          "levels_run": 5,
-          "success_rate": 0.4,
-          "avg_efficiency": 0.7222222222222222,
-          "p50_latency_ms": 1515.7371670002249
+          "levels_run": 18,
+          "success_rate": 0.2222222222222222,
+          "avg_efficiency": 0.9807692307692308,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.22008547008547008,
+          "p50_latency_ms": 9949.526166485157,
+          "avg_cost_usd": 2.1287717222222224
         },
         "diagonal_swipes": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 1860.3031250004278
+          "levels_run": 20,
+          "success_rate": 0.25,
+          "avg_efficiency": 0.6345238095238095,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.2043154761904762,
+          "p50_latency_ms": 30250.728750019334,
+          "avg_cost_usd": 1.5369278
         },
-        "box_builder": {
-          "levels_run": 5,
-          "success_rate": 0.2,
-          "avg_efficiency": 0.6,
-          "p50_latency_ms": 1612.246040998798
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.6333333333333333,
+          "avg_efficiency": 0.943358395989975,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.6153968253968254,
+          "p50_latency_ms": 18264.21114546247,
+          "avg_cost_usd": 1.1875701666666667
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.4,
+          "avg_efficiency": 0.7046130952380952,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.34092261904761906,
+          "p50_latency_ms": 39332.54918747116,
+          "avg_cost_usd": 0.6927229
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.7,
+          "avg_efficiency": 0.8352389673818245,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.6423336385836386,
+          "p50_latency_ms": 25128.518541983794,
+          "avg_cost_usd": 0.8718365
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.13333333333333333,
+          "p50_latency_ms": 3033.078375039622,
+          "avg_cost_usd": 2.444018333333333
         }
       }
     },
     {
-      "id": "gemma4-e4b",
-      "display_name": "Gemma 4 E4B",
-      "local": true,
-      "reasoning": false,
+      "id": "br-claude-sonnet-think",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "single",
+      "anon": false,
       "overall": {
-        "levels_run": 30,
-        "success_rate": 0.13333333333333333,
-        "avg_efficiency": 1.0,
-        "p50_latency_ms": 3049.843729000031
+        "levels_run": 128,
+        "success_rate": 0.3125,
+        "avg_efficiency": 0.8616217192036865,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.290878393625576,
+        "p50_latency_ms": 50838.007542013656,
+        "avg_cost_usd": 1.3098173515625
       },
       "by_pack": {
-        "number_cells": {
-          "levels_run": 5,
-          "success_rate": 0.6,
-          "avg_efficiency": 1.0,
-          "p50_latency_ms": 4868.4057909999865
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.4666666666666667,
+          "avg_efficiency": 0.8594197241738225,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.43386460230722523,
+          "p50_latency_ms": 22775.242374977097,
+          "avg_cost_usd": 1.4487894666666667
         },
         "carrot_quest": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 2734.3789159999687
-        },
-        "rotate_flip": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 3366.544458000135
-        },
-        "flood_colors": {
-          "levels_run": 5,
-          "success_rate": 0.2,
-          "avg_efficiency": 1.0,
-          "p50_latency_ms": 2627.006082999742
+          "levels_run": 18,
+          "success_rate": 0.3333333333333333,
+          "avg_efficiency": 1.030389363722697,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.33839822728711616,
+          "p50_latency_ms": 43842.49308356084,
+          "avg_cost_usd": 2.1964792777777777
         },
         "diagonal_swipes": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 2561.0064580000653
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.5050505050505051,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.07525252525252525,
+          "p50_latency_ms": 64469.358936999924,
+          "avg_cost_usd": 0.90891365
         },
-        "box_builder": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 3085.2176670000517
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.4,
+          "avg_efficiency": 0.9761904761904762,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.3952380952380952,
+          "p50_latency_ms": 44662.69081248902,
+          "avg_cost_usd": 0.8126265
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.45,
+          "avg_efficiency": 0.7487373737373737,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.3934659090909091,
+          "p50_latency_ms": 71225.3457295592,
+          "avg_cost_usd": 0.52545705
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.3,
+          "avg_efficiency": 0.6011904761904762,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.24017857142857144,
+          "p50_latency_ms": 65933.03579150233,
+          "avg_cost_usd": 1.0004195
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 62440.32191706356,
+          "avg_cost_usd": 2.8878498666666665
         }
       }
     },
     {
-      "id": "qwen3.5-0.8b",
-      "display_name": "Qwen 3.5 0.8B",
-      "local": true,
-      "reasoning": false,
+      "id": "br-claude-opus-4.7-think",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "flex-n",
+      "anon": false,
       "overall": {
-        "levels_run": 30,
-        "success_rate": 0.13333333333333333,
-        "avg_efficiency": 0.4409722222222222,
-        "p50_latency_ms": 854.0815420003582
+        "levels_run": 128,
+        "success_rate": 0.34375,
+        "avg_efficiency": 0.883401257833076,
+        "avg_efficiency_flex": 0.6525522683225767,
+        "avg_aggregate_score": 0.28403242111794286,
+        "p50_latency_ms": 35931.640061957296,
+        "avg_cost_usd": 0.8089868984375
       },
       "by_pack": {
-        "number_cells": {
-          "levels_run": 5,
-          "success_rate": 0.2,
-          "avg_efficiency": 0.6666666666666666,
-          "p50_latency_ms": 876.2042090002069
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.4,
+          "avg_efficiency": 0.8424242424242424,
+          "avg_efficiency_flex": 0.6222855013838621,
+          "avg_aggregate_score": 0.3244571002767724,
+          "p50_latency_ms": 10536.914124968462,
+          "avg_cost_usd": 0.5095240666666666
         },
         "carrot_quest": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 852.1999170002346
-        },
-        "rotate_flip": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 868.3107089996156
-        },
-        "flood_colors": {
-          "levels_run": 5,
-          "success_rate": 0.2,
-          "avg_efficiency": 0.2222222222222222,
-          "p50_latency_ms": 816.3280839999061
+          "levels_run": 18,
+          "success_rate": 0.2222222222222222,
+          "avg_efficiency": 0.9375,
+          "avg_efficiency_flex": 0.6842105263157895,
+          "avg_aggregate_score": 0.1871345029239766,
+          "p50_latency_ms": 12126.441541477107,
+          "avg_cost_usd": 1.2477957222222222
         },
         "diagonal_swipes": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 866.2742920005257
-        },
-        "box_builder": {
-          "levels_run": 5,
-          "success_rate": 0.4,
-          "avg_efficiency": 0.4375,
-          "p50_latency_ms": 841.0277080001833
-        }
-      }
-    },
-    {
-      "id": "gemma4-e2b",
-      "display_name": "Gemma 4 E2B",
-      "local": true,
-      "reasoning": false,
-      "overall": {
-        "levels_run": 78,
-        "success_rate": 0.11538461538461539,
-        "avg_efficiency": 0.9444444444444444,
-        "p50_latency_ms": 1082.1164579999981
-      },
-      "by_pack": {
-        "number_cells": {
-          "levels_run": 5,
-          "success_rate": 0.4,
-          "avg_efficiency": 1.0,
-          "p50_latency_ms": 1014.3617499999991
-        },
-        "carrot_quest": {
-          "levels_run": 14,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 1016.7923749997954
-        },
-        "rotate_flip": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 887.6873749999845
-        },
-        "flood_colors": {
-          "levels_run": 8,
-          "success_rate": 0.375,
+          "levels_run": 20,
+          "success_rate": 0.05,
           "avg_efficiency": 0.8333333333333334,
-          "p50_latency_ms": 899.8335209999766
-        },
-        "diagonal_swipes": {
-          "levels_run": 25,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 2014.8894999999811
-        },
-        "box_builder": {
-          "levels_run": 21,
-          "success_rate": 0.19047619047619047,
-          "avg_efficiency": 1.0,
-          "p50_latency_ms": 1095.0550830000054
-        }
-      }
-    },
-    {
-      "id": "qwen3.5-9b",
-      "display_name": "Qwen 3.5 9B",
-      "local": true,
-      "reasoning": false,
-      "overall": {
-        "levels_run": 30,
-        "success_rate": 0.1,
-        "avg_efficiency": 0.9333333333333333,
-        "p50_latency_ms": 2054.6727495002415
-      },
-      "by_pack": {
-        "number_cells": {
-          "levels_run": 5,
-          "success_rate": 0.2,
-          "avg_efficiency": 1.0,
-          "p50_latency_ms": 2489.2958749987883
-        },
-        "carrot_quest": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 1987.3880830000417
-        },
-        "rotate_flip": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 2098.5564580005303
+          "avg_efficiency_flex": 0.625,
+          "avg_aggregate_score": 0.040625,
+          "p50_latency_ms": 58505.34743798198,
+          "avg_cost_usd": 0.63870375
         },
         "flood_colors": {
-          "levels_run": 5,
+          "levels_run": 30,
+          "success_rate": 0.6,
+          "avg_efficiency": 0.9861111111111112,
+          "avg_efficiency_flex": 0.7204184704184704,
+          "avg_aggregate_score": 0.5161255411255411,
+          "p50_latency_ms": 36812.56691645831,
+          "avg_cost_usd": 0.49229443333333334
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.45,
+          "avg_efficiency": 0.7198412698412698,
+          "avg_efficiency_flex": 0.5450212145636982,
+          "avg_aggregate_score": 0.3476297732768321,
+          "p50_latency_ms": 65465.04222904332,
+          "avg_cost_usd": 0.4957496
+        },
+        "rotate_flip": {
+          "levels_run": 10,
           "success_rate": 0.4,
-          "avg_efficiency": 0.9,
-          "p50_latency_ms": 2008.2462500013207
+          "avg_efficiency": 0.750801282051282,
+          "avg_efficiency_flex": 0.5651719901719902,
+          "avg_aggregate_score": 0.31303439803439803,
+          "p50_latency_ms": 43716.44979197299,
+          "avg_cost_usd": 0.6715285
         },
-        "diagonal_swipes": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 3688.069792000533
-        },
-        "box_builder": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 1981.1603750003997
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7416666666666667,
+          "avg_aggregate_score": 0.11611111111111111,
+          "p50_latency_ms": 3601.5827079536393,
+          "avg_cost_usd": 1.9515969333333334
         }
       }
     },
     {
-      "id": "qwen3.5-2b",
-      "display_name": "Qwen 3.5 2B",
-      "local": true,
-      "reasoning": false,
+      "id": "br-claude-opus-4.7-think",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "full",
+      "anon": false,
       "overall": {
-        "levels_run": 30,
-        "success_rate": 0.03333333333333333,
-        "avg_efficiency": 0.3333333333333333,
-        "p50_latency_ms": 980.8350829998744
+        "levels_run": 128,
+        "success_rate": 0.2734375,
+        "avg_efficiency": 0.9775510204081632,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.27036830357142855,
+        "p50_latency_ms": 59631.087791523896,
+        "avg_cost_usd": 0.194030625
       },
       "by_pack": {
-        "number_cells": {
-          "levels_run": 5,
-          "success_rate": 0.2,
-          "avg_efficiency": 0.3333333333333333,
-          "p50_latency_ms": 913.6136669994812
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.3333333333333333,
+          "avg_efficiency": 0.95,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.325,
+          "p50_latency_ms": 87309.22237492632,
+          "avg_cost_usd": 0.25457246666666666
         },
         "carrot_quest": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 983.99658299968
-        },
-        "rotate_flip": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 1420.4154580002069
-        },
-        "flood_colors": {
-          "levels_run": 5,
-          "success_rate": 0.0,
-          "avg_efficiency": null,
-          "p50_latency_ms": 855.7575410004574
+          "levels_run": 18,
+          "success_rate": 0.16666666666666666,
+          "avg_efficiency": 0.8690476190476191,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.15575396825396826,
+          "p50_latency_ms": 59631.087791523896,
+          "avg_cost_usd": 0.14307466666666666
         },
         "diagonal_swipes": {
-          "levels_run": 5,
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.05,
+          "p50_latency_ms": 45791.783188062254,
+          "avg_cost_usd": 0.12215960000000001
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.4666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.4666666666666667,
+          "p50_latency_ms": 40834.25035403343,
+          "avg_cost_usd": 0.14368023333333332
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.15,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.15,
+          "p50_latency_ms": 68756.47258298704,
+          "avg_cost_usd": 0.22249735
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.7,
+          "avg_efficiency": 0.9795918367346939,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.6928571428571428,
+          "p50_latency_ms": 84260.71852096356,
+          "avg_cost_usd": 0.23835789999999998
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.13333333333333333,
+          "p50_latency_ms": 134258.42979201116,
+          "avg_cost_usd": 0.3236576
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet-think",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "flex-n",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.2890625,
+        "avg_efficiency": 0.8753869253869254,
+        "avg_efficiency_flex": 0.6498232738776298,
+        "avg_aggregate_score": 0.2384510200526262,
+        "p50_latency_ms": 62753.36543744197,
+        "avg_cost_usd": 0.697669796875
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.4,
+          "avg_efficiency": 0.9583333333333334,
+          "avg_efficiency_flex": 0.7061688311688312,
+          "avg_aggregate_score": 0.3412337662337662,
+          "p50_latency_ms": 44936.18116597645,
+          "avg_cost_usd": 0.6073938
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.2222222222222222,
+          "avg_efficiency": 0.7708333333333334,
+          "avg_efficiency_flex": 0.5603448275862069,
+          "avg_aggregate_score": 0.17337164750957854,
+          "p50_latency_ms": 54244.041082973126,
+          "avg_cost_usd": 1.3113749444444445
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.5208333333333334,
+          "avg_efficiency_flex": 0.3787878787878788,
+          "avg_aggregate_score": 0.06893939393939394,
+          "p50_latency_ms": 69925.60262500774,
+          "avg_cost_usd": 0.4955978
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.4666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7291280148423006,
+          "avg_aggregate_score": 0.40346320346320347,
+          "p50_latency_ms": 58718.53181254119,
+          "avg_cost_usd": 0.14803543333333333
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.25,
+          "avg_efficiency": 0.738974358974359,
+          "avg_efficiency_flex": 0.5732051282051283,
+          "avg_aggregate_score": 0.19665064102564103,
+          "p50_latency_ms": 71181.25664605759,
+          "avg_cost_usd": 0.31475875
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.5,
+          "avg_efficiency": 0.7638888888888888,
+          "avg_efficiency_flex": 0.5967350459441769,
+          "avg_aggregate_score": 0.39918376148604423,
+          "p50_latency_ms": 69773.16149999388,
+          "avg_cost_usd": 0.622461
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 68165.062709013,
+          "avg_cost_usd": 1.9808849333333334
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "full",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.21875,
+        "avg_efficiency": 0.9720804988662132,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.21569630456349206,
+        "p50_latency_ms": 188975.54202051833,
+        "avg_cost_usd": 0.023509320312500002
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.9166666666666666,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.19166666666666668,
+          "p50_latency_ms": 124544.68170797918,
+          "avg_cost_usd": 0.021401666666666666
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.05555555555555555,
+          "p50_latency_ms": 103889.7291244939,
+          "avg_cost_usd": 0.014894277777777777
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.15,
+          "avg_efficiency": 0.8703703703703703,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.14027777777777778,
+          "p50_latency_ms": 108291.2464584806,
+          "avg_cost_usd": 0.0184391
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.15,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.15,
+          "p50_latency_ms": 180786.0945414286,
+          "avg_cost_usd": 0.02275375
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.6,
+          "avg_efficiency": 0.9761904761904762,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.5928571428571429,
+          "p50_latency_ms": 201493.8928335905,
+          "avg_cost_usd": 0.024586900000000002
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 260497.29079101235,
+          "avg_cost_usd": 0.0318034
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.36666666666666664,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.36666666666666664,
+          "p50_latency_ms": 256460.39939601906,
+          "avg_cost_usd": 0.0291098
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku-think",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "single",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.21875,
+        "avg_efficiency": 0.8565601240496199,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.20306126356792717,
+        "p50_latency_ms": 24209.38989595743,
+        "avg_cost_usd": 0.6085715
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.26666666666666666,
+          "avg_efficiency": 0.7676470588235293,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.23568627450980392,
+          "p50_latency_ms": 14580.608875025064,
+          "avg_cost_usd": 0.5461286666666667
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.1111111111111111,
+          "avg_efficiency": 0.875,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.10416666666666667,
+          "p50_latency_ms": 21394.07508302247,
+          "avg_cost_usd": 0.9355638888888889
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
           "success_rate": 0.0,
           "avg_efficiency": null,
-          "p50_latency_ms": 1075.5260420000923
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 25687.833500502165,
+          "avg_cost_usd": 0.34386235
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.36666666666666664,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.36666666666666664,
+          "p50_latency_ms": 25059.14287501946,
+          "avg_cost_usd": 0.2858394
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.45,
+          "avg_efficiency": 0.7218253968253968,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.3874107142857143,
+          "p50_latency_ms": 35601.38333350187,
+          "avg_cost_usd": 0.33099625
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.6666666666666666,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.08333333333333333,
+          "p50_latency_ms": 20169.072874938138,
+          "avg_cost_usd": 0.2869904
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 22991.650708951056,
+          "avg_cost_usd": 1.8615209333333333
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5-think",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "full",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.203125,
+        "avg_efficiency": 0.9775641025641025,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.20084635416666666,
+        "p50_latency_ms": 182274.92831205018,
+        "avg_cost_usd": 0.0240418203125
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.9166666666666666,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.19166666666666668,
+          "p50_latency_ms": 161936.73191708513,
+          "avg_cost_usd": 0.022745666666666668
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.1111111111111111,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1111111111111111,
+          "p50_latency_ms": 110529.81935400749,
+          "avg_cost_usd": 0.01603461111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.8333333333333334,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.09166666666666667,
+          "p50_latency_ms": 112038.9254585607,
+          "avg_cost_usd": 0.01775695
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.4,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.4,
+          "p50_latency_ms": 234157.49558305833,
+          "avg_cost_usd": 0.026950866666666667
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.15,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.15,
+          "p50_latency_ms": 260153.0546869617,
+          "avg_cost_usd": 0.02607855
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.3,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.3,
+          "p50_latency_ms": 261515.1708755875,
+          "avg_cost_usd": 0.0291553
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 263577.99933315255,
+          "avg_cost_usd": 0.03138373333333333
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "single",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.2109375,
+        "avg_efficiency": 0.829070929070929,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.19290982455044955,
+        "p50_latency_ms": 14192.067791998852,
+        "avg_cost_usd": 0.4598902734375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.4,
+          "avg_efficiency": 0.9098484848484849,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.38196969696969696,
+          "p50_latency_ms": 10480.471208924428,
+          "avg_cost_usd": 0.39246013333333335
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.1111111111111111,
+          "avg_efficiency": 0.9285714285714286,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.10714285714285715,
+          "p50_latency_ms": 15400.590020930395,
+          "avg_cost_usd": 0.8776656111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 15881.094978947658,
+          "avg_cost_usd": 0.30792305
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.3,
+          "avg_efficiency": 0.9629629629629629,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.29444444444444445,
+          "p50_latency_ms": 12738.954124506563,
+          "avg_cost_usd": 0.16191756666666668
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.35,
+          "avg_efficiency": 0.5629251700680272,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.2735119047619048,
+          "p50_latency_ms": 19527.467165957205,
+          "avg_cost_usd": 0.21573945
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.7307692307692308,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.17307692307692307,
+          "p50_latency_ms": 14289.806770917494,
+          "avg_cost_usd": 0.2190629
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 16251.465416047722,
+          "avg_cost_usd": 1.3106444
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "flex-n",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.2265625,
+        "avg_efficiency": 0.8199589584906795,
+        "avg_efficiency_flex": 0.637703168575498,
+        "avg_aggregate_score": 0.18552106206519314,
+        "p50_latency_ms": 16050.920645997394,
+        "avg_cost_usd": 0.202151375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.4666666666666667,
+          "avg_efficiency": 0.7831632653061225,
+          "avg_efficiency_flex": 0.5765550239234449,
+          "avg_aggregate_score": 0.3678628389154705,
+          "p50_latency_ms": 16917.37641696818,
+          "avg_cost_usd": 0.1994526
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.2222222222222222,
+          "avg_efficiency": 0.7672697368421053,
+          "avg_efficiency_flex": 0.5740424076607387,
+          "avg_aggregate_score": 0.1748936008511932,
+          "p50_latency_ms": 15218.641687533818,
+          "avg_cost_usd": 0.34789922222222225
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.625,
+          "avg_efficiency_flex": 0.45454545454545453,
+          "avg_aggregate_score": 0.03636363636363636,
+          "p50_latency_ms": 17519.993312482256,
+          "avg_cost_usd": 0.11547285
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.23333333333333334,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7319109461966605,
+          "avg_aggregate_score": 0.20205627705627707,
+          "p50_latency_ms": 13163.969374960288,
+          "avg_cost_usd": 0.038478766666666664
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.25,
+          "avg_efficiency": 0.7842857142857143,
+          "avg_efficiency_flex": 0.7505194805194805,
+          "avg_aggregate_score": 0.21881493506493507,
+          "p50_latency_ms": 19924.956624978222,
+          "avg_cost_usd": 0.1277329
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.4,
+          "avg_efficiency": 0.6702898550724637,
+          "avg_efficiency_flex": 0.5202044025157233,
+          "avg_aggregate_score": 0.30404088050314465,
+          "p50_latency_ms": 15877.555896004196,
+          "avg_cost_usd": 0.1341242
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 14694.590125000104,
+          "avg_cost_usd": 0.6174454
+        }
+      }
+    },
+    {
+      "id": "br-claude-opus-4.7",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "single",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.171875,
+        "avg_efficiency": 0.8871212121212121,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.16217447916666666,
+        "p50_latency_ms": 5092.582895478699,
+        "avg_cost_usd": 0.315665390625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.9166666666666666,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.19166666666666668,
+          "p50_latency_ms": 4577.583458973095,
+          "avg_cost_usd": 0.303075
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.16666666666666666,
+          "avg_efficiency": 0.7833333333333333,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1486111111111111,
+          "p50_latency_ms": 4506.025666487403,
+          "avg_cost_usd": 0.45483416666666665
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 7852.020312973764,
+          "avg_cost_usd": 0.24780259999999998
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.3333333333333333,
+          "avg_efficiency": 0.9833333333333334,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.33055555555555555,
+          "p50_latency_ms": 4499.088541546371,
+          "avg_cost_usd": 0.14665373333333334
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.7708333333333334,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.17708333333333334,
+          "p50_latency_ms": 9915.875916543882,
+          "avg_cost_usd": 0.2527564
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.5,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.075,
+          "p50_latency_ms": 7700.523249979597,
+          "avg_cost_usd": 0.2916574
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 4245.556624955498,
+          "avg_cost_usd": 0.6896442666666667
+        }
+      }
+    },
+    {
+      "id": "br-claude-opus-4.7",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "flex-n",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1875,
+        "avg_efficiency": 0.8268877378537622,
+        "avg_efficiency_flex": 0.630928438339429,
+        "avg_aggregate_score": 0.15289954109432147,
+        "p50_latency_ms": 6601.755354495253,
+        "avg_cost_usd": 0.27444696875
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.26666666666666666,
+          "avg_efficiency": 0.9375,
+          "avg_efficiency_flex": 0.7256493506493507,
+          "avg_aggregate_score": 0.2300865800865801,
+          "p50_latency_ms": 4550.40887510404,
+          "avg_cost_usd": 0.30416326666666665
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.16666666666666666,
+          "avg_efficiency": 0.5347564313081554,
+          "avg_efficiency_flex": 0.3962937647148173,
+          "avg_aggregate_score": 0.11635781372623477,
+          "p50_latency_ms": 4693.754145526327,
+          "avg_cost_usd": 0.40909744444444446
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.35714285714285715,
+          "avg_efficiency_flex": 0.2702702702702703,
+          "avg_aggregate_score": 0.03175675675675675,
+          "p50_latency_ms": 11096.749354503118,
+          "avg_cost_usd": 0.16019595
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.3,
+          "avg_efficiency": 0.9312169312169312,
+          "avg_efficiency_flex": 0.6771072065189713,
+          "avg_aggregate_score": 0.25156608097784566,
+          "p50_latency_ms": 6262.655666447245,
+          "avg_cost_usd": 0.1158136
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.25,
+          "avg_efficiency": 0.7505882352941177,
+          "avg_efficiency_flex": 0.6273137388926863,
+          "avg_aggregate_score": 0.2034142173615858,
+          "p50_latency_ms": 13932.855666498654,
+          "avg_cost_usd": 0.2217945
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.8,
+          "avg_aggregate_score": 0.09,
+          "p50_latency_ms": 11558.101791481022,
+          "avg_cost_usd": 0.2902533
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 3806.0555000556633,
+          "avg_cost_usd": 0.6124172666666666
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet-think",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "full",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.15625,
+        "avg_efficiency": 0.9339285714285714,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.15108816964285715,
+        "p50_latency_ms": 65905.91056254925,
+        "avg_cost_usd": 0.08289359375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.3333333333333333,
+          "avg_efficiency": 0.8833333333333333,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.3138888888888889,
+          "p50_latency_ms": 65080.84191707894,
+          "avg_cost_usd": 0.0726508
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.16666666666666666,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.16666666666666666,
+          "p50_latency_ms": 66003.59606253915,
+          "avg_cost_usd": 0.08046305555555555
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.15,
+          "avg_efficiency": 0.753968253968254,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.13154761904761905,
+          "p50_latency_ms": 65137.36081251409,
+          "avg_cost_usd": 0.09317725
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.2,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.2,
+          "p50_latency_ms": 54103.05108351167,
+          "avg_cost_usd": 0.07495260000000001
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 77193.21027048863,
+          "avg_cost_usd": 0.09519709999999999
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.2,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.2,
+          "p50_latency_ms": 62760.88754157536,
+          "avg_cost_usd": 0.0783736
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 74984.2287079664,
+          "avg_cost_usd": 0.08483213333333334
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "single",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1484375,
+        "avg_efficiency": 0.8548359535201641,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.13766360592532467,
+        "p50_latency_ms": 7204.972708481364,
+        "avg_cost_usd": 0.1158170625
+      },
+      "by_pack": {
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 0.375,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.03819444444444445,
+          "p50_latency_ms": 7201.391874987166,
+          "avg_cost_usd": 0.1852346111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8531.077062536497,
+          "avg_cost_usd": 0.07724935000000001
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.3333333333333333,
+          "avg_efficiency": 0.9571428571428572,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.3261904761904762,
+          "p50_latency_ms": 6995.974062534515,
+          "avg_cost_usd": 0.059005
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.8125,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.18125,
+          "p50_latency_ms": 8646.334292076062,
+          "avg_cost_usd": 0.056671
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.5,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.075,
+          "p50_latency_ms": 7483.802291972097,
+          "avg_cost_usd": 0.0708526
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 6641.7147079482675,
+          "avg_cost_usd": 0.3029004
         },
         "box_builder": {
-          "levels_run": 5,
+          "levels_run": 15,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 0.7727272727272727,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.11818181818181818,
+          "p50_latency_ms": 4129.478416987695,
+          "avg_cost_usd": 0.11931813333333333
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku-think",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "full",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.125,
+        "avg_efficiency": 0.9572172619047619,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.12232607886904762,
+        "p50_latency_ms": 33422.43256251095,
+        "avg_cost_usd": 0.029832421875
+      },
+      "by_pack": {
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.9285714285714286,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.19285714285714287,
+          "p50_latency_ms": 31557.623687491287,
+          "avg_cost_usd": 0.0262059
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 40843.423833022825,
+          "avg_cost_usd": 0.03359433333333333
+        },
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.2,
+          "p50_latency_ms": 37907.67824999057,
+          "avg_cost_usd": 0.0321894
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.05555555555555555,
+          "p50_latency_ms": 29887.363167013973,
+          "avg_cost_usd": 0.025993555555555554
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.7291666666666667,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.08645833333333333,
+          "p50_latency_ms": 32963.27897947049,
+          "avg_cost_usd": 0.03154135
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.2,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.2,
+          "p50_latency_ms": 23673.65739546949,
+          "avg_cost_usd": 0.023914866666666666
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.05,
+          "p50_latency_ms": 39576.954291551374,
+          "avg_cost_usd": 0.0376789
+        }
+      }
+    },
+    {
+      "id": "br-claude-opus-4.7",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "full",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1171875,
+        "avg_efficiency": 0.9531746031746032,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.1144438244047619,
+        "p50_latency_ms": 19886.94579200819,
+        "avg_cost_usd": 0.0623648984375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.2,
+          "p50_latency_ms": 38444.28458297625,
+          "avg_cost_usd": 0.07578566666666667
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 0.75,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.04861111111111111,
+          "p50_latency_ms": 23158.43552100705,
+          "avg_cost_usd": 0.06890111111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.7738095238095238,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0886904761904762,
+          "p50_latency_ms": 33415.36283295136,
+          "avg_cost_usd": 0.08075415
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.23333333333333334,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.23333333333333334,
+          "p50_latency_ms": 11000.598249491304,
+          "avg_cost_usd": 0.027963833333333334
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.05,
+          "p50_latency_ms": 39558.02860396216,
+          "avg_cost_usd": 0.08812405
+        },
+        "rotate_flip": {
+          "levels_run": 10,
           "success_rate": 0.0,
           "avg_efficiency": null,
-          "p50_latency_ms": 946.4221250000264
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 36231.15864594001,
+          "avg_cost_usd": 0.077376
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 15745.126832975075,
+          "avg_cost_usd": 0.041030866666666665
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku-think",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "flex-n",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1328125,
+        "avg_efficiency": 0.9449579831932773,
+        "avg_efficiency_flex": 0.7164618319417081,
+        "avg_aggregate_score": 0.11398379352737906,
+        "p50_latency_ms": 24417.738854011986,
+        "avg_cost_usd": 0.3323802109375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.175,
+          "p50_latency_ms": 13275.40208294522,
+          "avg_cost_usd": 0.38621266666666665
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.04861111111111111,
+          "p50_latency_ms": 21219.83429143438,
+          "avg_cost_usd": 0.5549051111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.7142857142857143,
+          "avg_efficiency_flex": 0.5263157894736842,
+          "avg_aggregate_score": 0.0381578947368421,
+          "p50_latency_ms": 23390.440791496076,
+          "avg_cost_usd": 0.20146225
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.2,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7431818181818182,
+          "avg_aggregate_score": 0.17431818181818182,
+          "p50_latency_ms": 25405.757687462028,
+          "avg_cost_usd": 0.0673423
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.8375,
+          "avg_efficiency_flex": 0.6611111111111111,
+          "avg_aggregate_score": 0.16611111111111113,
+          "p50_latency_ms": 36569.91806300357,
+          "avg_cost_usd": 0.17058304999999999
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.8,
+          "avg_aggregate_score": 0.09,
+          "p50_latency_ms": 22959.96091706911,
+          "avg_cost_usd": 0.189351
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 25054.72954106517,
+          "avg_cost_usd": 1.0272333333333332
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "full",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.109375,
+        "avg_efficiency": 0.9345238095238095,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.10579427083333333,
+        "p50_latency_ms": 21339.667103951797,
+        "avg_cost_usd": 0.0215550390625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.3333333333333333,
+          "avg_efficiency": 0.9,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.31666666666666665,
+          "p50_latency_ms": 22456.493332982063,
+          "avg_cost_usd": 0.019178733333333333
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 0.75,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.04861111111111111,
+          "p50_latency_ms": 21576.31695905002,
+          "avg_cost_usd": 0.02033938888888889
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.8333333333333334,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.04583333333333334,
+          "p50_latency_ms": 21407.883228966966,
+          "avg_cost_usd": 0.02294725
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.16666666666666666,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.16666666666666666,
+          "p50_latency_ms": 18507.328979030717,
+          "avg_cost_usd": 0.017820333333333334
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 23561.890750017483,
+          "avg_cost_usd": 0.02810225
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1,
+          "p50_latency_ms": 21202.713854436297,
+          "avg_cost_usd": 0.0197708
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 23231.12495895475,
+          "avg_cost_usd": 0.023463133333333334
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "flex-n",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1171875,
+        "avg_efficiency": 0.9388888888888889,
+        "avg_efficiency_flex": 0.7598124098124098,
+        "avg_aggregate_score": 0.10311400838744589,
+        "p50_latency_ms": 7512.269187485799,
+        "avg_cost_usd": 0.0594944296875
+      },
+      "by_pack": {
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 5404.998624988366,
+          "avg_cost_usd": 0.08948344444444445
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8552.584124961868,
+          "avg_cost_usd": 0.04293155
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.2,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7326839826839827,
+          "avg_aggregate_score": 0.17326839826839827,
+          "p50_latency_ms": 7585.710353974719,
+          "avg_cost_usd": 0.015397666666666667
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.25,
+          "avg_efficiency": 0.8666666666666667,
+          "avg_efficiency_flex": 0.7987878787878788,
+          "avg_aggregate_score": 0.22484848484848485,
+          "p50_latency_ms": 9876.771395502146,
+          "avg_cost_usd": 0.05330775
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.875,
+          "avg_efficiency_flex": 0.7,
+          "avg_aggregate_score": 0.17,
+          "p50_latency_ms": 8270.788832975086,
+          "avg_cost_usd": 0.0382246
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.8571428571428571,
+          "avg_aggregate_score": 0.06190476190476191,
+          "p50_latency_ms": 7503.227832959965,
+          "avg_cost_usd": 0.1494382
+        },
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 2431.305916979909,
+          "avg_cost_usd": 0.06627
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "single",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1171875,
+        "avg_efficiency": 0.678974358974359,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.09837740384615384,
+        "p50_latency_ms": 11732.390104036313,
+        "avg_cost_usd": 0.0534883515625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 16319.943833048455,
+          "avg_cost_usd": 0.04848793333333333
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.1111111111111111,
+          "avg_efficiency": 0.5,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.08333333333333333,
+          "p50_latency_ms": 8950.129541452043,
+          "avg_cost_usd": 0.09567011111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 12682.389020978007,
+          "avg_cost_usd": 0.02930185
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.44743589743589746,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.14474358974358972,
+          "p50_latency_ms": 10635.369166499004,
+          "avg_cost_usd": 0.02516993333333333
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.875,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1875,
+          "p50_latency_ms": 15492.884125036653,
+          "avg_cost_usd": 0.0241648
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1,
+          "p50_latency_ms": 20323.960083012935,
+          "avg_cost_usd": 0.0161143
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 10782.057916047052,
+          "avg_cost_usd": 0.16077026666666666
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet-think",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "single",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1171875,
+        "avg_efficiency": 0.6606951871657754,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.09730635862299465,
+        "p50_latency_ms": 46444.02739603538,
+        "avg_cost_usd": 1.1568688984375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.5,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.15,
+          "p50_latency_ms": 32042.658040998504,
+          "avg_cost_usd": 1.74545
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.1111111111111111,
+          "avg_efficiency": 0.7279411764705883,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0959967320261438,
+          "p50_latency_ms": 39739.24272949807,
+          "avg_cost_usd": 1.9435486666666666
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.45454545454545453,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.03636363636363636,
+          "p50_latency_ms": 51602.95297898119,
+          "avg_cost_usd": 0.7717387
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1,
+          "p50_latency_ms": 19960.172624967527,
+          "avg_cost_usd": 0.2515344666666667
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.25,
+          "avg_efficiency": 0.5666666666666667,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.19583333333333333,
+          "p50_latency_ms": 64414.15695799515,
+          "avg_cost_usd": 0.62140725
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.6666666666666666,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.08333333333333333,
+          "p50_latency_ms": 53837.95608347282,
+          "avg_cost_usd": 0.8799063
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 46369.280125014484,
+          "avg_cost_usd": 2.8470384666666666
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5-think",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "flex-n",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1015625,
+        "avg_efficiency": 0.9051282051282051,
+        "avg_efficiency_flex": 0.7394733471656548,
+        "avg_aggregate_score": 0.08833263091075591,
+        "p50_latency_ms": 12406.923125497997,
+        "avg_cost_usd": 0.0278678515625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 16263.679082971066,
+          "avg_cost_usd": 0.0321974
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 9627.78568745125,
+          "avg_cost_usd": 0.03768
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7142857142857143,
+          "avg_aggregate_score": 0.04285714285714286,
+          "p50_latency_ms": 14005.693625484128,
+          "avg_cost_usd": 0.0153735
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.16666666666666666,
+          "avg_efficiency": 0.8533333333333334,
+          "avg_efficiency_flex": 0.7216783216783217,
+          "avg_aggregate_score": 0.14347319347319348,
+          "p50_latency_ms": 10707.9680209863,
+          "avg_cost_usd": 0.018577133333333332
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.875,
+          "avg_efficiency_flex": 0.7476190476190476,
+          "avg_aggregate_score": 0.17476190476190476,
+          "p50_latency_ms": 15221.837646036875,
+          "avg_cost_usd": 0.02047275
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.8,
+          "avg_aggregate_score": 0.09,
+          "p50_latency_ms": 16644.782854011282,
+          "avg_cost_usd": 0.0135342
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 11837.48949994333,
+          "avg_cost_usd": 0.0664202
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5-think",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "single",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.1015625,
+        "avg_efficiency": 0.6882284382284383,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.08573035037878787,
+        "p50_latency_ms": 11920.74104148196,
+        "avg_cost_usd": 0.053716609375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 0.75,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.11666666666666667,
+          "p50_latency_ms": 15666.42820800189,
+          "avg_cost_usd": 0.055655133333333336
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8535.268249979708,
+          "avg_cost_usd": 0.09593088888888888
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 13636.745812487788,
+          "avg_cost_usd": 0.0256721
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 0.75,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.11666666666666667,
+          "p50_latency_ms": 11453.813041502144,
+          "avg_cost_usd": 0.030079833333333333
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.25,
+          "avg_efficiency": 0.5893939393939394,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.19867424242424242,
+          "p50_latency_ms": 16546.120812534355,
+          "avg_cost_usd": 0.0214157
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1,
+          "p50_latency_ms": 17634.67091700295,
+          "avg_cost_usd": 0.0176118
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.5,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.05,
+          "p50_latency_ms": 10489.172416971996,
+          "avg_cost_usd": 0.15292493333333332
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "flex-n",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.09375,
+        "avg_efficiency": 0.7759920634920635,
+        "avg_efficiency_flex": 0.6422599750185957,
+        "avg_aggregate_score": 0.07698093632899668,
+        "p50_latency_ms": 11844.118083477952,
+        "avg_cost_usd": 0.02702459375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 15784.40712497104,
+          "avg_cost_usd": 0.029283466666666667
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 9563.8092290028,
+          "avg_cost_usd": 0.039286666666666664
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 13108.510624966584,
+          "avg_cost_usd": 0.01622205
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.16666666666666666,
+          "avg_efficiency": 0.6757142857142857,
+          "avg_efficiency_flex": 0.5440613026819924,
+          "avg_aggregate_score": 0.12867177522349935,
+          "p50_latency_ms": 10715.762687497772,
+          "avg_cost_usd": 0.0156955
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.7333333333333333,
+          "avg_efficiency_flex": 0.6717032967032968,
+          "avg_aggregate_score": 0.16717032967032966,
+          "p50_latency_ms": 16739.361604035366,
+          "avg_cost_usd": 0.01824545
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.8,
+          "avg_aggregate_score": 0.09,
+          "p50_latency_ms": 16949.04595799744,
+          "avg_cost_usd": 0.0141285
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 11257.919374969788,
+          "avg_cost_usd": 0.06741573333333334
+        }
+      }
+    },
+    {
+      "id": "br-claude-opus-4.7-think",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "single",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.09375,
+        "avg_efficiency": 0.5607804232804232,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.07316158234126985,
+        "p50_latency_ms": 13742.34122899361,
+        "avg_cost_usd": 1.256640625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.4222222222222222,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.14222222222222222,
+          "p50_latency_ms": 15288.705124985427,
+          "avg_cost_usd": 1.4099106666666668
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 0.8571428571428571,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.05158730158730159,
+          "p50_latency_ms": 12274.298146017827,
+          "avg_cost_usd": 2.0631939444444445
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.4527777777777778,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.07263888888888889,
+          "p50_latency_ms": 14382.804833468981,
+          "avg_cost_usd": 0.9223601499999999
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.8,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.060000000000000005,
+          "p50_latency_ms": 4095.547499950044,
+          "avg_cost_usd": 0.18032873333333332
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.15,
+          "avg_efficiency": 0.5333333333333333,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.115,
+          "p50_latency_ms": 25293.47668751143,
+          "avg_cost_usd": 0.83282175
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 17819.02502052253,
+          "avg_cost_usd": 1.1016656
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.5,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.05,
+          "p50_latency_ms": 14488.51083300542,
+          "avg_cost_usd": 3.4022462
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5-think",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "flex-n",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0859375,
+        "avg_efficiency": 0.7545454545454545,
+        "avg_efficiency_flex": 0.6559684623445805,
+        "avg_aggregate_score": 0.0711548948663687,
+        "p50_latency_ms": 9642.228208074812,
+        "avg_cost_usd": 0.0324084921875
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.3333333333333333,
+          "avg_efficiency_flex": 0.2608695652173913,
+          "avg_aggregate_score": 0.04202898550724638,
+          "p50_latency_ms": 12325.04600007087,
+          "avg_cost_usd": 0.0314334
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8238.135624967981,
+          "avg_cost_usd": 0.05427672222222222
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 9484.924979507923,
+          "avg_cost_usd": 0.0165235
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 0.875,
+          "avg_efficiency_flex": 0.7892078681552366,
+          "avg_aggregate_score": 0.11928052454368245,
+          "p50_latency_ms": 13033.099146501627,
+          "avg_cost_usd": 0.017544466666666668
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.6166666666666667,
+          "avg_efficiency_flex": 0.511988011988012,
+          "avg_aggregate_score": 0.1511988011988012,
+          "p50_latency_ms": 10871.325520973187,
+          "avg_cost_usd": 0.01513045
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 1.0,
+          "avg_aggregate_score": 0.1,
+          "p50_latency_ms": 11545.182396483142,
+          "avg_cost_usd": 0.0182679
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 8712.578332982957,
+          "avg_cost_usd": 0.0905142
+        }
+      }
+    },
+    {
+      "id": "br-claude-opus-4.7-think",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "flex-n",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.09375,
+        "avg_efficiency": 0.6038870851370851,
+        "avg_efficiency_flex": 0.5148083025480723,
+        "avg_aggregate_score": 0.07100663918194089,
+        "p50_latency_ms": 13622.126500064041,
+        "avg_cost_usd": 0.8009538515625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 0.75,
+          "avg_efficiency_flex": 0.6875,
+          "avg_aggregate_score": 0.1125,
+          "p50_latency_ms": 12253.038208000362,
+          "avg_cost_usd": 0.808992
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.1111111111111111,
+          "avg_efficiency": 0.606060606060606,
+          "avg_efficiency_flex": 0.5,
+          "avg_aggregate_score": 0.08333333333333333,
+          "p50_latency_ms": 12907.425083511043,
+          "avg_cost_usd": 1.2588825555555556
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.6696428571428572,
+          "avg_efficiency_flex": 0.5277777777777778,
+          "avg_aggregate_score": 0.0763888888888889,
+          "p50_latency_ms": 15447.316291509196,
+          "avg_cost_usd": 0.4524606
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.03333333333333333,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.8888888888888888,
+          "avg_aggregate_score": 0.03148148148148148,
+          "p50_latency_ms": 3212.0792915229686,
+          "avg_cost_usd": 0.0700294
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.4654761904761905,
+          "avg_efficiency_flex": 0.3993464052287582,
+          "avg_aggregate_score": 0.13993464052287582,
+          "p50_latency_ms": 25347.610750002787,
+          "avg_cost_usd": 0.68339245
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 16743.739521014504,
+          "avg_cost_usd": 0.7227071
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.3333333333333333,
+          "avg_efficiency_flex": 0.2608695652173913,
+          "avg_aggregate_score": 0.04202898550724638,
+          "p50_latency_ms": 16248.972333036363,
+          "avg_cost_usd": 2.3788208666666666
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "full",
+      "anon": false,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0703125,
+        "avg_efficiency": 1.0,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.0703125,
+        "p50_latency_ms": 9176.994375535287,
+        "avg_cost_usd": 0.0049503515625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.13333333333333333,
+          "p50_latency_ms": 10174.214249942452,
+          "avg_cost_usd": 0.004929533333333333
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8892.97358301701,
+          "avg_cost_usd": 0.005115611111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 9330.219228984788,
+          "avg_cost_usd": 0.0057422
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.16666666666666666,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.16666666666666666,
+          "p50_latency_ms": 7124.0679995389655,
+          "avg_cost_usd": 0.0036348333333333332
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 10422.00502048945,
+          "avg_cost_usd": 0.00585235
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1,
+          "p50_latency_ms": 9146.984999999404,
+          "avg_cost_usd": 0.0044992
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 9164.695584098808,
+          "avg_cost_usd": 0.0054462
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "single",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.078125,
+        "avg_efficiency": 0.6311904761904762,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.06371837797619048,
+        "p50_latency_ms": 10833.027479471639,
+        "avg_cost_usd": 0.29968375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 0.5,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1,
+          "p50_latency_ms": 9738.051540916786,
+          "avg_cost_usd": 0.3679928
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 0.42857142857142855,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.03968253968253968,
+          "p50_latency_ms": 10717.707875010092,
+          "avg_cost_usd": 0.5868641111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.4166666666666667,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.035416666666666666,
+          "p50_latency_ms": 10883.160291996319,
+          "avg_cost_usd": 0.18215789999999998
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1,
+          "p50_latency_ms": 7509.1745624667965,
+          "avg_cost_usd": 0.049700266666666666
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.15,
+          "avg_efficiency": 0.4888888888888889,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.11166666666666666,
+          "p50_latency_ms": 14507.001604011748,
+          "avg_cost_usd": 0.15428150000000002
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 13399.03706300538,
+          "avg_cost_usd": 0.1741334
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 11461.025917087682,
+          "avg_cost_usd": 0.8209962666666667
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "flex-n",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0703125,
+        "avg_efficiency": 0.8046296296296296,
+        "avg_efficiency_flex": 0.6235046435046435,
+        "avg_aggregate_score": 0.05707633512321012,
+        "p50_latency_ms": 9858.694125490729,
+        "avg_cost_usd": 0.0999406015625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.375,
+          "avg_efficiency_flex": 0.2857142857142857,
+          "avg_aggregate_score": 0.04285714285714285,
+          "p50_latency_ms": 10910.411500022747,
+          "avg_cost_usd": 0.1367238
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 9402.277333429083,
+          "avg_cost_usd": 0.14184222222222223
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8596.341604541522,
+          "avg_cost_usd": 0.05376715
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7434440559440559,
+          "avg_aggregate_score": 0.11622960372960373,
+          "p50_latency_ms": 6355.31777102733,
+          "avg_cost_usd": 0.020707666666666666
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.15,
+          "avg_efficiency": 0.6222222222222222,
+          "avg_efficiency_flex": 0.5340170940170941,
+          "avg_aggregate_score": 0.11505128205128205,
+          "p50_latency_ms": 12646.568582975306,
+          "avg_cost_usd": 0.09273375
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 11819.81774995802,
+          "avg_cost_usd": 0.0797848
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 10885.946208029054,
+          "avg_cost_usd": 0.25595226666666665
+        }
+      }
+    },
+    {
+      "id": "br-claude-opus-4.7",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "single",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0546875,
+        "avg_efficiency": 0.5952380952380952,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.043619791666666664,
+        "p50_latency_ms": 5364.694437535945,
+        "avg_cost_usd": 0.24645334375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.2,
+          "avg_efficiency": 0.3888888888888889,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.1388888888888889,
+          "p50_latency_ms": 5508.594457991421,
+          "avg_cost_usd": 0.3379662666666667
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 5199.342333013192,
+          "avg_cost_usd": 0.4780076111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 5666.172292025294,
+          "avg_cost_usd": 0.14748005
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 4496.584250009619,
+          "avg_cost_usd": 0.04720066666666667
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.6666666666666666,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.041666666666666664,
+          "p50_latency_ms": 6375.736083486117,
+          "avg_cost_usd": 0.14685215000000001
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 6302.669583528768,
+          "avg_cost_usd": 0.1907654
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.3333333333333333,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.04444444444444444,
+          "p50_latency_ms": 5039.164250018075,
+          "avg_cost_usd": 0.5774719333333334
+        }
+      }
+    },
+    {
+      "id": "br-claude-opus-4.7",
+      "display_name": "Claude Opus 4.7 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "flex-n",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0546875,
+        "avg_efficiency": 0.6597069597069597,
+        "avg_efficiency_flex": 0.5521043216895751,
+        "avg_aggregate_score": 0.04244035254619932,
+        "p50_latency_ms": 5161.548895994201,
+        "avg_cost_usd": 0.1738459140625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 5474.280167021789,
+          "avg_cost_usd": 0.24464866666666668
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 0.6666666666666666,
+          "avg_efficiency_flex": 0.5454545454545454,
+          "avg_aggregate_score": 0.04292929292929293,
+          "p50_latency_ms": 5072.629833535757,
+          "avg_cost_usd": 0.30481494444444446
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.38461538461538464,
+          "avg_efficiency_flex": 0.2857142857142857,
+          "avg_aggregate_score": 0.03214285714285714,
+          "p50_latency_ms": 6019.590854004491,
+          "avg_cost_usd": 0.1010586
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.8333333333333334,
+          "avg_efficiency_flex": 0.6677527967850548,
+          "avg_aggregate_score": 0.08338763983925275,
+          "p50_latency_ms": 4615.6201039557345,
+          "avg_cost_usd": 0.03556056666666667
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.5333333333333333,
+          "avg_efficiency_flex": 0.5151515151515151,
+          "avg_aggregate_score": 0.07575757575757576,
+          "p50_latency_ms": 5356.859437015373,
+          "avg_cost_usd": 0.0887565
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 5165.890208445489,
+          "avg_cost_usd": 0.1001798
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 4870.522582903504,
+          "avg_cost_usd": 0.4820640666666667
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku-think",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "single",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.046875,
+        "avg_efficiency": 0.6805555555555556,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.039388020833333336,
+        "p50_latency_ms": 17166.870624409057,
+        "avg_cost_usd": 0.425595234375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.3333333333333333,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.04444444444444444,
+          "p50_latency_ms": 16404.67737498693,
+          "avg_cost_usd": 0.4991428666666667
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 0.75,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.04861111111111111,
+          "p50_latency_ms": 19119.592063012533,
+          "avg_cost_usd": 0.8393183888888889
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 19197.57789594587,
+          "avg_cost_usd": 0.2168959
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.03333333333333333,
+          "avg_efficiency": 0.5,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.025,
+          "p50_latency_ms": 13299.39827148337,
+          "avg_cost_usd": 0.058088600000000004
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.75,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0875,
+          "p50_latency_ms": 20250.10070798453,
+          "avg_cost_usd": 0.21045855
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 15921.332791505847,
+          "avg_cost_usd": 0.24624580000000001
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.06666666666666667,
+          "p50_latency_ms": 16842.907374957576,
+          "avg_cost_usd": 1.2752740666666667
+        }
+      }
+    },
+    {
+      "id": "br-claude-sonnet-think",
+      "display_name": "Claude Sonnet 4.6 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "flex-n",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.046875,
+        "avg_efficiency": 0.8974358974358975,
+        "avg_efficiency_flex": 0.674777183600713,
+        "avg_aggregate_score": 0.03925259024064171,
+        "p50_latency_ms": 49410.82541702781,
+        "avg_cost_usd": 0.490782234375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 40367.943458026275,
+          "avg_cost_usd": 0.6351791999999999
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 46257.82131199958,
+          "avg_cost_usd": 0.8166431111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 56418.76770852832,
+          "avg_cost_usd": 0.38269785
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.1,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7348484848484849,
+          "avg_aggregate_score": 0.08674242424242425,
+          "p50_latency_ms": 22589.082937513012,
+          "avg_cost_usd": 0.084141
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.6923076923076923,
+          "avg_efficiency_flex": 0.5470588235294118,
+          "avg_aggregate_score": 0.0773529411764706,
+          "p50_latency_ms": 65010.049770993646,
+          "avg_cost_usd": 0.2961407
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 55842.082375020254,
+          "avg_cost_usd": 0.5623838
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 52500.77699997928,
+          "avg_cost_usd": 1.1245348666666666
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku-think",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "flex-n",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.046875,
+        "avg_efficiency": 0.8869047619047619,
+        "avg_efficiency_flex": 0.6656299840510367,
+        "avg_aggregate_score": 0.03903820275119617,
+        "p50_latency_ms": 20357.657417014707,
+        "avg_cost_usd": 0.18956764843749999
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 19933.732000063173,
+          "avg_cost_usd": 0.23330266666666666
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.05555555555555555,
+          "avg_efficiency": 0.75,
+          "avg_efficiency_flex": 0.5454545454545454,
+          "avg_aggregate_score": 0.04292929292929293,
+          "p50_latency_ms": 22135.793562454637,
+          "avg_cost_usd": 0.3362326666666667
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 18937.47143750079,
+          "avg_cost_usd": 0.11682914999999999
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7386363636363636,
+          "avg_aggregate_score": 0.05795454545454545,
+          "p50_latency_ms": 14034.455146058463,
+          "avg_cost_usd": 0.05453856666666666
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.7857142857142857,
+          "avg_efficiency_flex": 0.6105263157894737,
+          "avg_aggregate_score": 0.08052631578947368,
+          "p50_latency_ms": 23316.163666488137,
+          "avg_cost_usd": 0.1087477
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 21168.663229502272,
+          "avg_cost_usd": 0.1385302
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.75,
+          "avg_aggregate_score": 0.058333333333333334,
+          "p50_latency_ms": 21558.03720804397,
+          "avg_cost_usd": 0.4786623333333333
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5-think",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": true,
+      "inference_mode": "single",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.046875,
+        "avg_efficiency": 0.6464646464646464,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.03858901515151515,
+        "p50_latency_ms": 10558.350021019578,
+        "avg_cost_usd": 0.05966571875
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.42857142857142855,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.04761904761904762,
+          "p50_latency_ms": 15642.732959007844,
+          "avg_cost_usd": 0.045713133333333336
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8256.508375518024,
+          "avg_cost_usd": 0.1252398888888889
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 10329.897916526534,
+          "avg_cost_usd": 0.0315257
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.8484848484848485,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.09242424242424242,
+          "p50_latency_ms": 22693.792124977335,
+          "avg_cost_usd": 0.021947866666666666
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.45238095238095233,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.07261904761904761,
+          "p50_latency_ms": 11210.742687515449,
+          "avg_cost_usd": 0.01818515
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 12007.78960401658,
+          "avg_cost_usd": 0.031848800000000003
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8679.259708034806,
+          "avg_cost_usd": 0.18173706666666667
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "single",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0390625,
+        "avg_efficiency": 0.8183333333333334,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.03551432291666667,
+        "p50_latency_ms": 10432.566792005673,
+        "avg_cost_usd": 0.057830265625
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 13043.890250031836,
+          "avg_cost_usd": 0.052385466666666665
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8553.634875512216,
+          "avg_cost_usd": 0.12606772222222223
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.625,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.040625,
+          "p50_latency_ms": 9043.598813004792,
+          "avg_cost_usd": 0.02577155
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.8888888888888888,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.09444444444444444,
+          "p50_latency_ms": 23762.192354013678,
+          "avg_cost_usd": 0.01821853333333333
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.8,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.045,
+          "p50_latency_ms": 11384.184333495796,
+          "avg_cost_usd": 0.01770455
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 9845.392354007345,
+          "avg_cost_usd": 0.0217432
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8675.762166967615,
+          "avg_cost_usd": 0.18091753333333332
+        }
+      }
+    },
+    {
+      "id": "br-minimax-m2.5",
+      "display_name": "MiniMax M2.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "flex-n",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0390625,
+        "avg_efficiency": 0.8914285714285715,
+        "avg_efficiency_flex": 0.7144087938205586,
+        "avg_aggregate_score": 0.03348454675430779,
+        "p50_latency_ms": 9719.369832950179,
+        "avg_cost_usd": 0.0333120703125
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 11792.226416058838,
+          "avg_cost_usd": 0.0311484
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8198.746000009123,
+          "avg_cost_usd": 0.05749838888888889
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8974.533604516182,
+          "avg_cost_usd": 0.0162262
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.13333333333333333,
+          "avg_efficiency": 0.9642857142857143,
+          "avg_efficiency_flex": 0.7680109922756981,
+          "avg_aggregate_score": 0.11786739948504654,
+          "p50_latency_ms": 14843.144562502857,
+          "avg_cost_usd": 0.019298033333333332
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.6,
+          "avg_efficiency_flex": 0.5,
+          "avg_aggregate_score": 0.0375,
+          "p50_latency_ms": 10151.373312517535,
+          "avg_cost_usd": 0.0131002
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 10868.20531199919,
+          "avg_cost_usd": 0.0191383
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 8818.594790995121,
+          "avg_cost_usd": 0.09365973333333333
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "single",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0390625,
+        "avg_efficiency": 0.62,
+        "avg_efficiency_flex": null,
+        "avg_aggregate_score": 0.031640625,
+        "p50_latency_ms": 6759.36789548723,
+        "avg_cost_usd": 0.0991134375
+      },
+      "by_pack": {
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 5366.808958002366,
+          "avg_cost_usd": 0.13278193333333332
+        },
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 7046.58374999417,
+          "avg_cost_usd": 0.1816631111111111
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 7073.9160209777765,
+          "avg_cost_usd": 0.0594853
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.1,
+          "avg_efficiency": 0.7,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.085,
+          "p50_latency_ms": 6391.072749975137,
+          "avg_cost_usd": 0.015424466666666666
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 0.6666666666666666,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.041666666666666664,
+          "p50_latency_ms": 7533.339187502861,
+          "avg_cost_usd": 0.0424231
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 6655.7155005284585,
+          "avg_cost_usd": 0.0610603
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 0.3333333333333333,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.04444444444444444,
+          "p50_latency_ms": 6633.546666009352,
+          "avg_cost_usd": 0.2875566666666667
+        }
+      }
+    },
+    {
+      "id": "br-claude-haiku",
+      "display_name": "Claude Haiku 4.5 (Bedrock)",
+      "local": false,
+      "reasoning": false,
+      "inference_mode": "flex-n",
+      "anon": true,
+      "overall": {
+        "levels_run": 128,
+        "success_rate": 0.0234375,
+        "avg_efficiency": 1.0,
+        "avg_efficiency_flex": 0.8424242424242424,
+        "avg_aggregate_score": 0.02159090909090909,
+        "p50_latency_ms": 7100.9485834511,
+        "avg_cost_usd": 0.057561265625
+      },
+      "by_pack": {
+        "carrot_quest": {
+          "levels_run": 18,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 4983.429270971101,
+          "avg_cost_usd": 0.07692588888888889
+        },
+        "diagonal_swipes": {
+          "levels_run": 20,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 7412.922270479612,
+          "avg_cost_usd": 0.0439132
+        },
+        "flood_colors": {
+          "levels_run": 30,
+          "success_rate": 0.06666666666666667,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 0.7636363636363637,
+          "avg_aggregate_score": 0.05878787878787879,
+          "p50_latency_ms": 6350.575896038208,
+          "avg_cost_usd": 0.012323433333333333
+        },
+        "number_cells": {
+          "levels_run": 20,
+          "success_rate": 0.05,
+          "avg_efficiency": 1.0,
+          "avg_efficiency_flex": 1.0,
+          "avg_aggregate_score": 0.05,
+          "p50_latency_ms": 7829.943708027713,
+          "avg_cost_usd": 0.0409183
+        },
+        "rotate_flip": {
+          "levels_run": 10,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 7430.94560445752,
+          "avg_cost_usd": 0.045909900000000003
+        },
+        "twinseed": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 7039.220250095241,
+          "avg_cost_usd": 0.15443093333333333
+        },
+        "box_builder": {
+          "levels_run": 15,
+          "success_rate": 0.0,
+          "avg_efficiency": null,
+          "avg_efficiency_flex": null,
+          "avg_aggregate_score": 0.0,
+          "p50_latency_ms": 5286.314124939963,
+          "avg_cost_usd": 0.07608533333333334
         }
       }
     }

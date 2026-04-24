@@ -90,6 +90,7 @@ def compute_stats(levels: list[dict]) -> dict[str, Any]:
             "avg_efficiency_flex": None,
             "avg_aggregate_score": 0.0,
             "p50_latency_ms": None,
+            "avg_cost_usd": None,
             "levels_run": 0,
         }
 
@@ -97,6 +98,7 @@ def compute_stats(levels: list[dict]) -> dict[str, Any]:
     efficiencies = [l["efficiency"] for l in successes if l.get("efficiency") is not None]
     flex_efficiencies = [l["efficiency_flex"] for l in successes if l.get("efficiency_flex") is not None]
     latencies = [l["latency_ms"]["median"] for l in valid if l.get("latency_ms")]
+    costs = [l["cost_usd"] for l in valid if l.get("cost_usd") is not None]
 
     # Aggregate score: 0.5 * success(0/1) + 0.5 * best_efficiency.
     # Computed per-level so failed levels contribute 0 (not excluded).
@@ -112,6 +114,7 @@ def compute_stats(levels: list[dict]) -> dict[str, Any]:
         "avg_efficiency_flex": statistics.mean(flex_efficiencies) if flex_efficiencies else None,
         "avg_aggregate_score": statistics.mean(agg_scores) if agg_scores else 0.0,
         "p50_latency_ms": statistics.median(latencies) if latencies else None,
+        "avg_cost_usd": statistics.mean(costs) if costs else None,
     }
 
 
