@@ -37,7 +37,8 @@ def _llm_worker(queue: Any, params: dict) -> None:
             or 0
         )
         output_tokens: int = getattr(usage, "completion_tokens", 0) or 0
-        queue.put(("ok", (content, thinking_tokens, output_tokens)))
+        cost: float = response._hidden_params.get("response_cost", 0.0) or 0.0
+        queue.put(("ok", (content, thinking_tokens, output_tokens, cost)))
     except BaseException as e:  # noqa: BLE001
         queue.put(("err", e))
 
@@ -48,8 +49,8 @@ def call_llm(
     extra_params: dict[str, Any] | None = None,
     max_tokens: int = 1024,
     request_timeout: float | None = None,
-) -> tuple[str, float, int, int]:
-    """Call an LLM and return (response_text, latency_ms, thinking_tokens, output_tokens).
+) -> tuple[str, float, int, int, float]:
+    """Call an LLM and return (response_text, latency_ms, thinking_tokens, output_tokens, cost_usd).
 
     Args:
         prompt: The full prompt string built by the Dart runner.
@@ -79,11 +80,20 @@ def call_llm(
         if ollama_body.get("think") is True or "reasoning_effort" in ollama_body:
             effective_max_tokens = max(max_tokens, 32768)
 
-    # Anthropic/Bedrock extended thinking: max_tokens must exceed budget_tokens.
+    # Anthropic/Bedrock extended thinking: max_tokens must leave room for the
+    # visible response after the model's internal reasoning.
     thinking_cfg = extra_params.get("thinking")
-    if isinstance(thinking_cfg, dict) and thinking_cfg.get("type") == "enabled":
-        budget = thinking_cfg.get("budget_tokens", 0)
-        effective_max_tokens = max(effective_max_tokens, budget + max_tokens)
+    if isinstance(thinking_cfg, dict):
+        if thinking_cfg.get("type") == "enabled":
+            budget = thinking_cfg.get("budget_tokens", 0)
+            effective_max_tokens = max(effective_max_tokens, budget + max_tokens)
+        elif thinking_cfg.get("type") == "adaptive":
+            effective_max_tokens = max(effective_max_tokens, 16384)
+
+    # MiniMax reasons by default (hidden chain-of-thought consumes output tokens
+    # even without an explicit thinking param), so always give it headroom.
+    if "minimax" in litellm_model:
+        effective_max_tokens = max(effective_max_tokens, 32768)
 
     params: dict[str, Any] = {
         "model": litellm_model,
@@ -96,7 +106,11 @@ def call_llm(
 
     t0 = time.monotonic()
 
-    if request_timeout is not None:
+    # Only use subprocess isolation for Ollama (to hard-kill local inference).
+    # API models use LiteLLM's native timeout via the `timeout` param above.
+    use_subprocess = request_timeout is not None and litellm_model.startswith("ollama")
+
+    if use_subprocess:
         # Run in a subprocess so we can hard-kill it on timeout.  A daemon
         # thread would abandon the HTTP connection but leave Ollama generating;
         # terminating the process closes the socket and stops generation.
@@ -123,13 +137,10 @@ def call_llm(
 
         if status == "err":
             raise value  # re-raise original exception from worker
-        content, thinking_tokens, output_tokens = value
+        content, thinking_tokens, output_tokens, cost = value
     else:
         # No timeout — call directly in-process (no subprocess overhead).
-        try:
-            response = litellm.completion(**params)
-        except BaseException as e:
-            raise e
+        response = litellm.completion(**params)
         content = response.choices[0].message.content or ""
         usage = response.usage or {}
         thinking_tokens = (
@@ -138,9 +149,10 @@ def call_llm(
             or 0
         )
         output_tokens = getattr(usage, "completion_tokens", 0) or 0
+        cost = response._hidden_params.get("response_cost", 0.0) or 0.0
 
     latency_ms = (time.monotonic() - t0) * 1000.0
-    return content, latency_ms, thinking_tokens, output_tokens
+    return content, latency_ms, thinking_tokens, output_tokens, cost
 
 
 def _strip_noise(text: str) -> str:

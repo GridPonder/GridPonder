@@ -189,6 +189,7 @@ def run_level(
     latencies: list[float] = []
     thinking_tokens_total = 0
     output_tokens_total = 0
+    cost_total = 0.0
     resets = 0
     llm_calls = 0
     total_rejections = 0
@@ -225,15 +226,23 @@ def run_level(
 
             if etype == "state":
                 prompt: str = event["prompt"]
-                try:
-                    response_text, latency_ms, think_tok, out_tok = call_llm(
-                        prompt, litellm_model, extra_params,
-                        max_tokens=max_tokens,
-                        request_timeout=action_timeout,
-                    )
-                except Exception as exc:
-                    _send_give_up(send, mode, f"LLM error: {exc}")
-                    if action_timeout is not None and isinstance(exc, TimeoutError):
+                llm_ok = False
+                for _retry in range(3):
+                    try:
+                        response_text, latency_ms, think_tok, out_tok, call_cost = call_llm(
+                            prompt, litellm_model, extra_params,
+                            max_tokens=max_tokens,
+                            request_timeout=action_timeout,
+                        )
+                        llm_ok = True
+                        break
+                    except Exception as exc:
+                        last_exc = exc
+                        if _retry < 2:
+                            time.sleep(2 ** _retry)
+                if not llm_ok:
+                    _send_give_up(send, mode, f"LLM error: {last_exc}")
+                    if action_timeout is not None and isinstance(last_exc, TimeoutError):
                         consecutive_timeouts += 1
                         if consecutive_timeouts >= MAX_CONSECUTIVE_REJECTIONS:
                             break
@@ -243,11 +252,13 @@ def run_level(
                 latencies.append(latency_ms)
                 thinking_tokens_total += think_tok
                 output_tokens_total += out_tok
+                cost_total += call_cost
                 llm_calls += 1
                 llm_log.append({
                     "latency_ms": round(latency_ms),
                     "output_tokens": out_tok,
                     "thinking_tokens": think_tok,
+                    "cost_usd": round(call_cost, 6),
                     "response": response_text,
                 })
 
@@ -359,6 +370,7 @@ def run_level(
         },
         "thinking_tokens_total": thinking_tokens_total,
         "output_tokens_total": output_tokens_total,
+        "cost_usd": round(cost_total, 6),
         "llm_log": llm_log,
     }
 
@@ -382,13 +394,21 @@ def _send_give_up(send: Any, mode: str, memory: str) -> None:
 
 # ── Resume helpers ─────────────────────────────────────────────────────────────
 
-def load_completed(results_base: Path, mode: str, anon: bool) -> set[tuple[str, str, str]]:
-    """Scan all existing JSONL runs and return (model_id, pack_id, level_id) triples
-    that already have a successful (non-error) result for the given mode+anon."""
+def load_completed(
+    results_base: Path, mode: str, anon: bool, scan_dir: Path | None = None,
+) -> set[tuple[str, str, str]]:
+    """Scan JSONL runs and return (model_id, pack_id, level_id) triples
+    that already have a successful (non-error) result for the given mode+anon.
+
+    When *scan_dir* is given, only that directory is scanned (non-recursive).
+    Otherwise all subdirectories under *results_base* are scanned.
+    """
     done: set[tuple[str, str, str]] = set()
-    if not results_base.exists():
+    base = scan_dir or results_base
+    if not base.exists():
         return done
-    for jsonl_file in sorted(results_base.glob("**/*.jsonl")):
+    glob_pattern = "*.jsonl" if scan_dir else "**/*.jsonl"
+    for jsonl_file in sorted(base.glob(glob_pattern)):
         file_mode: str | None = None
         file_anon: bool = False
         with open(jsonl_file) as f:
@@ -461,13 +481,6 @@ def main() -> None:
         t = threading.Thread(target=_keyboard_listener, daemon=True)
         t.start()
 
-    # Prevent macOS from sleeping during a long benchmark run.
-    _caffeinate = subprocess.Popen(
-        ["caffeinate", "-i"],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-
     parser = argparse.ArgumentParser(
         description="GridPonder AI Benchmark",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -516,8 +529,22 @@ def main() -> None:
                              "(uses Dart if binary exists, else Python; default: auto)")
     parser.add_argument("--resume", action="store_true",
                         help="Skip levels already completed in any previous run for this mode+anon")
+    parser.add_argument("--run-dir", type=str, default=None,
+                        help="Shared output directory (skip creating a new timestamped dir). "
+                             "Used by the parallel launcher.")
+    parser.add_argument("--no-caffeinate", action="store_true",
+                        help="Don't spawn caffeinate (launcher handles it)")
 
     args = parser.parse_args()
+
+    # Prevent macOS from sleeping during a long benchmark run.
+    _caffeinate = None
+    if not args.no_caffeinate:
+        _caffeinate = subprocess.Popen(
+            ["caffeinate", "-i"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
     # ── Resolve level scope ──────────────────────────────────────────────────
     if args.level:
@@ -576,11 +603,15 @@ def main() -> None:
         print("  Controls: p = pause after current level  |  c = continue  |  q = quit")
 
     # ── Output directory for this run ─────────────────────────────────────────
-    ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-    RESULTS_DIR = RESULTS_BASE / ts
+    if args.run_dir:
+        RESULTS_DIR = Path(args.run_dir)
+    else:
+        ts = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        RESULTS_DIR = RESULTS_BASE / ts
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Write a meta.json capturing all CLI args so the run is self-describing.
+    # Write meta capturing CLI args. When using --run-dir (parallel mode),
+    # each worker writes its own meta file to avoid races.
     run_config = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "suite": args.suite,
@@ -598,7 +629,16 @@ def main() -> None:
         "levels_by_pack": {p: lvls for p, lvls in levels_by_pack.items()},
         "total_work_items": total,
     }
-    with open(RESULTS_DIR / "meta.json", "w") as f:
+    if args.run_dir:
+        _mode_tag = args.mode
+        if args.mode == "flex-n":
+            _mode_tag = f"flex-{args.max_n}" if args.max_n else "flex-n"
+        _anon_tag = "_anon" if args.anon else ""
+        _model_tag = (args.models[0] if args.models else "all")
+        meta_file = RESULTS_DIR / f"meta_{_model_tag}_{_mode_tag}{_anon_tag}.json"
+    else:
+        meta_file = RESULTS_DIR / "meta.json"
+    with open(meta_file, "w") as f:
         json.dump(run_config, f, indent=2)
 
     # Group work by model variant so we write one file per variant.
@@ -616,8 +656,14 @@ def main() -> None:
     by_variant = {k: v for k, v in by_variant.items() if v}
 
     # ── Run ───────────────────────────────────────────────────────────────────
+    # Build a file-name suffix from mode+anon so parallel workers don't collide.
+    mode_tag = args.mode
+    if args.mode == "flex-n":
+        mode_tag = f"flex-{args.max_n}" if args.max_n else "flex-n"
+    anon_tag = "_anon" if args.anon else ""
+
     for full_id, items in by_variant.items():
-        out_file = RESULTS_DIR / f"{full_id}.jsonl"
+        out_file = RESULTS_DIR / f"{full_id}_{mode_tag}{anon_tag}.jsonl"
         model_cfg = items[0][2]
         variant_cfg = items[0][3]
 
@@ -696,7 +742,8 @@ def main() -> None:
         print(f"  → {out_file}")
 
     print(f"\nDone. Run 'python aggregate.py' to update leaderboard.json.")
-    _caffeinate.terminate()
+    if _caffeinate:
+        _caffeinate.terminate()
 
 
 if __name__ == "__main__":
