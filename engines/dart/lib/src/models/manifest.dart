@@ -7,6 +7,9 @@ class PackManifest {
   final String version;
   final String minEngineVersion;
   final String? author;
+  /// One-sentence tagline for the home screen / library tile.
+  final String? shortDescription;
+  /// Full mechanical description used by LLM prompts and detail views.
   final String? description;
   final String gameFile;
   final String levelDirectory;
@@ -24,6 +27,7 @@ class PackManifest {
     required this.version,
     required this.minEngineVersion,
     this.author,
+    this.shortDescription,
     this.description,
     this.gameFile = 'game.json',
     this.levelDirectory = 'levels',
@@ -42,6 +46,7 @@ class PackManifest {
         version: j['version'] as String,
         minEngineVersion: j['minEngineVersion'] as String,
         author: j['author'] as String?,
+        shortDescription: j['shortDescription'] as String?,
         description: j['description'] as String?,
         gameFile: (j['gameFile'] as String?) ?? 'game.json',
         levelDirectory: (j['levelDirectory'] as String?) ?? 'levels',

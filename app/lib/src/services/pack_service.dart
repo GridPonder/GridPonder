@@ -10,6 +10,10 @@ import 'pack_registry.dart';
 class PackInfo {
   final String id;
   final String title;
+  /// Tagline used by the home/library tile. Falls back to description when absent.
+  final String shortDescription;
+  /// Full mechanical description used by detail views and (when loading the
+  /// engine) the LLM prompt.
   final String description;
   final int color; // ARGB — primaryColor from theme.json
   final ImageProvider? coverImage; // AssetImage (bundled) or MemoryImage (installed)
@@ -21,12 +25,16 @@ class PackInfo {
   const PackInfo({
     required this.id,
     required this.title,
+    this.shortDescription = '',
     required this.description,
     required this.color,
     this.coverImage,
     this.isInstalled = false,
     this.levelIds = const [],
   });
+
+  /// What to show on the home/library tile — short if available, else fall back.
+  String get tagline => shortDescription.isNotEmpty ? shortDescription : description;
 }
 
 /// Loads a game pack and provides asset resolution for both bundled and
@@ -175,6 +183,7 @@ class PackService {
     return PackInfo(
       id: packId,
       title: manifest['title'] as String? ?? packId,
+      shortDescription: manifest['shortDescription'] as String? ?? '',
       description: manifest['description'] as String? ?? '',
       color: color,
       coverImage: coverImage,

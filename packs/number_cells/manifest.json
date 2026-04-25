@@ -3,7 +3,8 @@
   "packVersion": 1,
   "gameId": "number_cells",
   "title": "Number Crunch",
-  "description": "Each move slides all number tiles simultaneously in one direction until blocked by a wall, pipe, void, or another tile. When two tiles collide they sum into one (e.g. 3+4→7); each tile merges at most once per move. Pipes deliver one number per turn to their spawn cell (see Multi-cell objects). Portals instantly move any tile on them to the paired portal if the destination is empty. Win by producing merges whose values match the required sequence in order.",
+  "shortDescription": "Slide and merge numbered tiles to produce a target sequence.",
+  "description": "Each move slides all number tiles simultaneously in one direction until blocked by a wall, pipe, void, or another tile. When two tiles collide they sum into one (e.g. 3+4\u21927); each tile merges at most once per move. Pipes deliver one number per turn to their spawn cell (see Multi-cell objects). Portals instantly move any tile on them to the paired portal if the destination is empty. Win by producing merges whose values match the required sequence in order.",
   "coverImage": "assets/number_cells.png",
   "version": "1.0.0",
   "minEngineVersion": "0.5.0"

@@ -526,7 +526,7 @@ class _PackCardState extends State<_PackCard> {
         Padding(
           padding: const EdgeInsets.fromLTRB(10, 2, 10, 4),
           child: Text(
-            widget.info.description,
+            widget.info.tagline,
             style: const TextStyle(color: Colors.black54, fontSize: 10),
             textAlign: TextAlign.center,
             maxLines: 2,

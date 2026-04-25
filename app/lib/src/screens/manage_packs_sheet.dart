@@ -391,9 +391,9 @@ class _InstalledPackTile extends StatelessWidget {
           style: const TextStyle(
               fontWeight: FontWeight.w600, fontSize: 14),
         ),
-        subtitle: info.description.isNotEmpty
+        subtitle: info.tagline.isNotEmpty
             ? Text(
-                info.description,
+                info.tagline,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style:

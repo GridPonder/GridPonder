@@ -3,6 +3,7 @@
   "packVersion": 1,
   "gameId": "carrot_quest",
   "title": "Carrot Quest",
+  "shortDescription": "Find a path to the carrot through rocks, wood, ice and water.",
   "description": "Navigate the grid to reach the carrot. Solid tiles (rock) block movement. Pushable tiles (wood, crate) slide one step when walked into. Ice is slippery and let's you or pushable items slide. Inventory (torch, pickaxe) interacts with the environment.",
   "coverImage": "assets/rabbit_reaching_for_carrot.png",
   "version": "1.0.0",

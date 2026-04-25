@@ -18,7 +18,8 @@ The pack's entry point: declares identity, version, compatibility requirements, 
   "packVersion": 1,
   "gameId": "com.example.mygame",
   "title": "My Puzzle Game",
-  "description": "A short description of the game.",
+  "shortDescription": "One-line tagline for the home screen.",
+  "description": "A full mechanical description used by the LLM-prompt header and detail views — names every entity and explains how the rules work.",
   "coverImage": "assets/cover.png",
   "version": "1.0.0",
   "minEngineVersion": "0.5.0",
@@ -40,7 +41,8 @@ The pack's entry point: declares identity, version, compatibility requirements, 
 | `title` | string | **yes** | Human-readable game title. |
 | `version` | string | **yes** | Game content version. Semantic versioning. |
 | `author` | string | no | Author or team name. |
-| `description` | string | no | Short description (1–2 sentences). |
+| `shortDescription` | string | no | One-sentence tagline used by the home screen / library tile. Should be self-contained and visually compact (under ~80 chars). |
+| `description` | string | no | Full mechanical description (paragraph). Names every entity by its display word and explains how the rules work. Consumed by the LLM-prompt header and by detail views. Falls back to `shortDescription` when absent. |
 | `minEngineVersion` | string | **yes** | Minimum engine version required to run this pack. |
 | `gameFile` | string | no | Path to the game definition file. Default: `"game.json"`. |
 | `levelDirectory` | string | no | Directory containing level files. Default: `"levels"`. |
