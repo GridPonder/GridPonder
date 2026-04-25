@@ -109,6 +109,12 @@ def main() -> None:
     memory = ""
     consecutive_rejections = 0
 
+    # Repeated-state tracking, scoped per attempt (cycles within an attempt
+    # signal "model is stuck looping"). The initial state of each attempt
+    # is pre-seeded so a turn that lands back on it counts as a repeat.
+    seen_states: set = {engine.state_key()}
+    repeated_state_count = 0
+
     last_action: dict | None = None
     prev_board_text: str | None = None
     prev_inventory: str | None = None
@@ -162,18 +168,27 @@ def main() -> None:
         _out(event)
 
     def do_reset(reason: str) -> None:
-        nonlocal attempt_number, last_action, prev_board_text, prev_inventory
+        nonlocal attempt_number, last_action, prev_board_text, prev_inventory, seen_states
         engine.reset()
         attempt_number += 1
         last_action = None
         prev_board_text = None
         prev_inventory = None
+        seen_states = {engine.state_key()}
         _out({
             "event": "reset",
             "attempt": attempt_number,
             "reason": reason,
             "actions_total": total_game_actions + give_up_count,
         })
+
+    def record_state() -> None:
+        """Note the current engine state. Counts a repeat if seen this attempt."""
+        nonlocal repeated_state_count
+        key = engine.state_key()
+        if key in seen_states:
+            repeated_state_count += 1
+        seen_states.add(key)
 
     def won_event() -> dict:
         return {
@@ -182,6 +197,7 @@ def main() -> None:
             "actions_total": total_game_actions + give_up_count,
             "attempts": attempt_number,
             "gold_path_length": gold_path_len,
+            "repeated_states": repeated_state_count,
         }
 
     def lost_event() -> dict:
@@ -191,6 +207,7 @@ def main() -> None:
             "actions_total": total_game_actions + give_up_count,
             "attempts": attempt_number,
             "gold_path_length": gold_path_len,
+            "repeated_states": repeated_state_count,
         }
 
     # ── Initial state ─────────────────────────────────────────────────────────
@@ -271,6 +288,7 @@ def main() -> None:
             last_action = {k: v for k, v in inp.items() if k != "memory"} if not anon else real
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
+            record_state()
 
             if engine.is_won:
                 _out(won_event())
@@ -359,6 +377,7 @@ def main() -> None:
             last_action = action_input if not anon else real
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
+            record_state()
 
             if engine.is_won:
                 _out(won_event())

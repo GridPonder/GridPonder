@@ -183,6 +183,32 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       </div>
     </div>
 
+    <!-- Game Analysis (behavioural metrics) -->
+    <div class="rounded-2xl border border-gray-200 overflow-hidden mb-12 mt-10">
+      <div class="bg-gray-50 border-b border-gray-200 px-6 py-4">
+        <h2 class="font-bold text-gray-900">Game Analysis</h2>
+        <p class="text-xs text-gray-500 mt-0.5">How models cope, recover, and use memory. Reflects the inference mode selected above. Column definitions below the table.</p>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead class="bg-gray-50 border-b border-gray-200">
+            <tr id="behaviour-thead"></tr>
+          </thead>
+          <tbody id="behaviour-tbody" class="divide-y divide-gray-100"></tbody>
+        </table>
+      </div>
+      <div class="px-6 py-4 text-xs text-gray-500 border-t border-gray-100 leading-relaxed space-y-1.5">
+        <p><strong class="text-gray-700">Recovery</strong> — fraction of levels in which the model failed at least one attempt and then went on to succeed.</p>
+        <p><strong class="text-gray-700">Rejection</strong> — fraction of LLM calls returning an action the engine refused (wrong shape, illegal target, etc.).</p>
+        <p><strong class="text-gray-700">Resets/lvl</strong> — average number of resets per level, counting both auto-resets (per-attempt action limit hit) and voluntary give-ups.</p>
+        <p><strong class="text-gray-700">Gave up</strong> — fraction of levels where the model used the <code class="bg-gray-100 px-1 rounded">give_up</code> action at least once.</p>
+        <p><strong class="text-gray-700">Mem write rate</strong> — fraction of LLM calls in which the model wrote a non-empty memory string. The final winning call on solved levels is excluded (its memory update is irrelevant — the game is over).</p>
+        <p><strong class="text-gray-700">Mem chars</strong> — median character length of non-empty memory strings written.</p>
+        <p><strong class="text-gray-700">State loops</strong> — fraction of turns whose resulting (board, inventory) hash had been seen earlier in the same attempt — i.e. the model cycled.</p>
+        <p class="text-gray-400 pt-1">A dash (—) means the metric isn't yet available — it requires a benchmark re-run with the latest runner instrumentation.</p>
+      </div>
+    </div>
+
     <!-- Per-pack breakdown -->
     <div id="pack-section" class="mb-12">
       <h2 class="font-bold text-gray-900 text-lg mb-4">Breakdown by Pack</h2>
@@ -252,7 +278,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       { id: 'sel-anon-flex-n',   mode: 'flex-n',    anon: true  },
     ];
 
-    let currentMode = 'single';
+    let currentMode = 'aggregate';
     let currentAnon = false;
 
     function strip_provider(name) {
@@ -291,8 +317,10 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
         byId[m.id].entries.push(m);
       }
       const mean = (arr) => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+      const BEH_KEYS = ['recovery_rate', 'rejection_rate', 'mean_resets_per_level', 'voluntary_giveup_rate', 'memory_use_rate', 'median_memory_chars', 'repeated_state_rate'];
       return Object.values(byId).map(g => {
         const avg = field => mean(g.entries.map(e => e.overall?.[field]).filter(v => v != null));
+        const bavg = key => mean(g.entries.map(e => e.overall?.behaviour?.[key]).filter(v => v != null));
         const packKeys = [...new Set(g.entries.flatMap(e => Object.keys(e.by_pack ?? {})))];
         const by_pack = {};
         for (const pack of packKeys) {
@@ -310,6 +338,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
             p50_latency_ms:      avg('p50_latency_ms'),
             avg_cost_usd:        avg('avg_cost_usd'),
             levels_run:          g.entries.reduce((s, e) => s + (e.overall?.levels_run ?? 0), 0),
+            behaviour:           Object.fromEntries(BEH_KEYS.map(k => [k, bavg(k)])),
           },
           by_pack,
         };
@@ -866,6 +895,52 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       });
     }
 
+    // ── Game Analysis panel ──────────────────────────────────────────────
+    const BEHAVIOUR_COLS = [
+      { key: null,                     label: '#',           tip: '' },
+      { key: null,                     label: 'Model',       tip: '' },
+      { key: 'recovery_rate',          label: 'Recovery',    tip: 'After a failed attempt, fraction of levels where the model went on to succeed.', fmt: 'pct' },
+      { key: 'rejection_rate',         label: 'Rejection',   tip: 'Fraction of LLM calls that produced an invalid action (rejected by the engine).', fmt: 'pct' },
+      { key: 'mean_resets_per_level',  label: 'Resets/lvl',  tip: 'Average number of resets (auto-reset on per-attempt limit, or voluntary give-up) per level.', fmt: 'num1' },
+      { key: 'voluntary_giveup_rate',  label: 'Gave up',     tip: 'Fraction of levels in which the model used the give_up action at least once.', fmt: 'pct' },
+      { key: 'memory_use_rate',        label: 'Mem write rate', tip: 'Fraction of LLM calls (excluding the final winning call on solved levels) that wrote a non-empty memory string.', fmt: 'pct' },
+      { key: 'median_memory_chars',    label: 'Mem chars',   tip: 'Median character length of non-empty memory strings written by the model.', fmt: 'int' },
+      { key: 'repeated_state_rate',    label: 'State loops', tip: 'Fraction of turns whose resulting (board, inventory) hash had been seen earlier in the same attempt — i.e. cycling.', fmt: 'pct' },
+    ];
+
+    function _bfmt(v, kind) {
+      if (v == null) return '—';
+      if (kind === 'pct') return (v * 100).toFixed(1) + '%';
+      if (kind === 'num1') return v.toFixed(1);
+      if (kind === 'int') return `${v}`;
+      return `${v}`;
+    }
+
+    function renderBehaviour(models) {
+      const thead = document.getElementById('behaviour-thead');
+      const tbody = document.getElementById('behaviour-tbody');
+      if (!thead || !tbody) return;
+
+      thead.innerHTML = BEHAVIOUR_COLS.map(c =>
+        `<th title="${c.tip}" class="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">${c.label}</th>`
+      ).join('');
+
+      if (!models.length) {
+        tbody.innerHTML = `<tr><td colspan="${BEHAVIOUR_COLS.length}" class="px-6 py-12 text-center text-gray-400">No data for this configuration.</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = models.map((m, i) => {
+        const b = m.overall?.behaviour ?? {};
+        const cells = BEHAVIOUR_COLS.map((c, idx) => {
+          if (idx === 0) return `<td class="px-4 py-3 text-gray-400 font-mono">${i + 1}</td>`;
+          if (idx === 1) return `<td class="px-4 py-3"><span class="font-semibold text-gray-900">${strip_provider(m.display_name)}</span>${m.reasoning ? ' <span class="text-xs text-purple-500">✦</span>' : ''}</td>`;
+          return `<td class="px-4 py-3 font-mono text-gray-700">${_bfmt(b[c.key], c.fmt)}</td>`;
+        }).join('');
+        return `<tr class="hover:bg-gray-50 transition-colors">${cells}</tr>`;
+      }).join('');
+    }
+
     async function render() {
       const models = getModels();
       renderOverall(models);
@@ -874,6 +949,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       renderDiffPicker();
       await renderCellsChart();
       renderCellsPicker();
+      renderBehaviour(models);
       renderPacks(models);
       updateSelectors();
       const n = currentMode !== 'aggregate' ? models[0]?.overall?.levels_run : null;

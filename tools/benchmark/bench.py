@@ -191,6 +191,7 @@ def run_level(
     output_tokens_total = 0
     cost_total = 0.0
     resets = 0
+    voluntary_resets = 0
     llm_calls = 0
     total_rejections = 0
     consecutive_rejections = 0
@@ -295,6 +296,8 @@ def run_level(
 
             elif etype == "reset":
                 resets += 1
+                if event.get("reason") == "voluntary":
+                    voluntary_resets += 1
 
             elif etype in ("won", "lost"):
                 final_event = event
@@ -322,6 +325,7 @@ def run_level(
     actions_total: int = final_event.get("actions_total", len(latencies))
     gold_path_length: int | None = final_event.get("gold_path_length")
     attempts: int = final_event.get("attempts", 1)
+    repeated_states: int | None = final_event.get("repeated_states")
 
     gpl_pos = gold_path_length if (gold_path_length and gold_path_length > 0) else 0
     efficiency: float | None = (
@@ -362,6 +366,8 @@ def run_level(
         "aggregate_score": aggregate_score,
         "attempts": attempts,
         "resets": resets,
+        "voluntary_resets": voluntary_resets,
+        "repeated_states": repeated_states,
         "llm_calls": llm_calls,
         "rejections": total_rejections,
         "latency_ms": {

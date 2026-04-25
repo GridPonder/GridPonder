@@ -117,6 +117,7 @@ def compute_stats(levels: list[dict]) -> dict[str, Any]:
             "p50_latency_ms": None,
             "avg_cost_usd": None,
             "levels_run": 0,
+            "behaviour": _empty_behaviour(),
         }
 
     successes = [l for l in valid if l.get("success")]
@@ -140,6 +141,122 @@ def compute_stats(levels: list[dict]) -> dict[str, Any]:
         "avg_aggregate_score": statistics.mean(agg_scores) if agg_scores else 0.0,
         "p50_latency_ms": statistics.median(latencies) if latencies else None,
         "avg_cost_usd": statistics.mean(costs) if costs else None,
+        "behaviour": _compute_behaviour(valid),
+    }
+
+
+# ── Game Analysis (behavioural metrics) ──────────────────────────────────
+
+def _empty_behaviour() -> dict[str, Any]:
+    return {
+        "recovery_rate": None,
+        "rejection_rate": None,
+        "mean_resets_per_level": None,
+        "voluntary_giveup_rate": None,
+        "memory_use_rate": None,
+        "median_memory_chars": None,
+        "repeated_state_rate": None,
+    }
+
+
+def _extract_memory_from_response(response_text: str) -> str | None:
+    """Best-effort extraction of the model's memory string from a raw response."""
+    if not response_text:
+        return None
+    # Find the first balanced JSON object and look for a "memory" key.
+    s = response_text
+    start = s.find("{")
+    while start != -1:
+        depth = 0
+        in_str = False
+        esc = False
+        for i in range(start, len(s)):
+            c = s[i]
+            if esc:
+                esc = False
+                continue
+            if c == "\\":
+                esc = True
+                continue
+            if c == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    try:
+                        obj = json.loads(s[start:i + 1])
+                        if isinstance(obj, dict) and "memory" in obj:
+                            mem = obj["memory"]
+                            return mem if isinstance(mem, str) else None
+                    except json.JSONDecodeError:
+                        pass
+                    break
+        start = s.find("{", start + 1)
+    return None
+
+
+def _compute_behaviour(valid_levels: list[dict]) -> dict[str, Any]:
+    # Recovery: P(attempt N+1 succeeds | attempt N failed).
+    failures_with_followup = 0
+    recoveries = 0
+    for l in valid_levels:
+        attempts = l.get("attempts", 1) or 1
+        if attempts > 1:
+            failures_with_followup += attempts - 1
+            if l.get("success"):
+                recoveries += 1
+
+    # Rejection rate.
+    rej_total = sum(int(l.get("rejections") or 0) for l in valid_levels)
+    call_total = sum(int(l.get("llm_calls") or 0) for l in valid_levels)
+
+    # Reset rate (mean resets per level — already correct per old data).
+    resets_per_level = [int(l.get("resets") or 0) for l in valid_levels]
+
+    # Voluntary give-up rate: only available if levels have voluntary_resets.
+    vr_levels = [l for l in valid_levels if "voluntary_resets" in l]
+    vol_rate = (
+        sum(1 for l in vr_levels if int(l.get("voluntary_resets") or 0) > 0) / len(vr_levels)
+        if vr_levels else None
+    )
+
+    # Repeated states: only available if levels have repeated_states.
+    rs_levels = [l for l in valid_levels if l.get("repeated_states") is not None]
+    rep_rate = None
+    if rs_levels:
+        rs_total = sum(int(l.get("repeated_states") or 0) for l in rs_levels)
+        actions_total = sum(int(l.get("actions_total") or 0) for l in rs_levels)
+        rep_rate = rs_total / actions_total if actions_total > 0 else None
+
+    # Memory write rate: fraction of LLM calls in which the model wrote a
+    # non-empty memory string. For won levels the final winning call is
+    # discarded — its memory update is redundant since the game is over.
+    mem_writes = 0
+    mem_calls = 0
+    mem_lengths: list[int] = []
+    for l in valid_levels:
+        log = l.get("llm_log") or []
+        relevant = log[:-1] if l.get("success") and log else log
+        for entry in relevant:
+            mem_calls += 1
+            mem = _extract_memory_from_response(entry.get("response", ""))
+            if mem:
+                mem_writes += 1
+                mem_lengths.append(len(mem))
+
+    return {
+        "recovery_rate": (recoveries / failures_with_followup) if failures_with_followup else None,
+        "rejection_rate": (rej_total / call_total) if call_total else None,
+        "mean_resets_per_level": (sum(resets_per_level) / len(resets_per_level)) if resets_per_level else None,
+        "voluntary_giveup_rate": vol_rate,
+        "memory_use_rate": (mem_writes / mem_calls) if mem_calls else None,
+        "median_memory_chars": int(statistics.median(mem_lengths)) if mem_lengths else None,
+        "repeated_state_rate": rep_rate,
     }
 
 
