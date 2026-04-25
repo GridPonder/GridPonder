@@ -32,6 +32,7 @@ from engines.python.text_renderer import render as render_board
 from engines.python.observation import build_prompt
 from engines.python.anon import build_anon_kind_to_label, build_anon_reverse_map
 from engines.python.action_enum import enumerate_actions
+from engines.python.gold_path import gold_path_length
 
 _PACKS_DIR = _REPO_ROOT / "packs"
 _MAX_CONSECUTIVE_REJECTIONS = 5
@@ -86,7 +87,7 @@ def main() -> None:
         return
 
     level_def = levels[level_id]
-    gold_path_len = len(level_def.get("solution", {}).get("goldPath", []))
+    gold_path_len = gold_path_length(level_def)
 
     limit_per_attempt = (
         attempt_mul * gold_path_len if gold_path_len > 0 else max(10, min(attempt_mul * 10, 60))

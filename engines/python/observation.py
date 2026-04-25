@@ -12,6 +12,7 @@ from .text_renderer import render as render_board
 from .goal_renderer import render_goals
 from .action_enum import enumerate_actions
 from .anon import build_anon_kind_to_label, build_anon_reverse_map
+from .gold_path import gold_path_length
 
 
 def build_prompt(
@@ -269,7 +270,7 @@ def build_observation(
     )
 
     valid_actions = enumerate_actions(game_def, state)
-    gold_path_len = len(level_def.get("solution", {}).get("goldPath", []))
+    gold_path_len = gold_path_length(level_def)
 
     return {
         "prompt": prompt,

@@ -310,30 +310,32 @@ def run_level(
         except subprocess.TimeoutExpired:
             proc.kill()
 
+    runner_error: str | None = None
     if final_event is None:
-        final_event = {
-            "event": "lost",
-            "actions_total": len(latencies),
-            "gold_path_length": 0,
-        }
+        # Runner subprocess died (crash, hang, killed) before emitting a
+        # won/lost event. Don't fabricate a gold_path_length — record the
+        # failure so aggregation can drop the row cleanly.
+        runner_error = "runner exited without won/lost event"
+        final_event = {"event": "lost"}
 
     success = final_event["event"] == "won"
-    actions_total: int = final_event.get("actions_total", 0)
-    gold_path_length: int = final_event.get("gold_path_length", 0)
+    actions_total: int = final_event.get("actions_total", len(latencies))
+    gold_path_length: int | None = final_event.get("gold_path_length")
     attempts: int = final_event.get("attempts", 1)
 
+    gpl_pos = gold_path_length if (gold_path_length and gold_path_length > 0) else 0
     efficiency: float | None = (
-        gold_path_length / actions_total
-        if (success and actions_total > 0 and gold_path_length > 0)
+        gpl_pos / actions_total
+        if (success and actions_total > 0 and gpl_pos > 0)
         else None
     )
 
     # flex-n: penalise extra steps beyond the first in each LLM call.
     # adjusted = actions_total * (1 + f) - llm_calls * f
     efficiency_flex: float | None = None
-    if mode == "flex-n" and success and actions_total > 0 and gold_path_length > 0 and llm_calls > 0:
+    if mode == "flex-n" and success and actions_total > 0 and gpl_pos > 0 and llm_calls > 0:
         adjusted = actions_total * (1 + flex_penalty) - llm_calls * flex_penalty
-        efficiency_flex = gold_path_length / adjusted if adjusted > 0 else None
+        efficiency_flex = gpl_pos / adjusted if adjusted > 0 else None
 
     # Aggregate score: 50% success (binary) + 50% efficiency (normalised 0–1).
     eff_for_score = efficiency_flex if mode == "flex-n" else efficiency
@@ -380,6 +382,9 @@ def run_level(
         result["max_n"] = max_n
         result["flex_penalty"] = flex_penalty
         result["efficiency_flex"] = efficiency_flex
+
+    if runner_error is not None:
+        result["error"] = runner_error
 
     return result
 

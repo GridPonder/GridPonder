@@ -12,33 +12,10 @@ sys.path.insert(0, str(ROOT))
 
 from engines.python.loader import load_pack
 from engines.python._turn_engine import TurnEngine
+from engines.python.gold_path import gold_path_actions
 
 
 PACKS_DIR = ROOT / "packs"
-
-
-def gold_path_actions(level_json: dict) -> list[tuple[str, dict]]:
-    """Return list of (action_id, params) from goldPath."""
-    gold_raw = level_json.get("solution", {}).get("goldPath", [])
-    actions = []
-    for entry in gold_raw:
-        if isinstance(entry, dict):
-            action_type = entry.get("action", "move")
-            direction = entry.get("direction")
-            params: dict = {}
-            if direction:
-                params["direction"] = direction
-            for k, v in entry.items():
-                if k not in ("action", "direction"):
-                    params[k] = v
-            actions.append((action_type, params))
-        elif isinstance(entry, str):
-            _cardinals = {"up", "down", "left", "right"}
-            if entry in _cardinals:
-                actions.append(("move", {"direction": entry}))
-            else:
-                actions.append((entry, {}))
-    return actions
 
 
 def run_all():

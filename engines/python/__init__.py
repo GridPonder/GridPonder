@@ -26,6 +26,7 @@ from ._game_def import GameDef
 from ._models import GameState, Pos, Entity, Board, AvatarState
 from ._turn_engine import TurnEngine, TurnResult
 from .loader import load_pack, make_engine
+from .gold_path import gold_path_length, gold_path_actions
 
 __all__ = [
     "__version__",
@@ -39,4 +40,6 @@ __all__ = [
     "TurnResult",
     "load_pack",
     "make_engine",
+    "gold_path_length",
+    "gold_path_actions",
 ]
