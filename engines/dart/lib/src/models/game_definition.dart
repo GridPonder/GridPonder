@@ -111,6 +111,10 @@ class GameDefinition {
   final List<SequenceEntry> levelSequence;
   final GameDefaults defaults;
   final GameUiConfig ui;
+  /// Per-game goal-text overrides keyed by goal id. See goal_descriptions
+  /// in the Python engine for parity. Lets a pack supply a precise
+  /// mechanical description in place of the renderer's generic auto-generated text.
+  final Map<String, String> goalDescriptions;
 
   const GameDefinition({
     required this.id,
@@ -124,6 +128,7 @@ class GameDefinition {
     required this.levelSequence,
     required this.defaults,
     this.ui = const GameUiConfig(),
+    this.goalDescriptions = const {},
   });
 
   factory GameDefinition.fromJson(
@@ -170,6 +175,8 @@ class GameDefinition {
           .toList(),
       defaults: GameDefaults.fromJson(j['defaults'] as Map<String, dynamic>?),
       ui: GameUiConfig.fromJson(j['ui'] as Map<String, dynamic>?),
+      goalDescriptions: ((j['goalDescriptions'] as Map?) ?? const {})
+          .map((k, v) => MapEntry(k as String, v as String)),
     );
   }
 

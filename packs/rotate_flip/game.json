@@ -23,7 +23,7 @@
       "layer": "ground",
       "tags": [],
       "sprite": "cell_void.png",
-      "symbol": "v"
+      "symbol": "#"
     },
     "cell_red": {
       "layer": "objects",
@@ -143,7 +143,7 @@
     {
       "type": "story",
       "title": "The Colour Scrambler",
-      "text": "A mischievous gust of wind has scrambled all the colour tiles!\n\nMove the glowing 2×2 frame across the grid and use Rotate or Flip to swap the tiles back into place.\n\nMatch the goal pattern shown above — every tile in the right spot — and you win!",
+      "text": "A mischievous gust of wind has scrambled all the colour tiles!\n\nMove the glowing 2\u00d72 frame across the grid and use Rotate or Flip to swap the tiles back into place.\n\nMatch the goal pattern shown above \u2014 every tile in the right spot \u2014 and you win!",
       "image": "assets/rotate_flip_cover.png"
     },
     {

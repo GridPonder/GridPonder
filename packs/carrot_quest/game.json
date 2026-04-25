@@ -22,7 +22,7 @@
     "void": {
       "layer": "ground",
       "tags": [],
-      "symbol": " "
+      "symbol": "#"
     },
     "empty": {
       "layer": "ground",
@@ -39,7 +39,7 @@
         "walkable"
       ],
       "sprite": "assets/sprites/water4.png",
-      "symbol": "≈"
+      "symbol": "\u2248"
     },
     "bridge": {
       "layer": "ground",
@@ -403,7 +403,7 @@
     {
       "type": "story",
       "title": "A Frosty Frontier",
-      "text": "Pip shivers as she enters the frozen caves. The ground ahead glistens with treacherous ice — one wrong step and she'll slide uncontrollably!\n\nBut her torch might come in handy... fire melts ice, after all. And that metal crate could be useful too."
+      "text": "Pip shivers as she enters the frozen caves. The ground ahead glistens with treacherous ice \u2014 one wrong step and she'll slide uncontrollably!\n\nBut her torch might come in handy... fire melts ice, after all. And that metal crate could be useful too."
     },
     {
       "type": "level",

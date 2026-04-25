@@ -230,7 +230,7 @@ def run_level(
                 llm_ok = False
                 for _retry in range(3):
                     try:
-                        response_text, latency_ms, think_tok, out_tok, call_cost = call_llm(
+                        response_text, latency_ms, think_tok, out_tok, call_cost, reasoning_text = call_llm(
                             prompt, litellm_model, extra_params,
                             max_tokens=max_tokens,
                             request_timeout=action_timeout,
@@ -255,13 +255,16 @@ def run_level(
                 output_tokens_total += out_tok
                 cost_total += call_cost
                 llm_calls += 1
-                llm_log.append({
+                llm_entry: dict[str, Any] = {
                     "latency_ms": round(latency_ms),
                     "output_tokens": out_tok,
                     "thinking_tokens": think_tok,
                     "cost_usd": round(call_cost, 6),
                     "response": response_text,
-                })
+                }
+                if reasoning_text:
+                    llm_entry["reasoning"] = reasoning_text
+                llm_log.append(llm_entry)
 
                 if mode == "single":
                     action = extract_action(response_text)

@@ -350,6 +350,15 @@ class LlmAgent implements GridPonderAgent {
     // ── Goals ─────────────────────────────────────────────────────────────────
     final goalParts = <String>[];
     for (final g in obs.level.goals) {
+      // Per-game goal-text override (set in game.json `goalDescriptions`).
+      // Skipped in anonymise mode since the override may name entities.
+      if (!anonymize) {
+        final override = obs.game.goalDescriptions[g.id];
+        if (override != null) {
+          goalParts.add(override);
+          continue;
+        }
+      }
       switch (g.type) {
         case 'reach_target':
           final kindId = g.config['targetKind'] as String?;

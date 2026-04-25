@@ -18,21 +18,31 @@
     "void": {
       "layer": "ground",
       "tags": [],
-      "symbol": " "
+      "symbol": "#"
     },
     "empty": {
       "layer": "ground",
-      "tags": ["walkable"],
+      "tags": [
+        "walkable"
+      ],
       "sprite": "assets/sprites/grass.png",
       "symbol": "."
     },
     "garden_plot": {
       "layer": "ground",
-      "tags": ["walkable", "plot_target"],
+      "tags": [
+        "walkable",
+        "plot_target"
+      ],
       "sprite": "assets/sprites/garden_plot2.png",
       "animations": {
         "growing": {
-          "frames": ["assets/sprites/garden_plot_seeds2.png", "assets/sprites/garden_plot_early_growth2.png", "assets/sprites/garden_plot_growth2.png", "assets/sprites/garden_plot_grown2.png"],
+          "frames": [
+            "assets/sprites/garden_plot_seeds2.png",
+            "assets/sprites/garden_plot_early_growth2.png",
+            "assets/sprites/garden_plot_growth2.png",
+            "assets/sprites/garden_plot_grown2.png"
+          ],
           "duration": 1200,
           "mode": "once"
         }
@@ -41,34 +51,49 @@
     },
     "planted_garden": {
       "layer": "ground",
-      "tags": ["walkable"],
+      "tags": [
+        "walkable"
+      ],
       "sprite": "assets/sprites/garden_plot_grown2.png",
-      "symbol": "♣"
+      "symbol": "\u2663"
     },
     "water": {
       "layer": "ground",
-      "tags": ["liquid", "walkable"],
+      "tags": [
+        "liquid",
+        "walkable"
+      ],
       "sprite": "assets/sprites/water4.png",
-      "symbol": "≈"
+      "symbol": "\u2248"
     },
     "water_crate": {
       "layer": "ground",
-      "tags": ["walkable"],
+      "tags": [
+        "walkable"
+      ],
       "sprite": "assets/sprites/water_crate2.png",
       "symbol": "="
     },
     "ice": {
       "layer": "ground",
-      "tags": ["slippery", "walkable"],
-      "sprite": "assets/sprites/ice.png",
+      "tags": [
+        "slippery",
+        "walkable"
+      ],
+      "sprite": "assets/sprites/ice2.png",
       "animations": {
         "melting": {
-          "frames": ["assets/sprites/ice_melting.png"],
+          "frames": [
+            "assets/sprites/ice_melting.png"
+          ],
           "duration": 800,
           "mode": "once"
         },
         "breaking": {
-          "frames": ["assets/sprites/ice_breaks_1.png", "assets/sprites/ice_breaks_2.png"],
+          "frames": [
+            "assets/sprites/ice_breaks_1.png",
+            "assets/sprites/ice_breaks_2.png"
+          ],
           "duration": 400,
           "mode": "once"
         }
@@ -77,11 +102,16 @@
     },
     "seed_basket": {
       "layer": "objects",
-      "tags": ["solid", "pushable"],
+      "tags": [
+        "solid",
+        "pushable"
+      ],
       "sprite": "assets/sprites/seeds.png",
       "animations": {
         "drowning": {
-          "frames": ["assets/sprites/seeds_drowning.png"],
+          "frames": [
+            "assets/sprites/seeds_drowning.png"
+          ],
           "duration": 800,
           "mode": "once"
         }
@@ -90,11 +120,17 @@
     },
     "rock": {
       "layer": "objects",
-      "tags": ["solid", "breakable"],
+      "tags": [
+        "solid",
+        "breakable"
+      ],
       "sprite": "assets/sprites/rock2.png",
       "animations": {
         "breaking": {
-          "frames": ["assets/sprites/rock2_with_cracks.png", "assets/sprites/rock2_broken.png"],
+          "frames": [
+            "assets/sprites/rock2_with_cracks.png",
+            "assets/sprites/rock2_broken.png"
+          ],
           "duration": 800,
           "mode": "once"
         }
@@ -103,11 +139,19 @@
     },
     "wood": {
       "layer": "objects",
-      "tags": ["solid", "pushable", "burnable"],
+      "tags": [
+        "solid",
+        "pushable",
+        "burnable"
+      ],
       "sprite": "assets/sprites/wood.png",
       "animations": {
         "burning": {
-          "frames": ["assets/sprites/wood_fire_ignites.png", "assets/sprites/wood_full_burn.png", "assets/sprites/wood_smoke_and_ash.png"],
+          "frames": [
+            "assets/sprites/wood_fire_ignites.png",
+            "assets/sprites/wood_full_burn.png",
+            "assets/sprites/wood_smoke_and_ash.png"
+          ],
           "duration": 1200,
           "mode": "once"
         }
@@ -116,19 +160,26 @@
     },
     "metal_crate": {
       "layer": "objects",
-      "tags": ["solid", "pushable"],
+      "tags": [
+        "solid",
+        "pushable"
+      ],
       "sprite": "assets/sprites/metal_crate2.png",
       "symbol": "C"
     },
     "torch": {
       "layer": "objects",
-      "tags": ["pickup"],
+      "tags": [
+        "pickup"
+      ],
       "sprite": "assets/sprites/torch.png",
       "symbol": "T"
     },
     "pickaxe": {
       "layer": "objects",
-      "tags": ["pickup"],
+      "tags": [
+        "pickup"
+      ],
       "sprite": "assets/sprites/pickaxe.png",
       "symbol": "P"
     },
@@ -145,7 +196,12 @@
       "params": {
         "direction": {
           "type": "direction",
-          "values": ["up", "down", "left", "right"]
+          "values": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
         }
       }
     },
@@ -165,8 +221,12 @@
       "id": "push",
       "type": "push_objects",
       "config": {
-        "pushableTags": ["pushable"],
-        "validTargetTags": ["walkable"],
+        "pushableTags": [
+          "pushable"
+        ],
+        "validTargetTags": [
+          "walkable"
+        ],
         "toolInteractions": [
           {
             "item": "torch",
@@ -190,7 +250,9 @@
         "markerKind": "rabbit_clone",
         "markerLayer": "clone",
         "action": "clone",
-        "blockedByTags": ["solid"]
+        "blockedByTags": [
+          "solid"
+        ]
       }
     },
     {
@@ -390,24 +452,73 @@
     {
       "type": "story",
       "title": "Pip's Phantom Garden",
-      "text": "Pip the rabbit has a problem: he needs to plant carrot seeds, but the garden plots are always in the most awkward spots.\n\nLuckily, Pip recently discovered he can conjure a ghostly copy of himself — a shimmery twin that hovers in place while the real Pip goes off to do things. One press later, Pip teleports back to the ghost's position. Very spooky. Very useful.\n\nPlan carefully, use your ghost wisely, and for carrot's sake don't move your seeds in a corner!",
+      "text": "Pip the rabbit has a problem: he needs to plant carrot seeds, but the garden plots are always in the most awkward spots.\n\nLuckily, Pip recently discovered he can conjure a ghostly copy of himself \u2014 a shimmery twin that hovers in place while the real Pip goes off to do things. One press later, Pip teleports back to the ghost's position. Very spooky. Very useful.\n\nPlan carefully, use your ghost wisely, and for carrot's sake don't move your seeds in a corner!",
       "image": "assets/twinseed.png"
     },
-    {"type": "level", "ref": "tw_001"},
-    {"type": "level", "ref": "tw_002"},
-    {"type": "level", "ref": "tw_003"},
-    {"type": "level", "ref": "tw_005"},
-    {"type": "level", "ref": "tw_006"},
-    {"type": "level", "ref": "tw_007"},
-    {"type": "level", "ref": "tw_004"},
-    {"type": "level", "ref": "tw_008"},
-    {"type": "level", "ref": "tw_009"},
-    {"type": "level", "ref": "tw_010"},
-    {"type": "level", "ref": "tw_011"},
-    {"type": "level", "ref": "tw_012"},
-    {"type": "level", "ref": "tw_013"},
-    {"type": "level", "ref": "tw_014"},
-    {"type": "level", "ref": "tw_015"}
+    {
+      "type": "level",
+      "ref": "tw_001"
+    },
+    {
+      "type": "level",
+      "ref": "tw_002"
+    },
+    {
+      "type": "level",
+      "ref": "tw_003"
+    },
+    {
+      "type": "level",
+      "ref": "tw_005"
+    },
+    {
+      "type": "level",
+      "ref": "tw_006"
+    },
+    {
+      "type": "level",
+      "ref": "tw_007"
+    },
+    {
+      "type": "level",
+      "ref": "tw_004"
+    },
+    {
+      "type": "level",
+      "ref": "tw_008"
+    },
+    {
+      "type": "level",
+      "ref": "tw_009"
+    },
+    {
+      "type": "level",
+      "ref": "tw_010"
+    },
+    {
+      "type": "level",
+      "ref": "tw_011"
+    },
+    {
+      "type": "level",
+      "ref": "tw_012"
+    },
+    {
+      "type": "level",
+      "ref": "tw_013"
+    },
+    {
+      "type": "level",
+      "ref": "tw_014"
+    },
+    {
+      "type": "level",
+      "ref": "tw_015"
+    },
+    {
+      "type": "level",
+      "ref": "tw_seed_ice"
+    }
   ],
   "defaults": {
     "maxCascadeDepth": 10,
@@ -415,5 +526,8 @@
       "enabled": true,
       "facing": "right"
     }
+  },
+  "goalDescriptions": {
+    "plant_all": "Push every seed basket (S) onto a garden plot (G) by walking into the basket \u2014 they pair up and both vanish. Solve when no garden plots remain."
   }
 }

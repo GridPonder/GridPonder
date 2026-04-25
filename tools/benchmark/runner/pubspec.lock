@@ -44,10 +44,10 @@ packages:
   gridponder_engine:
     dependency: "direct main"
     description:
-      path: "../../../engine"
+      path: "../../../engines/dart"
       relative: true
     source: path
-    version: "0.1.0"
+    version: "0.6.0"
   http_parser:
     dependency: transitive
     description:

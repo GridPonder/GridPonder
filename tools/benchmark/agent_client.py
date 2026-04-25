@@ -29,7 +29,9 @@ def _llm_worker(queue: Any, params: dict) -> None:
         import litellm as _litellm  # re-import in spawned process
         _litellm.suppress_debug_info = True
         response = _litellm.completion(**params)
-        content: str = response.choices[0].message.content or ""
+        msg = response.choices[0].message
+        content: str = msg.content or ""
+        reasoning: str = _extract_reasoning(msg)
         usage = response.usage or {}
         thinking_tokens: int = (
             getattr(usage, "reasoning_tokens", None)
@@ -38,9 +40,30 @@ def _llm_worker(queue: Any, params: dict) -> None:
         )
         output_tokens: int = getattr(usage, "completion_tokens", 0) or 0
         cost: float = response._hidden_params.get("response_cost", 0.0) or 0.0
-        queue.put(("ok", (content, thinking_tokens, output_tokens, cost)))
+        queue.put(("ok", (content, thinking_tokens, output_tokens, cost, reasoning)))
     except BaseException as e:  # noqa: BLE001
         queue.put(("err", e))
+
+
+def _extract_reasoning(msg: Any) -> str:
+    """Best-effort extraction of summarised reasoning content from a LiteLLM
+    response message. Anthropic / OpenAI-o1 / Gemini all expose this slightly
+    differently; LiteLLM normalises most of them onto `reasoning_content`."""
+    rc = getattr(msg, "reasoning_content", None)
+    if isinstance(rc, str) and rc:
+        return rc
+    blocks = getattr(msg, "thinking_blocks", None) or getattr(msg, "reasoning", None)
+    if isinstance(blocks, list):
+        parts: list[str] = []
+        for b in blocks:
+            if isinstance(b, dict):
+                t = b.get("thinking") or b.get("text") or b.get("content")
+                if isinstance(t, str) and t:
+                    parts.append(t)
+            elif isinstance(b, str) and b:
+                parts.append(b)
+        return "\n".join(parts)
+    return ""
 
 
 def call_llm(
@@ -49,8 +72,12 @@ def call_llm(
     extra_params: dict[str, Any] | None = None,
     max_tokens: int = 1024,
     request_timeout: float | None = None,
-) -> tuple[str, float, int, int, float]:
-    """Call an LLM and return (response_text, latency_ms, thinking_tokens, output_tokens, cost_usd).
+) -> tuple[str, float, int, int, float, str]:
+    """Call an LLM and return (response_text, latency_ms, thinking_tokens, output_tokens, cost_usd, reasoning).
+
+    `reasoning` is the model's summarised thinking content when the provider
+    exposes it (Anthropic extended-thinking summary, OpenAI o-series, Gemini).
+    Empty string when not available.
 
     Args:
         prompt: The full prompt string built by the Dart runner.
@@ -137,11 +164,13 @@ def call_llm(
 
         if status == "err":
             raise value  # re-raise original exception from worker
-        content, thinking_tokens, output_tokens, cost = value
+        content, thinking_tokens, output_tokens, cost, reasoning = value
     else:
         # No timeout — call directly in-process (no subprocess overhead).
         response = litellm.completion(**params)
-        content = response.choices[0].message.content or ""
+        msg = response.choices[0].message
+        content = msg.content or ""
+        reasoning = _extract_reasoning(msg)
         usage = response.usage or {}
         thinking_tokens = (
             getattr(usage, "reasoning_tokens", None)
@@ -152,7 +181,7 @@ def call_llm(
         cost = response._hidden_params.get("response_cost", 0.0) or 0.0
 
     latency_ms = (time.monotonic() - t0) * 1000.0
-    return content, latency_ms, thinking_tokens, output_tokens, cost
+    return content, latency_ms, thinking_tokens, output_tokens, cost, reasoning
 
 
 def _strip_noise(text: str) -> str:

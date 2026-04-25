@@ -25,11 +25,13 @@
         "void"
       ],
       "sprite": null,
-      "symbol": "_"
+      "symbol": "#"
     },
     "pipe": {
       "layer": "ground",
-      "tags": ["solid"],
+      "tags": [
+        "solid"
+      ],
       "sprite": null,
       "symbol": "\u2502"
     },

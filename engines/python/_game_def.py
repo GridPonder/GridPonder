@@ -95,6 +95,13 @@ class GameDef:
             "maxCascadeDepth": raw_defaults.get("maxCascadeDepth", 3),
         }
 
+        # Per-game goal-text overrides, keyed by goal id. Lets a pack supply
+        # a precise mechanical description ("Push every seed basket onto a
+        # garden plot — both disappear when paired") instead of relying on
+        # the renderer's generic auto-generated text ("Clear all garden
+        # plots from the board"). Empty dict by default.
+        self.goal_descriptions: dict[str, str] = data.get("goalDescriptions", {}) or {}
+
     @staticmethod
     def _parse_kind(kind_id: str, j: dict) -> dict:
         return {

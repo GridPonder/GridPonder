@@ -13,10 +13,17 @@ def render_goals(
 ) -> str:
     """Return a semicolon-separated string describing all level goals."""
     goal_parts: list[str] = []
+    overrides = getattr(game_def, "goal_descriptions", {}) or {}
     for goal in level_def.get("goals", []):
         goal_type = goal.get("type", "")
         config: dict = goal.get("config", {})
         goal_id: str = goal.get("id", "")
+
+        # Per-game goal-text override (set in game.json `goalDescriptions`).
+        # Skipped in anonymise mode since the override may name entities.
+        if not anonymize and goal_id in overrides:
+            goal_parts.append(overrides[goal_id])
+            continue
 
         if goal_type == "reach_target":
             kind_id = config.get("targetKind")

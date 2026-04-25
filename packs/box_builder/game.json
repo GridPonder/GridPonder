@@ -17,7 +17,9 @@
   "entityKinds": {
     "empty": {
       "layer": "ground",
-      "tags": ["walkable"],
+      "tags": [
+        "walkable"
+      ],
       "sprite": "assets/sprites/grass.png",
       "symbol": "."
     },
@@ -31,14 +33,18 @@
       "layer": "ground",
       "tags": [],
       "sprite": "assets/sprites/oak.png",
-      "symbol": "v",
+      "symbol": "#",
       "description": "impassable, cannot enter"
     },
     "box_fragment": {
       "layer": "objects",
-      "tags": ["sided"],
+      "tags": [
+        "sided"
+      ],
       "params": {
-        "sides": { "type": "integer" }
+        "sides": {
+          "type": "integer"
+        }
       },
       "sprite": "assets/sprites/box_{sides}.png",
       "spriteParam": "sides",
@@ -48,13 +54,18 @@
     },
     "box_target": {
       "layer": "markers",
-      "tags": ["goal_target"],
+      "tags": [
+        "goal_target"
+      ],
       "sprite": "assets/sprites/box_target.png",
       "symbol": "X"
     },
     "rock": {
       "layer": "objects",
-      "tags": ["solid", "breakable"],
+      "tags": [
+        "solid",
+        "breakable"
+      ],
       "sprite": "assets/sprites/rock2.png",
       "animations": {
         "breaking": {
@@ -71,16 +82,22 @@
     },
     "pickaxe": {
       "layer": "objects",
-      "tags": ["pickup"],
+      "tags": [
+        "pickup"
+      ],
       "sprite": "assets/sprites/pickaxe.png",
       "symbol": "P",
       "description": "pick up by walking onto it; then walk into a rock to destroy it"
     },
     "portal": {
       "layer": "objects",
-      "tags": ["teleport"],
+      "tags": [
+        "teleport"
+      ],
       "params": {
-        "channel": { "type": "string" }
+        "channel": {
+          "type": "string"
+        }
       },
       "sprite": null,
       "symbol": "O"
@@ -92,7 +109,12 @@
       "params": {
         "direction": {
           "type": "direction",
-          "values": ["up", "down", "left", "right"]
+          "values": [
+            "up",
+            "down",
+            "left",
+            "right"
+          ]
         }
       }
     }
@@ -104,7 +126,9 @@
       "config": {
         "sidedTag": "sided",
         "sidesParam": "sides",
-        "validGroundTags": ["walkable"],
+        "validGroundTags": [
+          "walkable"
+        ],
         "toolInteractions": [
           {
             "item": "pickaxe",
@@ -162,7 +186,7 @@
     {
       "type": "story",
       "title": "The Box That Pip Built",
-      "text": "Pip the rabbit has found a pile of box fragments scattered across the workshop!\n\nPush the pieces together to build complete boxes on every target square. A box needs all four sides — top, right, bottom, and left — to be complete.\n\nBe careful: you can slip inside an open box, and when you push against a wall from the inside, you'll carry it with you!",
+      "text": "Pip the rabbit has found a pile of box fragments scattered across the workshop!\n\nPush the pieces together to build complete boxes on every target square. A box needs all four sides \u2014 top, right, bottom, and left \u2014 to be complete.\n\nBe careful: you can slip inside an open box, and when you push against a wall from the inside, you'll carry it with you!",
       "image": "assets/rabbit_built_box.png"
     },
     {
