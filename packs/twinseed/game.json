@@ -165,7 +165,7 @@
         "pushable"
       ],
       "sprite": "assets/sprites/metal_crate2.png",
-      "symbol": "C"
+      "symbol": "M"
     },
     "torch": {
       "layer": "objects",

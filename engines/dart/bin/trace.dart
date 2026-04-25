@@ -85,9 +85,9 @@ void main(List<String> args) {
   }
 
   final finalPos = engine.state.avatar.position;
-  final flagEntity = _findFlag(engine.state);
+  final carrotPos = _findCarrot(engine.state);
   final won = engine.isWon;
-  print('end avatar=(${finalPos?.x},${finalPos?.y}) flag=$flagEntity won=$won');
+  print('end avatar=(${finalPos?.x},${finalPos?.y}) carrot=$carrotPos won=$won');
 }
 
 bool _stateUnchanged(LevelState a, LevelState b) {
@@ -115,11 +115,11 @@ Map<String, String> _layerSnapshot(LevelState state, String layerId) {
   return result;
 }
 
-String _findFlag(LevelState state) {
+String _findCarrot(LevelState state) {
   final markers = state.board.layers['markers'];
   if (markers == null) return '?';
   for (final entry in markers.entries()) {
-    if (entry.value.kind == 'flag') {
+    if (entry.value.kind == 'carrot') {
       return '(${entry.key.x},${entry.key.y})';
     }
   }

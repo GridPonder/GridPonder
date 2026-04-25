@@ -45,7 +45,7 @@
       "markers": {
         "format": "sparse",
         "entries": [
-          {"position": [ 6, 3 ], "kind": "flag"}
+          {"position": [ 6, 3 ], "kind": "carrot"}
         ]
       }
     }
@@ -55,7 +55,7 @@
   },
   "goals": [
     {
-      "id": "reach_flag",
+      "id": "reach_carrot",
       "type": "reach_target",
       "config": {"targetTag": "goal_target"}
     }

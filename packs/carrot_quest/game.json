@@ -123,7 +123,7 @@
         "sinkable"
       ],
       "sprite": "assets/sprites/metal_crate.png",
-      "symbol": "C"
+      "symbol": "M"
     },
     "torch": {
       "layer": "objects",
@@ -154,12 +154,12 @@
       },
       "symbol": "O"
     },
-    "flag": {
+    "carrot": {
       "layer": "markers",
       "tags": [
         "goal_target"
       ],
-      "symbol": "F"
+      "symbol": "C"
     }
   },
   "actions": [

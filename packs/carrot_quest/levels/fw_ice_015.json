@@ -65,14 +65,14 @@
       "markers": {
         "format": "sparse",
         "entries": [
-          {"position": [4, 2], "kind": "flag"}
+          {"position": [4, 2], "kind": "carrot"}
         ]
       }
     }
   },
   "state": {"avatar": {"enabled": true, "position": [7, 1], "facing": "right"}},
   "goals": [
-    {"id": "reach_flag", "type": "reach_target", "config": {"targetTag": "goal_target"}}
+    {"id": "reach_carrot", "type": "reach_target", "config": {"targetTag": "goal_target"}}
   ],
   "solution": {
     "goldPath": [

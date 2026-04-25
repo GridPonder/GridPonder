@@ -460,7 +460,7 @@ class _Cell extends StatelessWidget {
       );
     }
 
-    if (kind == 'flag') {
+    if (kind == 'carrot') {
       return Center(
         child: Text('🥕', style: TextStyle(fontSize: cellSize * 0.6)),
       );
