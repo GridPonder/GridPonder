@@ -159,7 +159,8 @@
       "tags": [
         "goal_target"
       ],
-      "symbol": "C"
+      "symbol": "C",
+      "sprite": "assets/sprites/carrot.png"
     }
   },
   "actions": [
