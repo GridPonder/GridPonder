@@ -29,6 +29,31 @@ SCRIPT_DIR = Path(__file__).parent.resolve()
 RESULTS_DIR = SCRIPT_DIR / "results" / "run"
 LEADERBOARD_FILE = SCRIPT_DIR / "leaderboard.json"
 MODELS_FILE = SCRIPT_DIR / "models.yaml"
+PACKS_DIR = SCRIPT_DIR.parent.parent / "packs"
+
+# Lazy import: only used when building level_results.
+import sys
+sys.path.insert(0, str(SCRIPT_DIR.parent.parent))
+from engines.python.level_metrics import playable_cell_count
+
+_level_metrics_cache: dict[tuple[str, str], dict[str, Any]] = {}
+
+
+def level_metrics(pack_id: str, level_id: str) -> dict[str, Any]:
+    """Return derived metrics for a level (cached). Empty dict if unreadable."""
+    key = (pack_id, level_id)
+    if key in _level_metrics_cache:
+        return _level_metrics_cache[key]
+    path = PACKS_DIR / pack_id / "levels" / f"{level_id}.json"
+    metrics: dict[str, Any] = {}
+    if path.exists():
+        try:
+            d = json.loads(path.read_text())
+            metrics["playable_cells"] = playable_cell_count(d)
+        except (json.JSONDecodeError, OSError):
+            pass
+    _level_metrics_cache[key] = metrics
+    return metrics
 
 
 def load_results(results_dir: Path, mode_filter: str | None = None) -> dict[str, dict]:
@@ -120,8 +145,8 @@ def compute_stats(levels: list[dict]) -> dict[str, Any]:
 
 def build_leaderboard(data: dict[str, dict]) -> dict:
     models_out: list[dict] = []
-    # Compact columnar per-level rows (used by the difficulty-curve chart).
-    level_cols = ["model_id", "pack_id", "level_id", "gold_path_length", "success", "inference_mode", "anon"]
+    # Compact columnar per-level rows (used by the analytic charts).
+    level_cols = ["model_id", "pack_id", "level_id", "gold_path_length", "success", "inference_mode", "anon", "playable_cells"]
     level_rows: list[list[Any]] = []
 
     for key, entry in data.items():
@@ -155,6 +180,7 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
         for l in levels:
             if "error" in l or l.get("gold_path_length") is None:
                 continue
+            metrics = level_metrics(l["pack_id"], l["level_id"])
             level_rows.append([
                 meta["model_id"],
                 l["pack_id"],
@@ -163,6 +189,7 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
                 bool(l.get("success", False)),
                 inference_mode,
                 anon,
+                metrics.get("playable_cells"),
             ])
 
     # Sort by aggregate score descending, then success rate, then efficiency.

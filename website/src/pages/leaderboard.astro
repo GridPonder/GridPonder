@@ -164,6 +164,25 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       </div>
     </div>
 
+    <!-- Grid-size curve chart -->
+    <div class="rounded-2xl border border-gray-200 overflow-hidden mb-6 mt-10">
+      <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 class="font-bold text-gray-900">Grid Size vs Accuracy</h2>
+          <p class="text-xs text-gray-500 mt-0.5">Accuracy by playable-cell count (excludes void cells). Buckets are 5 wide below 30 and 20 wide from 30 onward. Shaded band is a 95% Wilson confidence interval on the average.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-gray-500" for="cells-pack">Pack:</label>
+          <select id="cells-pack" class="text-xs border border-gray-300 rounded-lg px-2 py-1 bg-white"></select>
+        </div>
+      </div>
+      <div class="px-2 py-2" id="cells-chart" style="height:360px"></div>
+      <div class="px-6 pb-4 pt-3 border-t border-gray-100">
+        <p class="text-xs text-gray-500 mb-2">Click models to overlay individual curves:</p>
+        <div id="cells-model-picker" class="flex flex-wrap gap-1.5"></div>
+      </div>
+    </div>
+
     <!-- Per-pack breakdown -->
     <div id="pack-section" class="mb-12">
       <h2 class="font-bold text-gray-900 text-lg mb-4">Breakdown by Pack</h2>
@@ -664,12 +683,197 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       });
     }
 
+    // ── Grid-size curve ──────────────────────────────────────────────────
+    let _cellsChart = null;
+    let _cellsPack = 'all';
+    const _cellsSelected = new Set(ALL_MODELS.filter(m => m.reasoning).map(m => m.id));
+
+    // Adaptive buckets: width 5 below 30, width 20 from 30 onward.
+    function cellBucketLow(c)    { return c < 30 ? Math.floor(c / 5) * 5 : Math.floor((c - 30) / 20) * 20 + 30; }
+    function cellBucketWidth(lo) { return lo < 30 ? 5 : 20; }
+    function cellBucketCenter(lo){ return lo + (cellBucketWidth(lo) - 1) / 2; }
+    function cellBucketLabel(lo) { return `${lo}–${lo + cellBucketWidth(lo) - 1}`; }
+
+    function cellsFilteredRows() {
+      return LEVEL_ROWS.filter(r => {
+        if (r.playable_cells == null || r.playable_cells < 4) return false;
+        if (currentMode !== 'aggregate') {
+          if (r.inference_mode !== currentMode) return false;
+          if (Boolean(r.anon) !== currentAnon) return false;
+        }
+        if (_cellsPack !== 'all' && r.pack_id !== _cellsPack) return false;
+        return true;
+      });
+    }
+
+    function cellsModelCurve(rows, modelId) {
+      const buckets = {};
+      for (const r of rows) {
+        if (modelId && r.model_id !== modelId) continue;
+        const lo = cellBucketLow(r.playable_cells);
+        if (!buckets[lo]) buckets[lo] = { hits: 0, total: 0 };
+        buckets[lo].total++;
+        if (r.success) buckets[lo].hits++;
+      }
+      return Object.entries(buckets)
+        .map(([lo, v]) => ({
+          x: cellBucketCenter(+lo), acc: v.hits / v.total, n: v.total, label: cellBucketLabel(+lo),
+        }))
+        .sort((a, b) => a.x - b.x);
+    }
+
+    function cellsAverageCurve(rows, modelIds) {
+      const curves = modelIds.map(id => cellsModelCurve(rows, id));
+      const byX = {};
+      for (const c of curves) for (const p of c) {
+        if (!byX[p.x]) byX[p.x] = { accs: [], totalN: 0, label: p.label };
+        byX[p.x].accs.push(p.acc);
+        byX[p.x].totalN += p.n;
+      }
+      return Object.entries(byX)
+        .map(([x, v]) => ({
+          x: +x,
+          acc: v.accs.reduce((a, b) => a + b, 0) / v.accs.length,
+          n: v.totalN,
+          label: v.label,
+        }))
+        .sort((a, b) => a.x - b.x);
+    }
+
+    async function renderCellsChart() {
+      const el = document.getElementById('cells-chart');
+      if (!el) return;
+      const rows = cellsFilteredRows();
+      if (!rows.length) {
+        if (_cellsChart) _cellsChart.clear();
+        el.innerHTML = '<p class="py-12 text-center text-sm text-gray-400">No data for this filter.</p>';
+        return;
+      }
+
+      const echarts = await getECharts();
+      if (!_cellsChart) {
+        el.innerHTML = '';
+        _cellsChart = echarts.init(el);
+        new ResizeObserver(() => _cellsChart?.resize()).observe(el);
+      }
+
+      const allModelIds = [...new Set(rows.map(r => r.model_id))];
+      const toSeriesData = curve => curve.map(p => ({ value: [p.x, p.acc], n: p.n, label: p.label }));
+
+      const avgCurve = cellsAverageCurve(rows, allModelIds);
+      const ciPts = avgCurve.map(p => {
+        const [lo, hi] = wilson(p.acc, p.n);
+        return { x: p.x, lo, hi };
+      });
+
+      const series = [
+        {
+          name: '95% CI', type: 'custom', silent: true, z: 1, legendHoverLink: false,
+          renderItem: (params, api) => {
+            if (ciPts.length < 2) return null;
+            const upper = ciPts.map(p => api.coord([p.x, p.hi]));
+            const lower = ciPts.slice().reverse().map(p => api.coord([p.x, p.lo]));
+            return { type: 'polygon', shape: { points: [...upper, ...lower] }, style: { fill: 'rgba(55,65,81,0.13)' } };
+          },
+          data: [0],
+        },
+        {
+          name: 'Average', type: 'line', data: toSeriesData(avgCurve),
+          smooth: true,
+          lineStyle: { width: 3, color: '#374151' },
+          itemStyle: { color: '#374151' },
+          symbolSize: 6,
+          z: 10,
+        },
+      ];
+
+      let ci = 0;
+      for (const id of _cellsSelected) {
+        const curve = cellsModelCurve(rows, id);
+        if (!curve.length) continue;
+        const color = DIFF_COLORS[ci++ % DIFF_COLORS.length];
+        series.push({
+          name: modelLabel(id), type: 'line', data: toSeriesData(curve), smooth: true,
+          lineStyle: { color, width: 1.8 },
+          itemStyle: { color },
+          symbolSize: 5,
+        });
+      }
+
+      _cellsChart.setOption({
+        grid: { top: 36, right: 24, bottom: 50, left: 56 },
+        legend: { top: 4, textStyle: { fontSize: 11, color: '#4b5563' }, itemWidth: 14, itemHeight: 8 },
+        xAxis: {
+          type: 'value', name: 'playable cells', nameLocation: 'center', nameGap: 30,
+          axisLine: { lineStyle: { color: '#d1d5db' } },
+          axisTick: { lineStyle: { color: '#d1d5db' } },
+          splitLine: { lineStyle: { color: '#f3f4f6' } },
+          axisLabel: { color: '#9ca3af', fontSize: 11 },
+        },
+        yAxis: {
+          type: 'value', name: 'accuracy', nameLocation: 'center', nameGap: 40,
+          min: 0, max: 1,
+          axisLine: { show: true, lineStyle: { color: '#d1d5db' } },
+          axisTick: { lineStyle: { color: '#d1d5db' } },
+          splitLine: { lineStyle: { color: '#f3f4f6' } },
+          axisLabel: { color: '#9ca3af', fontSize: 11, formatter: v => `${Math.round(v * 100)}%` },
+        },
+        tooltip: {
+          trigger: 'axis',
+          formatter: params => {
+            if (!params.length) return '';
+            const head = `<b>${params[0].data.label} cells</b>`;
+            const lines = params.map(p => `${p.marker} ${p.seriesName}: ${(p.value[1] * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${p.data.n})</span>`);
+            return [head, ...lines].join('<br/>');
+          },
+        },
+        series,
+      }, true);
+    }
+
+    function renderCellsPicker() {
+      const el = document.getElementById('cells-model-picker');
+      if (!el) return;
+      const rows = cellsFilteredRows();
+      const ids = [...new Set(rows.map(r => r.model_id))];
+      const scoreById = Object.fromEntries(getModels().map(m => [m.id, m.overall?.avg_aggregate_score ?? 0]));
+      ids.sort((a, b) => (scoreById[b] ?? 0) - (scoreById[a] ?? 0));
+      el.innerHTML = ids.map(id => {
+        const active = _cellsSelected.has(id);
+        const cls = active
+          ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50';
+        return `<button data-mid="${id}" class="cells-mbtn text-xs px-2 py-1 rounded-md border transition-colors ${cls}">${modelLabel(id)}</button>`;
+      }).join('');
+      el.querySelectorAll('.cells-mbtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.mid;
+          if (_cellsSelected.has(id)) _cellsSelected.delete(id); else _cellsSelected.add(id);
+          renderCellsChart();
+          renderCellsPicker();
+        });
+      });
+    }
+
+    function setupCellsPackDropdown() {
+      const sel = document.getElementById('cells-pack');
+      if (!sel) return;
+      sel.innerHTML = '<option value="all">All packs</option>' +
+        ALL_PACKS.map(p => `<option value="${p}">${p.replace(/_/g, ' ')}</option>`).join('');
+      sel.addEventListener('change', () => {
+        _cellsPack = sel.value;
+        renderCellsChart();
+      });
+    }
+
     async function render() {
       const models = getModels();
       renderOverall(models);
       await renderPareto(models);
       await renderDiffChart();
       renderDiffPicker();
+      await renderCellsChart();
+      renderCellsPicker();
       renderPacks(models);
       updateSelectors();
       const n = currentMode !== 'aggregate' ? models[0]?.overall?.levels_run : null;
@@ -687,6 +891,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
     });
 
     setupDiffPackDropdown();
+    setupCellsPackDropdown();
 
     // Initial render
     render();
