@@ -53,18 +53,20 @@ class WorkItem:
     variant: dict
     mode: str
     anon: bool
+    input_mode: str
     max_n: int | None
     full_variant_id: str
     litellm_model: str
     output_key: str
 
 
-def compute_output_key(full_variant_id: str, mode: str, max_n: int | None, anon: bool) -> str:
+def compute_output_key(full_variant_id: str, mode: str, max_n: int | None, anon: bool, input_mode: str = "text") -> str:
     mode_tag = mode
     if mode == "flex-n":
         mode_tag = f"flex-{max_n}" if max_n else "flex-n"
     anon_tag = "_anon" if anon else ""
-    return f"{full_variant_id}_{mode_tag}{anon_tag}"
+    input_tag = "" if input_mode == "text" else f"_{input_mode.replace('+', '-')}"
+    return f"{full_variant_id}_{mode_tag}{anon_tag}{input_tag}"
 
 
 def build_work_items(
@@ -72,20 +74,24 @@ def build_work_items(
     levels_by_pack: dict[str, list[str]],
     modes: list[str],
     anon_modes: list[str],
+    input_modes: list[str],
     max_n: int | None,
 ) -> list[WorkItem]:
     items: list[WorkItem] = []
-    mode_anon_combos: list[tuple[str, bool]] = []
+    # (mode, anon, input_mode) tuples — anon implies text-only (image carries no
+    # anonymisation), so we don't pair anon with image/text+image.
+    combos: list[tuple[str, bool, str]] = []
     for mode in modes:
-        mode_anon_combos.append((mode, False))
+        for inp in input_modes:
+            combos.append((mode, False, inp))
         if mode in anon_modes:
-            mode_anon_combos.append((mode, True))
+            combos.append((mode, True, "text"))
 
     for model, variant in model_variants:
         full_id = f"{model['id']}{variant.get('suffix', '')}"
         lm = model["litellm_model"]
-        for mode, anon in mode_anon_combos:
-            okey = compute_output_key(full_id, mode, max_n, anon)
+        for mode, anon, input_mode in combos:
+            okey = compute_output_key(full_id, mode, max_n, anon, input_mode)
             for pack_id, level_ids in levels_by_pack.items():
                 for level_id in level_ids:
                     items.append(WorkItem(
@@ -95,6 +101,7 @@ def build_work_items(
                         variant=variant,
                         mode=mode,
                         anon=anon,
+                        input_mode=input_mode,
                         max_n=max_n,
                         full_variant_id=full_id,
                         litellm_model=lm,
@@ -126,12 +133,15 @@ def filter_completed(
     items: list[WorkItem],
     scan_dir: Path | None = None,
 ) -> list[WorkItem]:
-    cache: dict[tuple[str, bool], set[tuple[str, str, str]]] = {}
+    cache: dict[tuple[str, bool, str], set[tuple[str, str, str]]] = {}
     filtered: list[WorkItem] = []
     for item in items:
-        key = (item.mode, item.anon)
+        key = (item.mode, item.anon, item.input_mode)
         if key not in cache:
-            cache[key] = load_completed(RESULTS_BASE, item.mode, item.anon, scan_dir=scan_dir)
+            cache[key] = load_completed(
+                RESULTS_BASE, item.mode, item.anon,
+                scan_dir=scan_dir, input_mode=item.input_mode,
+            )
         done = cache[key]
         if (item.full_variant_id, item.pack_id, item.level_id) not in done:
             filtered.append(item)
@@ -148,6 +158,7 @@ def build_run_meta(item: WorkItem, args: argparse.Namespace) -> dict:
         "reasoning": item.variant.get("reasoning", False),
         "inference_mode": item.mode,
         "anon": item.anon,
+        "input_mode": item.input_mode,
         "attempt_multiplier": args.attempt_multiplier,
         "total_multiplier": args.total_multiplier,
         "runs_per_level": 1,
@@ -205,6 +216,12 @@ def main() -> None:
                         help="Inference modes to run (default: single flex-n full)")
     parser.add_argument("--anon-modes", nargs="+", default=["single", "flex-n"],
                         help="Modes that also run with --anon (default: single flex-n)")
+    parser.add_argument("--input-modes", nargs="+",
+                        choices=["text", "image", "text+image"],
+                        default=["text"],
+                        help="Input modalities to evaluate. text is the existing baseline; "
+                             "image and text+image require vision-capable models. "
+                             "Anon variants are only ever run with text. (default: text)")
 
     parser.add_argument("--workers", type=int, default=40,
                         help="Concurrent worker threads (default: 40)")
@@ -253,7 +270,10 @@ def main() -> None:
 
     # ── Build work items ─────────────────────────────────────────────────────
     max_n = args.flex_max_n if "flex-n" in args.modes else None
-    items = build_work_items(model_variants, levels_by_pack, args.modes, args.anon_modes, max_n)
+    items = build_work_items(
+        model_variants, levels_by_pack,
+        args.modes, args.anon_modes, args.input_modes, max_n,
+    )
 
     # ── Resume filtering ─────────────────────────────────────────────────────
     if not args.no_resume:
@@ -368,6 +388,7 @@ def main() -> None:
                 flex_penalty=args.flex_penalty,
                 anon=item.anon,
                 runner=args.runner,
+                input_mode=item.input_mode,
             )
         except Exception as exc:
             result = {

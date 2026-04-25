@@ -131,6 +131,7 @@ def run_level(
     flex_penalty: float = 0.5,
     anon: bool = False,
     runner: str = "auto",
+    input_mode: str = "text",
 ) -> dict[str, Any]:
     """Run one level with one model variant. Returns a result dict.
 
@@ -142,12 +143,17 @@ def run_level(
         flex_penalty:    Cost per extra step beyond the first (flex-n only).
         runner:          'dart' | 'python' | 'auto' (auto-detects by binary presence).
     """
-    use_python = runner == "python" or (runner == "auto" and not RUNNER_BIN.exists())
-    if not use_python and not RUNNER_BIN.exists():
-        sys.exit(
-            f"Runner binary not found: {RUNNER_BIN}\n"
-            "Build it first: make benchmark-build"
-        )
+    # Image input requires the PIL renderer which only exists in the Python
+    # runner — force python regardless of the requested runner choice.
+    if input_mode != "text":
+        use_python = True
+    else:
+        use_python = runner == "python" or (runner == "auto" and not RUNNER_BIN.exists())
+        if not use_python and not RUNNER_BIN.exists():
+            sys.exit(
+                f"Runner binary not found: {RUNNER_BIN}\n"
+                "Build it first: make benchmark-build"
+            )
 
     # max_tokens scales with expected output size.
     if mode == "flex-n" and max_n is None:
@@ -181,6 +187,8 @@ def run_level(
         cmd += ["--max-n", str(max_n)]
     if anon:
         cmd += ["--anon"]
+    if input_mode != "text":
+        cmd += ["--input", input_mode]
 
     litellm_model: str = model["litellm_model"]
     extra_params: dict = dict(variant.get("params") or {})
@@ -227,6 +235,7 @@ def run_level(
 
             if etype == "state":
                 prompt: str = event["prompt"]
+                image_b64: str | None = event.get("image_b64")
                 llm_ok = False
                 for _retry in range(3):
                     try:
@@ -234,6 +243,7 @@ def run_level(
                             prompt, litellm_model, extra_params,
                             max_tokens=max_tokens,
                             request_timeout=action_timeout,
+                            image_b64=image_b64,
                         )
                         llm_ok = True
                         break
@@ -361,6 +371,7 @@ def run_level(
         "reasoning": variant.get("reasoning", False),
         "inference_mode": mode,
         "anon": anon,
+        "input_mode": input_mode,
         "runner": "python" if use_python else "dart",
         "success": success,
         "actions_total": actions_total,
@@ -410,9 +421,11 @@ def _send_give_up(send: Any, mode: str, memory: str) -> None:
 
 def load_completed(
     results_base: Path, mode: str, anon: bool, scan_dir: Path | None = None,
+    input_mode: str = "text",
 ) -> set[tuple[str, str, str]]:
     """Scan JSONL runs and return (model_id, pack_id, level_id) triples
-    that already have a successful (non-error) result for the given mode+anon.
+    that already have a successful (non-error) result for the given
+    (mode, anon, input_mode) combination.
 
     When *scan_dir* is given, only that directory is scanned (non-recursive).
     Otherwise all subdirectories under *results_base* are scanned.
@@ -425,6 +438,7 @@ def load_completed(
     for jsonl_file in sorted(base.glob(glob_pattern)):
         file_mode: str | None = None
         file_anon: bool = False
+        file_input: str = "text"
         with open(jsonl_file) as f:
             for line in f:
                 line = line.strip()
@@ -437,7 +451,11 @@ def load_completed(
                 if rec.get("type") == "run_meta":
                     file_mode = rec.get("inference_mode", "single")
                     file_anon = rec.get("anon", False)
-                elif rec.get("type") == "level" and file_mode == mode and file_anon == anon:
+                    file_input = rec.get("input_mode", "text")
+                elif (rec.get("type") == "level"
+                      and file_mode == mode
+                      and file_anon == anon
+                      and file_input == input_mode):
                     if "error" not in rec:
                         done.add((rec["model_id"], rec["pack_id"], rec["level_id"]))
     return done
@@ -538,6 +556,11 @@ def main() -> None:
                         help="Efficiency penalty per extra step beyond first in flex-n (default: 0.5)")
     parser.add_argument("--anon", action="store_true",
                         help="Anonymise entity kinds and action IDs (ARC-AGI style)")
+    parser.add_argument("--input", choices=["text", "image", "text+image"],
+                        default="text",
+                        help="What the model sees: text grid, board image, or both. "
+                             "Image and text+image require the Python runner. Anon mode "
+                             "always forces text (image carries no anonymisation).")
     parser.add_argument("--runner", choices=["auto", "dart", "python"], default="auto",
                         help="Game-loop runner: dart (compiled binary), python, or auto "
                              "(uses Dart if binary exists, else Python; default: auto)")
@@ -591,8 +614,12 @@ def main() -> None:
                 for _ in range(args.runs):
                     work.append((pack_id, level_id, model, variant))
 
+    # Anon + image is silently downgraded to text by the runner; mirror that here.
+    if args.anon and args.input != "text":
+        args.input = "text"
+
     if args.resume:
-        completed = load_completed(RESULTS_BASE, args.mode, args.anon)
+        completed = load_completed(RESULTS_BASE, args.mode, args.anon, input_mode=args.input)
         if completed:
             before = len(work)
             work = [
@@ -609,7 +636,8 @@ def main() -> None:
     elif args.mode == "flex-n":
         mode_label = f"flex-{args.max_n}(f={args.flex_penalty})"
     anon_label = " [anon]" if args.anon else ""
-    print(f"Benchmark [{mode_label}]{anon_label}: {total} run(s) — "
+    input_label = "" if args.input == "text" else f" [{args.input}]"
+    print(f"Benchmark [{mode_label}]{anon_label}{input_label}: {total} run(s) — "
           f"{len(model_variants)} model variant(s) × "
           f"{sum(len(v) for v in levels_by_pack.values())} level(s)"
           f"{f' × {args.runs} runs' if args.runs > 1 else ''}")
@@ -640,16 +668,19 @@ def main() -> None:
         "step_size": args.step_size if args.mode == "fixed-n" else None,
         "max_n": args.max_n if args.mode == "flex-n" else None,
         "flex_penalty": args.flex_penalty if args.mode == "flex-n" else None,
+        "input_mode": args.input,
         "levels_by_pack": {p: lvls for p, lvls in levels_by_pack.items()},
         "total_work_items": total,
     }
+    # File-name suffix that uniquely identifies this (mode, anon, input) bucket.
+    _input_tag = "" if args.input == "text" else f"_{args.input.replace('+', '-')}"
     if args.run_dir:
         _mode_tag = args.mode
         if args.mode == "flex-n":
             _mode_tag = f"flex-{args.max_n}" if args.max_n else "flex-n"
         _anon_tag = "_anon" if args.anon else ""
         _model_tag = (args.models[0] if args.models else "all")
-        meta_file = RESULTS_DIR / f"meta_{_model_tag}_{_mode_tag}{_anon_tag}.json"
+        meta_file = RESULTS_DIR / f"meta_{_model_tag}_{_mode_tag}{_anon_tag}{_input_tag}.json"
     else:
         meta_file = RESULTS_DIR / "meta.json"
     with open(meta_file, "w") as f:
@@ -670,14 +701,15 @@ def main() -> None:
     by_variant = {k: v for k, v in by_variant.items() if v}
 
     # ── Run ───────────────────────────────────────────────────────────────────
-    # Build a file-name suffix from mode+anon so parallel workers don't collide.
+    # Build a file-name suffix from mode+anon+input so parallel workers don't collide.
     mode_tag = args.mode
     if args.mode == "flex-n":
         mode_tag = f"flex-{args.max_n}" if args.max_n else "flex-n"
     anon_tag = "_anon" if args.anon else ""
+    input_tag = "" if args.input == "text" else f"_{args.input.replace('+', '-')}"
 
     for full_id, items in by_variant.items():
-        out_file = RESULTS_DIR / f"{full_id}_{mode_tag}{anon_tag}.jsonl"
+        out_file = RESULTS_DIR / f"{full_id}_{mode_tag}{anon_tag}{input_tag}.jsonl"
         model_cfg = items[0][2]
         variant_cfg = items[0][3]
 
@@ -690,6 +722,7 @@ def main() -> None:
             "reasoning": variant_cfg.get("reasoning", False),
             "inference_mode": args.mode,
             "anon": args.anon,
+            "input_mode": args.input,
             "attempt_multiplier": args.attempt_multiplier,
             "total_multiplier": args.total_multiplier,
             "runs_per_level": args.runs,
@@ -720,6 +753,7 @@ def main() -> None:
                         flex_penalty=args.flex_penalty,
                         anon=args.anon,
                         runner=args.runner,
+                        input_mode=args.input,
                     )
                 except Exception as exc:
                     result = {

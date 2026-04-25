@@ -92,13 +92,15 @@ def load_results(results_dir: Path, mode_filter: str | None = None) -> dict[str,
 
         model_id = meta["model_id"]
         file_anon = meta.get("anon", False)
-        key = f"{model_id}|{file_mode}|{'anon' if file_anon else 'named'}"
+        file_input = meta.get("input_mode", "text")
+        key = f"{model_id}|{file_mode}|{'anon' if file_anon else 'named'}|{file_input}"
         if key not in data:
             data[key] = {
                 "meta": meta,
                 "levels": [],
                 "inference_mode": file_mode,
                 "anon": file_anon,
+                "input_mode": file_input,
             }
         data[key]["levels"].extend(levels)
 
@@ -263,7 +265,7 @@ def _compute_behaviour(valid_levels: list[dict]) -> dict[str, Any]:
 def build_leaderboard(data: dict[str, dict]) -> dict:
     models_out: list[dict] = []
     # Compact columnar per-level rows (used by the analytic charts).
-    level_cols = ["model_id", "pack_id", "level_id", "gold_path_length", "success", "inference_mode", "anon", "playable_cells"]
+    level_cols = ["model_id", "pack_id", "level_id", "gold_path_length", "success", "inference_mode", "anon", "playable_cells", "input_mode"]
     level_rows: list[list[Any]] = []
 
     for key, entry in data.items():
@@ -271,6 +273,7 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
         levels = entry["levels"]
         inference_mode = entry["inference_mode"]
         anon = bool(entry.get("anon", False))
+        input_mode = entry.get("input_mode", "text")
 
         by_pack: dict[str, list[dict]] = defaultdict(list)
         for l in levels:
@@ -290,6 +293,7 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
             "reasoning": meta.get("reasoning", False),
             "inference_mode": inference_mode,
             "anon": anon,
+            "input_mode": input_mode,
             "overall": overall,
             "by_pack": pack_stats,
         })
@@ -307,6 +311,7 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
                 inference_mode,
                 anon,
                 metrics.get("playable_cells"),
+                input_mode,
             ])
 
     # Sort by aggregate score descending, then success rate, then efficiency.

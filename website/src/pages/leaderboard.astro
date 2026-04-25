@@ -84,22 +84,36 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       </div>
     </div>
 
-    <!-- Selectors: 5 valid combinations in 2 labelled groups -->
+    <!-- Selectors: 11 valid combinations grouped by input modality -->
     <div class="mb-8">
       <div class="inline-flex flex-wrap items-center gap-1 bg-gray-100 rounded-xl p-1.5">
         <!-- Aggregate -->
         <button id="sel-aggregate" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Aggregate</button>
         <div class="w-px h-5 bg-gray-300 mx-1"></div>
-        <!-- Normal group -->
-        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Normal</span>
-        <button id="sel-normal-single" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white text-gray-900 shadow-sm">Single-step</button>
-        <button id="sel-normal-flex-n" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
-        <button id="sel-normal-full"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
+        <!-- Text group -->
+        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Text</span>
+        <button id="sel-text-single" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white text-gray-900 shadow-sm">Single</button>
+        <button id="sel-text-flex-n" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
+        <button id="sel-text-full"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
         <!-- Divider -->
         <div class="w-px h-5 bg-gray-300 mx-1"></div>
-        <!-- Anon group -->
+        <!-- Image group -->
+        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Image</span>
+        <button id="sel-img-single" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Single</button>
+        <button id="sel-img-flex-n" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
+        <button id="sel-img-full"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
+        <!-- Divider -->
+        <div class="w-px h-5 bg-gray-300 mx-1"></div>
+        <!-- Text+Image group -->
+        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Text+Image</span>
+        <button id="sel-ti-single" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Single</button>
+        <button id="sel-ti-flex-n" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
+        <button id="sel-ti-full"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
+        <!-- Divider -->
+        <div class="w-px h-5 bg-gray-300 mx-1"></div>
+        <!-- Anon group (text only by definition) -->
         <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Anon</span>
-        <button id="sel-anon-single"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Single-step</button>
+        <button id="sel-anon-single"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Single</button>
         <button id="sel-anon-flex-n"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
       </div>
       <p id="combo-description" class="mt-3 text-sm text-gray-500 max-w-xl leading-relaxed"></p>
@@ -260,26 +274,45 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
     const _lr = JSON.parse(levelResultsJson);
     const LEVEL_ROWS = (_lr.rows ?? []).map(r => Object.fromEntries((_lr.columns ?? []).map((c, i) => [c, r[i]])));
 
+    // Descriptions keyed by `${mode}|${anon}|${input}` (anon is bool, input is text/image/text+image).
+    // Aggregate gets a single key 'aggregate|false|text' — input is ignored in aggregate.
     const COMBO_DESCRIPTIONS = {
-      'aggregate|false': 'Average of score, accuracy, and efficiency across all five inference modes. Models without data for a mode are excluded from that mode\'s contribution.',
-      'single|false': 'One action per LLM call. The model sees the current board state and picks exactly one move. The baseline interaction mode.',
-      'flex-n|false': 'The model chooses 1–5 actions per call. Extra steps beyond the first are penalised (−0.5 per extra step), rewarding confident multi-step planning over move-by-move hedging.',
-      'full|false':   'All actions in a single call — no intermediate feedback. The model must plan the complete solution upfront from the initial board state alone.',
-      'single|true':  'Single-step with anonymised labels: entity kinds and action IDs are replaced with arbitrary codes (e.g. "entity_A", "action_3"). Tests whether performance depends on domain-familiar language rather than pure spatial reasoning.',
-      'flex-n|true':  'Flex-n with anonymised labels: multi-step planning where all entity and action names carry no semantic meaning. The hardest test of label-independent reasoning.',
+      'aggregate|false|text': 'Average of score, accuracy, and efficiency across every inference mode and input modality the model has been evaluated on. Each (mode, input) combo contributes equally if data is available.',
+      // text input (existing)
+      'single|false|text':       'One action per LLM call. The model sees the text-rendered board and picks exactly one move. The baseline interaction mode.',
+      'flex-n|false|text':       'The model chooses 1–5 actions per call from the text-rendered board. Extra steps beyond the first are penalised (−0.5 per extra step), rewarding confident multi-step planning.',
+      'full|false|text':         'All actions in a single call from the text-rendered board — no intermediate feedback. The model must plan the complete solution upfront.',
+      'single|true|text':        'Single-step with anonymised labels: entity kinds and action IDs are replaced with arbitrary codes. Tests whether performance depends on domain-familiar language rather than spatial reasoning.',
+      'flex-n|true|text':        'Flex-n with anonymised labels: multi-step planning where all entity and action names carry no semantic meaning.',
+      // image input
+      'single|false|image':      'Single-step on a rendered board image (no text grid). Tests purely visual perception of the board state.',
+      'flex-n|false|image':      'Flex-n with the board provided only as an image. Multi-step planning from visual input.',
+      'full|false|image':        'Full one-shot solve from a single board image, no text grid.',
+      // text + image
+      'single|false|text+image': 'Single-step with both the text grid and the rendered image attached. Most expensive variant — tests whether visual context boosts spatial reasoning.',
+      'flex-n|false|text+image': 'Flex-n with both text and image. Multi-step planning with redundant representations.',
+      'full|false|text+image':   'Full one-shot solve with both text and image. The most information-dense variant.',
     };
 
+    // input is one of 'text' | 'image' | 'text+image'. Aggregate ignores input.
     const COMBOS = [
-      { id: 'sel-aggregate',     mode: 'aggregate', anon: false },
-      { id: 'sel-normal-single', mode: 'single',    anon: false },
-      { id: 'sel-normal-flex-n', mode: 'flex-n',    anon: false },
-      { id: 'sel-normal-full',   mode: 'full',      anon: false },
-      { id: 'sel-anon-single',   mode: 'single',    anon: true  },
-      { id: 'sel-anon-flex-n',   mode: 'flex-n',    anon: true  },
+      { id: 'sel-aggregate',     mode: 'aggregate', anon: false, input: 'text' },
+      { id: 'sel-text-single',   mode: 'single',    anon: false, input: 'text' },
+      { id: 'sel-text-flex-n',   mode: 'flex-n',    anon: false, input: 'text' },
+      { id: 'sel-text-full',     mode: 'full',      anon: false, input: 'text' },
+      { id: 'sel-img-single',    mode: 'single',    anon: false, input: 'image' },
+      { id: 'sel-img-flex-n',    mode: 'flex-n',    anon: false, input: 'image' },
+      { id: 'sel-img-full',      mode: 'full',      anon: false, input: 'image' },
+      { id: 'sel-ti-single',     mode: 'single',    anon: false, input: 'text+image' },
+      { id: 'sel-ti-flex-n',     mode: 'flex-n',    anon: false, input: 'text+image' },
+      { id: 'sel-ti-full',       mode: 'full',      anon: false, input: 'text+image' },
+      { id: 'sel-anon-single',   mode: 'single',    anon: true,  input: 'text' },
+      { id: 'sel-anon-flex-n',   mode: 'flex-n',    anon: true,  input: 'text' },
     ];
 
     let currentMode = 'aggregate';
     let currentAnon = false;
+    let currentInput = 'text';
 
     function strip_provider(name) {
       return name.replace(/\s*\([^)]+\)$/, '');
@@ -330,7 +363,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
         }
         return {
           id: g.id, display_name: g.display_name, local: g.local, reasoning: g.reasoning,
-          inference_mode: 'aggregate', anon: false,
+          inference_mode: 'aggregate', anon: false, input_mode: 'aggregate',
           overall: {
             avg_aggregate_score: avg('avg_aggregate_score'),
             success_rate:        avg('success_rate'),
@@ -349,7 +382,8 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       if (currentMode === 'aggregate') return computeAggregate();
       return ALL_MODELS.filter(m =>
         m.inference_mode === currentMode &&
-        (m.anon ?? false) === currentAnon
+        (m.anon ?? false) === currentAnon &&
+        (m.input_mode ?? 'text') === currentInput
       );
     }
 
@@ -363,7 +397,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
                 <span class="text-5xl">🤖</span>
                 <div>
                   <p class="font-semibold text-gray-500 mb-1">No results yet for this configuration</p>
-                  <p class="text-sm">Run <code class="bg-gray-100 px-1 rounded">bench.py --mode ${currentMode}${currentAnon ? ' --anon' : ''}</code> to generate data.</p>
+                  <p class="text-sm">Run <code class="bg-gray-100 px-1 rounded">bench.py --mode ${currentMode}${currentAnon ? ' --anon' : ''}${currentInput !== 'text' ? ' --input ' + currentInput : ''}</code> to generate data.</p>
                 </div>
               </div>
             </td>
@@ -422,11 +456,14 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
     const INACTIVE   = 'text-gray-500 hover:text-gray-700';
 
     function updateSelectors() {
-      COMBOS.forEach(({ id, mode, anon }) => {
-        const active = mode === currentMode && anon === currentAnon;
+      COMBOS.forEach(({ id, mode, anon, input }) => {
+        const active = mode === currentMode && anon === currentAnon
+                    && (mode === 'aggregate' || input === currentInput);
         document.getElementById(id).className = `${BASE_BTN} ${active ? ACTIVE_CLS : INACTIVE}`;
       });
-      const key = `${currentMode}|${currentAnon}`;
+      const key = currentMode === 'aggregate'
+        ? 'aggregate|false|text'
+        : `${currentMode}|${currentAnon}|${currentInput}`;
       document.getElementById('combo-description').textContent = COMBO_DESCRIPTIONS[key] ?? '';
     }
 
@@ -537,6 +574,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
         if (currentMode !== 'aggregate') {
           if (r.inference_mode !== currentMode) return false;
           if (Boolean(r.anon) !== currentAnon) return false;
+          if ((r.input_mode ?? 'text') !== currentInput) return false;
         }
         if (_diffPack !== 'all' && r.pack_id !== _diffPack) return false;
         return true;
@@ -729,6 +767,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
         if (currentMode !== 'aggregate') {
           if (r.inference_mode !== currentMode) return false;
           if (Boolean(r.anon) !== currentAnon) return false;
+          if ((r.input_mode ?? 'text') !== currentInput) return false;
         }
         if (_cellsPack !== 'all' && r.pack_id !== _cellsPack) return false;
         return true;
@@ -957,11 +996,12 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       if (fn) fn.textContent = n != null ? ` · ${n} levels tested per model.` : '';
     }
 
-    // Wire up all 5 buttons
-    COMBOS.forEach(({ id, mode, anon }) => {
+    // Wire up all selector buttons (12 total: aggregate + 11 combos).
+    COMBOS.forEach(({ id, mode, anon, input }) => {
       document.getElementById(id).addEventListener('click', () => {
         currentMode = mode;
         currentAnon = anon;
+        currentInput = input;
         render();
       });
     });

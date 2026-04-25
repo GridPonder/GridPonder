@@ -34,6 +34,16 @@ from engines.python.anon import build_anon_kind_to_label, build_anon_reverse_map
 from engines.python.action_enum import enumerate_actions
 from engines.python.gold_path import gold_path_length
 
+# Image renderer is only imported on demand (Pillow may not be installed
+# on machines that only use text mode).
+_render_board_png = None
+def _get_renderer():
+    global _render_board_png
+    if _render_board_png is None:
+        from board_image import render_board_png
+        _render_board_png = render_board_png
+    return _render_board_png
+
 _PACKS_DIR = _REPO_ROOT / "packs"
 _MAX_CONSECUTIVE_REJECTIONS = 5
 
@@ -62,6 +72,13 @@ def main() -> None:
     parser.add_argument("--step-size", type=int, default=1)
     parser.add_argument("--max-n", type=int, default=None)
     parser.add_argument("--anon", action="store_true", default=False)
+    parser.add_argument(
+        "--input",
+        choices=["text", "image", "text+image"],
+        default="text",
+        help="What the model sees: text only (default), image only, or both. "
+             "Anon mode forces text (image carries no semantic anonymisation).",
+    )
     args = parser.parse_args()
 
     pack_id: str = args.pack
@@ -73,6 +90,12 @@ def main() -> None:
     step_size: int = args.step_size
     max_n: int | None = args.max_n
     anon: bool = args.anon
+    input_mode: str = args.input
+    # Anon mode would defeat itself if we shipped a sprite-rendered board, so
+    # silently force text-only when both flags are combined.
+    if anon and input_mode != "text":
+        input_mode = "text"
+    include_image = input_mode in ("image", "text+image")
 
     # ── Load pack ─────────────────────────────────────────────────────────────
     pack_dir = packs_dir / pack_id
@@ -145,6 +168,7 @@ def main() -> None:
             step_size=step_size,
             max_n=max_n,
             memory=memory,
+            text_board=(input_mode != "image"),
         )
 
         event: dict = {
@@ -160,7 +184,12 @@ def main() -> None:
             "level_id": level_id,
             "pack_id": pack_id,
             "inference_mode": mode,
+            "input_mode": input_mode,
         }
+        if include_image:
+            import base64
+            png = _get_renderer()(game_def, engine.state, pack_dir)
+            event["image_b64"] = base64.b64encode(png).decode("ascii")
         if mode == "fixed-n":
             event["step_size"] = step_size
         elif mode == "flex-n":

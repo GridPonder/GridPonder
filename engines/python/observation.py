@@ -15,6 +15,13 @@ from .anon import build_anon_kind_to_label, build_anon_reverse_map
 from .gold_path import gold_path_length
 
 
+_IMAGE_BOARD_NOTE = (
+    "(See the attached image of the current board. Columns are numbered "
+    "along the top (0..); rows are numbered down the left (0..). Use those "
+    "coordinates to refer to specific cells.)"
+)
+
+
 def build_prompt(
     game_def,
     level_def: dict,
@@ -31,8 +38,13 @@ def build_prompt(
     step_size: int = 3,
     max_n: int | None = None,
     memory: str = "",
+    text_board: bool = True,
 ) -> str:
-    """Build the full LLM prompt string matching the Dart runner output."""
+    """Build the full LLM prompt string matching the Dart runner output.
+
+    text_board: when False, the rendered grid + legend are replaced with a
+    short note pointing to the attached image. Used for input mode "image".
+    """
     valid_actions = enumerate_actions(game_def, state)
 
     # ── Anon maps ────────────────────────────────────────────────────────────
@@ -48,7 +60,12 @@ def build_prompt(
         }
 
     # ── Board text (current) ──────────────────────────────────────────────────
-    board_text = render_board(state, game_def, kind_symbol_overrides=kind_symbol_overrides)
+    if text_board:
+        board_text = render_board(state, game_def, kind_symbol_overrides=kind_symbol_overrides)
+    else:
+        board_text = _IMAGE_BOARD_NOTE
+        if previous_board_text is not None:
+            previous_board_text = _IMAGE_BOARD_NOTE
 
     # ── Goals ─────────────────────────────────────────────────────────────────
     goal_descriptions = render_goals(

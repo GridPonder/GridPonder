@@ -72,8 +72,13 @@ def call_llm(
     extra_params: dict[str, Any] | None = None,
     max_tokens: int = 1024,
     request_timeout: float | None = None,
+    image_b64: str | None = None,
 ) -> tuple[str, float, int, int, float, str]:
     """Call an LLM and return (response_text, latency_ms, thinking_tokens, output_tokens, cost_usd, reasoning).
+
+    If `image_b64` is provided, the prompt is sent as a multimodal message
+    (text + image), in the OpenAI-style format that LiteLLM normalises across
+    Anthropic / OpenAI / Gemini providers.
 
     `reasoning` is the model's summarised thinking content when the provider
     exposes it (Anthropic extended-thinking summary, OpenAI o-series, Gemini).
@@ -122,9 +127,19 @@ def call_llm(
     if "minimax" in litellm_model:
         effective_max_tokens = max(effective_max_tokens, 32768)
 
+    if image_b64:
+        # Multimodal: OpenAI-style content list, normalised across providers
+        # by LiteLLM. Sent as data URL so we don't need to host the image.
+        user_content: Any = [
+            {"type": "text", "text": prompt},
+            {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}},
+        ]
+    else:
+        user_content = prompt
+
     params: dict[str, Any] = {
         "model": litellm_model,
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [{"role": "user", "content": user_content}],
         "max_tokens": effective_max_tokens,
     }
     if request_timeout is not None:
