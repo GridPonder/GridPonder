@@ -39,11 +39,16 @@ def build_prompt(
     max_n: int | None = None,
     memory: str = "",
     text_board: bool = True,
+    attach_image: bool = False,
 ) -> str:
     """Build the full LLM prompt string matching the Dart runner output.
 
     text_board: when False, the rendered grid + legend are replaced with a
     short note pointing to the attached image. Used for input mode "image".
+    attach_image: signals that an image is attached alongside the prompt.
+    Combined with text_board=True (text+image mode) it adds an explicit
+    "the image is the same current board" note so the model doesn't waste
+    reasoning on what the image is or whether it matches the text grid.
     """
     valid_actions = enumerate_actions(game_def, state)
 
@@ -148,13 +153,23 @@ def build_prompt(
     else:
         description_section = ""
 
+    # In text+image mode we explicitly anchor the image to the current board
+    # so the model doesn't speculate about what the attachment depicts. (Pure
+    # image mode already substitutes the board section with a note that
+    # references the image.)
+    image_note = (
+        "\nThe attached image is a sprite rendering of the current board "
+        "(same state as the text grid above).\n"
+        if (text_board and attach_image) else ""
+    )
+
     header = (
         f"{title_line}\n"
         f"Minimize total actions — give up early if stuck rather than wasting moves.\n"
         f"Attempt {attempt_number} | Total actions across all attempts: {total_actions}\n"
         f"{description_section}{memory_section}\n"
         f"GOAL: {goal_descriptions}\n"
-        f"{last_action_section}\n"
+        f"{last_action_section}{image_note}\n"
         f"\n"
         f"AVAILABLE ACTIONS:\n"
         f"{actions_desc}\n"

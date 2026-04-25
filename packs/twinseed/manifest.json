@@ -3,7 +3,7 @@
   "packVersion": 1,
   "gameId": "twinseed",
   "title": "Twinseed",
-  "description": "Push seed baskets (S) onto garden plots (G) by walking into them — baskets slide one cell in your direction. When a basket reaches a plot they pair up and both disappear. Solid tiles (rock R, wood W, metal crate M) block movement; rock breaks with a pickaxe (P), wood burns with a torch (T). Ice (I) is slippery — you and pushable items slide until they hit something solid. Water (≈) is walkable but seed baskets pushed into it drown; pushing a metal crate into water creates a walkable platform. The clone action drops a ghostly twin (~) at your current position; clone again to teleport back to it — useful when a path becomes blocked.",
+  "description": "Push seed baskets onto garden plots by walking into them — baskets slide one cell in your direction. When a basket reaches a plot they pair up and both disappear. Solid tiles (rock, wood, metal crate) block movement; rock breaks with a pickaxe, wood burns with a torch. Ice is slippery — you and pushable items slide until they hit something solid. Water is walkable but seed baskets pushed into it drown; pushing a metal crate into water creates a walkable platform. The clone action drops a ghostly twin at your current position; clone again to teleport back to it — useful when a path becomes blocked.",
   "coverImage": "assets/twinseed.png",
   "version": "1.0.0",
   "minEngineVersion": "0.6.0"

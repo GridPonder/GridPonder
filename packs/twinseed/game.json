@@ -528,6 +528,6 @@
     }
   },
   "goalDescriptions": {
-    "plant_all": "Push every seed basket (S) onto a garden plot (G) by walking into the basket \u2014 they pair up and both vanish. Solve when no garden plots remain."
+    "plant_all": "Push every seed basket onto a garden plot by walking into the basket \u2014 they pair up and both vanish. Solve when no garden plots remain."
   }
 }

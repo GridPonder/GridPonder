@@ -140,7 +140,7 @@ class TextRenderer {
     final numbersBlock = _buildNumbersBlock(state, game);
     if (numbersBlock.isNotEmpty) parts.add(numbersBlock);
 
-    final overlayBlock = _buildOverlayBlock(state, game);
+    final overlayBlock = _buildOverlayBlock(state, game, kindSymbolOverrides: kindSymbolOverrides);
     if (overlayBlock.isNotEmpty) parts.add(overlayBlock);
 
     final stackedBlock = _buildStackedBlock(state, game, gridAvatarPos,
@@ -152,6 +152,19 @@ class TextRenderer {
     if (mcoBlock.isNotEmpty) parts.add(mcoBlock);
 
     return parts.join('\n\n');
+  }
+
+  /// True when the legend entry adds no information beyond the symbol itself.
+  /// Catches single-digit symbols whose only label is the digit itself or
+  /// the auto-derived "num <digit>" — e.g. "8=num 8" from diagonal_swipes
+  /// where each digit tile is its own entity kind.
+  static bool _isLegendRedundant(String sym, String label) {
+    final s = sym.trim();
+    final l = label.trim().toLowerCase();
+    if (s.length != 1) return false;
+    final c = s.codeUnitAt(0);
+    if (c < 0x30 || c > 0x39) return false; // not a digit
+    return l == s || l == 'num $s';
   }
 
   static String _buildLegend(
@@ -186,7 +199,8 @@ class TextRenderer {
           label = '${kindDef.uiName ?? kindDef.id.replaceAll('_', ' ')}$desc';
         }
 
-        if (!seen.containsKey(sym)) seen[sym] = label;
+        if (seen.containsKey(sym) || _isLegendRedundant(sym, label)) continue;
+        seen[sym] = label;
       }
     }
 
@@ -198,10 +212,11 @@ class TextRenderer {
     return seen.entries.map((e) => '${e.key}=${e.value}').join('  ');
   }
 
-  /// Renders the active overlay region as a labeled block showing its bounds
-  /// and the content of every cell it covers. The avatar position is included
-  /// when the overlay is active (since @ is suppressed from the grid).
-  static String _buildOverlayBlock(LevelState state, GameDefinition game) {
+  /// Show the overlay region as a focused mini-view of its cells. Without this
+  /// the model would only see the bounds ("Overlay region: (0,0)–(1,1)") and
+  /// have to mentally re-extract the contents from the full grid each turn.
+  static String _buildOverlayBlock(LevelState state, GameDefinition game,
+      {Map<String, String>? kindSymbolOverrides}) {
     final overlay = state.overlay;
     if (overlay == null) return '';
 
@@ -210,7 +225,37 @@ class TextRenderer {
     final x2 = overlay.x + overlay.width - 1;
     final y2 = overlay.y + overlay.height - 1;
 
-    return 'Overlay region: ($x1,$y1)–($x2,$y2)';
+    const layerOrder = ['actors', 'markers', 'objects', 'ground'];
+    final rows = <String>[];
+    for (int dy = 0; dy < overlay.height; dy++) {
+      final buf = StringBuffer();
+      for (int dx = 0; dx < overlay.width; dx++) {
+        final x = x1 + dx, y = y1 + dy;
+        String sym = '.';
+        for (final layerId in layerOrder) {
+          final entity = state.board.getEntity(layerId, Position(x, y));
+          if (entity == null) continue;
+          final kindDef = game.entityKinds[entity.kind];
+          if (kindDef == null) continue;
+          if (kindDef.symbolParam != null) {
+            final paramVal = entity.param(kindDef.symbolParam!);
+            sym = paramVal != null ? _valueToChar(paramVal as int) : kindDef.symbol;
+          } else if (kindSymbolOverrides != null &&
+              kindSymbolOverrides.containsKey(entity.kind)) {
+            sym = kindSymbolOverrides[entity.kind]!;
+          } else {
+            sym = kindDef.symbol;
+          }
+          break;
+        }
+        buf.write(sym);
+      }
+      rows.add(buf.toString());
+    }
+    final contents = rows.join('\n');
+    return 'Overlay region: ($x1,$y1)–($x2,$y2). These are the '
+        '${overlay.width}×${overlay.height} cells your selection-based actions '
+        'operate on:\n$contents';
   }
 
   /// Reports cells where more than one layer has a visible entity, so the LLM

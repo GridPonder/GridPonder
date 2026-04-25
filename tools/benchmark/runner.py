@@ -169,6 +169,7 @@ def main() -> None:
             max_n=max_n,
             memory=memory,
             text_board=(input_mode != "image"),
+            attach_image=include_image,
         )
 
         event: dict = {

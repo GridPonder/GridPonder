@@ -82,7 +82,7 @@ def render(
     if numbers_block:
         parts.append(numbers_block)
 
-    overlay_block = _build_overlay_block(state)
+    overlay_block = _build_overlay_block(state, game_def, kind_symbol_overrides)
     if overlay_block:
         parts.append(overlay_block)
 
@@ -106,6 +106,21 @@ def _get_symbol(entity, kind_def: dict | None, kind_symbol_overrides: dict | Non
     if kind_symbol_overrides and entity.kind in kind_symbol_overrides:
         return kind_symbol_overrides[entity.kind]
     return kind_def["symbol"]
+
+
+def _is_legend_redundant(sym: str, label: str) -> bool:
+    """True when the legend entry adds no information beyond the symbol itself.
+
+    Currently catches single-digit symbols (0-9) whose only label is the same
+    digit or the auto-derived "num <digit>" — e.g. "8=num 8" in diagonal_swipes
+    where each digit tile is its own kind. The model can already interpret a
+    digit as a number; the description provides context if needed.
+    """
+    s = sym.strip()
+    l = label.strip().lower()
+    if len(s) == 1 and s.isdigit() and l in (s, f"num {s}"):
+        return True
+    return False
 
 
 def _build_legend(state: GameState, game_def, has_avatar: bool, kind_symbol_overrides) -> str:
@@ -133,8 +148,9 @@ def _build_legend(state: GameState, game_def, has_avatar: bool, kind_symbol_over
                 desc = kind_def.get("description")
                 name = kind_def.get("uiName") or entity.kind.replace("_", " ")
                 label = f"{name} ({desc})" if desc else name
-            if sym not in seen:
-                seen[sym] = label
+            if sym in seen or _is_legend_redundant(sym, label):
+                continue
+            seen[sym] = label
 
     if state.board.multi_cell_objects:
         seen["║/═"] = "pipe body"
@@ -143,13 +159,45 @@ def _build_legend(state: GameState, game_def, has_avatar: bool, kind_symbol_over
     return "  ".join(f"{k}={v}" for k, v in seen.items())
 
 
-def _build_overlay_block(state: GameState) -> str:
+def _build_overlay_block(state: GameState, game_def, kind_symbol_overrides) -> str:
+    """Show the overlay region as a focused mini-view of its cells.
+
+    Without this the model only sees coordinates ("Overlay region: (0,0)–(1,1)")
+    and has to mentally re-extract those cells from the full grid each turn.
+    Rendering the actual contents alongside the bounds makes it explicit which
+    cells the selection-based actions operate on.
+    """
     overlay = state.overlay
     if overlay is None:
         return ""
-    x2 = overlay.x + overlay.width - 1
-    y2 = overlay.y + overlay.height - 1
-    return f"Overlay region: ({overlay.x},{overlay.y})–({x2},{y2})"
+    x1, y1 = overlay.x, overlay.y
+    x2 = x1 + overlay.width - 1
+    y2 = y1 + overlay.height - 1
+
+    rows: list[str] = []
+    for dy in range(overlay.height):
+        chars = []
+        for dx in range(overlay.width):
+            x, y = x1 + dx, y1 + dy
+            sym = "."
+            for layer_id in _LAYER_ORDER:
+                entity = state.board.get_entity(layer_id, Pos(x, y))
+                if entity is None:
+                    continue
+                kind_def = game_def.entity_kinds.get(entity.kind)
+                if kind_def is None:
+                    continue
+                sym = _get_symbol(entity, kind_def, kind_symbol_overrides)
+                break
+            chars.append(sym)
+        rows.append("".join(chars))
+    contents = "\n".join(rows)
+
+    return (
+        f"Overlay region: ({x1},{y1})–({x2},{y2}). "
+        f"These are the {overlay.width}×{overlay.height} cells your "
+        f"selection-based actions operate on:\n{contents}"
+    )
 
 
 def _build_stacked_block(
