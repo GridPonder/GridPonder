@@ -5,12 +5,16 @@ import Base from '../layouts/Base.astro';
 
 const leaderboardPath = resolve(process.cwd(), '../tools/benchmark/leaderboard.json');
 let models: any[] = [];
+let levelResultsCols: string[] = [];
+let levelResults: any[][] = [];
 let generated: string | null = null;
 
 if (existsSync(leaderboardPath)) {
   try {
     const leaderboard = JSON.parse(readFileSync(leaderboardPath, 'utf-8'));
     models = leaderboard.models ?? [];
+    levelResultsCols = leaderboard.level_results_columns ?? [];
+    levelResults = leaderboard.level_results ?? [];
     generated = leaderboard.generated
       ? new Date(leaderboard.generated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
       : null;
@@ -22,6 +26,7 @@ const allPacks = [...new Set(models.flatMap((m: any) => Object.keys(m.by_pack ??
 
 const modelsJson = JSON.stringify(models);
 const allPacksJson = JSON.stringify(allPacks);
+const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: levelResults });
 ---
 <Base
   title="AI Leaderboard"
@@ -140,6 +145,25 @@ const allPacksJson = JSON.stringify(allPacks);
       <div class="px-2 py-2" id="pareto-chart" style="height:380px"></div>
     </div>
 
+    <!-- Difficulty curve chart -->
+    <div class="rounded-2xl border border-gray-200 overflow-hidden mb-6 mt-10">
+      <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 class="font-bold text-gray-900">Difficulty Curve</h2>
+          <p class="text-xs text-gray-500 mt-0.5">Accuracy by gold-path length. Buckets are 2 steps wide below 10 and 5 steps wide from 10 onward. Shaded band is a 95% Wilson confidence interval on the average. Hover any point for sample size.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="text-xs text-gray-500" for="diff-pack">Pack:</label>
+          <select id="diff-pack" class="text-xs border border-gray-300 rounded-lg px-2 py-1 bg-white"></select>
+        </div>
+      </div>
+      <div class="px-2 py-2" id="diff-chart" style="height:360px"></div>
+      <div class="px-6 pb-4 pt-3 border-t border-gray-100">
+        <p class="text-xs text-gray-500 mb-2">Click models to overlay individual curves:</p>
+        <div id="diff-model-picker" class="flex flex-wrap gap-1.5"></div>
+      </div>
+    </div>
+
     <!-- Per-pack breakdown -->
     <div id="pack-section" class="mb-12">
       <h2 class="font-bold text-gray-900 text-lg mb-4">Breakdown by Pack</h2>
@@ -185,9 +209,11 @@ const allPacksJson = JSON.stringify(allPacks);
     </div>
   </div>
 
-  <script define:vars={{ modelsJson, allPacksJson }}>
+  <script define:vars={{ modelsJson, allPacksJson, levelResultsJson }}>
     const ALL_MODELS = JSON.parse(modelsJson);
     const ALL_PACKS  = JSON.parse(allPacksJson);
+    const _lr = JSON.parse(levelResultsJson);
+    const LEVEL_ROWS = (_lr.rows ?? []).map(r => Object.fromEntries((_lr.columns ?? []).map((c, i) => [c, r[i]])));
 
     const COMBO_DESCRIPTIONS = {
       'aggregate|false': 'Average of score, accuracy, and efficiency across all five inference modes. Models without data for a mode are excluded from that mode\'s contribution.',
@@ -435,10 +461,215 @@ const allPacksJson = JSON.stringify(allPacks);
       }, true);
     }
 
+    // ── Difficulty curve ──────────────────────────────────────────────────
+    let _diffChart = null;
+    let _diffPack = 'all';
+    // Pre-select all thinking/reasoning models so the chart isn't empty by default.
+    const _diffSelected = new Set(ALL_MODELS.filter(m => m.reasoning).map(m => m.id));
+    const DIFF_COLORS = ['#3b82f6', '#7c3aed', '#10b981', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#84cc16'];
+
+    // 95% Wilson score interval for a Bernoulli proportion.
+    function wilson(p, n, z = 1.96) {
+      if (n <= 0) return [0, 1];
+      const d = 1 + z * z / n;
+      const c = (p + z * z / (2 * n)) / d;
+      const h = z * Math.sqrt((p * (1 - p) + z * z / (4 * n)) / n) / d;
+      return [Math.max(0, c - h), Math.min(1, c + h)];
+    }
+
+    // Adaptive buckets: width 2 below 10, width 5 from 10 onward.
+    function bucketLow(len)    { return len < 10 ? Math.floor(len / 2) * 2 : Math.floor((len - 10) / 5) * 5 + 10; }
+    function bucketWidth(low)  { return low < 10 ? 2 : 5; }
+    function bucketCenter(low) { return low + (bucketWidth(low) - 1) / 2; }
+    function bucketLabel(low)  { return `${low}–${low + bucketWidth(low) - 1}`; }
+
+    function diffFilteredRows() {
+      return LEVEL_ROWS.filter(r => {
+        if (r.gold_path_length < 2) return false;  // exclude trivial / 0-step levels
+        if (currentMode !== 'aggregate') {
+          if (r.inference_mode !== currentMode) return false;
+          if (Boolean(r.anon) !== currentAnon) return false;
+        }
+        if (_diffPack !== 'all' && r.pack_id !== _diffPack) return false;
+        return true;
+      });
+    }
+
+    function diffModelCurve(rows, modelId) {
+      const buckets = {};
+      for (const r of rows) {
+        if (modelId && r.model_id !== modelId) continue;
+        const low = bucketLow(r.gold_path_length);
+        if (!buckets[low]) buckets[low] = { hits: 0, total: 0 };
+        buckets[low].total++;
+        if (r.success) buckets[low].hits++;
+      }
+      return Object.entries(buckets)
+        .map(([low, v]) => ({
+          x: bucketCenter(+low), acc: v.hits / v.total, n: v.total, label: bucketLabel(+low),
+        }))
+        .sort((a, b) => a.x - b.x);
+    }
+
+    function diffAverageCurve(rows, modelIds) {
+      const curves = modelIds.map(id => diffModelCurve(rows, id));
+      const byX = {};
+      for (const c of curves) for (const p of c) {
+        if (!byX[p.x]) byX[p.x] = { accs: [], totalN: 0, label: p.label };
+        byX[p.x].accs.push(p.acc);
+        byX[p.x].totalN += p.n;
+      }
+      return Object.entries(byX)
+        .map(([x, v]) => ({
+          x: +x,
+          acc: v.accs.reduce((a, b) => a + b, 0) / v.accs.length,
+          n: v.totalN,
+          label: v.label,
+        }))
+        .sort((a, b) => a.x - b.x);
+    }
+
+    function modelLabel(id) {
+      const m = ALL_MODELS.find(x => x.id === id);
+      return m ? strip_provider(m.display_name) + (m.reasoning ? ' ✦' : '') : id;
+    }
+
+    async function renderDiffChart() {
+      const el = document.getElementById('diff-chart');
+      if (!el) return;
+      const rows = diffFilteredRows();
+      if (!rows.length) {
+        if (_diffChart) _diffChart.clear();
+        el.innerHTML = '<p class="py-12 text-center text-sm text-gray-400">No data for this filter.</p>';
+        return;
+      }
+
+      const echarts = await getECharts();
+      if (!_diffChart) {
+        el.innerHTML = '';
+        _diffChart = echarts.init(el);
+        new ResizeObserver(() => _diffChart?.resize()).observe(el);
+      }
+
+      const allModelIds = [...new Set(rows.map(r => r.model_id))];
+      const toSeriesData = curve => curve.map(p => ({ value: [p.x, p.acc], n: p.n, label: p.label }));
+
+      // Average curve + Wilson 95% CI band (computed on aggregated obs per bucket)
+      const avgCurve = diffAverageCurve(rows, allModelIds);
+      const ciPts = avgCurve.map(p => {
+        const [lo, hi] = wilson(p.acc, p.n);
+        return { x: p.x, lo, hi };
+      });
+
+      const series = [
+        {
+          // CI band — closed polygon under the Average line.
+          name: '95% CI', type: 'custom', silent: true, z: 1, legendHoverLink: false,
+          renderItem: (params, api) => {
+            if (ciPts.length < 2) return null;
+            const upper = ciPts.map(p => api.coord([p.x, p.hi]));
+            const lower = ciPts.slice().reverse().map(p => api.coord([p.x, p.lo]));
+            return { type: 'polygon', shape: { points: [...upper, ...lower] }, style: { fill: 'rgba(55,65,81,0.13)' } };
+          },
+          data: [0],
+        },
+        {
+          name: 'Average', type: 'line', data: toSeriesData(avgCurve),
+          smooth: true,
+          lineStyle: { width: 3, color: '#374151' },
+          itemStyle: { color: '#374151' },
+          symbolSize: 6,
+          z: 10,
+        },
+      ];
+
+      let ci = 0;
+      for (const id of _diffSelected) {
+        const curve = diffModelCurve(rows, id);
+        if (!curve.length) continue;
+        const color = DIFF_COLORS[ci++ % DIFF_COLORS.length];
+        series.push({
+          name: modelLabel(id), type: 'line', data: toSeriesData(curve), smooth: true,
+          lineStyle: { color, width: 1.8 },
+          itemStyle: { color },
+          symbolSize: 5,
+        });
+      }
+
+      _diffChart.setOption({
+        grid: { top: 36, right: 24, bottom: 50, left: 56 },
+        legend: { top: 4, textStyle: { fontSize: 11, color: '#4b5563' }, itemWidth: 14, itemHeight: 8 },
+        xAxis: {
+          type: 'value', name: 'gold path length', nameLocation: 'center', nameGap: 30,
+          axisLine: { lineStyle: { color: '#d1d5db' } },
+          axisTick: { lineStyle: { color: '#d1d5db' } },
+          splitLine: { lineStyle: { color: '#f3f4f6' } },
+          axisLabel: { color: '#9ca3af', fontSize: 11 },
+          minInterval: 1,
+        },
+        yAxis: {
+          type: 'value', name: 'accuracy', nameLocation: 'center', nameGap: 40,
+          min: 0, max: 1,
+          axisLine: { show: true, lineStyle: { color: '#d1d5db' } },
+          axisTick: { lineStyle: { color: '#d1d5db' } },
+          splitLine: { lineStyle: { color: '#f3f4f6' } },
+          axisLabel: { color: '#9ca3af', fontSize: 11, formatter: v => `${Math.round(v * 100)}%` },
+        },
+        tooltip: {
+          trigger: 'axis',
+          formatter: params => {
+            if (!params.length) return '';
+            const head = `<b>Gold path ${params[0].data.label}</b>`;
+            const lines = params.map(p => `${p.marker} ${p.seriesName}: ${(p.value[1] * 100).toFixed(0)}% <span style="color:#9ca3af">(n=${p.data.n})</span>`);
+            return [head, ...lines].join('<br/>');
+          },
+        },
+        series,
+      }, true);
+    }
+
+    function renderDiffPicker() {
+      const el = document.getElementById('diff-model-picker');
+      if (!el) return;
+      const rows = diffFilteredRows();
+      const ids = [...new Set(rows.map(r => r.model_id))];
+      // Sort by current-mode aggregate score (descending) so best models are first.
+      const scoreById = Object.fromEntries(getModels().map(m => [m.id, m.overall?.avg_aggregate_score ?? 0]));
+      ids.sort((a, b) => (scoreById[b] ?? 0) - (scoreById[a] ?? 0));
+      el.innerHTML = ids.map(id => {
+        const active = _diffSelected.has(id);
+        const cls = active
+          ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+          : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50';
+        return `<button data-mid="${id}" class="diff-mbtn text-xs px-2 py-1 rounded-md border transition-colors ${cls}">${modelLabel(id)}</button>`;
+      }).join('');
+      el.querySelectorAll('.diff-mbtn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const id = btn.dataset.mid;
+          if (_diffSelected.has(id)) _diffSelected.delete(id); else _diffSelected.add(id);
+          renderDiffChart();
+          renderDiffPicker();
+        });
+      });
+    }
+
+    function setupDiffPackDropdown() {
+      const sel = document.getElementById('diff-pack');
+      if (!sel) return;
+      sel.innerHTML = '<option value="all">All packs</option>' +
+        ALL_PACKS.map(p => `<option value="${p}">${p.replace(/_/g, ' ')}</option>`).join('');
+      sel.addEventListener('change', () => {
+        _diffPack = sel.value;
+        renderDiffChart();
+      });
+    }
+
     async function render() {
       const models = getModels();
       renderOverall(models);
       await renderPareto(models);
+      await renderDiffChart();
+      renderDiffPicker();
       renderPacks(models);
       updateSelectors();
       const n = currentMode !== 'aggregate' ? models[0]?.overall?.levels_run : null;
@@ -454,6 +685,8 @@ const allPacksJson = JSON.stringify(allPacks);
         render();
       });
     });
+
+    setupDiffPackDropdown();
 
     // Initial render
     render();

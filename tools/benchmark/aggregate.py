@@ -120,11 +120,15 @@ def compute_stats(levels: list[dict]) -> dict[str, Any]:
 
 def build_leaderboard(data: dict[str, dict]) -> dict:
     models_out: list[dict] = []
+    # Compact columnar per-level rows (used by the difficulty-curve chart).
+    level_cols = ["model_id", "pack_id", "level_id", "gold_path_length", "success", "inference_mode", "anon"]
+    level_rows: list[list[Any]] = []
 
     for key, entry in data.items():
         meta = entry["meta"]
         levels = entry["levels"]
         inference_mode = entry["inference_mode"]
+        anon = bool(entry.get("anon", False))
 
         by_pack: dict[str, list[dict]] = defaultdict(list)
         for l in levels:
@@ -143,10 +147,23 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
             "local": meta.get("local", True),
             "reasoning": meta.get("reasoning", False),
             "inference_mode": inference_mode,
-            "anon": entry.get("anon", False),
+            "anon": anon,
             "overall": overall,
             "by_pack": pack_stats,
         })
+
+        for l in levels:
+            if "error" in l or l.get("gold_path_length") is None:
+                continue
+            level_rows.append([
+                meta["model_id"],
+                l["pack_id"],
+                l["level_id"],
+                int(l["gold_path_length"]),
+                bool(l.get("success", False)),
+                inference_mode,
+                anon,
+            ])
 
     # Sort by aggregate score descending, then success rate, then efficiency.
     def sort_key(m: dict) -> tuple:
@@ -162,6 +179,8 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
     return {
         "generated": datetime.now(timezone.utc).isoformat(),
         "models": models_out,
+        "level_results_columns": level_cols,
+        "level_results": level_rows,
     }
 
 
