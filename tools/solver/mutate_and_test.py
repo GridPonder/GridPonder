@@ -1070,8 +1070,49 @@ def _run(args: argparse.Namespace) -> None:
     print(f"Evaluating {total_tasks} candidates ({n_workers} workers)...")
     t0 = time.monotonic()
 
+    # Set up incremental save dir early so passing candidates are written immediately.
+    inc_dir: Optional[Path] = None
+    if args.output_dir:
+        inc_dir = Path(args.output_dir)
+        inc_dir.mkdir(parents=True, exist_ok=True)
+
+    required_actions: List[str] = list(getattr(args, "must_contain_action", []))
+
+    def _passes_action_filter(r: Dict) -> bool:
+        if not required_actions:
+            return True
+        path = r.get("solution_path") or []
+        return all(any(a == req or a == f"move_{req}" for a in path)
+                   for req in required_actions)
+
+    def _save_candidate(level_json: Dict, res: Dict, pass_n: int) -> Path:
+        out_json = copy.deepcopy(level_json)
+        out_json["id"] = f"{seed_id}_pass_{pass_n:04d}"
+        out_json["title"] = f"[Pass {pass_n}] {seed_json.get('title', seed_id)}"
+        sol_path = res.get("solution_path")
+        if sol_path:
+            gold = _path_to_gold(sol_path, game)
+            hint_stops = _hint_stops(len(sol_path))
+            solution_block: Dict[str, Any] = {"goldPath": gold}
+            if hint_stops:
+                solution_block["hintStops"] = hint_stops
+            out_json["solution"] = solution_block
+        out_json["metadata"] = {
+            "source": seed_id,
+            "pass_n": pass_n,
+            "solution_length": res.get("solution_length"),
+            "interaction_score": res.get("interaction_score"),
+            "mc_bits": round(res.get("mc_bits") or 0.0, 2),
+            "solve_rate": res.get("solve_rate"),
+        }
+        out_path = inc_dir / f"{seed_id}_pass_{pass_n:04d}.json"
+        with open(out_path, "w") as f:
+            json.dump(out_json, f, indent=2)
+        return out_path
+
     ctx = multiprocessing.get_context("spawn")
     results: List[Dict] = []
+    passing_live: List[Tuple[Dict, Dict]] = []   # (level_json, result) passing so far
     _last_progress = t0
     _PROGRESS_INTERVAL = 30  # seconds between progress lines
     _width = len(str(total_tasks))
@@ -1079,6 +1120,16 @@ def _run(args: argparse.Namespace) -> None:
     with ctx.Pool(processes=n_workers) as pool:
         for result in pool.imap_unordered(_evaluate_worker, tasks):
             results.append(result)
+            # Incremental save: write passing candidates immediately
+            if inc_dir and _check_criteria(result, criteria) and _passes_action_filter(result):
+                level_json = candidates[result["candidate_idx"]]
+                passing_live.append((level_json, result))
+                pass_n = len(passing_live)
+                out_path = _save_candidate(level_json, result, pass_n)
+                iscore = result.get("interaction_score") or 0
+                moves = result.get("solution_length", "?")
+                print(f"  ✓ pass #{pass_n:04d}  score={iscore}  moves={moves}  → {out_path.name}",
+                      flush=True)
             now = time.monotonic()
             if now - _last_progress >= _PROGRESS_INTERVAL or len(results) == total_tasks:
                 done = len(results)
@@ -1094,7 +1145,8 @@ def _run(args: argparse.Namespace) -> None:
                     extra = (f"  lengths: {min(lens)}-{max(lens)}"
                              f"  scores: {min(scores)}-{max(scores)}")
                 print(f"  [{done:{_width}}/{total_tasks} | {pct:5.1f}% | {elapsed_s:5.0f}s]"
-                      f"  solved: {n_sv}  timeout: {n_to}{extra}", flush=True)
+                      f"  solved: {n_sv}  timeout: {n_to}  passing: {len(passing_live)}{extra}",
+                      flush=True)
                 _last_progress = now
 
     elapsed = time.monotonic() - t0
@@ -1105,15 +1157,6 @@ def _run(args: argparse.Namespace) -> None:
     n_solved = sum(1 for r in results
                    if r.get("ok") and r.get("solution_length") is not None)
     n_timed_out = sum(1 for r in results if r.get("timed_out"))
-
-    required_actions: List[str] = list(getattr(args, "must_contain_action", []))
-
-    def _passes_action_filter(r: Dict) -> bool:
-        if not required_actions:
-            return True
-        path = r.get("solution_path") or []
-        return all(any(a == req or a == f"move_{req}" for a in path)
-                   for req in required_actions)
 
     passing = [
         (candidates[r["candidate_idx"]], r)
@@ -1179,7 +1222,7 @@ def _run(args: argparse.Namespace) -> None:
 
     print()
 
-    # --- Phase 5: Save ---
+    # --- Phase 5: Save ranked top-N as _mut_NNN, clean up _pass_ files ---
     if args.output_dir:
         out_dir = Path(args.output_dir)
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -1189,7 +1232,6 @@ def _run(args: argparse.Namespace) -> None:
             out_json["id"] = f"{seed_id}_mut_{rank:03d}"
             out_json["title"] = f"[Mutation {rank}] {seed_json.get('title', seed_id)}"
 
-            # Embed solved gold path so the candidate is ready to register
             sol_path = res.get("solution_path")
             if sol_path:
                 gold = _path_to_gold(sol_path, game)
@@ -1211,6 +1253,10 @@ def _run(args: argparse.Namespace) -> None:
             out_path = out_dir / f"{seed_id}_mut_{rank:03d}.json"
             with open(out_path, "w") as f:
                 json.dump(out_json, f, indent=2)
+
+        # Remove incremental _pass_ files now that ranked _mut_ files are written
+        for p in sorted(out_dir.glob(f"{seed_id}_pass_*.json")):
+            p.unlink()
 
         print(f"Saved {len(top)} candidate(s) to {out_dir}/")
         print()

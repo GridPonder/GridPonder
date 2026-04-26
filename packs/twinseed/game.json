@@ -511,14 +511,13 @@
       "type": "level",
       "ref": "tw_014"
     },
-    {
-      "type": "level",
-      "ref": "tw_015"
-    },
-    {
-      "type": "level",
-      "ref": "tw_seed_ice"
-    }
+    {"type": "level", "ref": "tw_015"},
+    {"type": "level", "ref": "tw_016"},
+    {"type": "level", "ref": "tw_017"},
+    {"type": "level", "ref": "tw_018"},
+    {"type": "level", "ref": "tw_019"},
+    {"type": "level", "ref": "tw_020"},
+    {"type": "level", "ref": "tw_021"}
   ],
   "defaults": {
     "maxCascadeDepth": 10,

@@ -1,0 +1,69 @@
+{
+  "id": "tw_021",
+  "title": "Polar Night",
+  "board": {
+    "size": [5, 7],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 6], "kind": "void"},
+          {"position": [1, 5], "kind": "void"},
+          {"position": [3, 0], "kind": "void"},
+          {"position": [2, 2], "kind": "ice"},
+          {"position": [1, 3], "kind": "ice"},
+          {"position": [2, 3], "kind": "ice"},
+          {"position": [3, 3], "kind": "ice"},
+          {"position": [2, 4], "kind": "ice"},
+          {"position": [4, 3], "kind": "water"},
+          {"position": [4, 4], "kind": "water"},
+          {"position": [3, 2], "kind": "garden_plot"},
+          {"position": [4, 6], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 3], "kind": "seed_basket"},
+          {"position": [3, 4], "kind": "seed_basket"},
+          {"position": [1, 2], "kind": "seed_basket"},
+          {"position": [4, 2], "kind": "rock"},
+          {"position": [3, 2], "kind": "rock"},
+          {"position": [3, 1], "kind": "wood"},
+          {"position": [4, 1], "kind": "wood"},
+          {"position": [3, 6], "kind": "wood"},
+          {"position": [0, 4], "kind": "torch"},
+          {"position": [0, 0], "kind": "pickaxe"},
+          {"position": [4, 5], "kind": "pickaxe"},
+          {"position": [4, 3], "kind": "metal_crate"},
+          {"position": [3, 5], "kind": "metal_crate"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {
+      "enabled": true,
+      "position": [1, 0],
+      "facing": "right"
+    }
+  },
+  "goals": [
+    {
+      "id": "plant_all",
+      "type": "all_cleared",
+      "config": {
+        "kind": "garden_plot"
+      }
+    }
+  ],
+  "solution": {
+    "goldPath": [
+      "left", "right", "right", "down", "down", "clone", "left", "down", "right", "down",
+      "down", "clone", "right", "left", "down", "right", "clone", "up", "right", "up",
+      "left", "down", "clone", "down", "right", "up", "up", "up", "left", "left",
+      "down", "right", "right", "up", "right", "down", "down"
+    ],
+    "hintStops": [6, 12, 23]
+  }
+}

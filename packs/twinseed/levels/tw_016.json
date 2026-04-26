@@ -1,0 +1,68 @@
+{
+  "id": "tw_016",
+  "title": "Frozen Ground",
+  "board": {
+    "size": [5, 7],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 5], "kind": "void"},
+          {"position": [4, 0], "kind": "void"},
+          {"position": [0, 6], "kind": "void"},
+          {"position": [2, 2], "kind": "ice"},
+          {"position": [1, 3], "kind": "ice"},
+          {"position": [2, 3], "kind": "ice"},
+          {"position": [3, 3], "kind": "ice"},
+          {"position": [2, 4], "kind": "ice"},
+          {"position": [4, 3], "kind": "water"},
+          {"position": [4, 4], "kind": "water"},
+          {"position": [1, 4], "kind": "garden_plot"},
+          {"position": [1, 6], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 1], "kind": "seed_basket"},
+          {"position": [3, 4], "kind": "seed_basket"},
+          {"position": [2, 5], "kind": "seed_basket"},
+          {"position": [1, 2], "kind": "rock"},
+          {"position": [3, 2], "kind": "rock"},
+          {"position": [3, 5], "kind": "wood"},
+          {"position": [4, 1], "kind": "wood"},
+          {"position": [0, 0], "kind": "wood"},
+          {"position": [0, 4], "kind": "torch"},
+          {"position": [4, 5], "kind": "pickaxe"},
+          {"position": [1, 3], "kind": "pickaxe"},
+          {"position": [1, 0], "kind": "metal_crate"},
+          {"position": [2, 4], "kind": "metal_crate"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {
+      "enabled": true,
+      "position": [3, 6],
+      "facing": "right"
+    }
+  },
+  "goals": [
+    {
+      "id": "plant_all",
+      "type": "all_cleared",
+      "config": {
+        "kind": "garden_plot"
+      }
+    }
+  ],
+  "solution": {
+        "goldPath": [
+      "right", "up", "clone", "up", "up", "left", "up", "right", "down", "left",
+      "up", "up", "up", "up", "right", "down", "down", "clone", "left", "up",
+      "left", "down", "right", "down", "left"
+    ],
+    "hintStops": [4, 8, 16]
+  }
+}

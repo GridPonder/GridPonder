@@ -31,7 +31,7 @@ from __future__ import annotations
 import heapq
 import sys
 from dataclasses import dataclass, field
-from itertools import permutations
+from itertools import combinations, permutations
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -79,40 +79,45 @@ class _HeuristicTable:
         """
         Minimum-cost assignment of baskets to plots (admissible lower bound).
 
-        For N ≤ 4 baskets we enumerate all N-permutations of remaining_plots and
-        take the minimum total cost — exact optimal matching in O(N! × N).
-        For larger N we sum each basket's individual minimum (still admissible).
+        When n_baskets > n_plots some baskets will drown; we choose the cheapest
+        subset of k=n_plots baskets to fill each plot.  We enumerate all C(n,k)
+        choices of which baskets to plant, then all k! plot permutations.
+        For k > 4 we fall back to per-plot minimums (always admissible).
         """
         n = len(basket_positions)
+        k = len(remaining_plots)
         if n == 0:
             return 0.0
-        if not remaining_plots:
+        if k == 0:
             return float("inf")
-        if n < len(remaining_plots):
-            return float("inf")    # drowned basket(s) — can't fill all plots
+        if n < k:
+            return float("inf")    # too few baskets — can't fill all plots
 
         inf = float("inf")
 
-        if n <= 4:
+        if k <= 4:
             best = inf
-            for perm in permutations(remaining_plots, n):
-                cost = 0.0
-                for (bx, by), plot in zip(basket_positions, perm):
-                    c = self.push_dist.get(plot, {}).get((bx, by), inf)
-                    if c >= inf:
-                        cost = inf
-                        break
-                    cost += c
-                if cost < best:
-                    best = cost
+            for combo in combinations(range(n), k):
+                chosen = [basket_positions[i] for i in combo]
+                for perm in permutations(remaining_plots):
+                    cost = 0.0
+                    for (bx, by), plot in zip(chosen, perm):
+                        c = self.push_dist.get(plot, {}).get((bx, by), inf)
+                        if c >= inf:
+                            cost = inf
+                            break
+                        cost += c
+                    if cost < best:
+                        best = cost
             return best
 
-        # Fallback: sum of individual minima (still admissible)
+        # Fallback for many plots: per-plot minimum (admissible lower bound).
+        # Summing over plots (not baskets) is correct when n > k.
         total = 0.0
-        for bx, by in basket_positions:
+        for plot in remaining_plots:
             best_c = min(
                 self.push_dist.get(plot, {}).get((bx, by), inf)
-                for plot in remaining_plots
+                for bx, by in basket_positions
             )
             if best_c >= inf:
                 return inf

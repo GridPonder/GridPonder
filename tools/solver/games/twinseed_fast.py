@@ -146,6 +146,22 @@ def load(level_json: Dict[str, Any]) -> Tuple[bytes, FastInfo]:
         pos = y * width + x
         cells[pos] = (cells[pos] & 7) | (kind << 3)  # keep ground bits, set obj
 
+    # Load-time cascade: mirror the `crate_floats_on_water` rule and the
+    # `seeds_drown` rule from game.json so that objects already placed on
+    # water at level start behave the same as objects pushed there during
+    # play (consistent with the engine fix in engines/python/_turn_engine.py).
+    for pos in range(cells_len):
+        ground = cells[pos] & 7
+        if ground != GROUND_WATER:
+            continue
+        obj = cells[pos] >> 3
+        if obj == OBJ_METAL_CRATE:
+            # crate_floats_on_water: destroy crate, transform ground → water_crate
+            cells[pos] = GROUND_WATER_CRATE
+        elif obj == OBJ_SEED_BASKET:
+            # seeds_drown: destroy basket
+            cells[pos] = ground
+
     # Neighbours (accounting for board bounds; void check done at runtime)
     neighbors: List[List[int]] = []
     for pos in range(cells_len):
@@ -282,16 +298,22 @@ def _slide_avatar(cells: bytearray, pos: int, dir_idx: int,
             break   # stop sliding (hit solid, push succeeded or not)
         # Walk to next cell
         pos = nxt
-        # Water clears inventory
         pg = cells[pos] & 7
+        if pg == GROUND_ICE:
+            if inventory == INV_TORCH:
+                cells[pos] = (cells[pos] & ~7) | GROUND_WATER
+                pg = GROUND_WATER
+            elif inventory == INV_PICKAXE:
+                cells[pos] = (cells[pos] & ~7) | GROUND_EMPTY
+                inventory = INV_NONE
+                pg = GROUND_EMPTY
         if pg == GROUND_WATER and inventory != INV_NONE:
             inventory = INV_NONE
-        # Also handle pickup during slide
         if no in _PICKUP:
             inventory = INV_TORCH if no == OBJ_TORCH else INV_PICKAXE
-            cells[pos] &= 7     # clear pickup
+            cells[pos] &= 7
         if pg != GROUND_ICE:
-            break               # left ice, stop
+            break
     return pos, inventory
 
 
@@ -370,6 +392,14 @@ def _apply_move(state: bytes, dir_idx: int, info: FastInfo) -> Tuple[bytes, bool
 
     # Post-move ground effects
     tg_now = cells[avatar_pos] & 7
+    if tg_now == GROUND_ICE:
+        if inventory == INV_TORCH:
+            cells[avatar_pos] = (cells[avatar_pos] & ~7) | GROUND_WATER
+            tg_now = GROUND_WATER       # torch melts ice → water (torch not consumed yet)
+        elif inventory == INV_PICKAXE:
+            cells[avatar_pos] = (cells[avatar_pos] & ~7) | GROUND_EMPTY
+            inventory = INV_NONE        # pickaxe breaks ice → empty, pickaxe consumed
+            tg_now = GROUND_EMPTY
     if tg_now == GROUND_WATER and inventory != INV_NONE:
         inventory = INV_NONE
     if tg_now == GROUND_ICE:

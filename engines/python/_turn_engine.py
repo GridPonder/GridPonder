@@ -51,6 +51,7 @@ class TurnEngine:
         self._game = game_def
         self._level = level_def  # raw dict with goals, rules, systemOverrides, solution, etc.
         self._initial_state = self._make_initial_state()
+        self._apply_load_cascade(self._initial_state)
         self._state = self._initial_state.copy()
         self._history: list[GameState] = []  # undo stack
 
@@ -194,6 +195,44 @@ class TurnEngine:
         """Restore to initial state, clear undo stack."""
         self._state = self._initial_state.copy()
         self._history.clear()
+
+    def _apply_load_cascade(self, state: GameState) -> None:
+        """Fire ``object_placed`` events for every object on a non-ground layer
+        at level load, then run the rules engine cascade. Mirrors the Dart
+        engine so always-on rules like ``crate_floats_on_water`` apply
+        uniformly to objects placed during play and to objects already on the
+        board at start.
+        """
+        initial_events: list[dict] = []
+        for layer_def in self._game.layers:
+            if layer_def.get("occupancy") != "zero_or_one":
+                continue
+            layer = state.board.layers.get(layer_def["id"])
+            if layer is None:
+                continue
+            for pos, entity in layer.entries():
+                initial_events.append(
+                    ev.object_placed(pos, entity.kind, dict(entity.params))
+                )
+        if not initial_events:
+            return
+        systems = instantiate_systems(self._game)
+        level_rules = self._level.get("rules", []) or []
+        norm_level_rules = [
+            {
+                "id": r.get("id", ""),
+                "on": r["on"],
+                "where": r.get("where"),
+                "if": r.get("if"),
+                "then": r.get("then", []),
+                "priority": r.get("priority", 0),
+                "once": r.get("once", False),
+            }
+            for r in level_rules
+        ]
+        rules_engine = RulesEngine(self._game.rules, norm_level_rules)
+        max_depth = self._game.defaults.get("maxCascadeDepth", 3)
+        rules_engine.evaluate(initial_events, state, self._game, max_depth, systems)
 
     def state_key(self) -> tuple:
         """Hashable state snapshot for BFS/A* deduplication."""

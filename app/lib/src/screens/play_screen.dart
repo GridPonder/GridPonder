@@ -571,7 +571,7 @@ class _PlayScreenState extends State<PlayScreen> {
     for (int i = 0; i < goldPath.length; i++) {
       if (!mounted) return;
       setState(() => _engine.executeTurn(goldPath[i]));
-      await Future.delayed(const Duration(milliseconds: 250));
+      await Future.delayed(const Duration(milliseconds: 300));
     }
   }
 
@@ -586,7 +586,7 @@ class _PlayScreenState extends State<PlayScreen> {
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
       if (!mounted) return;
       setState(() => _engine.executeTurn(goldPath[i]));
-      await Future.delayed(kDebugMode ? const Duration(milliseconds: 200) : const Duration(milliseconds: 900));
+      await Future.delayed(kDebugMode ? const Duration(milliseconds: 300) : const Duration(milliseconds: 900));
     }
   }
 
@@ -1534,6 +1534,16 @@ class _PlayScreenState extends State<PlayScreen> {
     );
   }
 
+  /// Short notation for a single action: U/D/L/R for moves, C for clone, etc.
+  String _actionShorthand(GameAction action) {
+    if (action.actionId == 'move') {
+      const map = {'up': 'U', 'down': 'D', 'left': 'L', 'right': 'R'};
+      return map[action.directionStr] ?? '?';
+    }
+    if (action.actionId == 'clone') return 'C';
+    return action.actionId.substring(0, 1).toUpperCase();
+  }
+
   /// Returns "Moves: 13/25" if there is a max_actions limit, else "Moves: 13".
   String _movesLabel(LevelState state) {
     final limitCond = _levelDef.loseConditions
@@ -1567,10 +1577,14 @@ class _PlayScreenState extends State<PlayScreen> {
           GestureDetector(
             onTap: () {
               final boardText = TextRenderer.render(state, widget.packService.game);
-              Clipboard.setData(ClipboardData(text: boardText));
+              final moves = _engine.actionHistory.map(_actionShorthand).join('');
+              final text = moves.isEmpty
+                  ? boardText
+                  : '$boardText\nMoves: $moves';
+              Clipboard.setData(ClipboardData(text: text));
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                    content: Text('Grid copied to clipboard'),
+                    content: Text('Grid + moves copied to clipboard'),
                     duration: Duration(seconds: 1)),
               );
             },

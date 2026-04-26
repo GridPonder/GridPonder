@@ -163,6 +163,14 @@ cdef int slide_avatar(unsigned char* cells, int pos, int dir_idx,
         # Walk to next cell
         pos = nxt
         pg = cells[pos] & 7
+        if pg == GROUND_ICE:
+            if inventory == INV_TORCH:
+                cells[pos] = (cells[pos] & 0xF8) | GROUND_WATER
+                pg = GROUND_WATER
+            elif inventory == INV_PICKAXE:
+                cells[pos] = (cells[pos] & 0xF8) | GROUND_EMPTY
+                inventory = INV_NONE
+                pg = GROUND_EMPTY
         if pg == GROUND_WATER and inventory != INV_NONE:
             inventory = INV_NONE
         if is_pickup(no):
@@ -289,6 +297,14 @@ def apply_cy(bytes state not None, int action_idx, list neighbors_list,
 
     # Post-move ground effects
     tg = out[avatar_pos] & 7
+    if tg == GROUND_ICE:
+        if inventory == INV_TORCH:
+            out[avatar_pos] = (out[avatar_pos] & 0xF8) | GROUND_WATER
+            tg = GROUND_WATER       # torch melts ice → water (torch not consumed yet)
+        elif inventory == INV_PICKAXE:
+            out[avatar_pos] = (out[avatar_pos] & 0xF8) | GROUND_EMPTY
+            inventory = INV_NONE    # pickaxe breaks ice → empty, pickaxe consumed
+            tg = GROUND_EMPTY
     if tg == GROUND_WATER and inventory != INV_NONE:
         inventory = INV_NONE
     if tg == GROUND_ICE:
@@ -318,26 +334,32 @@ cdef double _min_assign(double* ct, int cl,
                         int* plots, int np_) noexcept nogil:
     """Minimum-cost basket→plot assignment (admissible).
 
-    For nb ≤ 4: exact enumeration of all nb! permutations.
-    For nb > 4: sum of each basket's minimum (still admissible).
+    Iterates over plots (depth 0..np_-1); at each depth picks a basket
+    not yet assigned. Works for nb ≥ np_ — leftover baskets are simply
+    not planted (no cost contribution, admissible).
+
+    For np_ ≤ 4: exact enumeration via backtracking (C(nb,np_) × np_!).
+    For np_ > 4: per-plot minimum fallback (still admissible).
     """
     cdef double best, c, row_min
-    cdef int i, j, k
+    cdef int i, j, k, found, depth
     cdef int used[MAX_BASKETS]
+    cdef int choice_stack[4]
+    cdef int idx_stack[4]
 
     if nb == 0:
         return 0.0
     if np_ == 0:
         return 1e300
     if nb < np_:
-        return 1e300  # drowned basket(s)
+        return 1e300  # too few baskets to fill all plots
 
-    if nb > 4:
-        # Sum-of-minima fallback
+    if np_ > 4:
+        # Per-plot minimum (admissible lower bound; correct when nb ≥ np_).
         best = 0.0
-        for i in range(nb):
+        for j in range(np_):
             row_min = 1e300
-            for j in range(np_):
+            for i in range(nb):
                 c = ct[plots[j] * cl + baskets[i]]
                 if c < row_min:
                     row_min = c
@@ -346,20 +368,10 @@ cdef double _min_assign(double* ct, int cl,
             best += row_min
         return best
 
-    # Exact enumeration for nb ≤ 4
-    # Generate all permutations of np_ items taken nb at a time via backtrack.
-    best = 1e300
+    # Exact enumeration for np_ ≤ 4.
+    # depth = current plot index; choice_stack[d] = basket assigned to plot d.
     for i in range(MAX_BASKETS):
         used[i] = 0
-
-    # For nb ≤ 4, inline recursive permutation via iterative approach with a small stack.
-    # We enumerate all choices of nb distinct plots for the nb baskets.
-    # Depth-first: perm[i] = plot index for basket i.
-
-    cdef int depth
-    cdef int choice_stack[4]
-    cdef int idx_stack[4]   # current plot index we're trying at each depth
-
     for i in range(4):
         choice_stack[i] = -1
         idx_stack[i] = 0
@@ -369,11 +381,11 @@ cdef double _min_assign(double* ct, int cl,
     best = 1e300
 
     while depth >= 0:
-        if depth == nb:
-            # Evaluate this permutation
+        if depth == np_:
+            # Complete assignment — sum cost
             c = 0.0
-            for i in range(nb):
-                c += ct[plots[choice_stack[i]] * cl + baskets[i]]
+            for i in range(np_):
+                c += ct[plots[i] * cl + baskets[choice_stack[i]]]
                 if c >= best:
                     break
             if c < best:
@@ -384,20 +396,19 @@ cdef double _min_assign(double* ct, int cl,
                 idx_stack[depth] += 1
             continue
 
-        # Try next available plot at this depth
+        # Try next available basket at this depth (plot).
         found = 0
-        for j in range(idx_stack[depth], np_):
+        for j in range(idx_stack[depth], nb):
             if not used[j]:
                 choice_stack[depth] = j
                 used[j] = 1
-                idx_stack[depth] = j  # remember where we are
-                idx_stack[depth + 1] = 0  # reset next level
+                idx_stack[depth] = j
+                idx_stack[depth + 1] = 0
                 depth += 1
                 found = 1
                 break
 
         if not found:
-            # Backtrack
             depth -= 1
             if depth >= 0:
                 used[choice_stack[depth]] = 0
