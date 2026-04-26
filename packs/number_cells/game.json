@@ -182,23 +182,7 @@
     },
     {
       "type": "level",
-      "ref": "nc_016"
-    },
-    {
-      "type": "level",
-      "ref": "nc_017"
-    },
-    {
-      "type": "level",
-      "ref": "nc_018"
-    },
-    {
-      "type": "level",
       "ref": "nc_019"
-    },
-    {
-      "type": "level",
-      "ref": "nc_020"
     }
   ]
 }
