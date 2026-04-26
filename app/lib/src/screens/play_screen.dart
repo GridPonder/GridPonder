@@ -126,6 +126,13 @@ class _PlayScreenState extends State<PlayScreen> {
 
   Future<void> _onAction(GameAction action) async {
     if (_aiRunning || _animating) return;
+    await _runAction(action);
+  }
+
+  /// Runs [action] through the engine and plays its full animation queue.
+  /// Used by user input ([_onAction]) and replay paths ([_onSolve],
+  /// [_playHint]) so all entry points show the same animations.
+  Future<void> _runAction(GameAction action) async {
     final preState = _engine.state.copy();
     final result = _engine.executeTurn(action);
     if (!result.accepted) return;
@@ -677,7 +684,7 @@ class _PlayScreenState extends State<PlayScreen> {
     await Future.delayed(Duration.zero);
     for (int i = 0; i < goldPath.length; i++) {
       if (!mounted) return;
-      setState(() => _engine.executeTurn(goldPath[i]));
+      await _runAction(goldPath[i]);
       await Future.delayed(const Duration(milliseconds: 300));
     }
   }
@@ -692,8 +699,8 @@ class _PlayScreenState extends State<PlayScreen> {
 
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
       if (!mounted) return;
-      setState(() => _engine.executeTurn(goldPath[i]));
-      await Future.delayed(kDebugMode ? const Duration(milliseconds: 300) : const Duration(milliseconds: 900));
+      await _runAction(goldPath[i]);
+      await Future.delayed(const Duration(milliseconds: 300));
     }
   }
 
