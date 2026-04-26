@@ -34,7 +34,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
 >
   <div class="max-w-6xl mx-auto px-4 sm:px-6 py-16">
     <!-- Header -->
-    <div class="max-w-3xl mb-12">
+    <div class="mb-12">
       <div class="flex items-center gap-2 text-amber-600 font-mono text-sm mb-4">
         <span>🏆</span>
         <span>AI Benchmarks</span>
@@ -42,91 +42,67 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       <h1 class="text-4xl sm:text-5xl font-black text-gray-900 mb-5 leading-tight">
         AI Leaderboard
       </h1>
-      <p class="text-xl text-gray-600 leading-relaxed">
-        GridPonder levels are fully deterministic with verified gold paths, making them a clean benchmark
-        for evaluating AI planning and spatial reasoning.
+      <p class="text-lg text-gray-600 leading-relaxed">
+        GridPonder levels are fully deterministic with verified gold paths, making them a clean benchmark for evaluating AI reasoning.
       </p>
     </div>
 
     <!-- How it works -->
-    <div class="grid sm:grid-cols-3 gap-6 mb-16">
+    <div class="grid sm:grid-cols-3 gap-6 mb-10">
       <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
         <div class="text-3xl mb-3">🧩</div>
         <h2 class="font-bold text-gray-900 mb-2">What is measured</h2>
         <p class="text-sm text-gray-500 leading-relaxed">
-          Each turn the model receives a <strong class="text-gray-700">text-based board</strong> rendered
-          with Unicode symbols and a legend, the goal description, the last action taken and how the board
-          changed, and the full list of valid actions. The model can also maintain a
-          <strong class="text-gray-700">persistent memory</strong> string it updates freely across turns
-          — its only way to retain knowledge between steps.
+          Each turn the model sees the goal, the last action taken, the full list of valid actions,
+          and the current board — as a <strong class="text-gray-700">text grid</strong>, a
+          <strong class="text-gray-700">rendered image</strong>, or both, depending on the selected
+          modality. It can maintain a <strong class="text-gray-700">persistent memory</strong> string
+          across turns — its only way to carry information forward between steps.
         </p>
       </div>
       <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
         <div class="text-3xl mb-3">📊</div>
         <h2 class="font-bold text-gray-900 mb-2">How scores work</h2>
-        <ul class="mt-2 space-y-2 text-sm text-gray-500">
-          <li><strong class="text-gray-700">Accuracy</strong> — fraction of levels solved within the total action budget.</li>
-          <li><strong class="text-gray-700">Efficiency</strong> — gold path length ÷ actions used (1.0 = perfect). In flex-n mode the denominator is adjusted for batched steps.</li>
-          <li><strong class="text-gray-700">Speed / Cost</strong> — median ms per LLM call (local models); average USD per level (API models).</li>
-        </ul>
-        <p class="mt-3 text-sm text-gray-500">
-          Auto-reset triggers at 2× gold path length per attempt; total budget is 3× gold path across all attempts.
+        <p class="text-sm text-gray-500 leading-relaxed">
+          The headline <strong class="text-gray-700">Score</strong> is a 50/50 blend of solve-rate
+          and path efficiency. Detailed column definitions live under each table below.
+          Per attempt the action budget is 2× the gold-path length; total across attempts is 3×.
         </p>
       </div>
       <div class="bg-gray-50 rounded-2xl p-6 border border-gray-100">
         <div class="text-3xl mb-3">🤖</div>
         <h2 class="font-bold text-gray-900 mb-2">Which models</h2>
         <p class="text-sm text-gray-500 leading-relaxed">
-          Local models (Gemma 4, Qwen 3.5, GPT-OSS) run via <strong class="text-gray-700">Ollama</strong>.
-          API models (Claude, GPT, Gemini, Grok) are included for accuracy comparison but excluded
-          from the latency Pareto chart. The prompt is plain text — no vision or special modalities required.
+          Local models (Gemma 4, Qwen 3.5, GPT-OSS) run via Ollama;
+          API models (Claude, GPT, Gemini, Grok, MiniMax) run via LiteLLM. Vision-capable models can
+          additionally be evaluated in image and text+image modes.
         </p>
       </div>
     </div>
 
-    <!-- Selectors: 11 valid combinations grouped by input modality -->
+    <!-- Selector: tabs (input modality) + pill row (inference mode) -->
     <div class="mb-8">
-      <div class="inline-flex flex-wrap items-center gap-1 bg-gray-100 rounded-xl p-1.5">
-        <!-- Aggregate -->
-        <button id="sel-aggregate" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Aggregate</button>
-        <div class="w-px h-5 bg-gray-300 mx-1"></div>
-        <!-- Text group -->
-        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Text</span>
-        <button id="sel-text-single" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors bg-white text-gray-900 shadow-sm">Single</button>
-        <button id="sel-text-flex-n" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
-        <button id="sel-text-full"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
-        <!-- Divider -->
-        <div class="w-px h-5 bg-gray-300 mx-1"></div>
-        <!-- Image group -->
-        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Image</span>
-        <button id="sel-img-single" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Single</button>
-        <button id="sel-img-flex-n" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
-        <button id="sel-img-full"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
-        <!-- Divider -->
-        <div class="w-px h-5 bg-gray-300 mx-1"></div>
-        <!-- Text+Image group -->
-        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Text+Image</span>
-        <button id="sel-ti-single" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Single</button>
-        <button id="sel-ti-flex-n" class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
-        <button id="sel-ti-full"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Full</button>
-        <!-- Divider -->
-        <div class="w-px h-5 bg-gray-300 mx-1"></div>
-        <!-- Anon group (text only by definition) -->
-        <span class="text-xs font-semibold text-gray-400 uppercase tracking-wide px-2">Anon</span>
-        <button id="sel-anon-single"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Single</button>
-        <button id="sel-anon-flex-n"   class="sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors text-gray-500 hover:text-gray-700">Flex-n</button>
+      <div id="view-tabs" class="inline-flex flex-wrap items-center gap-1.5 mb-3"></div>
+      <div id="mode-pills-wrapper" class="flex items-center gap-3 min-h-[44px]">
+        <div id="mode-pills" class="inline-flex items-center gap-1 bg-gray-100 rounded-xl p-1.5"></div>
       </div>
-      <p id="combo-description" class="mt-3 text-sm text-gray-500 max-w-xl leading-relaxed"></p>
+      <p id="combo-description" class="mt-3 text-sm text-gray-500 max-w-2xl leading-relaxed"></p>
     </div>
 
     <!-- Overall leaderboard table -->
     <div class="rounded-2xl border border-gray-200 overflow-hidden mb-12">
-      <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 flex items-center justify-between">
+      <div class="bg-gray-50 border-b border-gray-200 px-6 py-4 flex items-center justify-between flex-wrap gap-3">
         <h2 class="font-bold text-gray-900">Overall Rankings</h2>
-        {generated
-          ? <span class="text-xs text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full">Updated {generated}</span>
-          : <span class="text-xs text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full">No data yet</span>
-        }
+        <div class="flex items-center gap-3">
+          <div id="metric-toggle" class="hidden inline-flex items-center gap-0.5 bg-gray-100 rounded-lg p-0.5 text-xs">
+            <button data-metric="absolute" class="metric-btn px-2.5 py-1 rounded-md font-medium transition-colors">Absolute</button>
+            <button data-metric="relative" class="metric-btn px-2.5 py-1 rounded-md font-medium transition-colors">vs. text</button>
+          </div>
+          {generated
+            ? <span class="text-xs text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full">Updated {generated}</span>
+            : <span class="text-xs text-gray-400 bg-white border border-gray-200 px-3 py-1 rounded-full">No data yet</span>
+          }
+        </div>
       </div>
       <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -294,25 +270,22 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       'full|false|text+image':   'Full one-shot solve with both text and image. The most information-dense variant.',
     };
 
-    // input is one of 'text' | 'image' | 'text+image'. Aggregate ignores input.
-    const COMBOS = [
-      { id: 'sel-aggregate',     mode: 'aggregate', anon: false, input: 'text' },
-      { id: 'sel-text-single',   mode: 'single',    anon: false, input: 'text' },
-      { id: 'sel-text-flex-n',   mode: 'flex-n',    anon: false, input: 'text' },
-      { id: 'sel-text-full',     mode: 'full',      anon: false, input: 'text' },
-      { id: 'sel-img-single',    mode: 'single',    anon: false, input: 'image' },
-      { id: 'sel-img-flex-n',    mode: 'flex-n',    anon: false, input: 'image' },
-      { id: 'sel-img-full',      mode: 'full',      anon: false, input: 'image' },
-      { id: 'sel-ti-single',     mode: 'single',    anon: false, input: 'text+image' },
-      { id: 'sel-ti-flex-n',     mode: 'flex-n',    anon: false, input: 'text+image' },
-      { id: 'sel-ti-full',       mode: 'full',      anon: false, input: 'text+image' },
-      { id: 'sel-anon-single',   mode: 'single',    anon: true,  input: 'text' },
-      { id: 'sel-anon-flex-n',   mode: 'flex-n',    anon: true,  input: 'text' },
+    // Top-level views (tabs). Each carries the (anon, input) it implies and the
+    // list of inference modes it offers as pills. Aggregate has no pill row.
+    const VIEWS = [
+      { id: 'aggregate',  label: 'Aggregate',  anon: false, input: 'text',       modes: [] },
+      { id: 'text',       label: 'Text',       anon: false, input: 'text',       modes: ['single', 'flex-n', 'full'] },
+      { id: 'image',      label: 'Image',      anon: false, input: 'image',      modes: ['single', 'flex-n', 'full'] },
+      { id: 'text+image', label: 'Text+Image', anon: false, input: 'text+image', modes: ['single', 'flex-n', 'full'] },
+      { id: 'anon',       label: 'Anon',       anon: true,  input: 'text',       modes: ['single', 'flex-n'] },
     ];
+    const MODE_LABELS = { 'single': 'Single', 'flex-n': 'Flex-n', 'full': 'Full' };
 
-    let currentMode = 'aggregate';
+    let currentView = 'aggregate';
+    let currentMode = 'aggregate';   // 'aggregate' | one of the inference modes
     let currentAnon = false;
     let currentInput = 'text';
+    let currentMetric = 'absolute';  // 'absolute' | 'relative' (vs. text baseline)
 
     function strip_provider(name) {
       return name.replace(/\s*\([^)]+\)$/, '');
@@ -341,6 +314,50 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       if (score == null || cost == null || cost === 0) return '—';
       const v = score / cost;
       return v < 1 ? v.toFixed(2) : v.toFixed(1);
+    }
+
+    // ── Relative-to-text-baseline plumbing ──────────────────────────────────
+    // For a given model entry the text baseline is the same model id with the
+    // same inference mode, anon=false, input=text. For aggregate-view rows the
+    // baseline is the average of every text-named entry for that model.
+    function getTextBaseline(model) {
+      if (!model) return null;
+      if (model.inference_mode === 'aggregate') {
+        const entries = ALL_MODELS.filter(m =>
+          m.id === model.id && (m.input_mode ?? 'text') === 'text' && !m.anon
+        );
+        if (!entries.length) return null;
+        const mean = arr => arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : null;
+        const avg = field => mean(entries.map(e => e.overall?.[field]).filter(v => v != null));
+        return { overall: {
+          avg_aggregate_score: avg('avg_aggregate_score'),
+          success_rate:        avg('success_rate'),
+          avg_efficiency:      avg('avg_efficiency'),
+          avg_cost_usd:        avg('avg_cost_usd'),
+        } };
+      }
+      return ALL_MODELS.find(m =>
+        m.id === model.id &&
+        m.inference_mode === model.inference_mode &&
+        !m.anon &&
+        (m.input_mode ?? 'text') === 'text'
+      ) ?? null;
+    }
+
+    // Signed % delta vs baseline. lowerIsBetter flips the colour scale (used for cost).
+    function fmt_delta(value, baseline, { lowerIsBetter = false } = {}) {
+      if (value == null || baseline == null || baseline === 0) return '<span class="text-gray-300">—</span>';
+      const pct = (value / baseline - 1) * 100;
+      const sign = pct > 0 ? '+' : (pct < 0 ? '−' : '');
+      const txt = `${sign}${Math.abs(pct).toFixed(0)}%`;
+      let cls;
+      if (Math.abs(pct) < 0.5) {
+        cls = 'text-gray-500';
+      } else {
+        const isImprovement = lowerIsBetter ? pct < 0 : pct > 0;
+        cls = isImprovement ? 'text-green-700 font-semibold' : 'text-red-600 font-semibold';
+      }
+      return `<span class="${cls}">${txt}</span>`;
     }
 
     function computeAggregate() {
@@ -417,11 +434,28 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
               : '<span class="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">API</span>'
             }
           </td>
-          <td class="px-4 py-3 font-mono font-semibold text-gray-900">${fmt_eff(m.overall?.avg_aggregate_score)}</td>
-          <td class="px-4 py-3 font-mono text-gray-700">${fmt_pct(m.overall?.success_rate)}</td>
-          <td class="px-4 py-3 font-mono text-gray-700">${fmt_eff(m.overall?.avg_efficiency)}</td>
-          <td class="px-4 py-3 font-mono text-gray-500">${m.local ? '—' : fmt_cost(m.overall?.avg_cost_usd)}</td>
-          <td class="px-4 py-3 font-mono text-gray-500">${m.local ? '—' : fmt_spd(m.overall?.avg_aggregate_score, m.overall?.avg_cost_usd)}</td>
+          ${(() => {
+            const o = m.overall ?? {};
+            const score = o.avg_aggregate_score, acc = o.success_rate, eff = o.avg_efficiency, cost = o.avg_cost_usd;
+            const spd = (score != null && cost) ? score / cost : null;
+            if (currentMetric === 'relative') {
+              const b = getTextBaseline(m)?.overall ?? {};
+              const bScore = b.avg_aggregate_score, bAcc = b.success_rate, bEff = b.avg_efficiency, bCost = b.avg_cost_usd;
+              const bSpd = (bScore != null && bCost) ? bScore / bCost : null;
+              return `
+          <td class="px-4 py-3 font-mono font-semibold">${fmt_delta(score, bScore)}</td>
+          <td class="px-4 py-3 font-mono">${fmt_delta(acc, bAcc)}</td>
+          <td class="px-4 py-3 font-mono">${fmt_delta(eff, bEff)}</td>
+          <td class="px-4 py-3 font-mono">${m.local ? '<span class="text-gray-300">—</span>' : fmt_delta(cost, bCost, { lowerIsBetter: true })}</td>
+          <td class="px-4 py-3 font-mono">${m.local ? '<span class="text-gray-300">—</span>' : fmt_delta(spd, bSpd)}</td>`;
+            }
+            return `
+          <td class="px-4 py-3 font-mono font-semibold text-gray-900">${fmt_eff(score)}</td>
+          <td class="px-4 py-3 font-mono text-gray-700">${fmt_pct(acc)}</td>
+          <td class="px-4 py-3 font-mono text-gray-700">${fmt_eff(eff)}</td>
+          <td class="px-4 py-3 font-mono text-gray-500">${m.local ? '—' : fmt_cost(cost)}</td>
+          <td class="px-4 py-3 font-mono text-gray-500">${m.local ? '—' : fmt_spd(score, cost)}</td>`;
+          })()}
         </tr>`
       ).join('');
     }
@@ -451,20 +485,96 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       ).join('');
     }
 
-    const BASE_BTN   = 'sel-btn px-4 py-1.5 rounded-lg text-sm font-medium transition-colors';
-    const ACTIVE_CLS = 'bg-white text-gray-900 shadow-sm';
-    const INACTIVE   = 'text-gray-500 hover:text-gray-700';
+    // Brand colour palette per view tab — lets each modality "glow" distinctly.
+    const VIEW_COLORS = {
+      'aggregate':   { active: 'bg-gray-900 text-white shadow',           hover: 'hover:bg-gray-200' },
+      'text':        { active: 'bg-indigo-600 text-white shadow',         hover: 'hover:bg-indigo-50' },
+      'image':       { active: 'bg-emerald-600 text-white shadow',        hover: 'hover:bg-emerald-50' },
+      'text+image':  { active: 'bg-purple-600 text-white shadow',         hover: 'hover:bg-purple-50' },
+      'anon':        { active: 'bg-amber-600 text-white shadow',          hover: 'hover:bg-amber-50' },
+    };
+
+    const TAB_BASE = 'px-4 py-1.5 rounded-xl text-sm font-medium transition-all border';
+    const TAB_INACTIVE = 'border-gray-200 text-gray-600 bg-white';
+    const PILL_BASE = 'px-4 py-1.5 rounded-lg text-sm font-medium transition-colors';
+    const PILL_ACTIVE = 'bg-white text-gray-900 shadow-sm';
+    const PILL_INACTIVE = 'text-gray-500 hover:text-gray-700';
 
     function updateSelectors() {
-      COMBOS.forEach(({ id, mode, anon, input }) => {
-        const active = mode === currentMode && anon === currentAnon
-                    && (mode === 'aggregate' || input === currentInput);
-        document.getElementById(id).className = `${BASE_BTN} ${active ? ACTIVE_CLS : INACTIVE}`;
+      const tabsEl = document.getElementById('view-tabs');
+      const pillsEl = document.getElementById('mode-pills');
+      const wrapperEl = document.getElementById('mode-pills-wrapper');
+
+      // ── Tabs ──────────────────────────────────────────────────────────
+      tabsEl.innerHTML = VIEWS.map(v => {
+        const colors = VIEW_COLORS[v.id];
+        const cls = currentView === v.id
+          ? `${TAB_BASE} ${colors.active} border-transparent`
+          : `${TAB_BASE} ${TAB_INACTIVE} ${colors.hover}`;
+        return `<button data-view="${v.id}" class="view-tab ${cls}">${v.label}</button>`;
+      }).join('');
+      tabsEl.querySelectorAll('.view-tab').forEach(btn => {
+        btn.addEventListener('click', () => selectView(btn.dataset.view));
       });
-      const key = currentMode === 'aggregate'
+
+      // ── Pills (inference mode) ────────────────────────────────────────
+      const view = VIEWS.find(v => v.id === currentView);
+      if (!view.modes.length) {
+        wrapperEl.classList.add('invisible'); // keep height for layout stability
+        pillsEl.innerHTML = '';
+      } else {
+        wrapperEl.classList.remove('invisible');
+        pillsEl.innerHTML = view.modes.map(m => {
+          const active = m === currentMode;
+          const cls = active ? PILL_ACTIVE : PILL_INACTIVE;
+          return `<button data-mode="${m}" class="mode-pill ${PILL_BASE} ${cls}">${MODE_LABELS[m]}</button>`;
+        }).join('');
+        pillsEl.querySelectorAll('.mode-pill').forEach(btn => {
+          btn.addEventListener('click', () => selectMode(btn.dataset.mode));
+        });
+      }
+
+      // ── Description ───────────────────────────────────────────────────
+      const key = currentView === 'aggregate'
         ? 'aggregate|false|text'
         : `${currentMode}|${currentAnon}|${currentInput}`;
       document.getElementById('combo-description').textContent = COMBO_DESCRIPTIONS[key] ?? '';
+
+      // ── Metric toggle (visible everywhere except plain text view) ─────
+      const toggle = document.getElementById('metric-toggle');
+      if (toggle) {
+        const showToggle = currentView !== 'text';
+        toggle.classList.toggle('hidden', !showToggle);
+        if (!showToggle) currentMetric = 'absolute';
+        toggle.querySelectorAll('.metric-btn').forEach(btn => {
+          const active = btn.dataset.metric === currentMetric;
+          btn.className = 'metric-btn px-2.5 py-1 rounded-md font-medium transition-colors '
+            + (active ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700');
+        });
+      }
+    }
+
+    function selectView(viewId) {
+      const view = VIEWS.find(v => v.id === viewId);
+      if (!view) return;
+      currentView = view.id;
+      currentAnon = view.anon;
+      currentInput = view.input;
+      if (view.modes.length === 0) {
+        currentMode = 'aggregate';
+      } else if (!view.modes.includes(currentMode)) {
+        // Switching tabs: keep the current mode if available; otherwise default
+        // to the first (Single).
+        currentMode = view.modes[0];
+      }
+      // Relative metrics aren't meaningful in pure-text view (would all be 0%).
+      if (currentView === 'text') currentMetric = 'absolute';
+      render();
+    }
+
+    function selectMode(mode) {
+      currentMode = mode;
+      render();
     }
 
     // Lazy-load ECharts from CDN the first time the chart is needed.
@@ -996,12 +1106,12 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       if (fn) fn.textContent = n != null ? ` · ${n} levels tested per model.` : '';
     }
 
-    // Wire up all selector buttons (12 total: aggregate + 11 combos).
-    COMBOS.forEach(({ id, mode, anon, input }) => {
-      document.getElementById(id).addEventListener('click', () => {
-        currentMode = mode;
-        currentAnon = anon;
-        currentInput = input;
+    // Selector tabs / pills wire themselves up inside updateSelectors() each render.
+
+    // Wire metric toggle (Absolute / vs. text). Hidden in text view via updateSelectors.
+    document.querySelectorAll('#metric-toggle .metric-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        currentMetric = btn.dataset.metric;
         render();
       });
     });
