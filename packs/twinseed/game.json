@@ -517,7 +517,11 @@
     {"type": "level", "ref": "tw_018"},
     {"type": "level", "ref": "tw_019"},
     {"type": "level", "ref": "tw_020"},
-    {"type": "level", "ref": "tw_021"}
+    {"type": "level", "ref": "tw_021"},
+    {"type": "level", "ref": "tw_022"},
+    {"type": "level", "ref": "tw_023"},
+    {"type": "level", "ref": "tw_024"},
+    {"type": "level", "ref": "tw_025"}
   ],
   "defaults": {
     "maxCascadeDepth": 10,

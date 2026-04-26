@@ -176,11 +176,13 @@ def _fields_match(event: Dict[str, Any], match_fields: Dict[str, Any]) -> bool:
     """Return True if every match field equals the corresponding event field."""
     for key, expected in match_fields.items():
         actual = event.get(key)
-        # Normalise lists to tuples for position comparison
+        # Normalise lists/Pos-like objects to tuples for position comparison
         if isinstance(expected, list):
             expected = tuple(expected)
         if isinstance(actual, list):
             actual = tuple(actual)
+        elif hasattr(actual, "x") and hasattr(actual, "y") and not isinstance(actual, tuple):
+            actual = (actual.x, actual.y)
         if actual != expected:
             return False
     return True

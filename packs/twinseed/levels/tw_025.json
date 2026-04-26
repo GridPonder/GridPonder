@@ -1,0 +1,79 @@
+{
+  "id": "tw_025",
+  "title": "Crown of Ice",
+  "board": {
+    "size": [7, 8],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "void"},
+          {"position": [4, 2], "kind": "void"},
+          {"position": [0, 3], "kind": "void"},
+          {"position": [0, 5], "kind": "void"},
+          {"position": [0, 7], "kind": "void"},
+          {"position": [1, 0], "kind": "void"},
+          {"position": [1, 7], "kind": "void"},
+          {"position": [2, 7], "kind": "void"},
+          {"position": [4, 7], "kind": "void"},
+          {"position": [5, 0], "kind": "void"},
+          {"position": [5, 7], "kind": "void"},
+          {"position": [6, 0], "kind": "void"},
+          {"position": [0, 2], "kind": "void"},
+          {"position": [4, 6], "kind": "void"},
+          {"position": [6, 6], "kind": "void"},
+          {"position": [6, 7], "kind": "void"},
+          {"position": [3, 3], "kind": "void"},
+          {"position": [3, 4], "kind": "void"},
+          {"position": [3, 2], "kind": "ice"},
+          {"position": [2, 3], "kind": "ice"},
+          {"position": [4, 3], "kind": "ice"},
+          {"position": [2, 4], "kind": "ice"},
+          {"position": [4, 4], "kind": "ice"},
+          {"position": [3, 5], "kind": "ice"},
+          {"position": [1, 4], "kind": "water"},
+          {"position": [5, 3], "kind": "water"},
+          {"position": [5, 4], "kind": "water"},
+          {"position": [3, 1], "kind": "garden_plot"},
+          {"position": [3, 6], "kind": "garden_plot"}
+        ]
+      },
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 1], "kind": "seed_basket"},
+          {"position": [2, 5], "kind": "seed_basket"},
+          {"position": [2, 2], "kind": "torch"},
+          {"position": [4, 1], "kind": "rock"},
+          {"position": [0, 1], "kind": "rock"},
+          {"position": [1, 2], "kind": "rock"},
+          {"position": [5, 1], "kind": "wood"},
+          {"position": [3, 7], "kind": "wood"},
+          {"position": [1, 6], "kind": "wood"},
+          {"position": [1, 5], "kind": "seed_basket"},
+          {"position": [6, 3], "kind": "torch"},
+          {"position": [2, 6], "kind": "torch"},
+          {"position": [1, 1], "kind": "pickaxe"},
+          {"position": [0, 4], "kind": "pickaxe"},
+          {"position": [5, 2], "kind": "metal_crate"},
+          {"position": [2, 3], "kind": "metal_crate"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [2, 0], "facing": "right"}
+  },
+  "goals": [
+    {"id": "plant_all", "type": "all_cleared", "config": {"kind": "garden_plot"}}
+  ],
+  "solution": {
+    "goldPath": [
+      "right", "down", "down", "left", "down", "left", "clone", "down", "left", "clone",
+      "up", "up", "right", "right", "right", "right", "down", "down", "left", "down",
+      "left", "down", "left", "left", "up", "down", "left", "clone", "right", "right",
+      "right", "up", "left", "up", "left", "down", "down", "clone", "right", "right"
+    ],
+    "hintStops": [7, 15, 27]
+  }
+}
