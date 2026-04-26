@@ -192,7 +192,7 @@ packages:
       path: "../engines/dart"
       relative: true
     source: path
-    version: "0.6.0"
+    version: "0.7.0"
   hooks:
     dependency: transitive
     description:

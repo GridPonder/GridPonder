@@ -214,6 +214,7 @@ Defines all entity types used by this game. Levels reference kinds by their key 
 | `description` | string | no | Human-readable description. |
 | `uiName` | string | no | Display name for UI. Defaults to the kind key. |
 | `animations` | object | no | Named animation sequences for this entity. See [Animations](#animations). |
+| `motion` | object | no | Motion timings used by the renderer when this kind appears in a motion event (`tile_moved`, `tiles_merged` with sources, etc.). See [Motion](#motion). Optional — engine has sensible defaults. |
 | `render` | object | no | Additional rendering hints (opacity, tint). |
 
 ### Animations
@@ -261,6 +262,55 @@ Animation fields:
 Effects reference animations by name via the `animation` field (see [05_rules.md §5](05_rules.md#5-effect-catalog)). When an effect specifies an animation, the engine plays it before (or during) the state change. If no animation is specified, the state change is instant.
 
 The animation name is scoped to the entity kind at the target position. For example, `"animation": "burning"` on a `destroy` effect at a cell containing `wood` looks up `wood.animations.burning`.
+
+### Motion
+
+A `motion` block on an entity kind sets per-cell motion durations the renderer uses when this kind participates in a multi-step cascade (e.g. number tiles sliding under `slide_merge`, items emitted from a `queued_emitters` pipe). All keys are optional; the renderer uses engine defaults when omitted. **Behaviour is unaffected** — these timings only control visual pacing.
+
+```json
+"number": {
+  "layer": "objects",
+  "tags": ["mergeable"],
+  "sprite": "assets/sprites/number_{value}.png",
+  "spriteParam": "value",
+  "motion": {
+    "moveDurationMs": 130,
+    "mergeDurationMs": 200,
+    "pathStepDurationMs": 80,
+    "spawnDurationMs": 120
+  }
+}
+```
+
+| Key | Used when | Default |
+|-----|-----------|---------|
+| `moveDurationMs` | Engine emits `tile_moved` (slide leg of `slide_merge`, push, portal exit). **Per cell** (matches the ice-slide pacing convention). | 130 |
+| `mergeDurationMs` | Engine emits `tiles_merged` with `sources` (post-slide merge in `slide_merge`). | 200 |
+| `pathStepDurationMs` | Engine emits `entity_path` (multi-cell traversal, e.g. queued-emitter routes). Per cell. | 80 |
+| `spawnDurationMs` | Engine emits `entity_spawn` (e.g. queued-emitter spawn). | 120 |
+
+#### How motion events are sequenced
+
+Each turn produces a list of `AnimationStep`s grouped by an integer `stage`. Steps with the same stage play in parallel; the next stage starts after the longest step of the previous stage finishes. The default stage is `0`, so legacy avatar/entity animations behave exactly as before.
+
+Within a single phase the engine assigns:
+
+- `motion` events (`avatar_move`, `tile_moved`, `entity_spawn`, `entity_path`) → stage `base + 0`
+- `merge` events (`tiles_merged` with sources) → stage `base + 1`
+- `destroy/transform` animations (`object_removed` with `animation`) → stage `base + 2`
+
+Each subsequent phase (movement → cascade) advances `base` past whatever stages the prior phase emitted, so a slide cannot overlap a downstream cascade animation.
+
+#### Opting out
+
+Systems that emit motion expose an `emitMotion` config flag (default `true`). Set it to `false` to fall back to the legacy snap-to-final-state behaviour:
+
+```json
+{ "id": "merge", "type": "slide_merge",
+  "config": { "emitMotion": false, "...": "..." } }
+```
+
+This is useful for fast-paced packs where the cascade animation would slow play, or for headless contexts where animations are irrelevant.
 
 ---
 

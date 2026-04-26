@@ -79,11 +79,28 @@ class GameEvent {
       });
 
   static GameEvent tilesMerged(
-          Position pos, int resultValue, List<int> inputValues) =>
+          Position pos, int resultValue, List<int> inputValues,
+          {List<Position>? sources, String? kind}) =>
       GameEvent('tiles_merged', {
         'position': pos,
         'resultValue': resultValue,
         'inputValues': inputValues,
+        if (sources != null) 'sources': sources,
+        if (kind != null) 'kind': kind,
+      });
+
+  /// A single tile slid from [from] to [to] without merging.
+  /// Carries enough information for the renderer to play an `entity_move`
+  /// animation; engines that don't render simply ignore it.
+  static GameEvent tileMoved(
+          Position from, Position to, String kind,
+          {Map<String, dynamic> params = const {}, String layer = 'objects'}) =>
+      GameEvent('tile_moved', {
+        'fromPosition': from,
+        'position': to,
+        'kind': kind,
+        'params': params,
+        'layer': layer,
       });
 
   static GameEvent tilesSlid(String direction, int movedCount) =>

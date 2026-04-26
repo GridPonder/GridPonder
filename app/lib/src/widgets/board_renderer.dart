@@ -365,7 +365,7 @@ class _Cell extends StatelessWidget {
   Widget build(BuildContext context) {
     final pos = Position(x, y);
     final groundEntity = state.board.getEntity('ground', pos);
-    if (groundEntity?.kind == 'void') {
+    if (groundEntity?.kind == 'void' && !skipGround) {
       final kindDef = game.entityKinds['void'];
       final spritePath = _entitySpritePath(kindDef, groundEntity!);
       if (spritePath != null) {
@@ -374,6 +374,18 @@ class _Cell extends StatelessWidget {
           width: cellSize,
           height: cellSize,
           fit: BoxFit.cover,
+        );
+      }
+      // Procedural fallback only when the game itself uses procedural
+      // rendering for normal cells (no sprite on `empty`). Sprite-backed
+      // packs (e.g. twinseed: empty=grass.png) frame voids naturally via the
+      // surrounding tiles, so we leave them transparent.
+      final emptySprite = game.entityKinds['empty']?.sprite;
+      if (emptySprite == null) {
+        return Container(
+          width: cellSize,
+          height: cellSize,
+          color: const Color(0xFFB0B0B0),
         );
       }
       return const SizedBox.shrink();

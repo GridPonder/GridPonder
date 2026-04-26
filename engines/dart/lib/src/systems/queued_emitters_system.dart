@@ -56,7 +56,8 @@ class QueuedEmittersSystem extends GameSystem {
             : exit2Pos;
 
         _emitBidirectional(
-          board, mco, events, queue, exitPos, spawnPos, exit2Pos, spawn2Pos,
+          board, mco, events, queue,
+          exitPos, spawnPos, exit2Pos, spawn2Pos,
         );
       } else {
         // ── Unidirectional pipe (original behaviour) ────────────────────────

@@ -79,12 +79,45 @@ def object_pushed(kind: str, from_pos: Pos, to_pos: Pos, direction: str) -> dict
     }
 
 
-def tiles_merged(pos: Pos, result_value: int, input_values: list[int]) -> dict:
-    return {
+def tiles_merged(
+    pos: Pos,
+    result_value: int,
+    input_values: list[int],
+    sources: list[Pos] | None = None,
+    kind: str | None = None,
+) -> dict:
+    out: dict = {
         "type": "tiles_merged",
         "position": pos,
         "resultValue": result_value,
         "inputValues": input_values,
+    }
+    if sources is not None:
+        out["sources"] = sources
+    if kind is not None:
+        out["kind"] = kind
+    return out
+
+
+def tile_moved(
+    from_pos: Pos,
+    to_pos: Pos,
+    kind: str,
+    params: dict | None = None,
+    layer: str = "objects",
+) -> dict:
+    """Single tile slid from `from_pos` to `to_pos` without merging.
+
+    Carries enough metadata for a UI to render an `entity_move` animation;
+    the Python solver/runner ignore it (no rendering).
+    """
+    return {
+        "type": "tile_moved",
+        "fromPosition": from_pos,
+        "position": to_pos,
+        "kind": kind,
+        "params": params or {},
+        "layer": layer,
     }
 
 

@@ -37,6 +37,7 @@ class SlideMergeSystem extends GameSystem {
     final mergeResult = config['mergeResult'] as String? ?? 'sum';
     final mergeLimit = config['mergeLimit'] as int? ?? 1;
     final wrapAround = config['wrapAround'] as bool? ?? false;
+    final emitMotion = config['emitMotion'] as bool? ?? true;
 
     final board = state.board;
     final objectsLayer = board.layers['objects'];
@@ -171,11 +172,25 @@ class SlideMergeSystem extends GameSystem {
         workingBoard[nextPos] = mergedEntity;
         mergeCounts[nextPos] = mergeCount + 1;
 
-        if (startPos != currentPos) {
-          // The tile slid before merging — emit cleared for its original position.
+        if (startPos != nextPos) {
+          // The moving tile slid before merging.
           events.add(GameEvent.cellCleared(startPos, entity.kind));
+          if (emitMotion) {
+            events.add(GameEvent.tileMoved(
+              startPos,
+              nextPos,
+              entity.kind,
+              params: Map<String, dynamic>.from(entity.params),
+            ));
+          }
         }
-        events.add(GameEvent.tilesMerged(nextPos, resultValue, [aVal, bVal]));
+        events.add(GameEvent.tilesMerged(
+          nextPos,
+          resultValue,
+          [aVal, bVal],
+          sources: emitMotion ? [startPos, nextPos] : null,
+          kind: emitMotion ? mergedEntity.kind : null,
+        ));
         movedCount++;
         didMerge = true;
         break;
@@ -187,6 +202,14 @@ class SlideMergeSystem extends GameSystem {
         workingBoard[currentPos] = entity;
         movedCount++;
         events.add(GameEvent.cellCleared(startPos, entity.kind));
+        if (emitMotion) {
+          events.add(GameEvent.tileMoved(
+            startPos,
+            currentPos,
+            entity.kind,
+            params: Map<String, dynamic>.from(entity.params),
+          ));
+        }
       }
     }
 

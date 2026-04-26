@@ -59,6 +59,13 @@ class EntityKindDef {
   /// their sides bitmask). [sprite] must contain `{paramName}`.
   final String? spriteParam;
 
+  /// Optional motion timings consumed by the renderer when this kind appears
+  /// in a motion-emitting event (`entity_move`, `entity_merge`, `entity_path`,
+  /// `entity_spawn`). Recognised keys: `moveDurationMs`, `mergeDurationMs`,
+  /// `pathStepDurationMs`, `spawnDurationMs`. Missing keys fall back to
+  /// engine defaults — no behavioural impact, only visual pacing.
+  final Map<String, dynamic> motion;
+
   const EntityKindDef({
     required this.id,
     required this.layer,
@@ -71,6 +78,7 @@ class EntityKindDef {
     this.description,
     this.symbolParam,
     this.spriteParam,
+    this.motion = const {},
   });
 
   factory EntityKindDef.fromJson(String id, Map<String, dynamic> j) {
@@ -99,6 +107,7 @@ class EntityKindDef {
       symbol: symbol,
       symbolParam: j['symbolParam'] as String?,
       spriteParam: j['spriteParam'] as String?,
+      motion: (j['motion'] as Map?)?.cast<String, dynamic>() ?? const {},
     );
   }
 

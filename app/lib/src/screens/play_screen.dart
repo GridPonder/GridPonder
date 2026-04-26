@@ -135,10 +135,6 @@ class _PlayScreenState extends State<PlayScreen> {
       _lastFloodColor = cellNamedColor(colorName);
     }
 
-    final entityAnims = result.animations
-        .where((s) => s.type == 'entity_animation')
-        .toList();
-
     final avatarMoves = result.animations
         .where((s) => s.type == 'avatar_move')
         .toList();
@@ -192,11 +188,44 @@ class _PlayScreenState extends State<PlayScreen> {
       });
     }
 
-    if (entityAnims.isNotEmpty) {
-      for (final step in entityAnims) {
+    // Stage-aware playback for new motion primitives.
+    // Group remaining animations by stage; play each stage to completion
+    // before starting the next.
+    final remaining = result.animations
+        .where((s) => s.type == 'entity_move' || s.type == 'entity_animation')
+        .toList()
+      ..sort((a, b) => a.stage.compareTo(b.stage));
+
+    int? currentStage;
+    final stageBuf = <AnimationStep>[];
+    Future<void> flushStage() async {
+      if (stageBuf.isEmpty) return;
+      final moves = stageBuf.where((s) => s.type == 'entity_move').toList();
+      final anims = stageBuf.where((s) => s.type == 'entity_animation').toList();
+      if (moves.isNotEmpty) {
+        await _playSlideMotion(preState, moves);
+      }
+      for (final step in anims) {
         if (!mounted) return;
         await _playEntityAnimation(preState, step);
       }
+      stageBuf.clear();
+    }
+
+    for (final step in remaining) {
+      if (currentStage == null || step.stage == currentStage) {
+        currentStage = step.stage;
+        stageBuf.add(step);
+      } else {
+        await flushStage();
+        if (!mounted) return;
+        currentStage = step.stage;
+        stageBuf.add(step);
+      }
+    }
+    await flushStage();
+
+    if (remaining.isNotEmpty) {
       if (!mounted) return;
       setState(() {
         _preAnimState = null;
@@ -252,6 +281,84 @@ class _PlayScreenState extends State<PlayScreen> {
       _preAnimState = null;
       _animOverlays = null;
     });
+  }
+
+  /// Animates `entity_move` steps (tiles sliding across cells) in parallel.
+  /// Each frame is a fresh board snapshot with the moving entities relocated
+  /// to their current path position, so the existing cell renderer handles
+  /// both sprite-backed and procedurally-drawn entities (e.g. number tiles).
+  Future<void> _playSlideMotion(
+    LevelState preState,
+    List<AnimationStep> moves,
+  ) async {
+    if (moves.isEmpty) return;
+
+    final paths = <List<Position>>[];
+    final entities = <EntityInstance>[];
+    final layers = <String>[];
+
+    for (final step in moves) {
+      final fromRaw = step.extra['from'];
+      if (fromRaw is! List) continue;
+      final from = Position(fromRaw[0] as int, fromRaw[1] as int);
+      final to = step.position;
+
+      // Cardinal-direction path; sign() handles non-cardinal degenerate cases.
+      final dx = (to.x - from.x).sign;
+      final dy = (to.y - from.y).sign;
+      final path = <Position>[from];
+      var p = from;
+      while (p != to && path.length < 64) {
+        p = Position(p.x + dx, p.y + dy);
+        path.add(p);
+      }
+
+      final layer = step.extra['layer'] as String? ?? 'objects';
+      final paramsRaw = step.extra['params'];
+      final params = (paramsRaw is Map)
+          ? paramsRaw.cast<String, dynamic>()
+          : const <String, dynamic>{};
+      final entity = EntityInstance(step.entityKind ?? '', params);
+
+      paths.add(path);
+      entities.add(entity);
+      layers.add(layer);
+    }
+
+    if (paths.isEmpty) return;
+
+    // Per-cell pacing — engine's `moveDurationMs` is per-cell, matching the
+    // ice-slide convention. Falls back to 130ms when not provided.
+    final frameMs = moves.first.durationMs > 0
+        ? moves.first.durationMs.clamp(40, 400)
+        : 130;
+
+    final maxLen = paths.map((p) => p.length).reduce((a, b) => a > b ? a : b);
+    // Iterate every path cell including the destination so single-cell moves
+    // (pipe shifts, exit-to-spawn) are visible. The trailing post-loop snap
+    // shows the same final state, so there is no visual discontinuity.
+    for (int frame = 0; frame < maxLen; frame++) {
+      if (!mounted) return;
+      final animState = preState.copy();
+      // Clear all source positions in the moving entity's layer.
+      for (int i = 0; i < paths.length; i++) {
+        animState.board.setEntity(layers[i], paths[i].first, null);
+      }
+      // Place each entity at its current frame position, but never overwrite
+      // an existing entity (merge target sits at the path's end).
+      for (int i = 0; i < paths.length; i++) {
+        final path = paths[i];
+        final pos = path[frame.clamp(0, path.length - 1)];
+        if (animState.board.getEntity(layers[i], pos) == null) {
+          animState.board.setEntity(layers[i], pos, entities[i]);
+        }
+      }
+      setState(() {
+        _preAnimState = animState;
+        _animOverlays = null;
+      });
+      await Future.delayed(Duration(milliseconds: frameMs));
+    }
   }
 
   Future<void> _playEntityAnimation(LevelState preState, AnimationStep step) async {

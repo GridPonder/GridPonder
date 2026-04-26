@@ -20,7 +20,7 @@ For solver use, state snapshots are available via::
     key = engine.state_key()   # hashable tuple for BFS/A* visited tracking
     snap = engine.state.copy() # full mutable copy for branching
 """
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 from ._game_def import GameDef
 from ._models import GameState, Pos, Entity, Board, AvatarState

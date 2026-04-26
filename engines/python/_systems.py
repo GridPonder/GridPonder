@@ -618,6 +618,7 @@ class SlideMergeSystem(GameSystem):
         merge_result_mode = config.get("mergeResult", "sum")
         merge_limit = config.get("mergeLimit", 1)
         wrap = config.get("wrapAround", False)
+        emit_motion = config.get("emitMotion", True)
 
         board = state.board
         objects_layer = board.layers.get("objects")
@@ -700,9 +701,16 @@ class SlideMergeSystem(GameSystem):
                 del working[start_pos]
                 working[next_pos] = merged
                 merge_counts[next_pos] = mc + 1
-                if start_pos != current_pos:
+                if start_pos != next_pos:
                     events_list.append(ev.cell_cleared(start_pos, e.kind))
-                events_list.append(ev.tiles_merged(next_pos, result, [av, bv]))
+                    if emit_motion:
+                        events_list.append(ev.tile_moved(
+                            start_pos, next_pos, e.kind, dict(e.params)))
+                events_list.append(ev.tiles_merged(
+                    next_pos, result, [av, bv],
+                    sources=[start_pos, next_pos] if emit_motion else None,
+                    kind=merged.kind if emit_motion else None,
+                ))
                 moved_count += 1
                 did_merge = True
                 break
@@ -712,6 +720,9 @@ class SlideMergeSystem(GameSystem):
                 working[current_pos] = e
                 moved_count += 1
                 events_list.append(ev.cell_cleared(start_pos, e.kind))
+                if emit_motion:
+                    events_list.append(ev.tile_moved(
+                        start_pos, current_pos, e.kind, dict(e.params)))
 
         # Commit
         for pos, _ in mergeable_tiles:
