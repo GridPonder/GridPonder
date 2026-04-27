@@ -34,7 +34,12 @@ export function getStaticPaths() {
 
 const { file, title, prev, next } = Astro.props;
 const rawContent = fs.readFileSync(path.join(dslDir, file), 'utf-8');
-const html = await marked.parse(rawContent, { gfm: true, breaks: false });
+// Cross-references in the source markdown link to neighbour docs by their
+// .md filename (e.g. [05_rules.md](05_rules.md#anchor)). On the website
+// each doc is served at /dsl/<slug> with no extension, so rewrite those
+// links here. Anchored fragments are preserved.
+const html = (await marked.parse(rawContent, { gfm: true, breaks: false }))
+  .replace(/href="(\d+_[^"#]+?)\.md(#[^"]*)?"/g, 'href="/dsl/$1$2"');
 
 // Derive short title for nav (strip "Gridponder DSL v0 —" prefix)
 const shortTitle = (t: string) => t.replace(/^Gridponder DSL(?:\s+v[\d.]+)?\s*[—–-]\s*/i, '').trim();
