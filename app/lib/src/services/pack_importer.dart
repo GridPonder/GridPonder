@@ -20,20 +20,15 @@ class PackConflictError extends PackImportError {
       : super('"$existingTitle" is already installed.');
 }
 
-/// IDs of packs compiled into the app binary — these can never be replaced.
-const _kBundledPackIds = [
-  'carrot_quest',
-  'number_cells',
-  'rotate_flip',
-  'flood_colors',
-  'diagonal_swipes',
-  'box_builder',
-];
-
 /// Handles importing a zip file as a new pack.
 class PackImporter {
   final PackStorage _storage;
-  PackImporter(this._storage);
+  /// IDs of bundled (read-only) packs — discovered by [PackRegistry] from
+  /// the asset manifest. Imports targeting any of these are rejected so a
+  /// user-imported pack can't shadow a built-in one.
+  final Iterable<String> _bundledIds;
+  PackImporter(this._storage, {Iterable<String> bundledIds = const []})
+      : _bundledIds = bundledIds;
 
   /// Imports [zipBytes] as a pack into [_storage].
   ///
@@ -92,7 +87,7 @@ class PackImporter {
     }
 
     // 5. Block built-in packs
-    if (_kBundledPackIds.contains(packId)) {
+    if (_bundledIds.contains(packId)) {
       throw PackImportError(
         '"$packId" is a built-in pack and cannot be replaced via import.',
       );

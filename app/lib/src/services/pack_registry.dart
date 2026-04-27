@@ -1,16 +1,6 @@
+import 'package:flutter/services.dart' show AssetManifest, rootBundle;
 import 'pack_file_reader.dart';
 import 'pack_storage.dart';
-
-/// The IDs of packs that ship with the app binary.
-const kBundledPackIds = [
-  'carrot_quest',
-  'number_cells',
-  'rotate_flip',
-  'flood_colors',
-  'diagonal_swipes',
-  'box_builder',
-  'twinseed',
-];
 
 /// A pack entry — knows its ID, whether it was user-installed, and how to
 /// read its files.
@@ -30,19 +20,39 @@ class PackEntry {
 /// (imported from zip files and stored on-device).
 class PackRegistry {
   final PackStorage _storage;
+  final List<String> _bundledIds;
 
-  PackRegistry._(this._storage);
+  PackRegistry._(this._storage, this._bundledIds);
 
-  static Future<PackRegistry> create() async =>
-      PackRegistry._(createPackStorage());
+  /// Discovers bundled pack IDs by scanning the asset manifest for any
+  /// `assets/packs/<id>/manifest.json`. Adding a pack to `pubspec.yaml` is
+  /// the single source of truth — no separate ID list to maintain.
+  static Future<PackRegistry> create() async {
+    final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
+    final pattern = RegExp(r'^assets/packs/([^/]+)/manifest\.json$');
+    final ids = manifest
+        .listAssets()
+        .map(pattern.firstMatch)
+        .where((m) => m != null)
+        .map((m) => m!.group(1)!)
+        .toSet()
+        .toList()
+      ..sort();
+    return PackRegistry._(createPackStorage(), List.unmodifiable(ids));
+  }
 
   PackStorage get storage => _storage;
+
+  /// IDs of packs compiled into the app binary, in stable (alphabetical)
+  /// order. Used by both the library UI and the importer (to prevent a
+  /// user-imported pack from shadowing a bundled one).
+  List<String> get bundledIds => _bundledIds;
 
   /// Returns all packs in display order: bundled first, then installed.
   Future<List<PackEntry>> listAll() async {
     final entries = <PackEntry>[];
 
-    for (final id in kBundledPackIds) {
+    for (final id in _bundledIds) {
       entries.add(PackEntry(
         id: id,
         isInstalled: false,

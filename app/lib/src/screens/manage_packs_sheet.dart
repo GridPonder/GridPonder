@@ -104,7 +104,10 @@ class _ManagePacksSheetState extends State<ManagePacksSheet> {
   }
 
   Future<void> _doImport(Uint8List bytes, {bool replace = false}) async {
-    final importer = PackImporter(widget.registry.storage);
+    final importer = PackImporter(
+      widget.registry.storage,
+      bundledIds: widget.registry.bundledIds,
+    );
     try {
       final title = await importer.importZip(bytes, replace: replace);
       if (!mounted) return;
