@@ -51,12 +51,13 @@ class GameDef:
             k: self._parse_kind(k, v) for k, v in raw_kinds.items()
         }
 
-        # Actions: list of {id, params: {name: {type, values}}, entityKind?}
+        # Actions: list of {id, params: {name: {type, values}}, entityKind?, color?}
         self.actions: list[dict] = [
             {
                 "id": a["id"],
                 "params": a.get("params", {}),
                 "entityKind": a.get("entityKind"),
+                "color": a.get("color"),
             }
             for a in data.get("actions", [])
         ]

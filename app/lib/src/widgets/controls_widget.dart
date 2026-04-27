@@ -106,10 +106,12 @@ class _ControlsWidgetState extends State<ControlsWidget> {
 
   Widget _actionButton(ActionDef actionDef) {
     if (actionDef.params.isEmpty) {
-      // Colour-flood actions: "flood_red", "flood_blue", etc.
-      if (actionDef.id.startsWith('flood_')) {
-        final colorName = actionDef.id.substring(6); // e.g. "red"
-        final color = _floodColor(colorName);
+      // Colour-pick actions render as a swatch button. The colour name comes
+      // from the action's `color` field in game.json (resolved via the named
+      // palette), so the renderer doesn't have to recognise any id-prefix
+      // convention like flood_<colour>.
+      if (actionDef.color != null) {
+        final color = _floodColor(actionDef.color!);
         final available = widget.availableActionIds == null ||
             widget.availableActionIds!.contains(actionDef.id);
         return _ColorBtn(

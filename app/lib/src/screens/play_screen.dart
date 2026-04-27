@@ -137,9 +137,14 @@ class _PlayScreenState extends State<PlayScreen> {
     final result = _engine.executeTurn(action);
     if (!result.accepted) return;
 
-    if (action.actionId.startsWith('flood_')) {
-      final colorName = action.actionId.substring(6); // e.g. "red"
-      _lastFloodColor = cellNamedColor(colorName);
+    // Record the chosen colour for any colour-pick action (any action that
+    // declares a `color` in game.json). The play screen uses it to tint the
+    // most recently flooded region in flood_colors-style packs.
+    final actionDef = widget.packService.game.actions
+        .firstWhere((a) => a.id == action.actionId,
+            orElse: () => const ActionDef(id: '', params: {}));
+    if (actionDef.color != null) {
+      _lastFloodColor = cellNamedColor(actionDef.color!);
     }
 
     final avatarMoves = result.animations
@@ -494,10 +499,11 @@ class _PlayScreenState extends State<PlayScreen> {
       false;
 
   /// Action IDs whose colour is currently adjacent to the flood region.
-  /// Only computed when the game has flood_<colour> actions.
+  /// Only computed when the game has colour-pick actions (declared via the
+  /// `color` field on an ActionDef).
   Set<String>? _availableFloodActions(LevelState state) {
     final hasFloodActions =
-        widget.packService.game.actions.any((a) => a.id.startsWith('flood_'));
+        widget.packService.game.actions.any((a) => a.color != null);
     if (!hasFloodActions) return null;
 
     final layer = state.board.layers['objects'];

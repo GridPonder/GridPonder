@@ -23,7 +23,19 @@ class ActionDef {
   /// prompt (e.g. flood_purple when no purple cells are on the board).
   final String? entityKind;
 
-  const ActionDef({required this.id, required this.params, this.entityKind});
+  /// Optional render hint: a colour name (resolved via the renderer's named
+  /// palette) that the controls UI uses to draw a swatch button instead of
+  /// the default action button. Lets a pack expose colour-pick actions
+  /// (e.g. the flood_<colour> actions in flood_colors) without the renderer
+  /// having to know the action's id-prefix convention.
+  final String? color;
+
+  const ActionDef({
+    required this.id,
+    required this.params,
+    this.entityKind,
+    this.color,
+  });
   factory ActionDef.fromJson(Map<String, dynamic> j) {
     final rawParams = j['params'] as Map<String, dynamic>? ?? {};
     return ActionDef(
@@ -31,6 +43,7 @@ class ActionDef {
       params: rawParams.map((k, v) =>
           MapEntry(k, ActionParamDef.fromJson(v as Map<String, dynamic>))),
       entityKind: j['entityKind'] as String?,
+      color: j['color'] as String?,
     );
   }
 }

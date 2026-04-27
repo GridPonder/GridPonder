@@ -70,12 +70,12 @@
     }
   },
   "actions": [
-    { "id": "flood_red",    "params": {}, "entityKind": "cell_red" },
-    { "id": "flood_blue",   "params": {}, "entityKind": "cell_blue" },
-    { "id": "flood_yellow", "params": {}, "entityKind": "cell_yellow" },
-    { "id": "flood_orange", "params": {}, "entityKind": "cell_orange" },
-    { "id": "flood_purple", "params": {}, "entityKind": "cell_purple" },
-    { "id": "flood_teal",   "params": {}, "entityKind": "cell_teal" }
+    { "id": "flood_red",    "params": {}, "entityKind": "cell_red",    "color": "red"    },
+    { "id": "flood_blue",   "params": {}, "entityKind": "cell_blue",   "color": "blue"   },
+    { "id": "flood_yellow", "params": {}, "entityKind": "cell_yellow", "color": "yellow" },
+    { "id": "flood_orange", "params": {}, "entityKind": "cell_orange", "color": "orange" },
+    { "id": "flood_purple", "params": {}, "entityKind": "cell_purple", "color": "purple" },
+    { "id": "flood_teal",   "params": {}, "entityKind": "cell_teal",   "color": "teal"   }
   ],
   "systems": [
     {
