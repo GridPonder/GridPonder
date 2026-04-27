@@ -480,38 +480,6 @@ class _Cell extends StatelessWidget {
     }
 
     final color = _color(kind, entity);
-
-    // Legacy procedural paths kept ONLY for value-coloured numeric tiles —
-    // their colour is an HSL function of the value, which can't yet be
-    // expressed in the `display` block. All other game-specific shortcuts
-    // (carrot, portal, cell_*, …) now live in pack JSON via `display`.
-    if (kind == 'number') {
-      return Container(
-        color: color,
-        alignment: Alignment.center,
-        child: Text(
-          entity.param('value')?.toString() ?? '?',
-          style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: cellSize * 0.42),
-        ),
-      );
-    }
-    if (kind.startsWith('num_')) {
-      return Container(
-        color: color,
-        alignment: Alignment.center,
-        child: Text(
-          kind.substring(4),
-          style: TextStyle(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: cellSize * 0.42),
-        ),
-      );
-    }
-
     return Container(
       color: color,
       alignment: Alignment.center,
@@ -590,6 +558,20 @@ class _Cell extends StatelessWidget {
             ),
           ),
         );
+      case 'label':
+        final labelText = _resolveDisplayString(display['label'], entity) ?? '?';
+        return Container(
+          color: color ?? _namedColor('grey'),
+          alignment: Alignment.center,
+          child: Text(
+            labelText,
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: cellSize * 0.42,
+            ),
+          ),
+        );
       case 'emoji':
         final glyph = display['value'] as String? ?? '?';
         return Center(
@@ -610,18 +592,46 @@ class _Cell extends StatelessWidget {
     }
   }
 
-  /// Resolves a `display.color` spec. Accepts `null` (no color), a palette
-  /// name (`"red"`), or a `@param:<key>` reference that reads the colour
-  /// name from an entity instance parameter.
+  /// Resolves a `display.color` spec. Accepts `null`, a palette name
+  /// (`"red"`), or one of the substitution tokens:
+  ///   - `@param:<key>`        — read a colour name from an instance param
+  ///   - `@hue:<source>`       — derive an HSL colour from a numeric
+  ///                             string. `<source>` is itself a string spec
+  ///                             (literal int, or a nested `@param:` /
+  ///                             `@kind_suffix:` token).
   Color? _resolveDisplayColor(dynamic spec, EntityInstance entity) {
     if (spec is! String) return null;
+    if (spec.startsWith('@hue:')) {
+      final source = _resolveDisplayString(spec.substring(5), entity);
+      final n = source == null ? null : int.tryParse(source);
+      return n == null ? null : _numberColor(n);
+    }
     if (spec.startsWith('@param:')) {
-      final key = spec.substring(7);
-      final v = entity.param(key);
+      final v = entity.param(spec.substring(7));
       if (v is! String) return null;
       return _namedColor(v);
     }
     return _namedColor(spec);
+  }
+
+  /// Resolves a string spec used inside `display` (label text, the source
+  /// of `@hue:`, …). Tokens:
+  ///   - `@param:<key>`         — entity.param(key).toString()
+  ///   - `@kind_suffix:<prefix>` — entity.kind with [prefix] removed
+  ///   - anything else           — literal
+  String? _resolveDisplayString(dynamic spec, EntityInstance entity) {
+    if (spec is! String) return null;
+    if (spec.startsWith('@param:')) {
+      final v = entity.param(spec.substring(7));
+      return v?.toString();
+    }
+    if (spec.startsWith('@kind_suffix:')) {
+      final prefix = spec.substring(13);
+      return entity.kind.startsWith(prefix)
+          ? entity.kind.substring(prefix.length)
+          : null;
+    }
+    return spec;
   }
 
   /// Tiny lookup so a pack can name a Material icon by its standard name.

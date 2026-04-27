@@ -222,25 +222,14 @@ def _procedural_ground(draw, kind, x0, y0):
 def _procedural_object(canvas, draw, kind, kind_def, params, x0, y0):
     """Procedural fallback for objects/markers without a sprite.
 
-    Dispatches on the kind def's optional `display` block first (the
-    pack-visible vocabulary). Legacy paths kept only for value-coloured
-    numeric tiles whose colour is a function of the value, since that
-    can't yet be expressed in the DSL display block.
+    Pack-visible vocabulary: every game-specific rendering choice goes
+    through the kind def's `display` block. The only fallback below is a
+    labelled badge for entities that didn't declare one.
     """
     cx, cy = x0 + CELL_PX // 2, y0 + CELL_PX // 2
 
     display = (kind_def or {}).get("display")
-    if display and _draw_from_display(draw, display, params, x0, y0, cx, cy):
-        return
-
-    # Numbers: HSL-from-value colouring stays procedural.
-    if kind.startswith("num_"):
-        value = kind[len("num_"):]
-        _draw_number_tile(canvas, draw, value, cx, cy, x0, y0)
-        return
-    if kind == "number":
-        value = params.get("value", "?")
-        _draw_number_tile(canvas, draw, str(value), cx, cy, x0, y0)
+    if display and _draw_from_display(draw, display, kind, params, x0, y0, cx, cy):
         return
 
     # Generic fallback: labelled badge (first letter of kind).
@@ -250,11 +239,11 @@ def _procedural_object(canvas, draw, kind, kind_def, params, x0, y0):
     draw.text((cx, cy), label, fill="white", font=font, anchor="mm")
 
 
-def _draw_from_display(draw, display, params, x0, y0, cx, cy) -> bool:
+def _draw_from_display(draw, display, kind, params, x0, y0, cx, cy) -> bool:
     """Render the entity using its kind's `display` block. Returns True on
     success, False when the type is unrecognised (caller falls back)."""
     type_ = display.get("type")
-    color = _resolve_display_color(display.get("color"), params)
+    color = _resolve_display_color(display.get("color"), kind, params)
     if type_ == "tile":
         fill = color or "#94a3b8"
         draw.rectangle((x0 + 4, y0 + 4, x0 + CELL_PX - 4, y0 + CELL_PX - 4),
@@ -269,6 +258,16 @@ def _draw_from_display(draw, display, params, x0, y0, cx, cy) -> bool:
         m = CELL_PX // 4
         draw.ellipse((x0 + m, y0 + m, x0 + CELL_PX - m, y0 + CELL_PX - m),
                      fill=c, outline=(50, 50, 50))
+        return True
+    if type_ == "label":
+        text = _resolve_display_string(display.get("label"), kind, params) or "?"
+        fill = color or "#fef3c7"
+        draw.rectangle((x0 + 4, y0 + 4, x0 + CELL_PX - 4, y0 + CELL_PX - 4),
+                       fill=fill, outline=(60, 30, 0), width=1)
+        font = _font(int(CELL_PX * 0.55))
+        # White text on saturated colours, dark text on the default cream.
+        text_fill = "white" if color else (60, 30, 0)
+        draw.text((cx, cy), text, fill=text_fill, font=font, anchor="mm")
         return True
     if type_ == "emoji":
         glyph = display.get("value", "?")
@@ -288,26 +287,51 @@ def _draw_from_display(draw, display, params, x0, y0, cx, cy) -> bool:
     return False
 
 
-def _resolve_display_color(spec, params):
-    """Resolves a `display.color` spec to a hex string. Accepts a palette
-    name ('red'), a `@param:<key>` reference that reads from the entity,
-    or None (caller picks a default)."""
+def _resolve_display_color(spec, kind, params):
+    """Resolves a `display.color` spec to a hex string. Tokens:
+       - `@param:<key>`        — read colour name from instance param
+       - `@hue:<source>`       — derive HSL colour from a numeric string
+                                 (`<source>` is itself a string spec)
+       - bare string           — palette lookup
+    Returns None when the spec can't resolve."""
     if not isinstance(spec, str):
         return None
+    if spec.startswith("@hue:"):
+        source = _resolve_display_string(spec[len("@hue:"):], kind, params)
+        try:
+            n = int(source) if source is not None else None
+        except (TypeError, ValueError):
+            n = None
+        return _hue_color(n) if n is not None else None
     if spec.startswith("@param:"):
-        key = spec[len("@param:"):]
-        v = params.get(key)
+        v = params.get(spec[len("@param:"):])
         if not isinstance(v, str):
             return None
         return _COLOR_HEX.get(v, "#94a3b8")
     return _COLOR_HEX.get(spec, "#94a3b8")
 
 
-def _draw_number_tile(canvas, draw, value: str, cx: int, cy: int, x0: int, y0: int):
-    """Render a number as a tile with the digit centred."""
-    draw.rectangle((x0 + 4, y0 + 4, x0 + CELL_PX - 4, y0 + CELL_PX - 4), fill="#fef3c7", outline=(120, 80, 0), width=1)
-    font = _font(int(CELL_PX * 0.55))
-    draw.text((cx, cy), value, fill=(60, 30, 0), font=font, anchor="mm")
+def _resolve_display_string(spec, kind, params):
+    """Resolves a string spec inside `display` (label text, source of @hue, …).
+    Tokens: `@param:<key>`, `@kind_suffix:<prefix>`, otherwise literal."""
+    if not isinstance(spec, str):
+        return None
+    if spec.startswith("@param:"):
+        v = params.get(spec[len("@param:"):])
+        return None if v is None else str(v)
+    if spec.startswith("@kind_suffix:"):
+        prefix = spec[len("@kind_suffix:"):]
+        return kind[len(prefix):] if kind.startswith(prefix) else None
+    return spec
+
+
+def _hue_color(value: int) -> str:
+    """Mirrors Dart's _numberColor: HSL hue = (value*37) mod 360,
+    saturation 0.6, lightness 0.45. Returns a #RRGGBB string."""
+    import colorsys
+    h = ((value * 37) % 360) / 360.0
+    r, g, b = colorsys.hls_to_rgb(h, 0.45, 0.6)
+    return "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
 
 
 def _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir):

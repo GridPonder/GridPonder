@@ -360,9 +360,33 @@ A `display` block on an entity kind tells the renderer how to draw the entity pr
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type`  | string | One of `tile` (rounded shadowed coloured tile), `fill` (flat colour rectangle), `circle` (filled circle with glow), `emoji` (centred glyph), `icon` (Material-style icon by name). |
-| `color` | string | Optional. A palette name (`"red"`) resolved via the renderer's named colours, or `@param:<key>` to read the colour name from an entity instance parameter. |
+| `type`  | string | One of `tile` (rounded shadowed coloured tile), `fill` (flat colour rectangle), `circle` (filled circle with glow), `label` (coloured tile with a centred text label), `emoji` (centred glyph), `icon` (Material-style icon by name). |
+| `color` | string | Optional. A palette name (`"red"`), `@param:<key>` (read colour name from instance param), or `@hue:<source>` (derive an HSL colour from a numeric string — useful for value-coloured tiles). See *substitution tokens* below. |
 | `value` | string | Optional. The glyph (for `emoji`) or icon name (for `icon`). |
+| `label` | string | Optional. Text shown by the `label` type. May use the substitution tokens below. |
+
+#### Substitution tokens
+
+Both `display.color` and `display.label` accept these tokens (the colour field additionally accepts the `@hue:` modifier above):
+
+| Token | Resolves to |
+|-------|-------------|
+| `@param:<key>`         | the entity instance's `<key>` parameter (as a string) |
+| `@kind_suffix:<prefix>` | the entity's kind name with `<prefix>` removed — useful for kinds named like `num_5`, `cell_red` |
+| anything else          | a literal string |
+
+`@hue:<source>` wraps any string token (or literal) and runs it through the renderer's value-to-colour function (HSL hue = `(int(source)*37) mod 360`, saturation 0.6, lightness 0.45). This is how number-style tiles get a deterministic colour per value:
+
+```json
+"number": {
+  "display": { "type": "label",
+    "color": "@hue:@param:value", "label": "@param:value" }
+},
+"num_5": {
+  "display": { "type": "label",
+    "color": "@hue:@kind_suffix:num_", "label": "@kind_suffix:num_" }
+}
+```
 
 Recognised icon names today: `blur_on`, `star`, `flag`. Extend the renderer's icon table to add more — pure additive work, no DSL impact.
 

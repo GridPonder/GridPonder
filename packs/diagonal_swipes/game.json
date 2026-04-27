@@ -29,55 +29,100 @@
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "1"
+      "symbol": "1",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     },
     "num_2": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "2"
+      "symbol": "2",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     },
     "num_3": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "3"
+      "symbol": "3",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     },
     "num_4": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "4"
+      "symbol": "4",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     },
     "num_5": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "5"
+      "symbol": "5",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     },
     "num_6": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "6"
+      "symbol": "6",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     },
     "num_7": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "7"
+      "symbol": "7",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     },
     "num_8": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "8"
+      "symbol": "8",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     },
     "num_9": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "9"
+      "symbol": "9",
+      "display": {
+        "type": "label",
+        "color": "@hue:@kind_suffix:num_",
+        "label": "@kind_suffix:num_"
+      }
     }
   },
   "actions": [

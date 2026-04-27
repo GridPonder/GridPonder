@@ -42,7 +42,12 @@
       ],
       "sprite": null,
       "symbol": "n",
-      "symbolParam": "value"
+      "symbolParam": "value",
+      "display": {
+        "type": "label",
+        "color": "@hue:@param:value",
+        "label": "@param:value"
+      }
     },
     "portal": {
       "layer": "ground",
