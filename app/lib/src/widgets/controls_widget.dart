@@ -255,8 +255,8 @@ class _ColorBtn extends StatelessWidget {
 // ---------------------------------------------------------------------------
 
 /// Two diagonal-swap buttons: one per distinct diagonal of the 2×2 overlay.
-/// up_left/down_right swap the same pair (top-left ↔ bottom-right, "\" diag).
-/// up_right/down_left swap the same pair (top-right ↔ bottom-left, "/" diag).
+/// up_left  (↖) swaps top-left ↔ bottom-right (the "\" diagonal).
+/// up_right (↗) swaps top-right ↔ bottom-left (the "/" diagonal).
 class _DiagonalSwapBtns extends StatelessWidget {
   final void Function(String direction) onTap;
   const _DiagonalSwapBtns({required this.onTap});
@@ -266,9 +266,9 @@ class _DiagonalSwapBtns extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        _diagBtn('down_right', pi / 4),    // ↘  top-left ↔ bottom-right
+        _diagBtn('up_left',  -3 * pi / 4), // ↖  top-left ↔ bottom-right
         const SizedBox(width: 10),
-        _diagBtn('down_left',  3 * pi / 4), // ↙  top-right ↔ bottom-left
+        _diagBtn('up_right', -pi / 4),     // ↗  top-right ↔ bottom-left
       ],
     );
   }
