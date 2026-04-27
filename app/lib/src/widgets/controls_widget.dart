@@ -22,6 +22,10 @@ class ControlsWidget extends StatefulWidget {
   /// If non-null, only these action IDs are currently applicable.
   /// Others are rendered grayed out (but still tappable — engine rejects them).
   final Set<String>? availableActionIds;
+  /// Pack-specific colour overrides forwarded to [cellNamedColor] when
+  /// drawing colour-pick action swatches. Pass `theme.palette` from the
+  /// caller; null falls back to the renderer's built-in palette.
+  final Map<String, String>? palette;
 
   const ControlsWidget({
     super.key,
@@ -35,6 +39,7 @@ class ControlsWidget extends StatefulWidget {
     required this.game,
     this.hintStatuses = const [],
     this.availableActionIds,
+    this.palette,
   });
 
   @override
@@ -143,7 +148,8 @@ class _ControlsWidgetState extends State<ControlsWidget> {
   }
 
   /// Map a colour name (e.g. "red") to a display Color.
-  Color _floodColor(String name) => cellNamedColor(name);
+  Color _floodColor(String name) =>
+      cellNamedColor(name, palette: widget.palette);
 }
 
 // ---------------------------------------------------------------------------

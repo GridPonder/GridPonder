@@ -144,7 +144,10 @@ class _PlayScreenState extends State<PlayScreen> {
         .firstWhere((a) => a.id == action.actionId,
             orElse: () => const ActionDef(id: '', params: {}));
     if (actionDef.color != null) {
-      _lastFloodColor = cellNamedColor(actionDef.color!);
+      _lastFloodColor = cellNamedColor(
+        actionDef.color!,
+        palette: widget.packService.theme?.palette,
+      );
     }
 
     final avatarMoves = result.animations
@@ -1146,6 +1149,7 @@ class _PlayScreenState extends State<PlayScreen> {
                 canUndo: _engine.undoDepth > 0 && !_aiRunning,
                 hintStatuses: hintStatuses,
                 availableActionIds: _availableFloodActions(state),
+                palette: widget.packService.theme?.palette,
               ),
             ),
           ],
@@ -1234,7 +1238,9 @@ class _PlayScreenState extends State<PlayScreen> {
         if (targetLayers != null) {
           return Center(
             child: TargetBoardRenderer(
-                targetLayers: targetLayers, currentState: state),
+                targetLayers: targetLayers,
+                currentState: state,
+                palette: widget.packService.theme?.palette),
           );
         }
       }

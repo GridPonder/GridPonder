@@ -3,21 +3,39 @@ import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
 import '../services/pack_service.dart';
 
-/// Canonical 8-color palette for colored cell entities.
-/// Colors are chosen to be clearly distinguishable from each other and from
-/// black (used for void cells). All colors work on a light background.
-Color cellNamedColor(String name) => switch (name) {
-      'red' => const Color(0xFFE53935),
-      'blue' => const Color(0xFF1E88E5),
-      'green' => const Color(0xFF43A047),
-      'yellow' => const Color(0xFFFFD600),
-      'orange' => const Color(0xFFFB8C00),
-      'purple' => const Color(0xFF8E24AA),
-      'lime' => const Color(0xFF7CB342),
-      'teal' => const Color(0xFF00897B),
-      'pink' => const Color(0xFFE91E63),
-      _ => const Color(0xFF9E9E9E),
-    };
+/// Resolves a colour name (e.g. "red") to a Color. Pack themes can override
+/// or extend the built-in palette via theme.json's `palette` block; any name
+/// the pack doesn't declare falls back to the canonical defaults below. The
+/// defaults are chosen to be clearly distinguishable from each other and
+/// from black (void), and to work on a light background.
+Color cellNamedColor(String name, {Map<String, String>? palette}) {
+  final hex = palette?[name];
+  if (hex != null) {
+    final parsed = _parsePaletteHex(hex);
+    if (parsed != null) return parsed;
+  }
+  return switch (name) {
+    'red' => const Color(0xFFE53935),
+    'blue' => const Color(0xFF1E88E5),
+    'green' => const Color(0xFF43A047),
+    'yellow' => const Color(0xFFFFD600),
+    'orange' => const Color(0xFFFB8C00),
+    'purple' => const Color(0xFF8E24AA),
+    'lime' => const Color(0xFF7CB342),
+    'teal' => const Color(0xFF00897B),
+    'pink' => const Color(0xFFE91E63),
+    _ => const Color(0xFF9E9E9E),
+  };
+}
+
+Color? _parsePaletteHex(String hex) {
+  var s = hex.trim();
+  if (s.startsWith('#')) s = s.substring(1);
+  if (s.length == 6) s = 'FF$s';
+  if (s.length != 8) return null;
+  final v = int.tryParse(s, radix: 16);
+  return v == null ? null : Color(v);
+}
 
 class BoardRenderer extends StatelessWidget {
   final LevelState state;
@@ -572,7 +590,8 @@ class _Cell extends StatelessWidget {
     };
   }
 
-  Color _namedColor(String name) => cellNamedColor(name);
+  Color _namedColor(String name) =>
+      cellNamedColor(name, palette: packService.theme?.palette);
 
   Color _numberColor(int v) =>
       HSLColor.fromAHSL(1.0, (v * 37 % 360).toDouble(), 0.6, 0.45).toColor();
@@ -588,10 +607,14 @@ class _Cell extends StatelessWidget {
 class TargetBoardRenderer extends StatelessWidget {
   final Map<String, dynamic> targetLayers;
   final LevelState? currentState;
+  /// Pack-specific colour overrides forwarded to [cellNamedColor]. Pass
+  /// `packService.theme?.palette` from the caller; null falls back to
+  /// the renderer's built-in palette.
+  final Map<String, String>? palette;
   static const double _cellSize = 24.0;
 
   const TargetBoardRenderer(
-      {super.key, required this.targetLayers, this.currentState});
+      {super.key, required this.targetLayers, this.currentState, this.palette});
 
   @override
   Widget build(BuildContext context) {
@@ -617,7 +640,8 @@ class TargetBoardRenderer extends StatelessWidget {
                     x: x,
                     y: y,
                     targetLayers: targetLayers,
-                    currentState: currentState),
+                    currentState: currentState,
+                    palette: palette),
               ),
         ],
       ),
@@ -629,12 +653,14 @@ class _TargetCell extends StatelessWidget {
   final int x, y;
   final Map<String, dynamic> targetLayers;
   final LevelState? currentState;
+  final Map<String, String>? palette;
 
   const _TargetCell(
       {required this.x,
       required this.y,
       required this.targetLayers,
-      this.currentState});
+      this.currentState,
+      this.palette});
 
   String? _kindAt(String layerId) {
     final layer = targetLayers[layerId] as List?;
@@ -718,7 +744,7 @@ class _TargetCell extends StatelessWidget {
     };
   }
 
-  Color _namedColor(String name) => cellNamedColor(name);
+  Color _namedColor(String name) => cellNamedColor(name, palette: palette);
 }
 
 // ---------------------------------------------------------------------------

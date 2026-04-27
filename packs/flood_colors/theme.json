@@ -18,5 +18,13 @@
     "cell_purple":  "#8E24AA",
     "cell_teal":    "#00897B",
     "cell_flooded": "#4CAF50"
+  },
+  "palette": {
+    "red":    "#E53935",
+    "blue":   "#1E88E5",
+    "yellow": "#FFD600",
+    "orange": "#FB8C00",
+    "purple": "#8E24AA",
+    "teal":   "#00897B"
   }
 }

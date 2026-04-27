@@ -144,6 +144,13 @@ class ThemeDef {
   final BoardStyleDef? boardStyle;
   final AvatarThemeDef? avatar;
 
+  /// Optional named-colour palette: maps colour names (e.g. "red", "teal")
+  /// to CSS hex strings. Used by the renderer when an entity or action
+  /// references a colour by name. Names not declared here fall back to the
+  /// renderer's built-in defaults — packs only need to declare the names
+  /// they want to override or add.
+  final Map<String, String> palette;
+
   const ThemeDef({
     this.controls,
     this.coverImage,
@@ -151,6 +158,7 @@ class ThemeDef {
     this.backgroundColor,
     this.boardStyle,
     this.avatar,
+    this.palette = const {},
   });
 
   factory ThemeDef.fromJson(Map<String, dynamic> j) => ThemeDef(
@@ -166,5 +174,7 @@ class ThemeDef {
         avatar: j['avatar'] != null
             ? AvatarThemeDef.fromJson(j['avatar'] as Map<String, dynamic>)
             : null,
+        palette: ((j['palette'] as Map?) ?? const {})
+            .map((k, v) => MapEntry(k.toString(), v.toString())),
       );
 }

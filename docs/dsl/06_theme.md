@@ -39,6 +39,7 @@ A game pack includes one `theme.json` alongside `game.json`. If omitted, the eng
 | `boardStyle` | object | no | Board rendering settings. |
 | `textStyle` | object | no | Text rendering settings. |
 | `avatar` | object | no | Avatar appearance settings. |
+| `palette` | object | no | Named-colour palette (`{"red": "#E53935", …}`) used by the renderer when an entity or action references a colour by name. Names not declared here fall back to the renderer's built-in defaults; packs only declare what they want to override or add. |
 
 ---
 
