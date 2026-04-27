@@ -139,7 +139,9 @@ def _build_legend(state: GameState, game_def, has_avatar: bool, kind_symbol_over
                     label = '? (exact value in "Number values")'
                 else:
                     name = kind_def.get("uiName") or entity.kind.replace("_", " ")
-                    label = f'{name} (exact value in "Number values")'
+                    desc = kind_def.get("description")
+                    extra = f"; {desc}" if desc else ""
+                    label = f'{name} (exact value in "Number values"{extra})'
             elif kind_symbol_overrides and entity.kind in kind_symbol_overrides:
                 sym = kind_symbol_overrides[entity.kind]
                 label = "?"

@@ -184,9 +184,15 @@ class TextRenderer {
         if (kindDef.symbolParam != null) {
           // Number tiles always 'N'; exact values in "Number values" block.
           sym = 'N';
-          label = kindSymbolOverrides != null
-              ? '? (exact value in "Number values")'
-              : '${kindDef.uiName ?? kindDef.id.replaceAll('_', ' ')} (exact value in "Number values")';
+          if (kindSymbolOverrides != null) {
+            label = '? (exact value in "Number values")';
+          } else {
+            final name = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
+            final extra = kindDef.description != null
+                ? '; ${kindDef.description}'
+                : '';
+            label = '$name (exact value in "Number values"$extra)';
+          }
         } else if (kindSymbolOverrides != null &&
             kindSymbolOverrides.containsKey(entity.kind)) {
           sym = kindSymbolOverrides[entity.kind]!;
