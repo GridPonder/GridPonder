@@ -55,6 +55,10 @@
         "channel": {
           "type": "string"
         }
+      },
+      "display": {
+        "type": "icon",
+        "value": "blur_on"
       }
     }
   },

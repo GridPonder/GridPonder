@@ -44,7 +44,7 @@
       "spriteParam": "sides",
       "symbol": "b",
       "symbolParam": "sides",
-      "description": "value is a sum of joined sides — 1=up, 2=right, 4=down, 8=left; F (=15) means all four sides joined"
+      "description": "value is a sum of joined sides \u2014 1=up, 2=right, 4=down, 8=left; F (=15) means all four sides joined"
     },
     "box_target": {
       "layer": "markers",
@@ -94,7 +94,11 @@
         }
       },
       "sprite": null,
-      "symbol": "O"
+      "symbol": "O",
+      "display": {
+        "type": "icon",
+        "value": "blur_on"
+      }
     }
   },
   "actions": [

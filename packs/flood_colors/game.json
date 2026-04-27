@@ -13,69 +13,146 @@
   "entityKinds": {
     "empty": {
       "layer": "ground",
-      "tags": ["walkable"],
+      "tags": [
+        "walkable"
+      ],
       "sprite": null,
       "symbol": "."
     },
     "cell_red": {
       "layer": "objects",
-      "tags": ["floodable"],
+      "tags": [
+        "floodable"
+      ],
       "sprite": null,
       "symbol": "r",
-      "uiName": "red"
+      "uiName": "red",
+      "display": {
+        "type": "tile",
+        "color": "red"
+      }
     },
     "cell_blue": {
       "layer": "objects",
-      "tags": ["floodable"],
+      "tags": [
+        "floodable"
+      ],
       "sprite": null,
       "symbol": "b",
-      "uiName": "blue"
+      "uiName": "blue",
+      "display": {
+        "type": "tile",
+        "color": "blue"
+      }
     },
     "cell_yellow": {
       "layer": "objects",
-      "tags": ["floodable"],
+      "tags": [
+        "floodable"
+      ],
       "sprite": null,
       "symbol": "y",
-      "uiName": "yellow"
+      "uiName": "yellow",
+      "display": {
+        "type": "tile",
+        "color": "yellow"
+      }
     },
     "cell_orange": {
       "layer": "objects",
-      "tags": ["floodable"],
+      "tags": [
+        "floodable"
+      ],
       "sprite": null,
       "symbol": "o",
-      "uiName": "orange"
+      "uiName": "orange",
+      "display": {
+        "type": "tile",
+        "color": "orange"
+      }
     },
     "cell_purple": {
       "layer": "objects",
-      "tags": ["floodable"],
+      "tags": [
+        "floodable"
+      ],
       "sprite": null,
       "symbol": "p",
-      "uiName": "purple"
+      "uiName": "purple",
+      "display": {
+        "type": "tile",
+        "color": "purple"
+      }
     },
     "cell_teal": {
       "layer": "objects",
-      "tags": ["floodable"],
+      "tags": [
+        "floodable"
+      ],
       "sprite": null,
       "symbol": "t",
-      "uiName": "teal"
+      "uiName": "teal",
+      "display": {
+        "type": "tile",
+        "color": "teal"
+      }
     },
     "cell_flooded": {
       "layer": "objects",
-      "tags": ["flooded"],
+      "tags": [
+        "flooded"
+      ],
       "sprite": null,
       "symbol": "F",
       "uiName": "flooded",
       "description": "your expanding region",
-      "outline": { "color": "#222222", "width": 3 }
+      "outline": {
+        "color": "#222222",
+        "width": 3
+      },
+      "display": {
+        "type": "tile",
+        "color": "green"
+      }
     }
   },
   "actions": [
-    { "id": "flood_red",    "params": {}, "entityKind": "cell_red",    "color": "red"    },
-    { "id": "flood_blue",   "params": {}, "entityKind": "cell_blue",   "color": "blue"   },
-    { "id": "flood_yellow", "params": {}, "entityKind": "cell_yellow", "color": "yellow" },
-    { "id": "flood_orange", "params": {}, "entityKind": "cell_orange", "color": "orange" },
-    { "id": "flood_purple", "params": {}, "entityKind": "cell_purple", "color": "purple" },
-    { "id": "flood_teal",   "params": {}, "entityKind": "cell_teal",   "color": "teal"   }
+    {
+      "id": "flood_red",
+      "params": {},
+      "entityKind": "cell_red",
+      "color": "red"
+    },
+    {
+      "id": "flood_blue",
+      "params": {},
+      "entityKind": "cell_blue",
+      "color": "blue"
+    },
+    {
+      "id": "flood_yellow",
+      "params": {},
+      "entityKind": "cell_yellow",
+      "color": "yellow"
+    },
+    {
+      "id": "flood_orange",
+      "params": {},
+      "entityKind": "cell_orange",
+      "color": "orange"
+    },
+    {
+      "id": "flood_purple",
+      "params": {},
+      "entityKind": "cell_purple",
+      "color": "purple"
+    },
+    {
+      "id": "flood_teal",
+      "params": {},
+      "entityKind": "cell_teal",
+      "color": "teal"
+    }
   ],
   "systems": [
     {
@@ -87,7 +164,9 @@
         "sourceKind": "cell_flooded",
         "affectedLayer": "objects",
         "matchBy": "kind",
-        "kindTransform": { "cell_red": "cell_flooded" }
+        "kindTransform": {
+          "cell_red": "cell_flooded"
+        }
       }
     },
     {
@@ -99,7 +178,9 @@
         "sourceKind": "cell_flooded",
         "affectedLayer": "objects",
         "matchBy": "kind",
-        "kindTransform": { "cell_blue": "cell_flooded" }
+        "kindTransform": {
+          "cell_blue": "cell_flooded"
+        }
       }
     },
     {
@@ -111,7 +192,9 @@
         "sourceKind": "cell_flooded",
         "affectedLayer": "objects",
         "matchBy": "kind",
-        "kindTransform": { "cell_yellow": "cell_flooded" }
+        "kindTransform": {
+          "cell_yellow": "cell_flooded"
+        }
       }
     },
     {
@@ -123,7 +206,9 @@
         "sourceKind": "cell_flooded",
         "affectedLayer": "objects",
         "matchBy": "kind",
-        "kindTransform": { "cell_orange": "cell_flooded" }
+        "kindTransform": {
+          "cell_orange": "cell_flooded"
+        }
       }
     },
     {
@@ -135,7 +220,9 @@
         "sourceKind": "cell_flooded",
         "affectedLayer": "objects",
         "matchBy": "kind",
-        "kindTransform": { "cell_purple": "cell_flooded" }
+        "kindTransform": {
+          "cell_purple": "cell_flooded"
+        }
       }
     },
     {
@@ -147,7 +234,9 @@
         "sourceKind": "cell_flooded",
         "affectedLayer": "objects",
         "matchBy": "kind",
-        "kindTransform": { "cell_teal": "cell_flooded" }
+        "kindTransform": {
+          "cell_teal": "cell_flooded"
+        }
       }
     }
   ],
@@ -162,38 +251,128 @@
     {
       "type": "story",
       "title": "The Rogue Rainbow Incident",
-      "text": "A rogue rainbow has exploded across Pip's garden, leaving reds crashing into oranges and purples where no purple should ever be.\n\nPip has located a bucket of paint. Starting from the top-left corner, choose a colour each turn — any region of that colour touching the flooded area joins it. Clear the whole board within the move limit!\n\nThe catch: the bucket only has so many splashes. Plan ahead — the order matters!",
+      "text": "A rogue rainbow has exploded across Pip's garden, leaving reds crashing into oranges and purples where no purple should ever be.\n\nPip has located a bucket of paint. Starting from the top-left corner, choose a colour each turn \u2014 any region of that colour touching the flooded area joins it. Clear the whole board within the move limit!\n\nThe catch: the bucket only has so many splashes. Plan ahead \u2014 the order matters!",
       "image": "assets/rabbit_color_flood.png"
     },
-    { "type": "level", "ref": "fl_001" },
-    { "type": "level", "ref": "fl_002" },
-    { "type": "level", "ref": "fl_003" },
-    { "type": "level", "ref": "fl_004" },
-    { "type": "level", "ref": "fl_005" },
-    { "type": "level", "ref": "fl_006" },
-    { "type": "level", "ref": "fl_007" },
-    { "type": "level", "ref": "fl_008" },
-    { "type": "level", "ref": "fl_009" },
-    { "type": "level", "ref": "fl_010" },
-    { "type": "level", "ref": "fl_011" },
-    { "type": "level", "ref": "fl_012" },
-    { "type": "level", "ref": "fl_013" },
-    { "type": "level", "ref": "fl_014" },
-    { "type": "level", "ref": "fl_015" },
-    { "type": "level", "ref": "fl_016" },
-    { "type": "level", "ref": "fl_017" },
-    { "type": "level", "ref": "fl_018" },
-    { "type": "level", "ref": "fl_019" },
-    { "type": "level", "ref": "fl_020" },
-    { "type": "level", "ref": "fl_021" },
-    { "type": "level", "ref": "fl_022" },
-    { "type": "level", "ref": "fl_023" },
-    { "type": "level", "ref": "fl_024" },
-    { "type": "level", "ref": "fl_025" },
-    { "type": "level", "ref": "fl_026" },
-    { "type": "level", "ref": "fl_027" },
-    { "type": "level", "ref": "fl_028" },
-    { "type": "level", "ref": "fl_029" },
-    { "type": "level", "ref": "fl_030" }
+    {
+      "type": "level",
+      "ref": "fl_001"
+    },
+    {
+      "type": "level",
+      "ref": "fl_002"
+    },
+    {
+      "type": "level",
+      "ref": "fl_003"
+    },
+    {
+      "type": "level",
+      "ref": "fl_004"
+    },
+    {
+      "type": "level",
+      "ref": "fl_005"
+    },
+    {
+      "type": "level",
+      "ref": "fl_006"
+    },
+    {
+      "type": "level",
+      "ref": "fl_007"
+    },
+    {
+      "type": "level",
+      "ref": "fl_008"
+    },
+    {
+      "type": "level",
+      "ref": "fl_009"
+    },
+    {
+      "type": "level",
+      "ref": "fl_010"
+    },
+    {
+      "type": "level",
+      "ref": "fl_011"
+    },
+    {
+      "type": "level",
+      "ref": "fl_012"
+    },
+    {
+      "type": "level",
+      "ref": "fl_013"
+    },
+    {
+      "type": "level",
+      "ref": "fl_014"
+    },
+    {
+      "type": "level",
+      "ref": "fl_015"
+    },
+    {
+      "type": "level",
+      "ref": "fl_016"
+    },
+    {
+      "type": "level",
+      "ref": "fl_017"
+    },
+    {
+      "type": "level",
+      "ref": "fl_018"
+    },
+    {
+      "type": "level",
+      "ref": "fl_019"
+    },
+    {
+      "type": "level",
+      "ref": "fl_020"
+    },
+    {
+      "type": "level",
+      "ref": "fl_021"
+    },
+    {
+      "type": "level",
+      "ref": "fl_022"
+    },
+    {
+      "type": "level",
+      "ref": "fl_023"
+    },
+    {
+      "type": "level",
+      "ref": "fl_024"
+    },
+    {
+      "type": "level",
+      "ref": "fl_025"
+    },
+    {
+      "type": "level",
+      "ref": "fl_026"
+    },
+    {
+      "type": "level",
+      "ref": "fl_027"
+    },
+    {
+      "type": "level",
+      "ref": "fl_028"
+    },
+    {
+      "type": "level",
+      "ref": "fl_029"
+    },
+    {
+      "type": "level",
+      "ref": "fl_030"
+    }
   ]
 }

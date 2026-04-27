@@ -29,37 +29,61 @@
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "r"
+      "symbol": "r",
+      "display": {
+        "type": "tile",
+        "color": "red"
+      }
     },
     "cell_blue": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "b"
+      "symbol": "b",
+      "display": {
+        "type": "tile",
+        "color": "blue"
+      }
     },
     "cell_green": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "g"
+      "symbol": "g",
+      "display": {
+        "type": "tile",
+        "color": "green"
+      }
     },
     "cell_yellow": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "y"
+      "symbol": "y",
+      "display": {
+        "type": "tile",
+        "color": "yellow"
+      }
     },
     "cell_purple": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "p"
+      "symbol": "p",
+      "display": {
+        "type": "tile",
+        "color": "purple"
+      }
     },
     "cell_lime": {
       "layer": "objects",
       "tags": [],
       "sprite": null,
-      "symbol": "l"
+      "symbol": "l",
+      "display": {
+        "type": "tile",
+        "color": "lime"
+      }
     }
   },
   "actions": [

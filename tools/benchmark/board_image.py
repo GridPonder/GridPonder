@@ -184,7 +184,7 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
             continue
         kind_def = game_def.entity_kinds.get(ent.kind, {})
         if not _paste_sprite(canvas, ent.kind, kind_def, ent.params, x0, y0, pack_dir, base_dir):
-            _procedural_object(canvas, draw, ent.kind, ent.params, x0, y0)
+            _procedural_object(canvas, draw, ent.kind, kind_def, ent.params, x0, y0)
 
 
 def _paste_sprite(canvas, kind, kind_def, params, x0, y0, pack_dir, base_dir) -> bool:
@@ -219,18 +219,21 @@ def _procedural_ground(draw, kind, x0, y0):
         draw.rectangle((x0, y0, x0 + CELL_PX, y0 + CELL_PX), fill=_EMPTY_FILL)
 
 
-def _procedural_object(canvas, draw, kind, params, x0, y0):
-    """Procedural fallback for objects/markers without a sprite."""
+def _procedural_object(canvas, draw, kind, kind_def, params, x0, y0):
+    """Procedural fallback for objects/markers without a sprite.
+
+    Dispatches on the kind def's optional `display` block first (the
+    pack-visible vocabulary). Legacy paths kept only for value-coloured
+    numeric tiles whose colour is a function of the value, since that
+    can't yet be expressed in the DSL display block.
+    """
     cx, cy = x0 + CELL_PX // 2, y0 + CELL_PX // 2
 
-    # Color cells (cell_red, cell_blue, ..., cell_flooded).
-    if kind.startswith("cell_"):
-        color_name = kind[len("cell_"):]
-        fill = _COLOR_HEX.get(color_name, "#94a3b8")
-        draw.rectangle((x0 + 4, y0 + 4, x0 + CELL_PX - 4, y0 + CELL_PX - 4), fill=fill, outline=(50, 50, 50), width=1)
+    display = (kind_def or {}).get("display")
+    if display and _draw_from_display(draw, display, params, x0, y0, cx, cy):
         return
 
-    # Numbers (num_1..9 or `number` with a `value` param).
+    # Numbers: HSL-from-value colouring stays procedural.
     if kind.startswith("num_"):
         value = kind[len("num_"):]
         _draw_number_tile(canvas, draw, value, cx, cy, x0, y0)
@@ -240,26 +243,64 @@ def _procedural_object(canvas, draw, kind, params, x0, y0):
         _draw_number_tile(canvas, draw, str(value), cx, cy, x0, y0)
         return
 
-    # Carrot: emoji-style fallback (PIL emoji rendering is unreliable; use a glyph).
-    if kind == "carrot":
-        # Orange triangle with green top
-        margin = 10
-        draw.polygon(
-            [(cx, y0 + margin + 8), (x0 + margin, y0 + CELL_PX - margin),
-             (x0 + CELL_PX - margin, y0 + CELL_PX - margin)],
-            fill="#f97316", outline=(80, 40, 0),
-        )
-        draw.polygon(
-            [(cx - 6, y0 + margin), (cx + 6, y0 + margin), (cx, y0 + margin + 10)],
-            fill="#16a34a",
-        )
-        return
-
-    # Pipe / generic markers fall back to a labelled badge.
+    # Generic fallback: labelled badge (first letter of kind).
     label = kind[:1].upper() if kind else "?"
     font = _font(int(CELL_PX * 0.45))
     draw.ellipse((x0 + 8, y0 + 8, x0 + CELL_PX - 8, y0 + CELL_PX - 8), fill="#94a3b8", outline=(50, 50, 50))
     draw.text((cx, cy), label, fill="white", font=font, anchor="mm")
+
+
+def _draw_from_display(draw, display, params, x0, y0, cx, cy) -> bool:
+    """Render the entity using its kind's `display` block. Returns True on
+    success, False when the type is unrecognised (caller falls back)."""
+    type_ = display.get("type")
+    color = _resolve_display_color(display.get("color"), params)
+    if type_ == "tile":
+        fill = color or "#94a3b8"
+        draw.rectangle((x0 + 4, y0 + 4, x0 + CELL_PX - 4, y0 + CELL_PX - 4),
+                       fill=fill, outline=(50, 50, 50), width=1)
+        return True
+    if type_ == "fill":
+        draw.rectangle((x0, y0, x0 + CELL_PX, y0 + CELL_PX),
+                       fill=color or "#94a3b8")
+        return True
+    if type_ == "circle":
+        c = color or "#16a34a"
+        m = CELL_PX // 4
+        draw.ellipse((x0 + m, y0 + m, x0 + CELL_PX - m, y0 + CELL_PX - m),
+                     fill=c, outline=(50, 50, 50))
+        return True
+    if type_ == "emoji":
+        glyph = display.get("value", "?")
+        font = _font(int(CELL_PX * 0.6))
+        draw.text((cx, cy), glyph, font=font, anchor="mm")
+        return True
+    if type_ == "icon":
+        # Material icons aren't available to PIL; fall back to a labelled
+        # badge using the icon name's first letter (uppercase).
+        name = display.get("value", "?")
+        label = name[:1].upper()
+        font = _font(int(CELL_PX * 0.45))
+        draw.ellipse((x0 + 8, y0 + 8, x0 + CELL_PX - 8, y0 + CELL_PX - 8),
+                     fill=color or "#94a3b8", outline=(50, 50, 50))
+        draw.text((cx, cy), label, fill="white", font=font, anchor="mm")
+        return True
+    return False
+
+
+def _resolve_display_color(spec, params):
+    """Resolves a `display.color` spec to a hex string. Accepts a palette
+    name ('red'), a `@param:<key>` reference that reads from the entity,
+    or None (caller picks a default)."""
+    if not isinstance(spec, str):
+        return None
+    if spec.startswith("@param:"):
+        key = spec[len("@param:"):]
+        v = params.get(key)
+        if not isinstance(v, str):
+            return None
+        return _COLOR_HEX.get(v, "#94a3b8")
+    return _COLOR_HEX.get(spec, "#94a3b8")
 
 
 def _draw_number_tile(canvas, draw, value: str, cx: int, cy: int, x0: int, y0: int):

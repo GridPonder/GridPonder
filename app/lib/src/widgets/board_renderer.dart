@@ -472,8 +472,19 @@ class _Cell extends StatelessWidget {
 
   Widget _fallback(EntityInstance entity) {
     final kind = entity.kind;
+    final kindDef = game.entityKinds[kind];
+    final display = kindDef?.display;
+    if (display != null) {
+      final widget = _renderFromDisplay(display, entity);
+      if (widget != null) return widget;
+    }
+
     final color = _color(kind, entity);
 
+    // Legacy procedural paths kept ONLY for value-coloured numeric tiles —
+    // their colour is an HSL function of the value, which can't yet be
+    // expressed in the `display` block. All other game-specific shortcuts
+    // (carrot, portal, cell_*, …) now live in pack JSON via `display`.
     if (kind == 'number') {
       return Container(
         color: color,
@@ -501,61 +512,10 @@ class _Cell extends StatelessWidget {
       );
     }
 
-    if (kind == 'carrot') {
-      return Center(
-        child: Text('🥕', style: TextStyle(fontSize: cellSize * 0.6)),
-      );
-    }
-
-    if (kind == 'spirit') {
-      final spiritColor = _namedColor(entity.param('color') as String? ?? 'green');
-      return Center(
-        child: Container(
-          width: cellSize * 0.5,
-          height: cellSize * 0.5,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: spiritColor,
-            boxShadow: [
-              BoxShadow(
-                color: spiritColor.withOpacity(0.5),
-                blurRadius: 4,
-                spreadRadius: 1,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    if (kind == 'colored_cell') {
-      final cellColor = _namedColor(entity.param('color') as String? ?? 'grey');
-      return Container(color: cellColor);
-    }
-
-    if (kind.startsWith('cell_')) {
-      return Container(
-        margin: EdgeInsets.all(cellSize * 0.1),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(cellSize * 0.1),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.2),
-              blurRadius: 2,
-              offset: const Offset(1, 1),
-            ),
-          ],
-        ),
-      );
-    }
-
     return Container(
       color: color,
       alignment: Alignment.center,
       child: switch (kind) {
-        'portal' =>
-          Icon(Icons.blur_on, size: cellSize * 0.65, color: Colors.white70),
         _ => null,
       },
     );
@@ -595,6 +555,83 @@ class _Cell extends StatelessWidget {
 
   Color _numberColor(int v) =>
       HSLColor.fromAHSL(1.0, (v * 37 % 360).toDouble(), 0.6, 0.45).toColor();
+
+  /// Renders an entity using a `display` block from its kind def. Returns
+  /// null when [display] doesn't specify a recognised type (caller falls
+  /// back to legacy procedural paths). Sole pack-visible vocabulary, so
+  /// the renderer doesn't have to recognise specific entity-kind names.
+  Widget? _renderFromDisplay(Map<String, dynamic> display, EntityInstance entity) {
+    final type = display['type'] as String?;
+    final color = _resolveDisplayColor(display['color'], entity);
+    switch (type) {
+      case 'tile':
+        return Container(
+          margin: EdgeInsets.all(cellSize * 0.1),
+          decoration: BoxDecoration(
+            color: color ?? _namedColor('grey'),
+            borderRadius: BorderRadius.circular(cellSize * 0.1),
+            boxShadow: const [
+              BoxShadow(color: Colors.black26, blurRadius: 2, offset: Offset(1, 1)),
+            ],
+          ),
+        );
+      case 'fill':
+        return Container(color: color ?? _namedColor('grey'));
+      case 'circle':
+        final c = color ?? _namedColor('green');
+        return Center(
+          child: Container(
+            width: cellSize * 0.5,
+            height: cellSize * 0.5,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: c,
+              boxShadow: [BoxShadow(color: c, blurRadius: 4, spreadRadius: 1)],
+            ),
+          ),
+        );
+      case 'emoji':
+        final glyph = display['value'] as String? ?? '?';
+        return Center(
+          child: Text(glyph, style: TextStyle(fontSize: cellSize * 0.6)),
+        );
+      case 'icon':
+        return Container(
+          color: color,
+          alignment: Alignment.center,
+          child: Icon(
+            _materialIcon(display['value'] as String?),
+            size: cellSize * 0.65,
+            color: Colors.white70,
+          ),
+        );
+      default:
+        return null;
+    }
+  }
+
+  /// Resolves a `display.color` spec. Accepts `null` (no color), a palette
+  /// name (`"red"`), or a `@param:<key>` reference that reads the colour
+  /// name from an entity instance parameter.
+  Color? _resolveDisplayColor(dynamic spec, EntityInstance entity) {
+    if (spec is! String) return null;
+    if (spec.startsWith('@param:')) {
+      final key = spec.substring(7);
+      final v = entity.param(key);
+      if (v is! String) return null;
+      return _namedColor(v);
+    }
+    return _namedColor(spec);
+  }
+
+  /// Tiny lookup so a pack can name a Material icon by its standard name.
+  /// Extend as needed; unknown names render the default placeholder.
+  IconData _materialIcon(String? name) => switch (name) {
+        'blur_on' => Icons.blur_on,
+        'star' => Icons.star,
+        'flag' => Icons.flag,
+        _ => Icons.circle_outlined,
+      };
 }
 
 // ---------------------------------------------------------------------------

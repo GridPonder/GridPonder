@@ -119,6 +119,7 @@ class GameDef:
             "description": j.get("description"),
             "motion": j.get("motion", {}),
             "outline": j.get("outline"),
+            "display": j.get("display"),
         }
 
     def has_tag(self, kind_name: str, tag: str) -> bool:

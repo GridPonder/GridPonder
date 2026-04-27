@@ -152,7 +152,11 @@
           "type": "string"
         }
       },
-      "symbol": "O"
+      "symbol": "O",
+      "display": {
+        "type": "icon",
+        "value": "blur_on"
+      }
     },
     "carrot": {
       "layer": "markers",
@@ -160,7 +164,11 @@
         "goal_target"
       ],
       "symbol": "C",
-      "sprite": "assets/sprites/carrot.png"
+      "sprite": "assets/sprites/carrot.png",
+      "display": {
+        "type": "emoji",
+        "value": "\ud83e\udd55"
+      }
     }
   },
   "actions": [

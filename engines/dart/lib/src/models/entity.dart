@@ -74,6 +74,18 @@ class EntityKindDef {
   /// hint — no engine/behavioural impact.
   final Map<String, dynamic>? outline;
 
+  /// Optional procedural render block, consulted when no `sprite` is supplied
+  /// (or the sprite asset fails to load). Recognised keys:
+  ///   - `type`  : "tile" | "fill" | "circle" | "icon" | "emoji"
+  ///   - `color` : a palette name, or `@param:<paramName>` to read it from
+  ///               the entity instance
+  ///   - `value` : the icon name (Material) or glyph (emoji)
+  /// Lets a pack express "render this as a rounded coloured tile" without
+  /// the renderer having to recognise the entity-kind name. Backwards-compat:
+  /// kinds without a `display` block fall through to the renderer's legacy
+  /// branches (currently `number`, `num_<N>` for value-coloured numeric tiles).
+  final Map<String, dynamic>? display;
+
   const EntityKindDef({
     required this.id,
     required this.layer,
@@ -88,6 +100,7 @@ class EntityKindDef {
     this.spriteParam,
     this.motion = const {},
     this.outline,
+    this.display,
   });
 
   factory EntityKindDef.fromJson(String id, Map<String, dynamic> j) {
@@ -118,6 +131,7 @@ class EntityKindDef {
       spriteParam: j['spriteParam'] as String?,
       motion: (j['motion'] as Map?)?.cast<String, dynamic>() ?? const {},
       outline: (j['outline'] as Map?)?.cast<String, dynamic>(),
+      display: (j['display'] as Map?)?.cast<String, dynamic>(),
     );
   }
 

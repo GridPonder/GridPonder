@@ -216,6 +216,7 @@ Defines all entity types used by this game. Levels reference kinds by their key 
 | `animations` | object | no | Named animation sequences for this entity. See [Animations](#animations). |
 | `motion` | object | no | Motion timings used by the renderer when this kind appears in a motion event (`tile_moved`, `tiles_merged` with sources, etc.). See [Motion](#motion). Optional — engine has sensible defaults. |
 | `outline` | object | no | Render hint: stroke a visible border along the perimeter of every contiguous region of cells of this kind. See [Outline](#outline). Pure render hint — no engine impact. |
+| `display` | object | no | Procedural render block consulted when no `sprite` is supplied (or the asset fails to load). See [Display](#display). |
 | `render` | object | no | Additional rendering hints (opacity, tint). |
 
 ### Animations
@@ -336,6 +337,36 @@ An `outline` block on an entity kind tells the renderer to stroke a visible bord
 Algorithm: for every cell whose entity is of this kind, the renderer draws a line on each side whose orthogonal neighbour is *not* of the same kind (or out of bounds). Stitched together this traces the region boundary exactly once. Multiple disconnected regions of the same kind get separate outlines. Layer is taken from the kind's `layer` field, so the outline picks the right grid automatically.
 
 Pure render hint: no engine logic, no events, no Python solver impact. Implemented in both the Flutter renderer and the Python image renderer used for vision-mode benchmarks.
+
+### Display
+
+A `display` block on an entity kind tells the renderer how to draw the entity procedurally when no `sprite` is supplied (or the sprite asset fails to load). Lets a pack express "render this as a rounded coloured tile" or "render this as a 🥕" without the renderer having to recognise the entity-kind name.
+
+```json
+"cell_red": {
+  "layer": "objects",
+  "tags": ["floodable"],
+  "display": { "type": "tile", "color": "red" }
+},
+"carrot": {
+  "layer": "markers",
+  "display": { "type": "emoji", "value": "🥕" }
+},
+"portal": {
+  "layer": "objects",
+  "display": { "type": "icon", "value": "blur_on" }
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `type`  | string | One of `tile` (rounded shadowed coloured tile), `fill` (flat colour rectangle), `circle` (filled circle with glow), `emoji` (centred glyph), `icon` (Material-style icon by name). |
+| `color` | string | Optional. A palette name (`"red"`) resolved via the renderer's named colours, or `@param:<key>` to read the colour name from an entity instance parameter. |
+| `value` | string | Optional. The glyph (for `emoji`) or icon name (for `icon`). |
+
+Recognised icon names today: `blur_on`, `star`, `flag`. Extend the renderer's icon table to add more — pure additive work, no DSL impact.
+
+Pure render hint: no engine logic, no behavioural impact. Implemented in both the Flutter renderer (`board_renderer.dart`'s `_renderFromDisplay`) and the Python image renderer (`board_image.py`'s `_draw_from_display`).
 
 ---
 
