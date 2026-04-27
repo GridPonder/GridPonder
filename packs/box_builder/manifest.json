@@ -4,7 +4,7 @@
   "gameId": "box_builder",
   "title": "The Box That Pip Built",
   "shortDescription": "Push fragments together to assemble complete boxes.",
-  "description": "Move one step per turn. Box fragments (N) are pushed one step by walking into them. Each fragment stores a 4-bit bitmask (bit0=up, bit1=right, bit2=down, bit3=left) indicating which sides are connected to an adjacent fragment or wall; F (=15) means all 4 sides connected. Win by pushing every fragment onto a target cell (X) such that all 4 of its sides are connected. Rocks block movement; carry a pickaxe (P) and walk into a rock to break it.",
+  "description": "Move one step per turn. Walk into a box fragment to push it one cell in your direction. When two fragments touch face-to-face, those touching sides join, and a joined cluster moves as a single piece — so you can push it from any of its outer sides. A fragment is complete when all four of its sides are joined (to another fragment or to the board edge). Win by maneuvering every fragment onto a target cell so each one ends up complete. Rocks block movement; pick up a pickaxe and walk into a rock to break it.",
   "coverImage": "assets/rabbit_built_box.png",
   "version": "1.0.0",
   "minEngineVersion": "0.5.0",

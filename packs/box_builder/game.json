@@ -23,12 +23,6 @@
       "sprite": "assets/sprites/grass.png",
       "symbol": "."
     },
-    "wall": {
-      "layer": "ground",
-      "tags": [],
-      "sprite": null,
-      "symbol": "#"
-    },
     "void": {
       "layer": "ground",
       "tags": [],
@@ -50,7 +44,7 @@
       "spriteParam": "sides",
       "symbol": "b",
       "symbolParam": "sides",
-      "description": "4-bit sides bitmask in hex: bit0=up, bit1=right, bit2=down, bit3=left; F=all 4 sides connected"
+      "description": "value is a sum of joined sides — 1=up, 2=right, 4=down, 8=left; F (=15) means all four sides joined"
     },
     "box_target": {
       "layer": "markers",

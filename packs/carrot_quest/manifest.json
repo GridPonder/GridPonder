@@ -4,7 +4,7 @@
   "gameId": "carrot_quest",
   "title": "Carrot Quest",
   "shortDescription": "Find a path to the carrot through rocks, wood, ice and water.",
-  "description": "Navigate the grid to reach the carrot. Solid tiles (rock) block movement. Pushable tiles (wood, crate) slide one step when walked into. Ice is slippery and let's you or pushable items slide. Inventory (torch, pickaxe) interacts with the environment.",
+  "description": "Reach the carrot. Push pushable tiles (wood, metal crate) by walking into them — they slide one cell in your direction. Solid tiles (rock, wood, metal crate) block movement; rock breaks when pushed with a pickaxe, wood burns when pushed with a torch. Ice is slippery — you and pushable items slide until you hit something solid; carrying a torch onto ice melts it into water, carrying a pickaxe onto ice shatters it into empty ground. Water is walkable but any item you carry is lost when you step in; pushing a metal crate into water turns the cell into a walkable bridge. Portals teleport you between paired tiles.",
   "coverImage": "assets/rabbit_reaching_for_carrot.png",
   "version": "1.0.0",
   "minEngineVersion": "0.5.0"
