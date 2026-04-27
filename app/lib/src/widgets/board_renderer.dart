@@ -109,6 +109,17 @@ class BoardRenderer extends StatelessWidget {
                             floodedColorOverride: floodedColorOverride,
                           ),
                   ),
+              // Region outlines: stroke the perimeter of contiguous cells
+              // for any kind that has `outline` set in game.json. Painted
+              // above cells but below avatar / animation overlays so the
+              // border is always visible on top of the fill.
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: CustomPaint(
+                    painter: _OutlinePainter(state, game, cellSize),
+                  ),
+                ),
+              ),
               if (animationOverlays != null)
                 for (final entry in animationOverlays!.entries)
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
@@ -806,4 +817,84 @@ class _PipeCellPainter extends CustomPainter {
       old.openUp != openUp ||
       old.openDown != openDown ||
       old.isExit != isExit;
+}
+
+// ---------------------------------------------------------------------------
+
+/// Strokes the outer perimeter of every contiguous region of cells whose
+/// kind has `outline` set in game.json. For each cell in such a region we
+/// draw an edge segment on the sides whose neighbour is NOT in the region;
+/// stitched together this traces the region boundary exactly once. Layer is
+/// taken from the kind def, so the same outline kind in a different layer
+/// works without configuration.
+class _OutlinePainter extends CustomPainter {
+  final LevelState state;
+  final GameDefinition game;
+  final double cellSize;
+
+  const _OutlinePainter(this.state, this.game, this.cellSize);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    for (final entry in game.entityKinds.entries) {
+      final kindId = entry.key;
+      final kindDef = entry.value;
+      final outline = kindDef.outline;
+      if (outline == null) continue;
+
+      final color = _parseHex(outline['color'] as String?) ?? const Color(0xFF222222);
+      final width = (outline['width'] as num?)?.toDouble() ?? 2.0;
+      final paint = Paint()
+        ..color = color
+        ..strokeWidth = width
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.square;
+
+      final layer = state.board.layers[kindDef.layer];
+      if (layer == null) continue;
+
+      bool inSet(int x, int y) {
+        if (x < 0 || y < 0) return false;
+        final e = layer.getAt(Position(x, y));
+        return e != null && e.kind == kindId;
+      }
+
+      for (final cell in layer.entries()) {
+        if (cell.value.kind != kindId) continue;
+        final px = cell.key.x * cellSize;
+        final py = cell.key.y * cellSize;
+        final left = px;
+        final top = py;
+        final right = px + cellSize;
+        final bottom = py + cellSize;
+
+        if (!inSet(cell.key.x, cell.key.y - 1)) {
+          canvas.drawLine(Offset(left, top), Offset(right, top), paint);
+        }
+        if (!inSet(cell.key.x + 1, cell.key.y)) {
+          canvas.drawLine(Offset(right, top), Offset(right, bottom), paint);
+        }
+        if (!inSet(cell.key.x, cell.key.y + 1)) {
+          canvas.drawLine(Offset(left, bottom), Offset(right, bottom), paint);
+        }
+        if (!inSet(cell.key.x - 1, cell.key.y)) {
+          canvas.drawLine(Offset(left, top), Offset(left, bottom), paint);
+        }
+      }
+    }
+  }
+
+  Color? _parseHex(String? hex) {
+    if (hex == null) return null;
+    var s = hex.trim();
+    if (s.startsWith('#')) s = s.substring(1);
+    if (s.length == 6) s = 'FF$s';
+    if (s.length != 8) return null;
+    final v = int.tryParse(s, radix: 16);
+    return v == null ? null : Color(v);
+  }
+
+  @override
+  bool shouldRepaint(_OutlinePainter old) =>
+      !identical(old.state, state) || old.cellSize != cellSize;
 }

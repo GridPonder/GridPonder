@@ -95,6 +95,10 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
             _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
             draw.rectangle((x0, y0, x1, y1), outline=_GRID_LINE, width=1)
 
+    # Region outlines: stroke the perimeter of every contiguous group of
+    # cells whose kind has `outline` set in game.json.
+    _draw_region_outlines(draw, game_def, state)
+
     # Avatar overlay (drawn last so always visible).
     avatar = getattr(state, "avatar", None)
     if avatar is not None and getattr(avatar, "enabled", False) and avatar.position is not None:
@@ -109,6 +113,57 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────
+
+def _draw_region_outlines(draw, game_def, state):
+    """Stroke the outer perimeter of every contiguous region of cells whose
+    kind has `outline` set. For each cell in such a region we draw a line on
+    each side whose neighbour is NOT in the region; stitched together this
+    traces the boundary exactly once. Layer comes from the kind def."""
+    for kind_id, kind_def in game_def.entity_kinds.items():
+        outline = kind_def.get("outline")
+        if not outline:
+            continue
+        color = _parse_hex(outline.get("color")) or (34, 34, 34)
+        width = int(outline.get("width", 2))
+        layer_id = kind_def.get("layer", "objects")
+        layer = state.board.layers.get(layer_id)
+        if layer is None:
+            continue
+
+        def in_set(x, y):
+            if x < 0 or y < 0:
+                return False
+            e = layer.get(_Pos(x, y))
+            return e is not None and e.kind == kind_id
+
+        for pos, ent in layer.entries():
+            if ent.kind != kind_id:
+                continue
+            x0 = AXIS_PX + PADDING + pos.x * CELL_PX
+            y0 = AXIS_PX + PADDING + pos.y * CELL_PX
+            x1 = x0 + CELL_PX
+            y1 = y0 + CELL_PX
+            if not in_set(pos.x, pos.y - 1):
+                draw.line([(x0, y0), (x1, y0)], fill=color, width=width)
+            if not in_set(pos.x + 1, pos.y):
+                draw.line([(x1, y0), (x1, y1)], fill=color, width=width)
+            if not in_set(pos.x, pos.y + 1):
+                draw.line([(x0, y1), (x1, y1)], fill=color, width=width)
+            if not in_set(pos.x - 1, pos.y):
+                draw.line([(x0, y0), (x0, y1)], fill=color, width=width)
+
+
+def _parse_hex(hex_str):
+    if not hex_str:
+        return None
+    s = hex_str.strip().lstrip("#")
+    if len(s) != 6:
+        return None
+    try:
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except ValueError:
+        return None
+
 
 def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir):
     """Paint a single cell: ground → objects → markers → clone (top to bottom)."""

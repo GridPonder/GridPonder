@@ -66,6 +66,14 @@ class EntityKindDef {
   /// engine defaults — no behavioural impact, only visual pacing.
   final Map<String, dynamic> motion;
 
+  /// Optional outline render hint. When non-null, the renderer draws a stroke
+  /// along the perimeter of every contiguous region of cells of this kind —
+  /// useful for visualising owned/connected territories (e.g. the flooded
+  /// region in flood_colors). Recognised keys: `color` (CSS hex string,
+  /// default `#222222`), `width` (logical pixels, default 2). Pure render
+  /// hint — no engine/behavioural impact.
+  final Map<String, dynamic>? outline;
+
   const EntityKindDef({
     required this.id,
     required this.layer,
@@ -79,6 +87,7 @@ class EntityKindDef {
     this.symbolParam,
     this.spriteParam,
     this.motion = const {},
+    this.outline,
   });
 
   factory EntityKindDef.fromJson(String id, Map<String, dynamic> j) {
@@ -108,6 +117,7 @@ class EntityKindDef {
       symbolParam: j['symbolParam'] as String?,
       spriteParam: j['spriteParam'] as String?,
       motion: (j['motion'] as Map?)?.cast<String, dynamic>() ?? const {},
+      outline: (j['outline'] as Map?)?.cast<String, dynamic>(),
     );
   }
 

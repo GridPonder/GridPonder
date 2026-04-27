@@ -215,6 +215,7 @@ Defines all entity types used by this game. Levels reference kinds by their key 
 | `uiName` | string | no | Display name for UI. Defaults to the kind key. |
 | `animations` | object | no | Named animation sequences for this entity. See [Animations](#animations). |
 | `motion` | object | no | Motion timings used by the renderer when this kind appears in a motion event (`tile_moved`, `tiles_merged` with sources, etc.). See [Motion](#motion). Optional — engine has sensible defaults. |
+| `outline` | object | no | Render hint: stroke a visible border along the perimeter of every contiguous region of cells of this kind. See [Outline](#outline). Pure render hint — no engine impact. |
 | `render` | object | no | Additional rendering hints (opacity, tint). |
 
 ### Animations
@@ -311,6 +312,30 @@ Systems that emit motion expose an `emitMotion` config flag (default `true`). Se
 ```
 
 This is useful for fast-paced packs where the cascade animation would slow play, or for headless contexts where animations are irrelevant.
+
+### Outline
+
+An `outline` block on an entity kind tells the renderer to stroke a visible border along the perimeter of every contiguous region of cells of that kind. Useful for highlighting an *owned* or *connected* region whose cells are otherwise indistinguishable from their neighbours — e.g. the flooded territory in flood_colors, the merged cluster in box_builder, or the player's painted area in any colouring puzzle.
+
+```json
+"cell_flooded": {
+  "layer": "objects",
+  "tags": ["flooded"],
+  "outline": {
+    "color": "#222222",
+    "width": 3
+  }
+}
+```
+
+| Key | Type | Default | Notes |
+|-----|------|---------|-------|
+| `color` | string (CSS hex) | `"#222222"` | Stroke colour. `#RRGGBB` or `#AARRGGBB`. |
+| `width` | integer | `2` | Stroke width in logical pixels. |
+
+Algorithm: for every cell whose entity is of this kind, the renderer draws a line on each side whose orthogonal neighbour is *not* of the same kind (or out of bounds). Stitched together this traces the region boundary exactly once. Multiple disconnected regions of the same kind get separate outlines. Layer is taken from the kind's `layer` field, so the outline picks the right grid automatically.
+
+Pure render hint: no engine logic, no events, no Python solver impact. Implemented in both the Flutter renderer and the Python image renderer used for vision-mode benchmarks.
 
 ---
 

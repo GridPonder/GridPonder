@@ -116,6 +116,8 @@ class GameDef:
             "spriteParam": j.get("spriteParam"),
             "uiName": j.get("uiName"),
             "description": j.get("description"),
+            "motion": j.get("motion", {}),
+            "outline": j.get("outline"),
         }
 
     def has_tag(self, kind_name: str, tag: str) -> bool:

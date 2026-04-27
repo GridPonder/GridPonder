@@ -65,7 +65,8 @@
       "sprite": null,
       "symbol": "F",
       "uiName": "flooded",
-      "description": "your expanding region"
+      "description": "your expanding region",
+      "outline": { "color": "#222222", "width": 3 }
     }
   },
   "actions": [
