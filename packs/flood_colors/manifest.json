@@ -1,5 +1,5 @@
 {
-  "dslVersion": "0.5",
+  "dslVersion": "0.7",
   "packVersion": 1,
   "gameId": "flood_colors",
   "title": "Flood Colors",
@@ -7,5 +7,5 @@
   "description": "Each action expands the flooded region by absorbing all orthogonally adjacent cells (not diagonal) of the chosen color. Only colors with at least one cell orthogonally adjacent to the flooded region will expand it \u2014 others waste a move. Repeat until the entire board is flooded.",
   "coverImage": "assets/rabbit_color_flood.png",
   "version": "1.0.0",
-  "minEngineVersion": "0.5.0"
+  "minEngineVersion": "0.7.0"
 }

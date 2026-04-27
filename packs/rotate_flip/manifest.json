@@ -1,5 +1,5 @@
 {
-  "dslVersion": "0.5",
+  "dslVersion": "0.7",
   "packVersion": 1,
   "gameId": "rotate_flip",
   "title": "Rotate & Flip",
@@ -7,5 +7,5 @@
   "description": "Move the 2\u00d72 selection overlay one step in any direction (move). Rotate spins the 4 cells inside the overlay 90\u00b0 clockwise. Flip mirrors the 4 cells horizontally. Rearrange the board to match the target pattern shown in the goal.",
   "coverImage": "assets/rotate_flip_cover.png",
   "version": "1.0.0",
-  "minEngineVersion": "0.5.0"
+  "minEngineVersion": "0.7.0"
 }

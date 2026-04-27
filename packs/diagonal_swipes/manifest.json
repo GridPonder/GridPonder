@@ -1,5 +1,5 @@
 {
-  "dslVersion": "0.5",
+  "dslVersion": "0.7",
   "packVersion": 1,
   "gameId": "diagonal_swipes",
   "title": "Diagonal Swipes",
@@ -7,5 +7,5 @@
   "description": "Move the 2\u00d72 selection overlay one step in any direction. The up-left swap (\u2196) exchanges the top-left and bottom-right cells of the overlay. The up-right swap (\u2197) exchanges the top-right and bottom-left cells. Rearrange the board to match the target pattern shown in the goal.",
   "coverImage": "assets/rabbit_diagonal_swipes.png",
   "version": "1.0.0",
-  "minEngineVersion": "0.5.0"
+  "minEngineVersion": "0.7.0"
 }
