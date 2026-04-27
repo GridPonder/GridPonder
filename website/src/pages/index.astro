@@ -34,7 +34,9 @@ const packs = fs.readdirSync(packsDir)
     const hasCover = manifest.coverImage && fs.existsSync(coverFile);
     const coverSrc = hasCover ? `/pack-covers/${id}.png` : null;
     const accent = packAccent[id] ?? '#7c3aed';
-    return { id, name: manifest.title as string, description: manifest.description as string, levels: levelCount, coverSrc, accent };
+    const description = (manifest.shortDescription as string | undefined)
+      ?? (manifest.description as string);
+    return { id, name: manifest.title as string, description, levels: levelCount, coverSrc, accent };
   })
   // Show packs with at least one level first; within each group keep filesystem order
   .sort((a, b) => (b.levels > 0 ? 1 : 0) - (a.levels > 0 ? 1 : 0));

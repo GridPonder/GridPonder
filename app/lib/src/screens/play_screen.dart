@@ -1020,12 +1020,29 @@ class _PlayScreenState extends State<PlayScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
-        title: Text(
-          _levelDef.title ?? levelId,
-          style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: Colors.black87),
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Flexible(
+              child: Text(
+                _levelDef.title ?? levelId,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87),
+              ),
+            ),
+            const SizedBox(width: 4),
+            IconButton(
+              icon: const Icon(Icons.info_outline,
+                  color: Colors.black45, size: 20),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              tooltip: 'How to play',
+              onPressed: _showGameInfo,
+            ),
+          ],
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios, color: Colors.black54),
@@ -1666,6 +1683,29 @@ class _PlayScreenState extends State<PlayScreen> {
     final limit = limitCond?.config['limit'] as int?;
     final count = state.actionCount;
     return limit != null ? 'Moves: $count/$limit' : 'Moves: $count';
+  }
+
+  void _showGameInfo() {
+    final info = widget.packService.info;
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(info.title),
+        content: SingleChildScrollView(
+          child: Text(
+            info.description,
+            style: const TextStyle(fontSize: 14, height: 1.4),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Got it'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildStatusBar(LevelState state) {
