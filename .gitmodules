@@ -1,0 +1,3 @@
+[submodule "packs-private"]
+	path = packs-private
+	url = https://github.com/GridPonder/gridponder-private.git
