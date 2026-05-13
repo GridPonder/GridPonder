@@ -15,16 +15,19 @@ abstract class PackFileReader {
 /// Reads pack files from the Flutter asset bundle (for built-in packs).
 class BundledPackFileReader implements PackFileReader {
   final String packId;
-  const BundledPackFileReader(this.packId);
+  final String assetRoot;
+
+  const BundledPackFileReader(this.packId,
+      {this.assetRoot = 'assets/packs'});
 
   @override
   Future<String> readString(String relativePath) =>
-      rootBundle.loadString('assets/packs/$packId/$relativePath');
+      rootBundle.loadString('$assetRoot/$packId/$relativePath');
 
   @override
   Future<Uint8List?> readBytes(String relativePath) async {
     try {
-      final data = await rootBundle.load('assets/packs/$packId/$relativePath');
+      final data = await rootBundle.load('$assetRoot/$packId/$relativePath');
       return data.buffer.asUint8List();
     } catch (_) {
       return null;

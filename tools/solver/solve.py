@@ -54,6 +54,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import math
 import random as _random
@@ -807,6 +808,18 @@ def solve(
         constraints = []
 
     mc_kw = dict(mc_trials=mc_trials, mc_steps=mc_steps)
+
+    # Pack-local solver plugin: <pack_root>/solver/solve.py takes precedence.
+    plugin_path = path.parent.parent / "solver" / "solve.py"
+    if plugin_path.exists():
+        spec = importlib.util.spec_from_file_location("_pack_solver", plugin_path)
+        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        mod.solve(str(path), mode=mode, max_depth=max_depth, timeout=timeout,
+                  trace=trace, constraints=constraints, mc_trials=mc_trials,
+                  mc_steps=mc_steps, **kwargs)
+        return
+
     game = _detect_game(path)
     if game == "rotate_flip":
         _solve_rotate_flip(path, level_json, mode, max_depth, timeout, trace,

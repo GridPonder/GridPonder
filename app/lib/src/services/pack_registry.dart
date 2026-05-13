@@ -20,45 +20,50 @@ class PackEntry {
 /// (imported from zip files and stored on-device).
 class PackRegistry {
   final PackStorage _storage;
-  final List<String> _bundledIds;
+  final List<PackEntry> _bundledEntries;
 
-  PackRegistry._(this._storage, this._bundledIds);
+  PackRegistry._(this._storage, this._bundledEntries);
 
-  /// Discovers bundled pack IDs by scanning the asset manifest for any
-  /// `assets/packs/<id>/manifest.json`. Adding a pack to `pubspec.yaml` is
-  /// the single source of truth — no separate ID list to maintain.
+  /// Discovers bundled packs by scanning the asset manifest for
+  /// `assets/packs/<id>/manifest.json` and `assets/packs-private/<id>/manifest.json`.
+  /// Adding a pack to `pubspec.yaml` is the single source of truth.
   static Future<PackRegistry> create() async {
     final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-    final pattern = RegExp(r'^assets/packs/([^/]+)/manifest\.json$');
-    final ids = manifest
-        .listAssets()
-        .map(pattern.firstMatch)
-        .where((m) => m != null)
-        .map((m) => m!.group(1)!)
-        .toSet()
-        .toList()
-      ..sort();
-    return PackRegistry._(createPackStorage(), List.unmodifiable(ids));
+    final allAssets = manifest.listAssets();
+    final entries = <PackEntry>[];
+    final seen = <String>{};
+
+    for (final root in const ['assets/packs', 'assets/packs-private']) {
+      final pattern = RegExp('^$root/([^/]+)/manifest\\.json\$');
+      final ids = allAssets
+          .map(pattern.firstMatch)
+          .where((m) => m != null)
+          .map((m) => m!.group(1)!)
+          .where(seen.add) // deduplicate across roots
+          .toList()
+        ..sort();
+      for (final id in ids) {
+        entries.add(PackEntry(
+          id: id,
+          isInstalled: false,
+          reader: BundledPackFileReader(id, assetRoot: root),
+        ));
+      }
+    }
+
+    return PackRegistry._(createPackStorage(), List.unmodifiable(entries));
   }
 
   PackStorage get storage => _storage;
 
   /// IDs of packs compiled into the app binary, in stable (alphabetical)
-  /// order. Used by both the library UI and the importer (to prevent a
-  /// user-imported pack from shadowing a bundled one).
-  List<String> get bundledIds => _bundledIds;
+  /// order per root (public first, then private). Used by the importer to
+  /// prevent user-installed packs from shadowing bundled ones.
+  List<String> get bundledIds => _bundledEntries.map((e) => e.id).toList();
 
   /// Returns all packs in display order: bundled first, then installed.
   Future<List<PackEntry>> listAll() async {
-    final entries = <PackEntry>[];
-
-    for (final id in _bundledIds) {
-      entries.add(PackEntry(
-        id: id,
-        isInstalled: false,
-        reader: BundledPackFileReader(id),
-      ));
-    }
+    final entries = List<PackEntry>.from(_bundledEntries);
 
     final installedIds = await _storage.listPackIds();
     for (final id in installedIds) {
