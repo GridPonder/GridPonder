@@ -96,6 +96,11 @@ def _detect_game(level_path: Path) -> str:
             return "flood_colors"
         if part == "twinseed":
             return "twinseed"
+        # three_kingdoms: real pack folder is "three_kingdoms"; the pre-pack
+        # engine smoke fixture lives under "tk_smoke". Both solve via the
+        # generic DSL path (coupled_actors + balance goal, no custom heuristic).
+        if part == "three_kingdoms" or part == "tk_smoke":
+            return "three_kingdoms"
     return "number_crunch"
 
 
@@ -827,6 +832,9 @@ def solve(
                        trace, constraints, **mc_kw)
     elif game == "flood_colors":
         _solve_generic(path, level_json, "Flood Colors", mode, max_depth, timeout,
+                       trace, constraints, **mc_kw)
+    elif game == "three_kingdoms":
+        _solve_generic(path, level_json, "Three Kingdoms", mode, max_depth, timeout,
                        trace, constraints, **mc_kw)
     elif game == "twinseed":
         _solve_twinseed(path, level_json, mode, max_depth, timeout, trace,
