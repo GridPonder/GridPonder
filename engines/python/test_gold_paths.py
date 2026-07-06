@@ -1,8 +1,12 @@
 """
 Smoke test: replay all gold paths for all packs using the Python engine.
 Run from engines/python/:  python test_gold_paths.py
+Add private/local packs with:  python test_gold_paths.py --extra-packs-dir <dir>
+(repeatable; each <dir>'s immediate children must be pack folders, same shape
+as packs/).
 """
 from __future__ import annotations
+import argparse
 import sys
 from pathlib import Path
 
@@ -27,14 +31,16 @@ FIXTURES_DIR = Path(__file__).parent / "_fixtures"
 PACK_SEARCH_DIRS = [PACKS_DIR, FIXTURES_DIR]
 
 
-def run_all():
+def run_all(extra_packs_dirs: list[Path] | None = None):
     passed = 0
     failed = 0
     skipped = 0
 
+    search_dirs = PACK_SEARCH_DIRS + (extra_packs_dirs or [])
+
     pack_dirs = [
         pack_dir
-        for base_dir in PACK_SEARCH_DIRS
+        for base_dir in search_dirs
         if base_dir.exists()
         for pack_dir in sorted(base_dir.iterdir())
     ]
@@ -80,6 +86,21 @@ def run_all():
     return failed == 0
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--extra-packs-dir",
+        action="append",
+        dest="extra_packs_dir",
+        default=[],
+        help="Directory whose immediate children are pack folders (same shape "
+        "as packs/); repeatable.",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    ok = run_all()
+    args = _parse_args()
+    extra_dirs = [Path(d) for d in args.extra_packs_dir]
+    ok = run_all(extra_packs_dirs=extra_dirs)
     sys.exit(0 if ok else 1)
