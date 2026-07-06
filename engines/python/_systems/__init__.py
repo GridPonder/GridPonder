@@ -14,6 +14,7 @@ from .._game_def import GameDef
 from ._base import GameSystem
 from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
+from .coupled_actors import CoupledActorsSystem
 from .flood_fill import FloodFillSystem
 from .follower_npcs import FollowerNpcsSystem
 from .ice_slide import IceSlideSystem
@@ -41,6 +42,7 @@ _REGISTRY: dict[str, type[GameSystem]] = {
     "tile_teleport":     TileTeleportSystem,
     "sided_box":         SidedBoxSystem,
     "follower_npcs":     FollowerNpcsSystem,
+    "coupled_actors":    CoupledActorsSystem,
 }
 
 
