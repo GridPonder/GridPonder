@@ -303,7 +303,18 @@ def _param_match(cfg: dict, state: GameState) -> tuple[bool, float]:
 def _count_claimable(board: Any, cfg: dict) -> int:
     """Count cells in `cfg["claimableLayer"]` whose kind == `cfg["claimableKind"]`
     (default: that layer's default kind) — every non-wall ground cell eligible
-    to be owned."""
+    to be owned.
+
+    NOTE (engine parity, tracked follow-up): this reads the layer's declared
+    (un-normalized) `default_kind` as set on `BoardLayer`. Dart's `Board.fromJson`
+    normalizes a missing `exactly_one` layer `default` to `'empty'`, while this
+    Python model does not perform that normalization. A claimable layer that
+    omits `default` entirely, combined with a `balance` goal that also omits
+    `claimableKind`, could therefore diverge between engines (Python: `None`
+    here vs. Dart: `'empty'`). This is non-divergent for well-formed packs,
+    which declare an explicit `default` on `exactly_one` layers. Follow-up:
+    normalize the missing `exactly_one` default in `_models.py` to match Dart.
+    """
     layer = board.layers.get(cfg.get("claimableLayer"))
     if layer is None:
         return 0

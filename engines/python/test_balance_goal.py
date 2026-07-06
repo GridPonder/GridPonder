@@ -71,6 +71,21 @@ _GOAL = {
     },
 }
 
+# Same as _GOAL but with `claimableKind` OMITTED — exercises the
+# `cfg.get("claimableKind", layer.default_kind)` fallback in `_count_claimable`,
+# which must resolve to the `ground` layer's declared default ("empty").
+_GOAL_NO_CLAIMABLE_KIND = {
+    "id": "balance_goal",
+    "type": "balance",
+    "config": {
+        "layer": "territory",
+        "owners": ["terr_wei", "terr_shu", "terr_wu"],
+        "claimableLayer": "ground",
+        "requireComplete": True,
+        "requireEqual": True,
+    },
+}
+
 
 def _territory(counts: dict[str, int]) -> list[tuple[int, int, str]]:
     """Lay out `counts[kind]` cells of each kind along row-major positions,
@@ -124,11 +139,32 @@ def test_complete_and_equal_is_done() -> None:
     print("  OK  complete_and_equal_is_done")
 
 
+def test_omitted_claimable_kind_falls_back_to_layer_default() -> None:
+    """Reuses the 3/3/3 complete-and-equal fixture but OMITS `claimableKind`
+    from the goal config, so `_count_claimable` must resolve the claimable
+    kind via `cfg.get("claimableKind", layer.default_kind)` -> the `ground`
+    layer's declared `"default": "empty"`. That still makes claimable=9, so
+    the outcome matches the explicit-`empty` case: complete + equal -> done,
+    progress 1.0. If the fallback did not honor the layer default, claimable
+    would be 0 -> owned(9) != claimable(0) -> complete=false -> done=false —
+    so this case genuinely locks in the fallback."""
+    game = _make_game()
+    territory = _territory({"terr_wei": 3, "terr_shu": 3, "terr_wu": 3})
+    state = _make_state(game, territory)
+
+    done, progress = _evaluate_goal(_GOAL_NO_CLAIMABLE_KIND, state, game, [])
+
+    assert done, "omitted claimableKind must fall back to layer default (empty) -> claimable=9 -> complete + equal -> done"
+    assert abs(progress - 1.0) < 1e-9, f"expected progress 1.0, got {progress}"
+    print("  OK  omitted_claimable_kind_falls_back_to_layer_default")
+
+
 def run_all() -> bool:
     tests = [
         test_incomplete_is_not_done,
         test_complete_but_unequal_is_not_done,
         test_complete_and_equal_is_done,
+        test_omitted_claimable_kind_falls_back_to_layer_default,
     ]
     passed = 0
     failed = 0
