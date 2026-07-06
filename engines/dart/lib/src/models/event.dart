@@ -18,7 +18,8 @@ class GameEvent {
 
   // --- Named constructors ---
 
-  static GameEvent avatarEntered(Position pos, Position from, String direction) =>
+  static GameEvent avatarEntered(
+          Position pos, Position from, String direction) =>
       GameEvent('avatar_entered', {
         'position': pos,
         'fromPosition': from,
@@ -28,8 +29,8 @@ class GameEvent {
   static GameEvent avatarExited(Position pos) =>
       GameEvent('avatar_exited', {'position': pos});
 
-  static GameEvent moveBlocked(
-          Position target, Position from, String direction, String blockerKind) =>
+  static GameEvent moveBlocked(Position target, Position from, String direction,
+          String blockerKind) =>
       GameEvent('move_blocked', {
         'position': target,
         'fromPosition': from,
@@ -54,8 +55,8 @@ class GameEvent {
       GameEvent('object_removed',
           {'position': pos, 'kind': kind, 'animation': animationName});
 
-  static GameEvent cellCleared(Position pos, String previousKind) =>
-      GameEvent('cell_cleared', {'position': pos, 'previousKind': previousKind});
+  static GameEvent cellCleared(Position pos, String previousKind) => GameEvent(
+      'cell_cleared', {'position': pos, 'previousKind': previousKind});
 
   static GameEvent cellTransformed(
           Position pos, String fromKind, String toKind, String layer) =>
@@ -92,8 +93,7 @@ class GameEvent {
   /// A single tile slid from [from] to [to] without merging.
   /// Carries enough information for the renderer to play an `entity_move`
   /// animation; engines that don't render simply ignore it.
-  static GameEvent tileMoved(
-          Position from, Position to, String kind,
+  static GameEvent tileMoved(Position from, Position to, String kind,
           {Map<String, dynamic> params = const {}, String layer = 'objects'}) =>
       GameEvent('tile_moved', {
         'fromPosition': from,
@@ -109,8 +109,7 @@ class GameEvent {
         'movedCount': movedCount,
       });
 
-  static GameEvent itemReleased(
-          String emitterId, String kind, Position pos,
+  static GameEvent itemReleased(String emitterId, String kind, Position pos,
           [Map<String, dynamic> params = const {}]) =>
       GameEvent('item_released', {
         'emitterId': emitterId,
@@ -133,13 +132,46 @@ class GameEvent {
         'toPosition': to,
       });
 
+  // --- Coupled actors (movement + territory claiming) ---
+
+  static GameEvent actorMoved(
+          String kind, Position from, Position to, String direction) =>
+      GameEvent('actor_moved', {
+        'kind': kind,
+        'fromPosition': from,
+        'position': to,
+        'direction': direction,
+      });
+
+  static GameEvent actorEntered(
+          String kind, Position pos, Position from, String direction) =>
+      GameEvent('actor_entered', {
+        'kind': kind,
+        'fromPosition': from,
+        'position': pos,
+        'direction': direction,
+      });
+
+  static GameEvent actorBlocked(String kind, Position pos) =>
+      GameEvent('actor_blocked', {'kind': kind, 'position': pos});
+
+  static GameEvent cellClaimed(
+          Position pos, String layer, String kind, String owner) =>
+      GameEvent('cell_claimed', {
+        'position': pos,
+        'layer': layer,
+        'kind': kind,
+        'owner': owner,
+      });
+
   static GameEvent goalStepCompleted(String goalId, int stepIndex) =>
       GameEvent('goal_step_completed', {
         'goalId': goalId,
         'stepIndex': stepIndex,
       });
 
-  static GameEvent variableChanged(String name, dynamic oldVal, dynamic newVal) =>
+  static GameEvent variableChanged(
+          String name, dynamic oldVal, dynamic newVal) =>
       GameEvent('variable_changed', {
         'variable': name,
         'oldValue': oldVal,
