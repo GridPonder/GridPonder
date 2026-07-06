@@ -1,0 +1,42 @@
+{
+  "layers": [
+    { "id": "ground", "occupancy": "exactly_one", "default": "empty" },
+    { "id": "actors", "occupancy": "zero_or_one" },
+    { "id": "territory", "occupancy": "zero_or_one" }
+  ],
+  "entityKinds": {
+    "empty": { "layer": "ground", "tags": ["walkable"], "symbol": "." },
+    "wall": { "layer": "ground", "tags": ["solid"], "symbol": "#" },
+    "wei": { "layer": "actors", "tags": ["actor"], "symbol": "W" },
+    "shu": { "layer": "actors", "tags": ["actor"], "symbol": "S" },
+    "terr_wei": { "layer": "territory", "tags": ["territory"], "symbol": "1" },
+    "terr_shu": { "layer": "territory", "tags": ["territory"], "symbol": "2" }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": { "direction": { "type": "direction", "values": ["up", "down", "left", "right"] } }
+    }
+  ],
+  "systems": [
+    {
+      "id": "movement",
+      "type": "coupled_actors",
+      "config": {
+        "actorLayer": "actors",
+        "groundLayer": "ground",
+        "claim": {
+          "layer": "territory",
+          "map": { "wei": "terr_wei", "shu": "terr_shu" }
+        }
+      }
+    }
+  ],
+  "rules": [],
+  "defaults": {
+    "avatar": { "enabled": false },
+    "maxCascadeDepth": 1
+  },
+  "ui": { "showGoal": true },
+  "levelSequence": []
+}

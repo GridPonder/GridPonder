@@ -17,13 +17,29 @@ from engines.python.gold_path import gold_path_actions
 
 PACKS_DIR = ROOT / "packs"
 
+# Throwaway fixture packs (engines/python/_fixtures/<name>/) exercise
+# newly-added DSL features end-to-end via a gold path — same manifest/game/
+# levels shape as a real pack, but never shipped in the app. Scanned after
+# PACKS_DIR so a feature stays under default behavioural-parity CI even
+# before a real pack using it exists.
+FIXTURES_DIR = Path(__file__).parent / "_fixtures"
+
+PACK_SEARCH_DIRS = [PACKS_DIR, FIXTURES_DIR]
+
 
 def run_all():
     passed = 0
     failed = 0
     skipped = 0
 
-    for pack_dir in sorted(PACKS_DIR.iterdir()):
+    pack_dirs = [
+        pack_dir
+        for base_dir in PACK_SEARCH_DIRS
+        if base_dir.exists()
+        for pack_dir in sorted(base_dir.iterdir())
+    ]
+
+    for pack_dir in pack_dirs:
         if not pack_dir.is_dir() or not (pack_dir / "manifest.json").exists():
             continue
 

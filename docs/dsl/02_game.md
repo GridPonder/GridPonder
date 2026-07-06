@@ -62,6 +62,8 @@ Defines the board's layer stack. Each layer has a name and occupancy rule.
 
 The layer order defines rendering order (first = bottom). The avatar is not part of any layer — it is rendered separately on top.
 
+Layer ids are free-form, but a few names carry conventional meaning that built-in systems default to: `ground` (walkable/solid terrain), `objects` (pushables, pickups, number tiles), `markers` (goal/anchor markers), `actors` (entities moved together each turn by [`coupled_actors`](04_systems.md#211-coupled_actors)), and `territory` (per-owner claim marks written by `coupled_actors`'s optional `claim` config and read by the [`balance` goal](03_levels.md#goals)). All of these are configurable per-system via `config` — the names above are only the defaults.
+
 ---
 
 ## Actions

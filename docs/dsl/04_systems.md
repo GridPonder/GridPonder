@@ -359,6 +359,55 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 
 ---
 
+### 2.11 `coupled_actors`
+
+**Purpose:** Move every actor entity on a layer (default `actors`) together, one cell each, in response to a single `move` action — unlike `avatar_navigation`, which moves one avatar. Actors are resolved front-first (the actor closest to the direction of travel resolves first) so a trailing actor can legally "train" into a cell the actor ahead of it just vacated. Optionally claims territory for the mover's owner as a side effect of reaching a new cell.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `actor_moved`, `actor_entered`, `actor_blocked`, `cell_claimed` (only when `claim` is configured)
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `moveAction` | string | `"move"` | Action id that triggers movement. |
+| `directions` | array of strings | all 4 cardinals | Directions the system responds to. |
+| `actorLayer` | string | `"actors"` | Layer holding the moving entities. |
+| `groundLayer` | string | `"ground"` | Layer checked for wall collisions. |
+| `wallTag` | string | `"solid"` | Tag on `groundLayer` that blocks a mover. |
+| `claim` | object | — | Optional. When present, an actor that reaches a new cell also claims it in a territory layer. See below. |
+
+`claim` object:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `layer` | string | Territory layer to write claims into. Must be declared in the game's `layers` array. |
+| `map` | object | Mover's entity kind → claim-mark entity kind written to `claim.layer`. |
+
+Example config:
+```json
+{
+  "actorLayer": "actors",
+  "groundLayer": "ground",
+  "claim": {
+    "layer": "territory",
+    "map": { "wei": "terr_wei", "shu": "terr_shu" }
+  }
+}
+```
+
+**Behavior:**
+1. On `moveAction` with a direction in `directions`, collect every actor entity on `actorLayer` as `(position, kind)` pairs.
+2. Sort front-first: by the projection of `position` onto the direction of travel, descending; ties are broken by the other-axis coordinate, then by kind — fully deterministic.
+3. Seed the `occupied` set with every actor's current position.
+4. For each actor in order: if its target cell is out of bounds, tagged `wallTag` on `groundLayer`, or still in `occupied`, the actor stays and emits `actor_blocked`. Otherwise it moves — `occupied` is updated live (old cell freed, new cell claimed) before the next actor resolves, the actor is relocated on `actorLayer`, and `actor_moved` + `actor_entered` are emitted.
+5. If `claim` is configured and the actor moved: when the destination cell in `claim.layer` is empty, set it to `claim.map[kind]` and emit `cell_claimed`. An already-owned cell is never overwritten. Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
+
+**Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals).
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -373,6 +422,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 | Region Transform | `region_transform` | `action_resolution` | `rotate`, `flip`, `diagonal_swap` |
 | Flood Fill | `flood_fill` | `action_resolution` | `flood` |
 | Anchor Point | `anchor_point` | `action_resolution` | configurable |
+| Coupled Actors | `coupled_actors` | `action_resolution` | `move` (configurable via `moveAction`) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 

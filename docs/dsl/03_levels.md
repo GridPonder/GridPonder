@@ -234,6 +234,7 @@ The engine tracks **partial progress** for each goal so the UI can visualize how
 - `board_match`: progress = number of matching cells / total non-null target cells.
 - `variable_threshold`: progress = current value / target value (clamped to 0–1).
 - `all_cleared`: progress = 1 − (remaining matching entities / initial count).
+- `balance`: progress = owned territory cells / total claimable cells.
 
 ### Goal Types
 
@@ -309,6 +310,31 @@ All entities matching a selector are removed from the board.
 ```json
 { "type": "all_cleared", "config": { "kind": "monster" } }
 ```
+
+#### `balance`
+A territory layer is divided completely and equally among a fixed set of owners — the win condition for [`coupled_actors`](04_systems.md#211-coupled_actors) "painting" mechanics.
+
+```json
+{ "type": "balance", "config": {
+    "layer": "territory",
+    "owners": ["terr_wei", "terr_shu"],
+    "claimableLayer": "ground",
+    "claimableKind": "empty",
+    "requireComplete": true,
+    "requireEqual": true
+}}
+```
+
+| Config Field | Type | Description |
+|-------------|------|-------------|
+| `layer` | string | Territory layer to tally ownership on. |
+| `owners` | array of strings | Entity kinds counted as "owned" cells, one per owner. |
+| `claimableLayer` | string | Layer whose cells are eligible to be claimed (usually `ground`). |
+| `claimableKind` | string | Kind that counts as claimable. Default: that layer's declared `default` kind. |
+| `requireComplete` | boolean | Require every claimable cell to be owned (`owned == claimable`). Default: `true`. |
+| `requireEqual` | boolean | Require every owner's count to be identical. Default: `true`. |
+
+**Engine behavior:** Tally each owner's cell count on `layer`. `claimable` = number of `claimableLayer` cells whose kind is `claimableKind`. The goal is done when (`equal`, or `requireEqual` is `false`) and (`complete`, or `requireComplete` is `false`); progress = owned / claimable (or `1.0` when nothing is claimable).
 
 ---
 

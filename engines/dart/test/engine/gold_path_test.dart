@@ -100,6 +100,15 @@ void main() {
     }
   });
 
+  // --- tk_smoke (throwaway fixture: coupled_actors + balance) ---
+  group('tk_smoke gold paths', () {
+    late LoadedPack pack;
+    setUpAll(() => pack = _loadPack('../python/_fixtures/tk_smoke'));
+
+    test('tk_smoke_01', () => _replayAndExpectWin(
+        _engineForLevel(pack, 'tk_smoke_01'), _goldPath(pack, 'tk_smoke_01')));
+  });
+
   group('undo/reset', () {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/carrot_quest'));

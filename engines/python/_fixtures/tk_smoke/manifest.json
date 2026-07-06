@@ -1,0 +1,10 @@
+{
+  "dslVersion": "0.8",
+  "packVersion": 1,
+  "gameId": "tk_smoke",
+  "title": "TK Smoke Fixture",
+  "shortDescription": "Throwaway fixture exercising coupled_actors + balance for engine parity tests.",
+  "description": "Not a real pack. Two actors (wei, shu) move down a 2-column board, painting territory behind them, until the board is fully and evenly claimed. Keeps the balance goal under default behavioural-parity CI on both engines ahead of the real three_kingdoms pack.",
+  "version": "1.0.0",
+  "minEngineVersion": "0.8.0"
+}

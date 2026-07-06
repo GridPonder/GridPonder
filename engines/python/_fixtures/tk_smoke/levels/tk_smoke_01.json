@@ -1,0 +1,47 @@
+{
+  "id": "tk_smoke_01",
+  "title": "TK Smoke",
+  "board": {
+    "size": [2, 3],
+    "layers": {
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "wei"},
+          {"position": [1, 0], "kind": "shu"}
+        ]
+      },
+      "territory": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "terr_wei"},
+          {"position": [1, 0], "kind": "terr_shu"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "balance_goal",
+      "type": "balance",
+      "config": {
+        "layer": "territory",
+        "owners": ["terr_wei", "terr_shu"],
+        "claimableLayer": "ground",
+        "claimableKind": "empty",
+        "requireComplete": true,
+        "requireEqual": true
+      }
+    }
+  ],
+  "loseConditions": [],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"}
+    ]
+  }
+}
