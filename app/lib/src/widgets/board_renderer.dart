@@ -425,6 +425,7 @@ class _Cell extends StatelessWidget {
       child: Stack(
         children: [
           if (!skipGround) _layer('ground', pos),
+          _layer('territory', pos),
           _layer('portals', pos),
           _layer('objects', pos),
           _layer('clone', pos),
