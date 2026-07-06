@@ -10,12 +10,16 @@ stays in place instead of moving — and because the ``occupied`` set is
 updated live as each actor resolves, an actor blocked by a wall correctly
 "traps" the actor behind it (its target cell never frees up).
 
-Movement only. Territory claiming is a separate, still-unimplemented concern
-layered on top of this same system (see the phase plan) — do not add it here.
+Optionally, when the system config has a ``claim`` block (``{"layer": ...,
+"map": {kind: territoryKind, ...}}``), an actor that successfully moves to a
+new cell also claims that cell in the named territory layer — but only if the
+cell is currently empty there; an already-owned territory cell is never
+overwritten. Claiming applies only to cells reached by a move this turn, not
+to blocked/staying actors or to actors' initial cells.
 """
 from __future__ import annotations
 
-from .._models import Pos, GameState, dir_delta, CARDINALS
+from .._models import Pos, GameState, dir_delta, CARDINALS, Entity
 from .._game_def import GameDef
 from .. import _events as ev
 from ._base import GameSystem
@@ -43,6 +47,7 @@ class CoupledActorsSystem(GameSystem):
         actor_layer_id = config.get("actorLayer", "actors")
         ground_layer_id = config.get("groundLayer", "ground")
         wall_tag = config.get("wallTag", "solid")
+        claim = config.get("claim")
 
         board = state.board
         actor_layer = board.layers.get(actor_layer_id)
@@ -83,5 +88,12 @@ class CoupledActorsSystem(GameSystem):
             board.set_entity(actor_layer_id, target, entity)
             events.append(ev.actor_moved(entity.kind, pos, target, direction))
             events.append(ev.actor_entered(entity.kind, target, pos, direction))
+
+            if claim is not None:
+                claim_layer_id = claim["layer"]
+                claim_kind = claim.get("map", {}).get(entity.kind)
+                if claim_kind is not None and board.get_entity(claim_layer_id, target) is None:
+                    board.set_entity(claim_layer_id, target, Entity(claim_kind))
+                    events.append(ev.cell_claimed(target, claim_layer_id, claim_kind, entity.kind))
 
         return events

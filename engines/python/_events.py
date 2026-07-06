@@ -168,6 +168,16 @@ def actor_blocked(kind: str, pos: Pos) -> dict:
     return {"type": "actor_blocked", "kind": kind, "position": pos}
 
 
+def cell_claimed(pos: Pos, layer: str, kind: str, owner: str) -> dict:
+    return {
+        "type": "cell_claimed",
+        "position": pos,
+        "layer": layer,
+        "kind": kind,
+        "owner": owner,
+    }
+
+
 def variable_changed(name: str, old_val: Any, new_val: Any) -> dict:
     return {
         "type": "variable_changed",

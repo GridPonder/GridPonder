@@ -76,6 +76,61 @@ def _actor_events(result) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Claiming fixtures (territory layer + `claim` system config)
+# ---------------------------------------------------------------------------
+
+def _make_claim_game() -> GameDef:
+    data = {
+        "id": "com.gridponder.test_coupled_actors_claim",
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            {"id": "actors", "occupancy": "zero_or_one"},
+            {"id": "territory", "occupancy": "zero_or_one"},
+        ],
+        "entityKinds": {
+            "empty": {"layer": "ground", "tags": ["walkable"]},
+            "wall":  {"layer": "ground", "tags": ["solid"]},
+            "wei":   {"layer": "actors", "tags": ["actor"]},
+            "shu":   {"layer": "actors", "tags": ["actor"]},
+            "terr_wei": {"layer": "territory", "tags": ["territory"]},
+            "terr_shu": {"layer": "territory", "tags": ["territory"]},
+        },
+        "actions": [
+            {"id": "move", "params": {"direction": {"type": "direction", "values": ["up", "down", "left", "right"]}}},
+        ],
+        "systems": [
+            {"id": "movement", "type": "coupled_actors", "config": {
+                "claim": {"layer": "territory", "map": {"wei": "terr_wei", "shu": "terr_shu"}},
+            }},
+        ],
+    }
+    return GameDef.from_dict(data, id="test_coupled_actors_claim")
+
+
+def _make_claim_level(
+    actors: list[tuple[int, int, str]],
+    walls: list[tuple[int, int]],
+    territory: list[tuple[int, int, str]] | None = None,
+    width: int = 6,
+) -> dict:
+    level = _make_level(actors, walls, width)
+    level["board"]["layers"]["territory"] = {
+        "format": "sparse",
+        "entries": [{"position": [x, y], "kind": kind} for x, y, kind in (territory or [])],
+    }
+    return level
+
+
+def _territory_kind(engine: TurnEngine, pos: Pos) -> str | None:
+    entity = engine.state.board.get_entity("territory", pos)
+    return entity.kind if entity else None
+
+
+def _claim_events(result) -> list[dict]:
+    return [e for e in result.events if e["type"] == "cell_claimed"]
+
+
+# ---------------------------------------------------------------------------
 # Test cases
 # ---------------------------------------------------------------------------
 
@@ -174,12 +229,83 @@ def test_out_of_bounds_blocks_actor_at_edge() -> None:
     print("  OK  out_of_bounds_blocks_actor_at_edge")
 
 
+def test_claim_marks_fresh_destination_cells_for_each_mover() -> None:
+    """When `claim` is configured, each actor that successfully moves claims
+    its destination cell in the territory layer using the kind mapped from
+    its own kind — as long as the cell was previously unclaimed."""
+    game = _make_claim_game()
+    level = _make_claim_level(actors=[(1, 0, "wei"), (4, 0, "shu")], walls=[])
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert result.accepted
+    assert _territory_kind(engine, Pos(2, 0)) == "terr_wei", "wei's destination should be claimed for wei"
+    assert _territory_kind(engine, Pos(5, 0)) == "terr_shu", "shu's destination should be claimed for shu"
+
+    claims = _claim_events(result)
+    assert len(claims) == 2, f"expected two cell_claimed events, got {claims}"
+    by_owner = {e["owner"]: e for e in claims}
+    assert by_owner["wei"]["position"] == Pos(2, 0) and by_owner["wei"]["kind"] == "terr_wei"
+    assert by_owner["shu"]["position"] == Pos(5, 0) and by_owner["shu"]["kind"] == "terr_shu"
+    assert all(e["layer"] == "territory" for e in claims), f"expected layer='territory' on every claim, got {claims}"
+    print("  OK  claim_marks_fresh_destination_cells_for_each_mover")
+
+
+def test_claim_does_not_overwrite_already_owned_cell() -> None:
+    """A territory cell already owned by one kingdom must survive being
+    walked over by the other kingdom's actor: claiming never overwrites."""
+    game = _make_claim_game()
+    # (3,0) is already owned by wei's territory. shu (front actor) trains
+    # onto it while wei (trailing) moves into shu's vacated, unclaimed cell.
+    level = _make_claim_level(
+        actors=[(1, 0, "wei"), (2, 0, "shu")],
+        walls=[],
+        territory=[(3, 0, "terr_wei")],
+    )
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert result.accepted
+    assert _actor_pos(engine, "shu") == Pos(3, 0)
+    assert _actor_pos(engine, "wei") == Pos(2, 0)
+
+    assert _territory_kind(engine, Pos(3, 0)) == "terr_wei", "pre-owned cell must not be overwritten by shu"
+    assert _territory_kind(engine, Pos(2, 0)) == "terr_wei", "wei's fresh destination should be claimed for wei"
+
+    claims = _claim_events(result)
+    assert len(claims) == 1, f"expected exactly one cell_claimed event (only the fresh claim), got {claims}"
+    assert claims[0]["owner"] == "wei" and claims[0]["position"] == Pos(2, 0) and claims[0]["kind"] == "terr_wei"
+    print("  OK  claim_does_not_overwrite_already_owned_cell")
+
+
+def test_claim_not_applied_to_blocked_actor() -> None:
+    """Claiming only happens on successful moves — a blocked actor keeps its
+    old cell and must not trigger any claim (there is no new destination)."""
+    game = _make_claim_game()
+    level = _make_claim_level(actors=[(2, 0, "shu")], walls=[(3, 0)])
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert result.accepted
+    assert _actor_pos(engine, "shu") == Pos(2, 0), "shu should stay in place (wall ahead)"
+    assert _territory_kind(engine, Pos(2, 0)) is None, "no claim should be made for a blocked actor"
+    assert _territory_kind(engine, Pos(3, 0)) is None, "wall cell was never a move destination, so no claim"
+    assert _claim_events(result) == [], "blocked actor must not emit cell_claimed"
+    print("  OK  claim_not_applied_to_blocked_actor")
+
+
 def run_all() -> bool:
     tests = [
         test_open_move_shifts_and_trains_both_actors,
         test_wall_blocks_one_actor_while_other_moves,
         test_wall_blocks_front_actor_and_traps_trailing_actor,
         test_out_of_bounds_blocks_actor_at_edge,
+        test_claim_marks_fresh_destination_cells_for_each_mover,
+        test_claim_does_not_overwrite_already_owned_cell,
+        test_claim_not_applied_to_blocked_actor,
     ]
     passed = 0
     failed = 0
