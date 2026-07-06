@@ -245,7 +245,7 @@ def test_claim_marks_fresh_destination_cells_for_each_mover() -> None:
 
     claims = _claim_events(result)
     assert len(claims) == 2, f"expected two cell_claimed events, got {claims}"
-    by_owner = {e["owner"]: e for e in claims}
+    by_owner = {e["ownerKind"]: e for e in claims}
     assert by_owner["wei"]["position"] == Pos(2, 0) and by_owner["wei"]["kind"] == "terr_wei"
     assert by_owner["shu"]["position"] == Pos(5, 0) and by_owner["shu"]["kind"] == "terr_shu"
     assert all(e["layer"] == "territory" for e in claims), f"expected layer='territory' on every claim, got {claims}"
@@ -276,7 +276,7 @@ def test_claim_does_not_overwrite_already_owned_cell() -> None:
 
     claims = _claim_events(result)
     assert len(claims) == 1, f"expected exactly one cell_claimed event (only the fresh claim), got {claims}"
-    assert claims[0]["owner"] == "wei" and claims[0]["position"] == Pos(2, 0) and claims[0]["kind"] == "terr_wei"
+    assert claims[0]["ownerKind"] == "wei" and claims[0]["position"] == Pos(2, 0) and claims[0]["kind"] == "terr_wei"
     print("  OK  claim_does_not_overwrite_already_owned_cell")
 
 

@@ -156,12 +156,12 @@ class GameEvent {
       GameEvent('actor_blocked', {'kind': kind, 'position': pos});
 
   static GameEvent cellClaimed(
-          Position pos, String layer, String kind, String owner) =>
+          Position pos, String layer, String kind, String ownerKind) =>
       GameEvent('cell_claimed', {
         'position': pos,
         'layer': layer,
         'kind': kind,
-        'owner': owner,
+        'ownerKind': ownerKind,
       });
 
   static GameEvent goalStepCompleted(String goalId, int stepIndex) =>

@@ -361,7 +361,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 
 ### 2.11 `coupled_actors`
 
-**Purpose:** Move every actor entity on a layer (default `actors`) together, one cell each, in response to a single `move` action — unlike `avatar_navigation`, which moves one avatar. Actors are resolved front-first (the actor closest to the direction of travel resolves first) so a trailing actor can legally "train" into a cell the actor ahead of it just vacated. Optionally claims territory for the mover's owner as a side effect of reaching a new cell.
+**Purpose:** Move every actor entity on a layer (default `actors`) together, one cell each, in response to a single `move` action — unlike `avatar_navigation`, which moves one avatar. Actors are resolved front-first (the actor closest to the direction of travel resolves first) so a trailing actor can legally "train" into a cell the actor ahead of it just vacated. Optionally claims territory as a side effect of reaching a new cell, tagging the claim with the mover's kind as `ownerKind`.
 
 **Phase:** `action_resolution`
 

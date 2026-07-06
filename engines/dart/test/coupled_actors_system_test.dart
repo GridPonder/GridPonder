@@ -339,7 +339,7 @@ void main() {
 
       final claims = _claimEvents(result);
       expect(claims.length, equals(2));
-      final byOwner = {for (final e in claims) e['owner'] as String: e};
+      final byOwner = {for (final e in claims) e['ownerKind'] as String: e};
       expect(byOwner['wei']!['position'], equals(const Position(2, 0)));
       expect(byOwner['wei']!['kind'], equals('terr_wei'));
       expect(byOwner['shu']!['position'], equals(const Position(5, 0)));
@@ -379,7 +379,7 @@ void main() {
       expect(claims.length, equals(1),
           reason:
               'expected exactly one cell_claimed event (only the fresh claim)');
-      expect(claims[0]['owner'], equals('wei'));
+      expect(claims[0]['ownerKind'], equals('wei'));
       expect(claims[0]['position'], equals(const Position(2, 0)));
       expect(claims[0]['kind'], equals('terr_wei'));
     });
