@@ -39,6 +39,7 @@ def _evaluate_goal(goal: dict, state: GameState, game: GameDef, pending_events: 
         case "sum_constraint": return _sum_constraint(cfg, state)
         case "count_constraint": return _count_constraint(cfg, state)
         case "param_match":    return _param_match(cfg, state)
+        case "balance":        return _balance(cfg, state, game)
         case _:                return False, 0.0
 
 
@@ -297,6 +298,36 @@ def _param_match(cfg: dict, state: GameState) -> tuple[bool, float]:
     if total == 0:
         return False, 0.0
     return matched == total, matched / total
+
+
+def _count_claimable(board: Any, cfg: dict) -> int:
+    """Count cells in `cfg["claimableLayer"]` whose kind == `cfg["claimableKind"]`
+    (default: that layer's default kind) — every non-wall ground cell eligible
+    to be owned."""
+    layer = board.layers.get(cfg.get("claimableLayer"))
+    if layer is None:
+        return 0
+    claimable_kind = cfg.get("claimableKind", layer.default_kind)
+    return sum(1 for _pos, entity in layer.entries() if entity.kind == claimable_kind)
+
+
+def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
+    """Win when a territory layer is divided completely and into exactly-equal
+    shares among the configured owners (or per requireComplete/requireEqual)."""
+    layer = state.board.layers.get(cfg.get("layer"))
+    counts = {o: 0 for o in cfg.get("owners", [])}
+    if layer is not None:
+        for _pos, entity in layer.entries():
+            if entity.kind in counts:
+                counts[entity.kind] += 1
+    claimable = _count_claimable(state.board, cfg)
+    owned = sum(counts.values())
+    equal = len(set(counts.values())) == 1
+    complete = owned == claimable
+    progress = owned / claimable if claimable else 1.0
+    done = (equal or not cfg.get("requireEqual", True)) and \
+           (complete or not cfg.get("requireComplete", True))
+    return done, progress
 
 
 # ---------------------------------------------------------------------------
