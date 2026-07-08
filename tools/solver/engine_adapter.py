@@ -112,7 +112,7 @@ class EngineInfo:
 # Action helpers
 # ---------------------------------------------------------------------------
 
-def _build_actions(game: GameDef) -> list[str]:
+def _build_actions(game: GameDef, width: int = 0, height: int = 0) -> list[str]:
     """Build the flat ACTIONS list from the game definition."""
     result: list[str] = []
     for action_def in game.actions:
@@ -122,6 +122,10 @@ def _build_actions(game: GameDef) -> list[str]:
             dirs = params["direction"].get("values", ["up", "down", "left", "right"])
             for d in dirs:
                 result.append(f"{aid}_{d}")
+        elif "position" in params:
+            for y in range(height):
+                for x in range(width):
+                    result.append(f"{aid}_{x}_{y}")
         else:
             result.append(aid)
     return result
@@ -137,6 +141,10 @@ def _parse_action(action_str: str, game: GameDef) -> tuple[str, dict]:
             for d in dirs:
                 if action_str == f"{aid}_{d}":
                     return aid, {"direction": d}
+        elif "position" in params and action_str.startswith(f"{aid}_"):
+            rest = action_str[len(aid) + 1:].split("_")
+            if len(rest) == 2:
+                return aid, {"position": [int(rest[0]), int(rest[1])]}
         elif action_str == aid:
             return aid, {}
     raise ValueError(f"Unknown action string: {action_str!r}")
@@ -164,7 +172,7 @@ def load(level_json: dict, pack_dir: str | Path) -> tuple[EngineState, EngineInf
     board = level_json.get("board", {})
     cols, rows = board.get("size", [0, 0])
 
-    actions = _build_actions(game)
+    actions = _build_actions(game, cols, rows)
 
     info = EngineInfo(
         game=game,
@@ -238,8 +246,11 @@ def gold_path_actions(level_json: dict) -> list[str]:
         elif isinstance(entry, dict):
             action_id = entry.get("action", "move")
             direction = entry.get("direction")
+            position = entry.get("position")
             if direction:
                 actions.append(f"{action_id}_{direction}")
+            elif position:
+                actions.append(f"{action_id}_{position[0]}_{position[1]}")
             else:
                 actions.append(action_id)
     return actions
