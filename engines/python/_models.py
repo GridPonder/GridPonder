@@ -489,7 +489,7 @@ class GameState:
             for lid, layer in sorted(self.board.layers.items())
         )
         mco_key = tuple(
-            (m.id, tuple(sorted(m.params.items())))
+            (m.id, tuple((p.x, p.y) for p in m.cells), tuple(sorted(m.params.items())))
             for m in self.board.multi_cell_objects
         )
         av = self.avatar

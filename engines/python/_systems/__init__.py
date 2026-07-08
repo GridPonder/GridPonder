@@ -23,6 +23,7 @@ from .push_objects import PushObjectsSystem
 from .queued_emitters import QueuedEmittersSystem
 from .region_transform import RegionTransformSystem
 from .sided_box import SidedBoxSystem
+from .sliding_blocks import SlidingBlocksSystem
 from .slide_merge import SlideMergeSystem
 from .tile_teleport import TileTeleportSystem
 
@@ -40,6 +41,7 @@ _REGISTRY: dict[str, type[GameSystem]] = {
     "queued_emitters":   QueuedEmittersSystem,
     "tile_teleport":     TileTeleportSystem,
     "sided_box":         SidedBoxSystem,
+    "sliding_blocks":    SlidingBlocksSystem,
     "follower_npcs":     FollowerNpcsSystem,
 }
 
@@ -51,7 +53,10 @@ def instantiate_systems(game: GameDef, overrides: Optional[dict] = None) -> list
             continue
         cls = _REGISTRY.get(sys_def["type"])
         if cls is not None:
-            systems.append(cls(sys_def["id"]))
+            if cls is SlidingBlocksSystem:
+                systems.append(cls(sys_def["id"], game.system_config(sys_def["id"], overrides)))
+            else:
+                systems.append(cls(sys_def["id"]))
     return systems
 
 

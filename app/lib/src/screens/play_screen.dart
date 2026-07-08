@@ -50,7 +50,9 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   // Swipe detection (covers full screen)
+  final GlobalKey _boardKey = GlobalKey();
   Offset? _panStart;
+  Position? _panStartCell;
   static const double _swipeThreshold = 18.0;
 
   // Periodic timer to refresh hint dot availability
@@ -496,6 +498,10 @@ class _PlayScreenState extends State<PlayScreen> {
       widget.packService.game.actions.any((a) => a.id == 'diagonal_swap');
   bool get _hasMoveAction =>
       widget.packService.game.actions.any((a) => a.id == 'move');
+  bool get _moveActionNeedsPosition =>
+      widget.packService.game.actions
+          .where((a) => a.id == 'move')
+          .any((a) => a.params.containsKey('position'));
   bool get _hasCellTapGesture =>
       widget.packService.theme?.controls?.gestureMap
           .any((b) => b.gesture == 'tap_cell') ??
@@ -548,9 +554,20 @@ class _PlayScreenState extends State<PlayScreen> {
     }
   }
 
-  void _onPanStart(DragStartDetails d) => _panStart = d.globalPosition;
-  void _onPanCancel() => _panStart = null;
-  void _onPanEnd(DragEndDetails _) => _panStart = null;
+  void _onPanStart(DragStartDetails d) {
+    _panStart = d.globalPosition;
+    _panStartCell = _cellAtGlobalPosition(d.globalPosition);
+  }
+
+  void _onPanCancel() {
+    _panStart = null;
+    _panStartCell = null;
+  }
+
+  void _onPanEnd(DragEndDetails _) {
+    _panStart = null;
+    _panStartCell = null;
+  }
 
   void _onPanUpdate(DragUpdateDetails details) {
     if (_panStart == null) return;
@@ -561,7 +578,27 @@ class _PlayScreenState extends State<PlayScreen> {
     if (action == null) return;
 
     _panStart = null;
+    _panStartCell = null;
     _onAction(action);
+  }
+
+  Position? _cellAtGlobalPosition(Offset globalPosition) {
+    final context = _boardKey.currentContext;
+    final renderObject = context?.findRenderObject();
+    if (renderObject is! RenderBox) return null;
+    final local = renderObject.globalToLocal(globalPosition);
+    final size = renderObject.size;
+    if (local.dx < 0 ||
+        local.dy < 0 ||
+        local.dx >= size.width ||
+        local.dy >= size.height) {
+      return null;
+    }
+    final board = _engine.state.board;
+    final x = (local.dx / (size.width / board.width)).floor();
+    final y = (local.dy / (size.height / board.height)).floor();
+    if (x < 0 || y < 0 || x >= board.width || y >= board.height) return null;
+    return Position(x, y);
   }
 
   GameAction? _detectSwipeAction(Offset delta) {
@@ -579,13 +616,18 @@ class _PlayScreenState extends State<PlayScreen> {
     }
 
     if (!_hasMoveAction) return null;
+    if (_moveActionNeedsPosition && _panStartCell == null) return null;
     final String dir;
     if (ax > ay) {
       dir = delta.dx > 0 ? 'right' : 'left';
     } else {
       dir = delta.dy > 0 ? 'down' : 'up';
     }
-    return GameAction('move', {'direction': dir});
+    return GameAction('move', {
+      'direction': dir,
+      if (_moveActionNeedsPosition)
+        'position': [_panStartCell!.x, _panStartCell!.y],
+    });
   }
 
   String? _diagonalDir(Offset delta) {
@@ -1099,7 +1141,9 @@ class _PlayScreenState extends State<PlayScreen> {
             LogicalKeyboardKey.arrowRight => 'right',
             _ => null,
           };
-          if (dir == null || !_hasMoveAction) return KeyEventResult.ignored;
+          if (dir == null || !_hasMoveAction || _moveActionNeedsPosition) {
+            return KeyEventResult.ignored;
+          }
           _onAction(GameAction('move', {'direction': dir}));
           return KeyEventResult.handled;
         },
@@ -1121,6 +1165,7 @@ class _PlayScreenState extends State<PlayScreen> {
                 padding: const EdgeInsets.all(12),
                 child: Center(
                   child: BoardRenderer(
+                    key: _boardKey,
                     state: state,
                     game: widget.packService.game,
                     packService: widget.packService,

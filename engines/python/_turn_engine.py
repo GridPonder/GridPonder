@@ -109,7 +109,7 @@ class TurnEngine:
             self._history.append(self._state.copy())
 
         state = self._state
-        systems = instantiate_systems(self._game)
+        systems = instantiate_systems(self._game, self._level.get("systemOverrides"))
         all_events: list[dict] = []
 
         # Phase 2: Action resolution
