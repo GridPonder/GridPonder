@@ -155,6 +155,9 @@ class GameEvent {
   static GameEvent actorBlocked(String kind, Position pos) =>
       GameEvent('actor_blocked', {'kind': kind, 'position': pos});
 
+  static GameEvent actorSelected(String kind, Position pos) =>
+      GameEvent('actor_selected', {'kind': kind, 'position': pos});
+
   static GameEvent cellClaimed(
           Position pos, String layer, String kind, String ownerKind) =>
       GameEvent('cell_claimed', {

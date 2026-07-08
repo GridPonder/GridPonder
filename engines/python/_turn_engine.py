@@ -109,12 +109,13 @@ class TurnEngine:
             self._history.append(self._state.copy())
 
         state = self._state
-        systems = instantiate_systems(self._game)
+        effective_game = self._game.with_system_overrides(self._level.get("systemOverrides"))
+        systems = instantiate_systems(effective_game)
         all_events: list[dict] = []
 
         # Phase 2: Action resolution
         for sys in systems:
-            events = sys.execute_action_resolution(action, state, self._game)
+            events = sys.execute_action_resolution(action, state, effective_game)
             all_events.extend(events)
 
         # If vetoed → reject (don't count the move)
@@ -125,7 +126,7 @@ class TurnEngine:
 
         # Phase 3: Movement resolution
         for sys in systems:
-            events = sys.execute_movement_resolution(state, self._game)
+            events = sys.execute_movement_resolution(state, effective_game)
             all_events.extend(events)
 
         # Phase 4: Interaction resolution (no-op in v0)
@@ -147,12 +148,12 @@ class TurnEngine:
         ]
         rules_engine = RulesEngine(self._game.rules, norm_level_rules)
         max_depth = self._game.defaults.get("maxCascadeDepth", 3)
-        cascade_events = rules_engine.evaluate(all_events, state, self._game, max_depth, systems)
+        cascade_events = rules_engine.evaluate(all_events, state, effective_game, max_depth, systems)
         all_events.extend(cascade_events)
 
         # Phase 6: NPC resolution
         for sys in systems:
-            events = sys.execute_npc_resolution(state, self._game)
+            events = sys.execute_npc_resolution(state, effective_game)
             all_events.extend(events)
 
         # Phase 7: Goal evaluation
@@ -162,7 +163,7 @@ class TurnEngine:
         goals = self._level.get("goals", []) or []
         lose_conditions = self._level.get("loseConditions", []) or []
 
-        is_won, goal_progress = evaluate_goals(goals, state, self._game, all_events)
+        is_won, goal_progress = evaluate_goals(goals, state, effective_game, all_events)
         if is_won:
             state.is_won = True
 
@@ -216,7 +217,8 @@ class TurnEngine:
                 )
         if not initial_events:
             return
-        systems = instantiate_systems(self._game)
+        effective_game = self._game.with_system_overrides(self._level.get("systemOverrides"))
+        systems = instantiate_systems(effective_game)
         level_rules = self._level.get("rules", []) or []
         norm_level_rules = [
             {
@@ -232,7 +234,7 @@ class TurnEngine:
         ]
         rules_engine = RulesEngine(self._game.rules, norm_level_rules)
         max_depth = self._game.defaults.get("maxCascadeDepth", 3)
-        rules_engine.evaluate(initial_events, state, self._game, max_depth, systems)
+        rules_engine.evaluate(initial_events, state, effective_game, max_depth, systems)
 
     def state_key(self) -> tuple:
         """Hashable state snapshot for BFS/A* deduplication."""

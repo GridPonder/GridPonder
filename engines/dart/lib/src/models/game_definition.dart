@@ -9,8 +9,10 @@ class ActionParamDef {
   final String type;
   final List<String>? values;
   const ActionParamDef({required this.type, this.values});
-  factory ActionParamDef.fromJson(Map<String, dynamic> j) =>
-      ActionParamDef(type: j['type'] as String, values: j['values'] != null ? List<String>.from(j['values'] as List) : null);
+  factory ActionParamDef.fromJson(Map<String, dynamic> j) => ActionParamDef(
+      type: j['type'] as String,
+      values:
+          j['values'] != null ? List<String>.from(j['values'] as List) : null);
 }
 
 /// A declared action type in game.json.
@@ -56,7 +58,8 @@ class SequenceEntry {
   final String? text;
   final String? image;
 
-  const SequenceEntry({required this.type, this.ref, this.title, this.text, this.image});
+  const SequenceEntry(
+      {required this.type, this.ref, this.title, this.text, this.image});
 
   factory SequenceEntry.fromJson(Map<String, dynamic> j) => SequenceEntry(
         type: j['type'] as String,
@@ -124,6 +127,7 @@ class GameDefinition {
   final List<SequenceEntry> levelSequence;
   final GameDefaults defaults;
   final GameUiConfig ui;
+
   /// Per-game goal-text overrides keyed by goal id. See goal_descriptions
   /// in the Python engine for parity. Lets a pack supply a precise
   /// mechanical description in place of the renderer's generic auto-generated text.
@@ -151,16 +155,15 @@ class GameDefinition {
     String description = '',
   }) {
     final rawKinds = j['entityKinds'] as Map<String, dynamic>? ?? {};
-    final entityKinds = rawKinds.map(
-        (k, v) => MapEntry(k, EntityKindDef.fromJson(k, v as Map<String, dynamic>)));
+    final entityKinds = rawKinds.map((k, v) =>
+        MapEntry(k, EntityKindDef.fromJson(k, v as Map<String, dynamic>)));
 
     // Validate text symbols are unique within this game.
     final seen = <String, String>{}; // symbol -> kindId
     for (final kind in entityKinds.values) {
       final sym = kind.symbol;
       if (seen.containsKey(sym)) {
-        throw FormatException(
-            'Duplicate symbol "$sym" on entity kinds '
+        throw FormatException('Duplicate symbol "$sym" on entity kinds '
             '"${seen[sym]}" and "${kind.id}" in game "$id"');
       }
       seen[sym] = kind.id;
@@ -212,6 +215,40 @@ class GameDefinition {
     final override = overrides?[id];
     if (override == null) return base;
     return {...base, ...override};
+  }
+
+  GameDefinition withSystemOverrides(
+      Map<String, Map<String, dynamic>>? overrides) {
+    if (overrides == null || overrides.isEmpty) return this;
+
+    return GameDefinition(
+      id: id,
+      title: title,
+      description: description,
+      layers: layers,
+      actions: actions,
+      entityKinds: entityKinds,
+      systems: [
+        for (final system in systems)
+          () {
+            final override = overrides[system.id];
+            if (override == null) return system;
+            final configOverride = Map<String, dynamic>.from(override)
+              ..remove('enabled');
+            return SystemDef(
+              id: system.id,
+              type: system.type,
+              config: {...system.config, ...configOverride},
+              enabled: override['enabled'] as bool? ?? system.enabled,
+            );
+          }(),
+      ],
+      rules: rules,
+      levelSequence: levelSequence,
+      defaults: defaults,
+      ui: ui,
+      goalDescriptions: goalDescriptions,
+    );
   }
 
   bool isValidAction(GameAction action) =>

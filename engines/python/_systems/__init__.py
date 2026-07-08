@@ -18,6 +18,7 @@ from .coupled_actors import CoupledActorsSystem
 from .flood_fill import FloodFillSystem
 from .follower_npcs import FollowerNpcsSystem
 from .ice_slide import IceSlideSystem
+from .individual_actors import IndividualActorsSystem
 from .overlay_cursor import OverlayCursorSystem
 from .portals import PortalsSystem
 from .push_objects import PushObjectsSystem
@@ -34,6 +35,7 @@ _REGISTRY: dict[str, type[GameSystem]] = {
     "push_objects":      PushObjectsSystem,
     "portals":           PortalsSystem,
     "ice_slide":         IceSlideSystem,
+    "individual_actors": IndividualActorsSystem,
     "flood_fill":        FloodFillSystem,
     "slide_merge":       SlideMergeSystem,
     "overlay_cursor":    OverlayCursorSystem,
@@ -47,6 +49,7 @@ _REGISTRY: dict[str, type[GameSystem]] = {
 
 
 def instantiate_systems(game: GameDef, overrides: Optional[dict] = None) -> list[GameSystem]:
+    game = game.with_system_overrides(overrides)
     systems = []
     for sys_def in game.systems:
         if not sys_def.get("enabled", True):

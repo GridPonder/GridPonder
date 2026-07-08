@@ -168,6 +168,10 @@ def actor_blocked(kind: str, pos: Pos) -> dict:
     return {"type": "actor_blocked", "kind": kind, "position": pos}
 
 
+def actor_selected(kind: str, pos: Pos) -> dict:
+    return {"type": "actor_selected", "kind": kind, "position": pos}
+
+
 def cell_claimed(pos: Pos, layer: str, kind: str, owner_kind: str) -> dict:
     return {
         "type": "cell_claimed",
