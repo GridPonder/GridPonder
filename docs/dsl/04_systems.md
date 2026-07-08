@@ -1,6 +1,6 @@
 # Gridponder DSL — System Catalog
 
-The ten built-in engine systems, their execution order, and the per-system configuration reference.
+The built-in engine systems, their execution order, and the per-system configuration reference.
 
 ## 1. System Architecture
 
@@ -408,6 +408,54 @@ Example config:
 
 ---
 
+### 2.12 `individual_actors`
+
+**Purpose:** Select one actor entity on a layer (default `actors`) and move only that selected actor with a directional action. This is the individual-control counterpart to `coupled_actors`: it keeps actors as data-driven layer entities, supports the same territory-claim side effect, and can optionally enforce per-actor successful-move budgets.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `actor_selected`, `actor_moved`, `actor_entered`, `actor_blocked`, `cell_claimed` (only when `claim` is configured), `action_vetoed` (when selection/movement is invalid)
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `selectAction` | string | `"tap_cell"` | Action id used to select an actor. The action must carry a `position` param. |
+| `moveAction` | string | `"move"` | Action id that moves the selected actor. |
+| `directions` | array of strings | all 4 cardinals | Directions the system responds to. |
+| `actorLayer` | string | `"actors"` | Layer holding selectable/moving actors. |
+| `actorTag` | string | `"actor"` | Tag an entity kind must have to be selectable. |
+| `groundLayer` | string | `"ground"` | Layer checked for wall collisions. |
+| `wallTag` | string | `"solid"` | Tag on `groundLayer` that blocks a mover. |
+| `selectedVariable` | string | `"selectedActorKind"` | Runtime variable storing the currently selected actor kind. |
+| `budgets` | object | — | Optional actor kind → successful move count. When configured, a selected actor at 0 remaining moves cannot move. |
+| `budgetVariable` | string | `"actorMovesRemaining"` | Runtime variable storing remaining move budgets. |
+| `claim` | object | — | Optional. Same shape and semantics as `coupled_actors.claim`. |
+
+Example config:
+```json
+{
+  "actorLayer": "actors",
+  "selectAction": "tap_cell",
+  "moveAction": "move",
+  "budgets": { "wei": 7, "shu": 7, "wu": 7 },
+  "claim": {
+    "layer": "territory",
+    "map": { "wei": "terr_wei", "shu": "terr_shu", "wu": "terr_wu" }
+  }
+}
+```
+
+**Behavior:**
+1. On `selectAction`, if the tapped cell contains an actor entity, store its kind in `selectedVariable` and emit `actor_selected`. If `budgets` is configured, initialise `budgetVariable` from it the first time an actor is selected.
+2. On `moveAction`, reject with `action_vetoed` if no actor is selected, the selected actor is missing, or its remaining budget is 0.
+3. Compute the selected actor's target cell. If the target is out of bounds, tagged `wallTag` on `groundLayer`, or occupied by another actor, the actor stays and emits `actor_blocked`.
+4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, optionally claim the destination cell, and decrement that actor's remaining budget when budgets are configured.
+
+**Reuse:** Game-agnostic — any game with multiple layer-entity actors can use it for tap-to-select movement, squad puzzles, or budgeted routing.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -423,6 +471,7 @@ Example config:
 | Flood Fill | `flood_fill` | `action_resolution` | `flood` |
 | Anchor Point | `anchor_point` | `action_resolution` | configurable |
 | Coupled Actors | `coupled_actors` | `action_resolution` | `move` (configurable via `moveAction`) |
+| Individual Actors | `individual_actors` | `action_resolution` | `tap_cell` + `move` (configurable) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 
