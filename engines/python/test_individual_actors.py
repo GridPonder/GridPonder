@@ -97,6 +97,53 @@ def _make_level() -> dict:
     }
 
 
+def _make_balance_budget_level() -> dict:
+    return {
+        "id": "test_balance_budget_level",
+        "board": {
+            "size": [4, 1],
+            "layers": {
+                "ground": {"format": "sparse", "entries": []},
+                "actors": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [0, 0], "kind": "wei"},
+                        {"position": [3, 0], "kind": "shu"},
+                    ],
+                },
+                "territory": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [0, 0], "kind": "terr_wei"},
+                        {"position": [3, 0], "kind": "terr_shu"},
+                    ],
+                },
+            },
+        },
+        "state": {},
+        "goals": [
+            {
+                "id": "balance_goal",
+                "type": "balance",
+                "config": {
+                    "layer": "territory",
+                    "owners": ["terr_wei", "terr_shu"],
+                    "claimableLayer": "ground",
+                    "claimableKind": "empty",
+                    "requireComplete": True,
+                    "requireEqual": True,
+                },
+            },
+        ],
+        "loseConditions": [
+            {
+                "type": "balance_budget_exhausted",
+                "config": {"goalId": "balance_goal"},
+            },
+        ],
+    }
+
+
 def _actor_pos(engine: TurnEngine, kind: str) -> Pos | None:
     for pos, entity in engine.state.board.layers["actors"].entries():
         if entity.kind == kind:
@@ -141,6 +188,33 @@ def test_move_rejected_when_selected_actor_budget_is_exhausted() -> None:
     print("  OK  move_rejected_when_selected_actor_budget_is_exhausted")
 
 
+def test_balance_budget_exhausted_loses_when_actor_still_needs_claims() -> None:
+    game = _make_game({"budgets": {"wei": 0, "shu": 1}})
+    engine = TurnEngine(game, _make_balance_budget_level())
+
+    result = engine.execute_turn("tap_cell", {"position": [3, 0]})
+
+    assert result.accepted
+    assert result.is_lost
+    assert result.lose_reason == "balance_budget_exhausted"
+    print("  OK  balance_budget_exhausted_loses_when_actor_still_needs_claims")
+
+
+def test_balance_budget_exhausted_allows_actor_at_target_with_zero_budget() -> None:
+    game = _make_game({"budgets": {"wei": 0, "shu": 1}})
+    level = _make_balance_budget_level()
+    level["board"]["layers"]["territory"]["entries"].append(
+        {"position": [1, 0], "kind": "terr_wei"}
+    )
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("tap_cell", {"position": [3, 0]})
+
+    assert result.accepted
+    assert not result.is_lost
+    print("  OK  balance_budget_exhausted_allows_actor_at_target_with_zero_budget")
+
+
 def test_level_overrides_can_switch_from_coupled_to_individual_movement() -> None:
     game = _make_switch_game()
     level = _make_level()
@@ -163,6 +237,8 @@ def run_all() -> bool:
     tests = [
         test_tap_selects_actor_and_move_moves_only_selected_actor,
         test_move_rejected_when_selected_actor_budget_is_exhausted,
+        test_balance_budget_exhausted_loses_when_actor_still_needs_claims,
+        test_balance_budget_exhausted_allows_actor_at_target_with_zero_budget,
         test_level_overrides_can_switch_from_coupled_to_individual_movement,
     ]
     passed = 0

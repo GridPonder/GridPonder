@@ -1851,6 +1851,28 @@ class _PlayScreenState extends State<PlayScreen> {
     return limit != null ? 'Moves: $count/$limit' : 'Moves: $count';
   }
 
+  String? _selectedActorBudgetLabel(LevelState state) {
+    final selectedKind = state.variables['selectedActorKind'] as String?;
+    final remaining = state.variables['actorMovesRemaining'];
+    if (selectedKind == null || remaining is! Map) return null;
+    final value = remaining[selectedKind];
+    if (value is! num) return null;
+
+    final name =
+        widget.packService.game.entityKinds[selectedKind]?.uiName ??
+        selectedKind;
+    final count = value.toInt();
+    return '$name: $count ${count == 1 ? 'move' : 'moves'}';
+  }
+
+  bool _selectedActorBudgetExhausted(LevelState state) {
+    final selectedKind = state.variables['selectedActorKind'] as String?;
+    final remaining = state.variables['actorMovesRemaining'];
+    if (selectedKind == null || remaining is! Map) return false;
+    final value = remaining[selectedKind];
+    return value is num && value <= 0;
+  }
+
   void _showGameInfo() {
     final info = widget.packService.info;
     showDialog<void>(
@@ -1875,6 +1897,8 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   Widget _buildStatusBar(LevelState state) {
+    final selectedBudgetLabel = _selectedActorBudgetLabel(state);
+    final selectedBudgetExhausted = _selectedActorBudgetExhausted(state);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
@@ -1888,6 +1912,24 @@ class _PlayScreenState extends State<PlayScreen> {
             Text(
               'Attempt: $_agentAttempt',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            ),
+            const SizedBox(width: 12),
+          ],
+          if (selectedBudgetLabel != null) ...[
+            Flexible(
+              child: Text(
+                selectedBudgetLabel,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: selectedBudgetExhausted
+                      ? Colors.red.shade600
+                      : Colors.grey.shade600,
+                  fontSize: 13,
+                  fontWeight: selectedBudgetExhausted
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+              ),
             ),
             const SizedBox(width: 12),
           ],

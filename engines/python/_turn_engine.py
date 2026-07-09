@@ -170,7 +170,7 @@ class TurnEngine:
         is_lost = False
         lose_reason = None
         if not state.is_won:
-            is_lost, lose_reason = evaluate_lose(lose_conditions, state)
+            is_lost, lose_reason = evaluate_lose(lose_conditions, state, goals, effective_game)
             if is_lost:
                 state.is_lost = True
 

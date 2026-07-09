@@ -97,7 +97,12 @@ class PhaseRunner {
     }
 
     if (!state.isWon) {
-      final loseStatus = _loseEval.evaluate(_level.loseConditions, state);
+      final loseStatus = _loseEval.evaluate(
+        _level.loseConditions,
+        state,
+        goals: _level.goals,
+        game: effectiveGame,
+      );
       if (loseStatus.isLost) {
         state.isLost = true;
         return TurnResult(
@@ -149,6 +154,22 @@ class PhaseRunner {
         if (pos != null && from != null) {
           final fromPos = from is Position ? from : Position.fromJson(from);
           out.add(AnimationStep.avatarMove(fromPos, pos, stage: motionStage));
+        }
+      } else if (event.type == 'actor_moved') {
+        final pos = event.position;
+        final from = event.payload['fromPosition'];
+        final kind = event.payload['kind'] as String?;
+        if (pos != null && from != null && kind != null) {
+          final fromPos = from is Position ? from : Position.fromJson(from);
+          final dur = _motionDurationMs(kind, 'moveDurationMs', 130);
+          out.add(AnimationStep.entityMove(
+            fromPos,
+            pos,
+            kind,
+            'actors',
+            durationMs: dur,
+            stage: motionStage,
+          ));
         }
       } else if (event.type == 'tile_moved') {
         final pos = event.position;

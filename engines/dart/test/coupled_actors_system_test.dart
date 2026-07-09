@@ -241,6 +241,31 @@ void main() {
       expect(events[2]['position'], equals(const Position(2, 0)));
     });
 
+    test('actor moves produce actor-layer entity_move animations', () {
+      final game = _makeGame();
+      final level = _makeLevel(actors: [
+        [1, 0, 'wei'],
+        [2, 0, 'shu'],
+      ]);
+      final engine = _engineFor(game, level);
+
+      final result = engine.executeTurn(_moveRight());
+
+      final animations = result.animations
+          .where((step) => step.type == 'entity_move')
+          .toList();
+      expect(animations.length, equals(2));
+      expect(
+        animations.map((step) => step.entityKind).toSet(),
+        equals({'wei', 'shu'}),
+      );
+      expect(
+        animations.every((step) => step.extra['layer'] == 'actors'),
+        isTrue,
+      );
+      expect(animations.first.durationMs, equals(130));
+    });
+
     test('wall blocks one actor while other moves freely', () {
       final game = _makeGame();
       // wei is far from the wall and moves freely; shu is blocked by a wall.

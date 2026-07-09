@@ -345,7 +345,12 @@ def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
 # Lose evaluator
 # ---------------------------------------------------------------------------
 
-def evaluate_lose(lose_conditions: list[dict], state: GameState) -> tuple[bool, str | None]:
+def evaluate_lose(
+    lose_conditions: list[dict],
+    state: GameState,
+    goals: list[dict] | None = None,
+    game: GameDef | None = None,
+) -> tuple[bool, str | None]:
     """Return (is_lost, reason | None)."""
     for cond in lose_conditions:
         ctype = cond["type"]
@@ -363,4 +368,106 @@ def evaluate_lose(lose_conditions: list[dict], state: GameState) -> tuple[bool, 
                 lost = {"eq": cur == target, "gte": cur >= target, "lte": cur <= target}.get(comparison, False)
                 if lost:
                     return True, f"variable_threshold:{name}"
+        elif ctype == "balance_budget_exhausted":
+            if _balance_budget_exhausted(cfg, state, goals or [], game):
+                return True, "balance_budget_exhausted"
     return False, None
+
+
+def _balance_budget_exhausted(
+    cfg: dict,
+    state: GameState,
+    goals: list[dict],
+    game: GameDef | None,
+) -> bool:
+    goal = _balance_goal_for_condition(cfg, goals)
+    if goal is None:
+        return False
+
+    goal_cfg = goal.get("config", {})
+    owners = goal_cfg.get("owners", [])
+    if not owners:
+        return False
+
+    claimable = _count_claimable_for_budget_loss(state, goal_cfg, game)
+    if claimable % len(owners) != 0:
+        return True
+    target = claimable // len(owners)
+
+    owned = {owner: 0 for owner in owners}
+    layer = state.board.layers.get(goal_cfg.get("layer", "territory"))
+    if layer is not None:
+        for _pos, entity in layer.entries():
+            if entity.kind in owned:
+                owned[entity.kind] += 1
+
+    if any(count > target for count in owned.values()):
+        return True
+
+    actor_to_owner = cfg.get("actorToOwner") or _individual_actor_to_owner(game)
+    if not actor_to_owner:
+        return False
+
+    budget_key = cfg.get("budgetVariable", "actorMovesRemaining")
+    remaining = state.variables.get(budget_key)
+    if not isinstance(remaining, dict):
+        remaining = _individual_budgets(game)
+    if not isinstance(remaining, dict):
+        return False
+
+    for actor_kind, owner_kind in actor_to_owner.items():
+        if owner_kind not in owned:
+            continue
+        deficit = target - owned[owner_kind]
+        if deficit > int(remaining.get(actor_kind, 0)):
+            return True
+    return False
+
+
+def _balance_goal_for_condition(cfg: dict, goals: list[dict]) -> dict | None:
+    goal_id = cfg.get("goalId")
+    for goal in goals:
+        if goal.get("type") != "balance":
+            continue
+        if goal_id is None or goal.get("id") == goal_id:
+            return goal
+    return None
+
+
+def _count_claimable_for_budget_loss(
+    state: GameState,
+    goal_cfg: dict,
+    game: GameDef | None,
+) -> int:
+    layer_id = goal_cfg.get("claimableLayer", "ground")
+    claimable_kind = goal_cfg.get("claimableKind")
+    if claimable_kind is None and game is not None:
+        layer_def = next((layer for layer in game.layers if layer.get("id") == layer_id), None)
+        claimable_kind = layer_def.get("defaultKind") if layer_def is not None else None
+    if claimable_kind is None:
+        claimable_kind = "empty"
+
+    layer = state.board.layers.get(layer_id)
+    if layer is None:
+        return 0
+    return sum(1 for _pos, entity in layer.entries() if entity.kind == claimable_kind)
+
+
+def _individual_actor_to_owner(game: GameDef | None) -> dict[str, str]:
+    if game is None:
+        return {}
+    for system in game.systems:
+        if system.get("type") == "individual_actors" and system.get("enabled", True):
+            claim = system.get("config", {}).get("claim", {})
+            return {str(k): str(v) for k, v in claim.get("map", {}).items()}
+    return {}
+
+
+def _individual_budgets(game: GameDef | None) -> dict[str, int]:
+    if game is None:
+        return {}
+    for system in game.systems:
+        if system.get("type") == "individual_actors" and system.get("enabled", True):
+            budgets = system.get("config", {}).get("budgets", {})
+            return {str(k): int(v) for k, v in budgets.items()}
+    return {}

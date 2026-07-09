@@ -162,6 +162,63 @@ Map<String, dynamic> _makeLevel() => {
       'loseConditions': [],
     };
 
+Map<String, dynamic> _makeBalanceBudgetLevel() => {
+      'id': 'test_balance_budget_level',
+      'board': {
+        'size': [4, 1],
+        'layers': {
+          'ground': {'format': 'sparse', 'entries': []},
+          'actors': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'wei',
+              },
+              {
+                'position': [3, 0],
+                'kind': 'shu',
+              },
+            ],
+          },
+          'territory': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'terr_wei',
+              },
+              {
+                'position': [3, 0],
+                'kind': 'terr_shu',
+              },
+            ],
+          },
+        },
+      },
+      'state': {},
+      'goals': [
+        {
+          'id': 'balance_goal',
+          'type': 'balance',
+          'config': {
+            'layer': 'territory',
+            'owners': ['terr_wei', 'terr_shu'],
+            'claimableLayer': 'ground',
+            'claimableKind': 'empty',
+            'requireComplete': true,
+            'requireEqual': true,
+          },
+        },
+      ],
+      'loseConditions': [
+        {
+          'type': 'balance_budget_exhausted',
+          'config': {'goalId': 'balance_goal'},
+        },
+      ],
+    };
+
 TurnEngine _engineFor(GameDefinition game, Map<String, dynamic> levelJson) {
   final level = LevelDefinition.fromJson(levelJson, game.layers);
   return TurnEngine(game, level);
@@ -227,6 +284,40 @@ void main() {
       (engine.state.variables['actorMovesRemaining'] as Map)['wei'],
       equals(0),
     );
+  });
+
+  test('balance budget exhausted loses when actor still needs claims', () {
+    final game = _makeGame(config: {
+      'budgets': {'wei': 0, 'shu': 1},
+    });
+    final engine = _engineFor(game, _makeBalanceBudgetLevel());
+
+    final result = engine.executeTurn(GameAction('tap_cell', {
+      'position': [3, 0],
+    }));
+
+    expect(result.accepted, isTrue);
+    expect(result.isLost, isTrue);
+    expect(result.loseReason, equals('balance_budget_exhausted'));
+  });
+
+  test('balance budget exhausted allows actor at target with zero budget', () {
+    final game = _makeGame(config: {
+      'budgets': {'wei': 0, 'shu': 1},
+    });
+    final level = _makeBalanceBudgetLevel();
+    ((level['board'] as Map)['layers'] as Map)['territory']['entries'].add({
+      'position': [1, 0],
+      'kind': 'terr_wei',
+    });
+    final engine = _engineFor(game, level);
+
+    final result = engine.executeTurn(GameAction('tap_cell', {
+      'position': [3, 0],
+    }));
+
+    expect(result.accepted, isTrue);
+    expect(result.isLost, isFalse);
   });
 
   test('level overrides can switch from coupled to individual movement', () {
