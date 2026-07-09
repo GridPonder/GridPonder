@@ -37,6 +37,57 @@ Color? _parsePaletteHex(String hex) {
   return v == null ? null : Color(v);
 }
 
+/// Resolves the sprite path for an entity instance, including optional
+/// direction-aware motion sprites declared under `motion.sprites`.
+String? resolveEntitySpritePath(
+  EntityKindDef? kindDef,
+  EntityInstance entity, {
+  String? facingDirection,
+}) {
+  final sprite = kindDef?.sprite;
+  if (sprite == null) return null;
+
+  final motionSprite = _motionSpritePath(
+    kindDef!.motion,
+    entity,
+    facingDirection: facingDirection,
+  );
+  if (motionSprite != null) return motionSprite;
+
+  final spriteParam = kindDef.spriteParam;
+  if (spriteParam == null) return sprite;
+  final value = entity.param(spriteParam);
+  return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
+}
+
+String? _motionSpritePath(
+  Map<String, dynamic> motion,
+  EntityInstance entity, {
+  String? facingDirection,
+}) {
+  final sprites = motion['sprites'];
+  if (sprites is! Map) return null;
+
+  final movementDirection = entity.param('_motionDirection');
+  if (movementDirection is String) {
+    final walk = sprites['walk'];
+    final frames = walk is Map ? walk[movementDirection] : null;
+    if (frames is List && frames.isNotEmpty) {
+      final rawFrame = entity.param('_motionFrame');
+      final frame = rawFrame is int ? rawFrame : 0;
+      return frames[frame % frames.length] as String?;
+    }
+  }
+
+  if (facingDirection != null) {
+    final idle = sprites['idle'];
+    final frame = idle is Map ? idle[facingDirection] : null;
+    if (frame is String) return frame;
+  }
+
+  return null;
+}
+
 class BoardRenderer extends StatelessWidget {
   final LevelState state;
   final GameDefinition game;
@@ -49,6 +100,10 @@ class BoardRenderer extends StatelessWidget {
 
   /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
   final void Function(int x, int y)? onCellTap;
+
+  /// Last known facing direction per actor kind. Used to render idle actor
+  /// sprites after movement animation has finished.
+  final Map<String, String> actorFacingByKind;
 
   /// When set, cell_flooded entities are rendered in this color instead of
   /// their default color — used by Flood Colors to show the last chosen color.
@@ -65,6 +120,7 @@ class BoardRenderer extends StatelessWidget {
     required this.packService,
     this.animationOverlays,
     this.onCellTap,
+    this.actorFacingByKind = const {},
     this.floodedColorOverride,
     this.avatarPositionOverride,
   });
@@ -117,6 +173,7 @@ class BoardRenderer extends StatelessWidget {
                               packService: packService,
                               cellSize: cellSize,
                               skipGround: mcoPosSet.contains(Position(x, y)),
+                              actorFacingByKind: actorFacingByKind,
                               floodedColorOverride: floodedColorOverride,
                             ),
                           )
@@ -128,6 +185,7 @@ class BoardRenderer extends StatelessWidget {
                             packService: packService,
                             cellSize: cellSize,
                             skipGround: mcoPosSet.contains(Position(x, y)),
+                            actorFacingByKind: actorFacingByKind,
                             floodedColorOverride: floodedColorOverride,
                           ),
                   ),
@@ -203,7 +261,6 @@ class BoardRenderer extends StatelessWidget {
     }
 
     return mco.cells.map((pos) {
-      final isExit = pos == exitPos;
       final sprite = mco.cellSprites[pos];
 
       Widget background;
@@ -424,6 +481,7 @@ class _Cell extends StatelessWidget {
   final PackService packService;
   final double cellSize;
   final bool skipGround;
+  final Map<String, String> actorFacingByKind;
   final Color? floodedColorOverride;
 
   const _Cell({
@@ -434,6 +492,7 @@ class _Cell extends StatelessWidget {
     required this.packService,
     required this.cellSize,
     this.skipGround = false,
+    this.actorFacingByKind = const {},
     this.floodedColorOverride,
   });
 
@@ -443,7 +502,7 @@ class _Cell extends StatelessWidget {
     final groundEntity = state.board.getEntity('ground', pos);
     if (groundEntity?.kind == 'void' && !skipGround) {
       final kindDef = game.entityKinds['void'];
-      final spritePath = _entitySpritePath(kindDef, groundEntity!);
+      final spritePath = resolveEntitySpritePath(kindDef, groundEntity!);
       if (spritePath != null) {
         return Image.asset(
           packService.resolveSprite(spritePath),
@@ -484,22 +543,18 @@ class _Cell extends StatelessWidget {
     );
   }
 
-  /// Resolves the sprite path for an entity instance, substituting the
-  /// `{paramName}` placeholder when the kind uses [EntityKindDef.spriteParam].
-  String? _entitySpritePath(EntityKindDef? kindDef, EntityInstance entity) {
-    final sprite = kindDef?.sprite;
-    if (sprite == null) return null;
-    final spriteParam = kindDef!.spriteParam;
-    if (spriteParam == null) return sprite;
-    final value = entity.param(spriteParam);
-    return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
-  }
-
   Widget _layer(String layerId, Position pos) {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
     final kindDef = game.entityKinds[entity.kind];
-    final spritePath = _entitySpritePath(kindDef, entity);
+    final facingDirection = layerId == 'actors'
+        ? actorFacingByKind[entity.kind]
+        : null;
+    final spritePath = resolveEntitySpritePath(
+      kindDef,
+      entity,
+      facingDirection: facingDirection,
+    );
     if (spritePath != null) {
       // Try pack-specific path first; fall back to gridponder-base for shared sprites.
       return Image(

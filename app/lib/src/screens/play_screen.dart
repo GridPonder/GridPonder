@@ -61,6 +61,7 @@ class _PlayScreenState extends State<PlayScreen> {
   LevelState? _preAnimState;
   Map<Position, String>? _animOverlays;
   bool _animating = false;
+  Map<String, String> _actorFacingByKind = {};
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
 
@@ -123,6 +124,7 @@ class _PlayScreenState extends State<PlayScreen> {
     _agentAttempt = 1;
     _agentMemory.clear();
     _lastFloodColor = null;
+    _actorFacingByKind = {};
     _wonHandled = false;
   }
 
@@ -321,6 +323,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final paths = <List<Position>>[];
     final entities = <EntityInstance>[];
     final layers = <String>[];
+    final directions = <String?>[];
 
     for (final step in moves) {
       final fromRaw = step.extra['from'];
@@ -348,6 +351,7 @@ class _PlayScreenState extends State<PlayScreen> {
       paths.add(path);
       entities.add(entity);
       layers.add(layer);
+      directions.add(_directionBetween(from, to));
     }
 
     if (paths.isEmpty) return;
@@ -375,7 +379,15 @@ class _PlayScreenState extends State<PlayScreen> {
         final path = paths[i];
         final pos = path[frame.clamp(0, path.length - 1)];
         if (animState.board.getEntity(layers[i], pos) == null) {
-          animState.board.setEntity(layers[i], pos, entities[i]);
+          final direction = directions[i];
+          final entity = direction == null
+              ? entities[i]
+              : EntityInstance(entities[i].kind, {
+                  ...entities[i].params,
+                  '_motionDirection': direction,
+                  '_motionFrame': frame,
+                });
+          animState.board.setEntity(layers[i], pos, entity);
         }
       }
       setState(() {
@@ -384,6 +396,27 @@ class _PlayScreenState extends State<PlayScreen> {
       });
       await Future.delayed(Duration(milliseconds: frameMs));
     }
+
+    final facingUpdates = <String, String>{};
+    for (int i = 0; i < entities.length; i++) {
+      final direction = directions[i];
+      if (layers[i] == 'actors' && direction != null) {
+        facingUpdates[entities[i].kind] = direction;
+      }
+    }
+    if (facingUpdates.isNotEmpty && mounted) {
+      setState(() {
+        _actorFacingByKind = {..._actorFacingByKind, ...facingUpdates};
+      });
+    }
+  }
+
+  String? _directionBetween(Position from, Position to) {
+    final dx = to.x - from.x;
+    final dy = to.y - from.y;
+    if (dx.abs() > dy.abs()) return dx > 0 ? 'right' : 'left';
+    if (dy != 0) return dy > 0 ? 'down' : 'up';
+    return null;
   }
 
   Future<void> _playEntityAnimation(
@@ -432,6 +465,7 @@ class _PlayScreenState extends State<PlayScreen> {
       _lastThinking = null;
       _lastResponse = null;
       _lastFloodColor = null;
+      _actorFacingByKind = {};
     });
   }
 
@@ -1195,6 +1229,7 @@ class _PlayScreenState extends State<PlayScreen> {
                         game: widget.packService.game,
                         packService: widget.packService,
                         animationOverlays: _animOverlays,
+                        actorFacingByKind: _actorFacingByKind,
                         onCellTap: _hasCellTapGesture ? _onCellTap : null,
                         floodedColorOverride: _lastFloodColor,
                         avatarPositionOverride: _avatarSlidePos,
