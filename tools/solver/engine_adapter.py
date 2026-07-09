@@ -40,6 +40,7 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from collections import deque
 from typing import Any, Optional
 
 # Make engines/ importable when running from tools/solver/
@@ -48,9 +49,12 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from engines.python._game_def import GameDef
-from engines.python._models import GameState
+from engines.python._models import GameState, Pos
 from engines.python._turn_engine import TurnEngine
 from engines.python.loader import load_pack
+
+# Per-level cache of the (constant) claimable-cell count, keyed by id(info).
+_CLAIMABLE_CACHE: dict[int, int] = {}
 
 
 # ---------------------------------------------------------------------------
@@ -222,8 +226,419 @@ def can_prune(
     depth: int,
     max_depth: int,
 ) -> bool:
-    """Generic pruning — always False.  Override in game-specific code."""
+    """Generic pruning — over-claim dead end for the ``balance`` goal.
+
+    Any kingdom owning more than ``target`` can never rebalance (claims are
+    irreversible), so the branch is dead.  Lets BFS/DFS (which don't consult
+    the heuristic) prune these too.  Returns False for non-balance games.
+    """
+    cfg = _balance_goal(info)
+    if cfg is None:
+        return False
+    owners = cfg.get("owners", [])
+    k = len(owners)
+    if k == 0:
+        return False
+    claimable = _claimable_count(
+        state, info, cfg.get("claimableLayer", "ground"), cfg.get("claimableKind", "empty")
+    )
+    if claimable % k != 0:
+        return False
+    target = claimable // k
+    owned = _owned_counts(state, cfg.get("layer", "territory"), owners)
+    if any(owned[o] > target for o in owners):
+        return True
+
+    indiv = _individual_system(info)
+    if indiv is None:
+        return False
+
+    sys_cfg = indiv.get("config", {})
+    claim = sys_cfg.get("claim", {})
+    actor_to_owner = claim.get("map", {})
+    if not actor_to_owner:
+        return False
+
+    remaining = _actor_budgets_remaining(state, sys_cfg)
+    for actor_kind, owner_kind in actor_to_owner.items():
+        if owner_kind not in owned:
+            continue
+        deficit = target - owned[owner_kind]
+        if deficit > int(remaining.get(actor_kind, 0)):
+            return True
+        if deficit > 0 and not _actor_can_reach_enough_claims(
+            state,
+            info,
+            actor_kind,
+            int(remaining.get(actor_kind, 0)),
+            deficit,
+            ground_layer=cfg.get("claimableLayer", "ground"),
+            claim_kind=cfg.get("claimableKind", "empty"),
+            territory_layer=cfg.get("layer", "territory"),
+        ):
+            return True
+    h = heuristic(state, info)
+    if h == float("inf"):
+        return True
+    if depth + h > max_depth:
+        return True
     return False
+
+
+def _actor_can_reach_enough_claims(
+    state: EngineState,
+    info: EngineInfo,
+    actor_kind: str,
+    budget: int,
+    deficit: int,
+    ground_layer: str,
+    claim_kind: str,
+    territory_layer: str,
+) -> bool:
+    if budget < deficit:
+        return False
+
+    board = state._state.board
+    actor_layer = board.layers.get("actors")
+    start = None
+    if actor_layer is not None:
+        for pos, entity in actor_layer.entries():
+            if entity.kind == actor_kind:
+                start = pos
+                break
+    if start is None:
+        return False
+
+    seen = {start}
+    q = deque([(start, 0)])
+    reachable_unclaimed = 0
+    while q:
+        pos, dist = q.popleft()
+        if dist >= budget:
+            continue
+        for direction in ("up", "down", "left", "right"):
+            target = pos.moved(direction)
+            if target in seen:
+                continue
+            if not board.is_in_bounds(target):
+                continue
+            ground = board.get_entity(ground_layer, target)
+            if ground is None or ground.kind != claim_kind:
+                continue
+            seen.add(target)
+            if board.get_entity(territory_layer, target) is None:
+                reachable_unclaimed += 1
+                if reachable_unclaimed >= deficit:
+                    return True
+            q.append((target, dist + 1))
+    return reachable_unclaimed >= deficit
+
+
+def _balance_goal(info: EngineInfo) -> Optional[dict]:
+    for g in info.level_def.get("goals", []):
+        if g.get("type") == "balance":
+            return g.get("config", {})
+    return None
+
+
+def _claimable_count(state: EngineState, info: EngineInfo, ground_layer: str, claim_kind: str) -> int:
+    cached = _CLAIMABLE_CACHE.get(id(info))
+    if cached is not None:
+        return cached
+    board = state._state.board
+    count = 0
+    for y in range(info.height):
+        for x in range(info.width):
+            entity = board.get_entity(ground_layer, Pos(x, y))
+            if entity is not None and entity.kind == claim_kind:
+                count += 1
+    _CLAIMABLE_CACHE[id(info)] = count
+    return count
+
+
+def _owned_counts(state: EngineState, terr_layer: str, owners: list[str]) -> dict[str, int]:
+    owned = {o: 0 for o in owners}
+    layer = state._state.board.layers.get(terr_layer)
+    if layer is not None:
+        for _pos, entity in layer.entries():
+            if entity.kind in owned:
+                owned[entity.kind] += 1
+    return owned
+
+
+def _effective_game(info: EngineInfo) -> GameDef:
+    overrides = info.level_def.get("systemOverrides")
+    return info.game.with_system_overrides(overrides) if overrides else info.game
+
+
+def _individual_system(info: EngineInfo) -> Optional[dict]:
+    """Return the enabled ``individual_actors`` system, if this level uses one."""
+    for s in _effective_game(info).systems:
+        if s["type"] == "individual_actors" and s.get("enabled", True):
+            return s
+    return None
+
+
+def _actor_budgets_remaining(state: EngineState, sys_cfg: dict) -> dict[str, int]:
+    budgets = sys_cfg.get("budgets", {})
+    key = sys_cfg.get("budgetVariable", "actorMovesRemaining")
+    current = state._state.variables.get(key)
+    if isinstance(current, dict):
+        return {kind: int(value) for kind, value in current.items()}
+    return {kind: int(value) for kind, value in budgets.items()}
+
+
+def _balance_target_and_owned(
+    state: EngineState,
+    info: EngineInfo,
+    cfg: dict,
+    owners: list[str],
+) -> tuple[Optional[int], dict[str, int]]:
+    claimable = _claimable_count(
+        state,
+        info,
+        cfg.get("claimableLayer", "ground"),
+        cfg.get("claimableKind", "empty"),
+    )
+    if claimable % len(owners) != 0:
+        return None, {o: 0 for o in owners}
+    target = claimable // len(owners)
+    owned = _owned_counts(state, cfg.get("layer", "territory"), owners)
+    return target, owned
+
+
+def _coupled_balance_heuristic(
+    owners: list[str],
+    target: int,
+    owned: dict[str, int],
+) -> float:
+    deficits = [target - owned[o] for o in owners]
+    return float(max(deficits))
+
+
+def _individual_balance_heuristic(
+    state: EngineState,
+    info: EngineInfo,
+    cfg: dict,
+    owners: list[str],
+    target: int,
+    owned: dict[str, int],
+) -> float:
+    deficits = [target - owned[o] for o in owners]
+    lower = sum(deficits)
+    indiv = _individual_system(info)
+    if indiv is None:
+        return float(lower)
+
+    sys_cfg = indiv.get("config", {})
+    claim = sys_cfg.get("claim", {})
+    owner_to_actor = {owner: actor for actor, owner in claim.get("map", {}).items()}
+    selected_key = sys_cfg.get("selectedVariable", "selectedActorKind")
+    selected = state._state.variables.get(selected_key)
+
+    actors_needing_work = 0
+    first_claim_extra = 0
+    for owner_kind in owners:
+        deficit = target - owned[owner_kind]
+        if deficit <= 0:
+            continue
+        actor_kind = owner_to_actor.get(owner_kind)
+        if actor_kind is None:
+            continue
+        if actor_kind != selected:
+            actors_needing_work += 1
+        distance = _distance_to_nearest_unclaimed_claim(
+            state,
+            info,
+            sys_cfg,
+            actor_kind,
+            territory_layer_id=cfg.get("layer", "territory"),
+            claimable_kind=cfg.get("claimableKind", "empty"),
+        )
+        if distance is None:
+            return float("inf")
+        first_claim_extra += max(0, distance - 1)
+    return float(lower + actors_needing_work + first_claim_extra)
+
+
+def _distance_to_nearest_unclaimed_claim(
+    state: EngineState,
+    info: EngineInfo,
+    sys_cfg: dict,
+    actor_kind: str,
+    territory_layer_id: str,
+    claimable_kind: str,
+) -> Optional[int]:
+    board = state._state.board
+    actor_layer_id = sys_cfg.get("actorLayer", "actors")
+    ground_layer_id = sys_cfg.get("groundLayer", "ground")
+    wall_tag = sys_cfg.get("wallTag", "solid")
+
+    actor_layer = board.layers.get(actor_layer_id)
+    start = None
+    if actor_layer is not None:
+        for pos, entity in actor_layer.entries():
+            if entity.kind == actor_kind:
+                start = pos
+                break
+    if start is None:
+        return None
+
+    seen = {start}
+    q = deque([(start, 0)])
+    while q:
+        pos, dist = q.popleft()
+        if dist > 0 and board.get_entity(territory_layer_id, pos) is None:
+            return dist
+        for direction in ("up", "down", "left", "right"):
+            target = pos.moved(direction)
+            if target in seen:
+                continue
+            if not board.is_in_bounds(target):
+                continue
+            ground = board.get_entity(ground_layer_id, target)
+            if ground is None or ground.kind != claimable_kind:
+                continue
+            if board.has_tag_at(ground_layer_id, target, wall_tag, info.game.entity_kinds):
+                continue
+            seen.add(target)
+            q.append((target, dist + 1))
+    return None
+
+
+def heuristic(state: EngineState, info: EngineInfo) -> float:
+    """Admissible heuristic for the ``balance`` goal (0 for other goals).
+
+    Per-kingdom deficit is ``target − owned_k``.  A single claim-move adds at
+    most one owned cell for one kingdom; taps and moves onto already-owned or
+    foreign cells claim nothing.
+
+    * Individual mode: each action advances at most one kingdom, so remaining
+      actions ≥ **sum** of deficits — an admissible, much tighter bound.
+    * Coupled mode: one action can claim for several kingdoms at once, so only
+      the **max** deficit is a safe (admissible) lower bound.
+
+    Returns ``inf`` (a dead end the search prunes) when any kingdom already owns
+    more than ``target``: claims are irreversible, so balance can never recover.
+    """
+    cfg = _balance_goal(info)
+    if cfg is None:
+        return 0.0
+    owners = cfg.get("owners", [])
+    if not owners:
+        return 0.0
+    target, owned = _balance_target_and_owned(state, info, cfg, owners)
+    if target is None:
+        return 0.0  # malformed target; don't guide
+    if any(owned[o] > target for o in owners):
+        return float("inf")
+    if _individual_system(info) is not None:
+        return _individual_balance_heuristic(state, info, cfg, owners, target, owned)
+    return _coupled_balance_heuristic(owners, target, owned)
+
+
+def legal_actions(state: EngineState, info: EngineInfo) -> list[str]:
+    """Per-state legal action list — a generic pruning of the static ACTIONS.
+
+    For games with an enabled ``individual_actors`` system the select action
+    (``tap_cell``) is only valid on cells that currently hold an actor; tapping
+    any other cell is always vetoed and produces an identical (deduped) state,
+    so enumerating all width×height tap targets is pure wasted work.  Here we
+    restrict the select action to actor-occupied cells, collapsing branching
+    from ~width×height taps to one-per-actor.  Games without an individual
+    system are unaffected (the full ACTIONS list is returned).
+    """
+    indiv = _individual_system(info)
+    if indiv is None:
+        return info.ACTIONS
+
+    cfg = indiv.get("config", {})
+    select_action = cfg.get("selectAction", "tap_cell")
+    move_action = cfg.get("moveAction", "move")
+    actor_layer_id = cfg.get("actorLayer", "actors")
+    ground_layer_id = cfg.get("groundLayer", "ground")
+    wall_tag = cfg.get("wallTag", "solid")
+    selected_key = cfg.get("selectedVariable", "selectedActorKind")
+    selected_kind = state._state.variables.get(selected_key)
+    remaining = _actor_budgets_remaining(state, cfg)
+
+    layer = state._state.board.layers.get(actor_layer_id)
+    occupied: set[tuple[int, int]] = set()
+    actor_positions: dict[str, Pos] = {}
+    if layer is not None:
+        for pos, entity in layer.entries():
+            occupied.add((pos.x, pos.y))
+            actor_positions[entity.kind] = pos
+
+    deficits_by_actor = _individual_actor_deficits(state, info, cfg)
+    board = state._state.board
+    select_prefix = f"{select_action}_"
+    move_prefix = f"{move_action}_"
+    result: list[str] = []
+    for action in info.ACTIONS:
+        if action.startswith(select_prefix):
+            rest = action[len(select_prefix):].split("_")
+            if len(rest) != 2:
+                continue
+            pos_key = (int(rest[0]), int(rest[1]))
+            actor_kind = None
+            if layer is not None:
+                entity = layer.get(Pos(pos_key[0], pos_key[1]))
+                actor_kind = entity.kind if entity is not None else None
+            if (
+                pos_key in occupied
+                and actor_kind is not None
+                and actor_kind != selected_kind
+                and deficits_by_actor.get(actor_kind, 0) > 0
+                and int(remaining.get(actor_kind, 0)) > 0
+            ):
+                result.append(action)
+        elif action.startswith(move_prefix):
+            if not selected_kind:
+                continue
+            if deficits_by_actor.get(selected_kind, 0) <= 0:
+                continue
+            if int(remaining.get(selected_kind, 0)) <= 0:
+                continue
+            pos = actor_positions.get(selected_kind)
+            if pos is None:
+                continue
+            action_id, params = _parse_action(action, info.game)
+            direction = params.get("direction")
+            target = pos.moved(direction)
+            if (
+                not board.is_in_bounds(target)
+                or board.has_tag_at(ground_layer_id, target, wall_tag, info.game.entity_kinds)
+                or (target.x, target.y) in occupied
+            ):
+                continue
+            result.append(action)
+        else:
+            result.append(action)
+    return result
+
+
+def _individual_actor_deficits(state: EngineState, info: EngineInfo, sys_cfg: dict) -> dict[str, int]:
+    cfg = _balance_goal(info)
+    if cfg is None:
+        return {}
+    owners = cfg.get("owners", [])
+    if not owners:
+        return {}
+    claimable = _claimable_count(
+        state, info, cfg.get("claimableLayer", "ground"), cfg.get("claimableKind", "empty")
+    )
+    if claimable % len(owners) != 0:
+        return {}
+    target = claimable // len(owners)
+    owned = _owned_counts(state, cfg.get("layer", "territory"), owners)
+    claim = sys_cfg.get("claim", {})
+    actor_to_owner = claim.get("map", {})
+    result: dict[str, int] = {}
+    for actor_kind, owner_kind in actor_to_owner.items():
+        if owner_kind in owned:
+            result[actor_kind] = target - owned[owner_kind]
+    return result
 
 
 # ---------------------------------------------------------------------------

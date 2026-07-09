@@ -106,7 +106,9 @@ def astar(
                       flush=True)
                 _last_log = now
 
-        for action in module.ACTIONS:
+        _legal = getattr(module, "legal_actions", None)
+        _actions = _legal(state, info) if _legal is not None else module.ACTIONS
+        for action in _actions:
             new_state, module_won, step_events = module.apply(state, action, info)
 
             # Constraint check: prune this transition if any event violates
