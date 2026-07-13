@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT))
 
 from engines.python._game_def import GameDef
 from engines.python._models import Board, GameState
-from engines.python._goal import _evaluate_goal
+from engines.python._goal import _evaluate_goal, evaluate_lose
 
 
 def _make_game() -> GameDef:
@@ -159,12 +159,61 @@ def test_omitted_claimable_kind_falls_back_to_layer_default() -> None:
     print("  OK  omitted_claimable_kind_falls_back_to_layer_default")
 
 
+# Lose condition mirroring the balance goal above (resolved via goalId).
+_LOSE_UNREACHABLE = [{"type": "balance_unreachable", "config": {"goalId": "balance_goal"}}]
+
+
+def test_balance_unreachable_fires_on_overclaim() -> None:
+    """4/3/2 on a 9-cell board (target 3): wei owns more than its equal share, and
+    claims are permanent, so equal thirds can never be reached -> the level is
+    lost immediately via balance_unreachable."""
+    game = _make_game()
+    territory = _territory({"terr_wei": 4, "terr_shu": 3, "terr_wu": 2})
+    state = _make_state(game, territory)
+
+    is_lost, reason = evaluate_lose(_LOSE_UNREACHABLE, state, [_GOAL], game)
+
+    assert is_lost, "an owner over its equal share (4/3/2) must lose"
+    assert reason == "balance_unreachable", f"unexpected reason {reason!r}"
+    print("  OK  balance_unreachable_fires_on_overclaim")
+
+
+def test_balance_unreachable_quiet_on_valid_partial() -> None:
+    """3/3/2 (one cell still unclaimed, nobody over target): still winnable, so
+    balance_unreachable must stay quiet."""
+    game = _make_game()
+    territory = _territory({"terr_wei": 3, "terr_shu": 3, "terr_wu": 2})
+    state = _make_state(game, territory)
+
+    is_lost, reason = evaluate_lose(_LOSE_UNREACHABLE, state, [_GOAL], game)
+
+    assert not is_lost, "a still-winnable partial (3/3/2) must not lose"
+    assert reason is None, f"expected no lose reason, got {reason!r}"
+    print("  OK  balance_unreachable_quiet_on_valid_partial")
+
+
+def test_balance_unreachable_quiet_on_balanced_state() -> None:
+    """3/3/3 fully balanced: nobody exceeds target, so balance_unreachable does
+    not fire (the win is decided by the goal, not this lose condition)."""
+    game = _make_game()
+    territory = _territory({"terr_wei": 3, "terr_shu": 3, "terr_wu": 3})
+    state = _make_state(game, territory)
+
+    is_lost, _reason = evaluate_lose(_LOSE_UNREACHABLE, state, [_GOAL], game)
+
+    assert not is_lost, "a balanced 3/3/3 state must not trip balance_unreachable"
+    print("  OK  balance_unreachable_quiet_on_balanced_state")
+
+
 def run_all() -> bool:
     tests = [
         test_incomplete_is_not_done,
         test_complete_but_unequal_is_not_done,
         test_complete_and_equal_is_done,
         test_omitted_claimable_kind_falls_back_to_layer_default,
+        test_balance_unreachable_fires_on_overclaim,
+        test_balance_unreachable_quiet_on_valid_partial,
+        test_balance_unreachable_quiet_on_balanced_state,
     ]
     passed = 0
     failed = 0

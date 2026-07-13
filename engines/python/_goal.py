@@ -371,6 +371,9 @@ def evaluate_lose(
         elif ctype == "balance_budget_exhausted":
             if _balance_budget_exhausted(cfg, state, goals or [], game):
                 return True, "balance_budget_exhausted"
+        elif ctype == "balance_unreachable":
+            if _balance_unreachable(cfg, state, goals or [], game):
+                return True, "balance_unreachable"
     return False, None
 
 
@@ -422,6 +425,44 @@ def _balance_budget_exhausted(
         if deficit > int(remaining.get(actor_kind, 0)):
             return True
     return False
+
+
+def _balance_unreachable(
+    cfg: dict,
+    state: GameState,
+    goals: list[dict],
+    game: GameDef | None,
+) -> bool:
+    """Fires when the `balance` goal's equal-share requirement has already
+    become impossible: some owner has claimed strictly more than its equal
+    share (`claimable / owners`). Because a claimed cell can never change owner,
+    an over-target owner can never come back down, so the level is unwinnable
+    and is lost immediately rather than only when the action cap is reached.
+    Also fires if `claimable` is not divisible by the owner count (equal shares
+    are arithmetically impossible). Generic across coupled and individual modes;
+    unlike `balance_budget_exhausted` it needs no actor/budget wiring."""
+    goal = _balance_goal_for_condition(cfg, goals)
+    if goal is None:
+        return False
+
+    goal_cfg = goal.get("config", {})
+    owners = goal_cfg.get("owners", [])
+    if not owners:
+        return False
+
+    claimable = _count_claimable_for_budget_loss(state, goal_cfg, game)
+    if claimable % len(owners) != 0:
+        return True
+    target = claimable // len(owners)
+
+    owned = {owner: 0 for owner in owners}
+    layer = state.board.layers.get(goal_cfg.get("layer", "territory"))
+    if layer is not None:
+        for _pos, entity in layer.entries():
+            if entity.kind in owned:
+                owned[entity.kind] += 1
+
+    return any(count > target for count in owned.values())
 
 
 def _balance_goal_for_condition(cfg: dict, goals: list[dict]) -> dict | None:

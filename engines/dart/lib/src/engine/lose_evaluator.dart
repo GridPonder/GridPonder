@@ -52,9 +52,56 @@ class LoseEvaluator {
               reason: 'balance_budget_exhausted',
             );
           }
+        case 'balance_unreachable':
+          if (_balanceUnreachable(cond.config, state, goals, game)) {
+            return const LoseStatus(
+              isLost: true,
+              reason: 'balance_unreachable',
+            );
+          }
       }
     }
     return const LoseStatus(isLost: false);
+  }
+
+  /// Fires when the `balance` goal's equal-share requirement has already become
+  /// impossible: some owner has claimed strictly more than its equal share
+  /// (`claimable / owners`). Because a claimed cell can never change owner, an
+  /// over-target owner can never come back down, so the level is unwinnable and
+  /// is lost immediately rather than only when the action cap is reached. Also
+  /// fires if `claimable` is not divisible by the owner count (equal shares are
+  /// arithmetically impossible). Generic across coupled and individual modes;
+  /// unlike `balance_budget_exhausted` it needs no actor/budget wiring.
+  bool _balanceUnreachable(
+    Map<String, dynamic> config,
+    LevelState state,
+    List<GoalDef> goals,
+    GameDefinition? game,
+  ) {
+    final goal = _balanceGoalForCondition(config, goals);
+    if (goal == null) return false;
+
+    final owners =
+        (goal.config['owners'] as List<dynamic>? ?? const []).cast<String>();
+    if (owners.isEmpty) return false;
+
+    final claimable = _countClaimable(state, goal.config, game);
+    if (claimable % owners.length != 0) return true;
+    final target = claimable ~/ owners.length;
+
+    final owned = {for (final owner in owners) owner: 0};
+    final layerId = goal.config['layer'] as String? ?? 'territory';
+    final layer = state.board.layers[layerId];
+    if (layer != null) {
+      for (final entry in layer.entries()) {
+        final count = owned[entry.value.kind];
+        if (count != null) {
+          owned[entry.value.kind] = count + 1;
+        }
+      }
+    }
+
+    return owned.values.any((count) => count > target);
   }
 
   bool _balanceBudgetExhausted(

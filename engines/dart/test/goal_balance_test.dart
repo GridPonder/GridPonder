@@ -2,6 +2,7 @@
 // for the `balance` goal type.
 import 'package:gridponder_engine/engine.dart';
 import 'package:gridponder_engine/src/engine/goal_evaluator.dart';
+import 'package:gridponder_engine/src/engine/lose_evaluator.dart';
 import 'package:test/test.dart';
 
 // ---------------------------------------------------------------------------
@@ -119,6 +120,21 @@ GoalStatus _evaluate(GameDefinition game, LevelState state) =>
 GoalStatus _evaluateWith(GameDefinition game, LevelState state, GoalDef goal) =>
     GoalEvaluator().evaluate(<GoalDef>[goal], state, game, const []);
 
+/// Evaluates a lone `balance_unreachable` lose condition (resolved to the
+/// balance goal via `goalId`) against the given state.
+LoseStatus _loseUnreachable(GameDefinition game, LevelState state) =>
+    LoseEvaluator().evaluate(
+      <LoseConditionDef>[
+        LoseConditionDef.fromJson(const {
+          'type': 'balance_unreachable',
+          'config': {'goalId': 'balance_goal'},
+        }),
+      ],
+      state,
+      goals: <GoalDef>[_goal()],
+      game: game,
+    );
+
 void main() {
   group('balance goal', () {
     test('incomplete board (8/9 owned) is not done', () {
@@ -181,6 +197,47 @@ void main() {
           reason: 'omitted claimableKind must fall back to layer default '
               '(empty) → claimable=9 → complete + equal → done');
       expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
+    });
+  });
+
+  group('balance_unreachable lose condition', () {
+    test('fires when an owner exceeds its equal share (4/3/2)', () {
+      // wei owns 4 of 9 (target 3); claims are permanent, so equal thirds can
+      // never be reached → lost immediately.
+      final game = _makeGame();
+      final territory =
+          _territory({'terr_wei': 4, 'terr_shu': 3, 'terr_wu': 2});
+      final state = _makeState(game, territory);
+
+      final status = _loseUnreachable(game, state);
+
+      expect(status.isLost, isTrue,
+          reason: 'an owner over its equal share (4/3/2) must lose');
+      expect(status.reason, 'balance_unreachable');
+    });
+
+    test('stays quiet on a still-winnable partial (3/3/2)', () {
+      final game = _makeGame();
+      final territory =
+          _territory({'terr_wei': 3, 'terr_shu': 3, 'terr_wu': 2});
+      final state = _makeState(game, territory);
+
+      final status = _loseUnreachable(game, state);
+
+      expect(status.isLost, isFalse,
+          reason: 'a still-winnable partial (3/3/2) must not lose');
+    });
+
+    test('stays quiet on a balanced 3/3/3 state', () {
+      final game = _makeGame();
+      final territory =
+          _territory({'terr_wei': 3, 'terr_shu': 3, 'terr_wu': 3});
+      final state = _makeState(game, territory);
+
+      final status = _loseUnreachable(game, state);
+
+      expect(status.isLost, isFalse,
+          reason: 'a balanced 3/3/3 state must not trip balance_unreachable');
     });
   });
 }

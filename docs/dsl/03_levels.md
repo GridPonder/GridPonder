@@ -360,6 +360,16 @@ Same as the goal type but triggers a loss.
 #### `board_state`
 A specific board condition is detected (e.g., an entity reaches a forbidden cell).
 
+#### `balance_budget_exhausted`
+Pairs with a [`balance`](#balance) goal under [`individual_actors`](04_systems.md#212-individual_actors): fails when equal-share balance can no longer be reached — either some owner has already claimed more than its equal share (`claimable / owners`), or an owner's remaining move budget is smaller than the number of cells it still needs to reach that share. Resolves the balance goal via `config.goalId` (or the first `balance` goal if omitted).
+
+#### `balance_unreachable`
+Pairs with a [`balance`](#balance) goal: fails the moment equal shares become impossible — any owner has claimed strictly more than its equal share (`claimable / owners`), or `claimable` is not divisible by the number of owners. Because a claimed cell can never change owner, an over-target owner can never come back down, so the level is unwinnable and is lost immediately (a "wrong claim" is reported at once instead of only when `max_actions` is reached). Works in both coupled and individual modes and, unlike `balance_budget_exhausted`, needs no actor/budget wiring. Config: `goalId` — the `balance` goal to check (optional; defaults to the first `balance` goal).
+
+```json
+{ "type": "balance_unreachable", "config": { "goalId": "balance_goal" } }
+```
+
 ---
 
 ## System Overrides
