@@ -101,7 +101,51 @@ class LoseEvaluator {
       }
     }
 
+    if (_claimsAreOverwritable(state, game)) return false;
+
     return owned.values.any((count) => count > target);
+  }
+
+  /// True when an owned cell on THIS board could actually be repainted.
+  ///
+  /// Both balance lose conditions share an over-claim test that assumes claims
+  /// are permanent: an owner past its equal share can never come back down.
+  /// That breaks when cells can be repainted, so the test must stay quiet
+  /// rather than report a false loss.
+  ///
+  /// Deliberately a board-level question, not a config-level one. A pack may
+  /// declare a `tagged` policy game-wide while most of its boards carry no
+  /// tagged cells; on those boards claims *are* permanent and the conditions
+  /// must still fire. Asking only "is a policy declared?" would silently
+  /// disable the fail condition for the whole pack, and no gold-path test would
+  /// catch it — a winning path never trips a lose condition.
+  bool _claimsAreOverwritable(LevelState state, GameDefinition? game) {
+    if (game == null) return false;
+    for (final system in game.systems) {
+      if (system.type != 'coupled_actors' &&
+          system.type != 'individual_actors') {
+        continue;
+      }
+      final config = system.config;
+      final claim = config['claim'] as Map<String, dynamic>? ?? const {};
+      final overwrite = claim['overwrite'] as Map<String, dynamic>? ?? const {};
+      final mode = overwrite['mode'] as String? ?? 'never';
+      if (mode == 'always') return true;
+      if (mode != 'tagged') continue;
+      final tag = overwrite['tag'] as String?;
+      if (tag == null || tag.isEmpty) continue;
+      final layerId = overwrite['layer'] as String? ??
+          config['groundLayer'] as String? ??
+          'ground';
+      final layer = state.board.layers[layerId];
+      if (layer == null) continue;
+      for (final entry in layer.entries()) {
+        if (state.board.hasTagAt(layerId, entry.key, tag, game.entityKinds)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   bool _balanceBudgetExhausted(
@@ -133,7 +177,12 @@ class LoseEvaluator {
       }
     }
 
-    if (owned.values.any((count) => count > target)) return true;
+    // Over-claim is only terminal while claims are permanent. The deficit check
+    // below stays sound under reclaim (a claimer still spends a move per cell).
+    if (owned.values.any((count) => count > target) &&
+        !_claimsAreOverwritable(state, game)) {
+      return true;
+    }
 
     final actorToOwner = _actorToOwner(config, game);
     if (actorToOwner.isEmpty) return false;

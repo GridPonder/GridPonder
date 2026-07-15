@@ -168,6 +168,95 @@ LoseStatus _loseUnreachable(GameDefinition game, LevelState state) =>
       game: game,
     );
 
+// ---------------------------------------------------------------------------
+// Over-claim guard under claim.overwrite (DSL 0.10)
+//
+// Both balance lose conditions share an over-claim test ("someone holds more
+// than their equal share, and claims are permanent, so this is dead"). That
+// premise fails when cells can be repainted. The guard is board-level, not
+// config-level: a policy declared game-wide is inert on boards that place no
+// tagged cells.
+// ---------------------------------------------------------------------------
+
+/// A GameDefinition declaring a `tagged` overwrite policy on an actor system.
+/// Whether the guard trips is decided by the BOARD carrying tagged cells, not
+/// by this config.
+GameDefinition _makeGameWithContestedOverwrite() {
+  final data = {
+    'id': 'com.gridponder.test_balance_goal',
+    'layers': [
+      {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+      {'id': 'territory', 'occupancy': 'zero_or_one'},
+    ],
+    'entityKinds': {
+      'empty': {
+        'layer': 'ground',
+        'tags': ['walkable'],
+        'symbol': '.',
+      },
+      'wall': {
+        'layer': 'ground',
+        'tags': ['solid'],
+        'symbol': '#',
+      },
+      'contested': {
+        'layer': 'ground',
+        'tags': ['walkable', 'contested'],
+        'symbol': 'C',
+      },
+      'terr_wei': {
+        'layer': 'territory',
+        'tags': ['territory'],
+        'symbol': '1',
+      },
+      'terr_shu': {
+        'layer': 'territory',
+        'tags': ['territory'],
+        'symbol': '2',
+      },
+      'terr_wu': {
+        'layer': 'territory',
+        'tags': ['territory'],
+        'symbol': '3',
+      },
+    },
+    'actions': [],
+    'systems': [
+      {
+        'id': 'movement',
+        'type': 'coupled_actors',
+        'config': {
+          'claim': {
+            'layer': 'territory',
+            'map': <String, dynamic>{},
+            'overwrite': {'mode': 'tagged', 'tag': 'contested'},
+          },
+        },
+      },
+    ],
+  };
+  return GameDefinition.fromJson(data, id: 'test_balance_goal');
+}
+
+/// Evaluates one balance lose condition against the list-claimableKind goal.
+///
+/// The guard tests place contested cells on the board, which would otherwise
+/// drop `claimable` from 9 to 8 under a string `claimableKind: 'empty'` — and
+/// 8 % 3 != 0 trips the "equal shares are arithmetically impossible" branch
+/// *before* the over-claim test, masking what these tests actually check.
+LoseStatus _loseWith(GameDefinition game, LevelState state, String type) =>
+    LoseEvaluator().evaluate(
+      <LoseConditionDef>[
+        LoseConditionDef.fromJson({
+          'type': type,
+          'config': const {'goalId': 'balance_goal'},
+        }),
+      ],
+      state,
+      goals: <GoalDef>[_goalListClaimableKind()],
+      game: game,
+    );
+
 void main() {
   group('balance goal', () {
     test('incomplete board (8/9 owned) is not done', () {
@@ -295,6 +384,60 @@ void main() {
 
       expect(status.isLost, isFalse,
           reason: 'a balanced 3/3/3 state must not trip balance_unreachable');
+    });
+  });
+
+  group('over-claim guard under claim.overwrite', () {
+    test('balance_unreachable suppressed when board has contested cells', () {
+      // 4/3/2 with a contested cell present: the over-share owner can be
+      // repainted back down, so the condition must stay quiet.
+      final game = _makeGameWithContestedOverwrite();
+      final territory =
+          _territory({'terr_wei': 4, 'terr_shu': 3, 'terr_wu': 2});
+      final state = _makeState(game, territory, contestedCells: const [
+        [0, 0]
+      ]);
+
+      final status = _loseWith(game, state, 'balance_unreachable');
+
+      expect(status.isLost, isFalse,
+          reason: 'overclaim is recoverable while contested cells exist');
+    });
+
+    test('balance_budget_exhausted suppressed when board has contested cells',
+        () {
+      // THE tk_015 CASE. balance_budget_exhausted carries the same over-claim
+      // test as balance_unreachable, and tk_015 uses THIS condition — without
+      // the guard it would lose the instant a kingdom steals a contested cell
+      // and transiently exceeds its third, which is the level's core action.
+      final game = _makeGameWithContestedOverwrite();
+      final territory =
+          _territory({'terr_wei': 4, 'terr_shu': 3, 'terr_wu': 2});
+      final state = _makeState(game, territory, contestedCells: const [
+        [0, 0]
+      ]);
+
+      final status = _loseWith(game, state, 'balance_budget_exhausted');
+
+      expect(status.isLost, isFalse,
+          reason: 'transient overclaim must not lose while contested cells '
+              'exist');
+    });
+
+    test('over-claim still fires when board has no contested cells', () {
+      // A `tagged` overwrite declared game-wide must NOT disable the over-claim
+      // test on boards that place no tagged cells. This is what makes it safe
+      // to declare the policy once in game.json: without it, every level in the
+      // pack silently loses its fail condition and no gold-path test notices.
+      final game = _makeGameWithContestedOverwrite();
+      final territory =
+          _territory({'terr_wei': 4, 'terr_shu': 3, 'terr_wu': 2});
+      final state = _makeState(game, territory);
+
+      expect(_loseWith(game, state, 'balance_unreachable').isLost, isTrue,
+          reason: 'no contested cells -> overclaim is still terminal');
+      expect(_loseWith(game, state, 'balance_budget_exhausted').isLost, isTrue,
+          reason: 'no contested cells -> overclaim is still terminal');
     });
   });
 }

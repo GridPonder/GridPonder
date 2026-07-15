@@ -200,8 +200,41 @@ def test_claimable_kind_accepts_list() -> None:
     print("  OK  claimable_kind_accepts_list")
 
 
-# Lose condition mirroring the balance goal above (resolved via goalId).
+# Lose conditions mirroring the balance goal above (resolved via goalId).
 _LOSE_UNREACHABLE = [{"type": "balance_unreachable", "config": {"goalId": "balance_goal"}}]
+_LOSE_BUDGET = [{"type": "balance_budget_exhausted", "config": {"goalId": "balance_goal"}}]
+
+
+# Goal counting BOTH ground kinds as claimable. The guard tests place contested
+# cells on the board, which would otherwise drop `claimable` from 9 to 8 under a
+# string `claimableKind: "empty"` — and 8 % 3 != 0 trips the "equal shares are
+# arithmetically impossible" branch *before* the over-claim test, masking what
+# these tests are actually checking.
+_GOAL_CONTESTED = {
+    "id": "balance_goal",
+    "type": "balance",
+    "config": {**_GOAL["config"], "claimableKind": ["empty", "contested"]},
+}
+
+
+def _with_contested_overwrite(game: GameDef) -> GameDef:
+    """Declare a `tagged` overwrite policy on every actor system.
+
+    Whether the guard trips is decided by the BOARD carrying tagged cells, not
+    by this config — see the two tests below, which differ only in the board.
+    """
+    game.systems.append({
+        "id": "movement",
+        "type": "coupled_actors",
+        "config": {
+            "claim": {
+                "layer": "territory",
+                "map": {},
+                "overwrite": {"mode": "tagged", "tag": "contested"},
+            },
+        },
+    })
+    return game
 
 
 def test_balance_unreachable_fires_on_overclaim() -> None:
@@ -246,6 +279,70 @@ def test_balance_unreachable_quiet_on_balanced_state() -> None:
     print("  OK  balance_unreachable_quiet_on_balanced_state")
 
 
+# ---------------------------------------------------------------------------
+# Over-claim guard under claim.overwrite (DSL 0.10)
+#
+# Both balance lose conditions share an over-claim test ("someone holds more
+# than their equal share, and claims are permanent, so this is dead"). That
+# premise fails when cells can be repainted. The guard is board-level, not
+# config-level: a policy declared game-wide is inert on boards that place no
+# tagged cells.
+# ---------------------------------------------------------------------------
+
+def test_balance_unreachable_suppressed_when_board_has_contested_cells() -> None:
+    """4/3/2 with a contested cell on the board: the over-share owner can be
+    repainted back down, so the condition must stay quiet rather than report a
+    false loss."""
+    game = _with_contested_overwrite(_make_game())
+    territory = _territory({"terr_wei": 4, "terr_shu": 3, "terr_wu": 2})
+    state = _make_state(game, territory, contested_cells=[(0, 0)])
+
+    is_lost, reason = evaluate_lose(_LOSE_UNREACHABLE, state, [_GOAL_CONTESTED], game)
+
+    assert not is_lost, (
+        f"overclaim is recoverable while contested cells exist; must not lose "
+        f"(got reason={reason!r})"
+    )
+    print("  OK  balance_unreachable_suppressed_when_board_has_contested_cells")
+
+
+def test_balance_budget_exhausted_suppressed_when_board_has_contested_cells() -> None:
+    """THE tk_015 CASE. balance_budget_exhausted carries the same over-claim test
+    as balance_unreachable. tk_015 uses THIS condition, so without the guard it
+    would lose the instant a kingdom steals a contested cell and transiently
+    exceeds its third — the level's core action."""
+    game = _with_contested_overwrite(_make_game())
+    territory = _territory({"terr_wei": 4, "terr_shu": 3, "terr_wu": 2})
+    state = _make_state(game, territory, contested_cells=[(0, 0)])
+
+    is_lost, reason = evaluate_lose(_LOSE_BUDGET, state, [_GOAL_CONTESTED], game)
+
+    assert not is_lost, (
+        f"transient overclaim must not lose while contested cells exist "
+        f"(got reason={reason!r})"
+    )
+    print("  OK  balance_budget_exhausted_suppressed_when_board_has_contested_cells")
+
+
+def test_over_claim_still_fires_when_board_has_no_contested_cells() -> None:
+    """A `tagged` overwrite declared game-wide must NOT disable the over-claim
+    test on boards that place no tagged cells. This is what makes it safe to
+    declare the policy once in game.json: without it, every level in the pack
+    silently loses its fail condition and no gold-path test notices."""
+    game = _with_contested_overwrite(_make_game())
+    territory = _territory({"terr_wei": 4, "terr_shu": 3, "terr_wu": 2})
+    state = _make_state(game, territory, contested_cells=[])
+
+    is_lost, reason = evaluate_lose(_LOSE_UNREACHABLE, state, [_GOAL_CONTESTED], game)
+    assert is_lost, "no contested cells on the board -> overclaim is still terminal"
+    assert reason == "balance_unreachable", f"unexpected reason {reason!r}"
+
+    is_lost, reason = evaluate_lose(_LOSE_BUDGET, state, [_GOAL_CONTESTED], game)
+    assert is_lost, "no contested cells on the board -> overclaim is still terminal"
+    assert reason == "balance_budget_exhausted", f"unexpected reason {reason!r}"
+    print("  OK  over_claim_still_fires_when_board_has_no_contested_cells")
+
+
 def run_all() -> bool:
     tests = [
         test_incomplete_is_not_done,
@@ -256,6 +353,9 @@ def run_all() -> bool:
         test_balance_unreachable_fires_on_overclaim,
         test_balance_unreachable_quiet_on_valid_partial,
         test_balance_unreachable_quiet_on_balanced_state,
+        test_balance_unreachable_suppressed_when_board_has_contested_cells,
+        test_balance_budget_exhausted_suppressed_when_board_has_contested_cells,
+        test_over_claim_still_fires_when_board_has_no_contested_cells,
     ]
     passed = 0
     failed = 0

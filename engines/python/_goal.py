@@ -380,6 +380,47 @@ def evaluate_lose(
     return False, None
 
 
+def _claims_are_overwritable(state: GameState, game: GameDef | None) -> bool:
+    """True when an owned cell on THIS board could actually be repainted.
+
+    Both balance lose conditions share an over-claim test that assumes claims
+    are permanent: an owner past its equal share can never come back down. That
+    breaks when cells can be repainted, so the test must stay quiet rather than
+    report a false loss.
+
+    Deliberately a board-level question, not a config-level one. A pack may
+    declare a `tagged` policy game-wide while most of its boards carry no tagged
+    cells; on those boards claims *are* permanent and the conditions must still
+    fire. Asking only "is a policy declared?" would silently disable the fail
+    condition for the whole pack, and no gold-path test would catch it — a
+    winning path never trips a lose condition.
+    """
+    if game is None:
+        return False
+    for system in getattr(game, "systems", []):
+        if system.get("type") not in ("coupled_actors", "individual_actors"):
+            continue
+        config = system.get("config") or {}
+        claim = config.get("claim") or {}
+        overwrite = claim.get("overwrite") or {}
+        mode = overwrite.get("mode", "never")
+        if mode == "always":
+            return True
+        if mode != "tagged":
+            continue
+        tag = overwrite.get("tag")
+        if not tag:
+            continue
+        layer_id = overwrite.get("layer", config.get("groundLayer", "ground"))
+        layer = state.board.layers.get(layer_id)
+        if layer is None:
+            continue
+        for pos, _entity in layer.entries():
+            if state.board.has_tag_at(layer_id, pos, tag, game.entity_kinds):
+                return True
+    return False
+
+
 def _balance_budget_exhausted(
     cfg: dict,
     state: GameState,
@@ -407,7 +448,10 @@ def _balance_budget_exhausted(
             if entity.kind in owned:
                 owned[entity.kind] += 1
 
-    if any(count > target for count in owned.values()):
+    # Over-claim is only terminal while claims are permanent. The deficit check
+    # below stays sound under reclaim (a claimer still spends a move per cell).
+    if (any(count > target for count in owned.values())
+            and not _claims_are_overwritable(state, game)):
         return True
 
     actor_to_owner = cfg.get("actorToOwner") or _individual_actor_to_owner(game)
@@ -443,7 +487,11 @@ def _balance_unreachable(
     and is lost immediately rather than only when the action cap is reached.
     Also fires if `claimable` is not divisible by the owner count (equal shares
     are arithmetically impossible). Generic across coupled and individual modes;
-    unlike `balance_budget_exhausted` it needs no actor/budget wiring."""
+    unlike `balance_budget_exhausted` it needs no actor/budget wiring.
+
+    The over-claim half is suppressed when the board carries repaintable cells
+    (see `_claims_are_overwritable`) — an over-share owner can then be repainted
+    back down, so it is not terminal."""
     goal = _balance_goal_for_condition(cfg, goals)
     if goal is None:
         return False
@@ -457,6 +505,9 @@ def _balance_unreachable(
     if claimable % len(owners) != 0:
         return True
     target = claimable // len(owners)
+
+    if _claims_are_overwritable(state, game):
+        return False
 
     owned = {owner: 0 for owner in owners}
     layer = state.board.layers.get(goal_cfg.get("layer", "territory"))
