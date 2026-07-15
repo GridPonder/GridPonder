@@ -74,6 +74,27 @@ def dir_delta(d: str) -> tuple[int, int]:
     return _DIR_DELTA.get(d, (0, 0))
 
 
+_DIRECTION_TRANSFORMS = {
+    "identity": lambda dx, dy: (dx, dy),
+    "invert": lambda dx, dy: (-dx, -dy),
+    "mirror_x": lambda dx, dy: (-dx, dy),
+    "mirror_y": lambda dx, dy: (dx, -dy),
+}
+
+
+def transform_delta(delta: tuple[int, int], transform: Optional[str]) -> tuple[int, int]:
+    """Apply a per-actor direction transform to a movement delta.
+
+    See docs/dsl/04_systems.md (`coupled_actors.directionTransforms`).
+    Unrecognised or missing transforms are treated as `identity` — both engines
+    must agree, so this is deliberately lenient rather than throwing.
+    """
+    fn = _DIRECTION_TRANSFORMS.get(transform or "identity")
+    if fn is None:
+        return delta
+    return fn(delta[0], delta[1])
+
+
 def dir_opposite(d: str) -> str:
     return _DIR_OPPOSITE.get(d, d)
 
