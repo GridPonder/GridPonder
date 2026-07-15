@@ -7,7 +7,7 @@ successful-move budgets.
 from __future__ import annotations
 
 from .._game_def import GameDef
-from .._models import CARDINALS, Entity, GameState, Pos, dir_delta
+from .._models import CARDINALS, GameState, Pos, dir_delta
 from .. import _events as ev
 from ._base import GameSystem
 from ._claim import apply_claim
