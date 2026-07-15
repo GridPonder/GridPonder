@@ -345,11 +345,13 @@ A territory layer is divided completely and equally among a fixed set of owners 
 | `layer` | string | Territory layer to tally ownership on. |
 | `owners` | array of strings | Entity kinds counted as "owned" cells, one per owner. |
 | `claimableLayer` | string | Layer whose cells are eligible to be claimed (usually `ground`). |
-| `claimableKind` | string | Kind that counts as claimable. Default: that layer's declared `default` kind. |
+| `claimableKind` | string or array of strings | Kind(s) that count as claimable. A list is allowed for boards where more than one ground kind can be owned. Default: that layer's declared `default` kind. |
 | `requireComplete` | boolean | Require every claimable cell to be owned (`owned == claimable`). Default: `true`. |
 | `requireEqual` | boolean | Require every owner's count to be identical. Default: `true`. |
 
-**Engine behavior:** Tally each owner's cell count on `layer`. `claimable` = number of `claimableLayer` cells whose kind is `claimableKind`. The goal is done when (`equal`, or `requireEqual` is `false`) and (`complete`, or `requireComplete` is `false`); progress = owned / claimable (or `1.0` when nothing is claimable).
+**Engine behavior:** Tally each owner's cell count on `layer`. `claimable` = number of `claimableLayer` cells whose kind matches `claimableKind`. The goal is done when (`equal`, or `requireEqual` is `false`) and (`complete`, or `requireComplete` is `false`); progress = owned / claimable (or `1.0` when nothing is claimable).
+
+> **Keep `claimableKind` in step with the board.** The balance lose conditions count claimable cells the same way. If a board introduces a second walkable ground kind and `claimableKind` still names only one, `claimable` silently drops — which usually makes it indivisible by the owner count and fails the level as "equal shares impossible" before anything else is evaluated.
 
 ---
 
@@ -384,6 +386,14 @@ Pairs with a [`balance`](#balance) goal: fails the moment equal shares become im
 ```json
 { "type": "balance_unreachable", "config": { "goalId": "balance_goal" } }
 ```
+
+> **Soundness under [`claim.overwrite`](04_systems.md#213-claim-overwrite).** Both conditions above share an over-claim test: an owner past its equal share is treated as dead, because claims are permanent and it can never come back down. That premise fails when cells can be repainted — an over-share owner can be brought back down by losing cells.
+>
+> The engine therefore suppresses **the over-claim test in both conditions** when the current board actually carries repaintable cells: `overwrite.mode: "always"`, or `"tagged"` with at least one tagged cell present on the board. The check is board-level, not config-level, so a pack may declare a `tagged` policy game-wide and still get the full over-claim test on every board that places no tagged cells.
+>
+> `balance_budget_exhausted`'s *deficit* test (an owner needing more cells than it has moves left) stays active regardless — it remains sound under reclaim, since claiming a cell still costs a move.
+>
+> **Consequence for level design:** a level with repaintable cells cannot rely on either condition to punish overshooting, because overshooting is no longer fatal there. Bound such a level with `max_actions`, or with the deficit half of `balance_budget_exhausted`.
 
 ---
 

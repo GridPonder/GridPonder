@@ -479,6 +479,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 | `actorLayer` | string | `"actors"` | Layer holding the moving entities. |
 | `groundLayer` | string | `"ground"` | Layer checked for wall collisions. |
 | `wallTag` | string | `"solid"` | Tag on `groundLayer` that blocks a mover. |
+| `directionTransforms` | object | `{}` | Actor kind → direction transform. Kinds not listed use `identity`. Values: `identity`, `invert` (180° reverse), `mirror_x` (flip left/right), `mirror_y` (flip up/down). Unrecognised values are treated as `identity`. |
 | `claim` | object | — | Optional. When present, an actor that reaches a new cell also claims it in a territory layer. See below. |
 
 `claim` object:
@@ -487,25 +488,29 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 |-------|------|-------------|
 | `layer` | string | Territory layer to write claims into. Must be declared in the game's `layers` array. |
 | `map` | object | Mover's entity kind → claim-mark entity kind written to `claim.layer`. |
+| `overwrite` | object | Optional. Policy for entering a cell that is already owned. Defaults to `{mode: "never"}` — the pre-0.10 behaviour. See [Claim overwrite](#claim-overwrite). |
 
 Example config:
 ```json
 {
   "actorLayer": "actors",
   "groundLayer": "ground",
+  "directionTransforms": { "mirror": "invert" },
   "claim": {
     "layer": "territory",
-    "map": { "wei": "terr_wei", "shu": "terr_shu" }
+    "map": { "runner": "terr_runner", "mirror": "terr_mirror" }
   }
 }
 ```
 
 **Behavior:**
-1. On `moveAction` with a direction in `directions`, collect every actor entity on `actorLayer` as `(position, kind)` pairs.
-2. Sort front-first: by the projection of `position` onto the direction of travel, descending; ties are broken by the other-axis coordinate, then by kind — fully deterministic.
+1. On `moveAction` with a direction in `directions`, collect every actor entity on `actorLayer` as `(position, kind)` pairs, and compute each actor's **effective direction** by applying its `directionTransforms` entry to the action's direction.
+2. Group actors into **buckets** by effective direction. Buckets resolve in the fixed canonical order `up, down, left, right`. Within a bucket, sort front-first: by the projection of `position` onto that bucket's direction, descending; ties are broken by the other-axis coordinate, then by kind — fully deterministic. When every actor uses `identity` there is exactly one bucket and this is identical to pre-0.10 ordering.
 3. Seed the `occupied` set with every actor's current position.
 4. For each actor in order: if its target cell is out of bounds, tagged `wallTag` on `groundLayer`, or still in `occupied`, the actor stays and emits `actor_blocked`. Otherwise it moves — `occupied` is updated live (old cell freed, new cell claimed) before the next actor resolves, the actor is relocated on `actorLayer`, and `actor_moved` + `actor_entered` are emitted.
-5. If `claim` is configured and the actor moved: when the destination cell in `claim.layer` is empty, set it to `claim.map[kind]` and emit `cell_claimed`. An already-owned cell is never overwritten. Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
+5. If `claim` is configured and the actor moved, apply the claim policy — see [Claim overwrite](#claim-overwrite). Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
+
+**Mirrored actors.** `directionTransforms` lets one input drive actors in different directions at once — mirrored/opposed avatars, tug-of-war pairs, reflection puzzles. Two actors that target each other's cells (a mutual swap) both stay put; this falls out of the live `occupied` set and needs no special case. `actor_moved` / `actor_entered` always report the **action's** direction, not the effective one.
 
 **Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals).
 
@@ -553,9 +558,42 @@ Example config:
 1. On `selectAction`, if the tapped cell contains an actor entity, store its kind in `selectedVariable` and emit `actor_selected`. If `budgets` is configured, initialise `budgetVariable` from it the first time an actor is selected.
 2. On `moveAction`, reject with `action_vetoed` if no actor is selected, the selected actor is missing, or its remaining budget is 0.
 3. Compute the selected actor's target cell. If the target is out of bounds, tagged `wallTag` on `groundLayer`, or occupied by another actor, the actor stays and emits `actor_blocked`.
-4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, optionally claim the destination cell, and decrement that actor's remaining budget when budgets are configured.
+4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, apply the claim policy to the destination cell (see [Claim overwrite](#claim-overwrite)), and decrement that actor's remaining budget when budgets are configured.
 
 **Reuse:** Game-agnostic — any game with multiple layer-entity actors can use it for tap-to-select movement, squad puzzles, or budgeted routing.
+
+---
+
+### 2.13 Claim overwrite
+
+Shared by `coupled_actors` and `individual_actors` — both resolve claims identically.
+
+`claim.overwrite` object:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `mode` | string | `"never"` | `never` — an owned cell is never repainted (pre-0.10 behaviour). `always` — the last visitor owns every cell. `tagged` — the last visitor owns only cells carrying `tag`. |
+| `tag` | string | — | Required when `mode` is `"tagged"`. |
+| `layer` | string | the system's `groundLayer` | Layer checked for `tag`. |
+
+**Resolution, in order:**
+1. No `claim` block, or no `claim.map` entry for the mover's kind → nothing happens.
+2. Destination already owned **by the mover's own kind** → nothing happens, **no event**. Re-entering your own territory is never a re-claim, under any policy.
+3. Destination unowned → claimed; emits `cell_claimed`.
+4. Destination owned by another kind, and the policy allows overwriting it → repainted; emits `cell_claimed`.
+5. Destination owned by another kind, and the policy does not → untouched, no event. The mover passes over it freely: a **transit**.
+
+```json
+"claim": {
+  "layer": "territory",
+  "map": { "runner": "terr_runner", "mirror": "terr_mirror" },
+  "overwrite": { "mode": "tagged", "tag": "contested" }
+}
+```
+
+**Design note.** `never` and `tagged` differ in a way worth planning around: under `never`, owned ground is a free corridor — a mover crosses it without taking it. Tagged ground is the opposite: it **cannot be crossed without taking it**, since every entry repaints. A game can therefore use the tag to mark ground that costs ownership to traverse.
+
+**Interaction with the balance lose conditions.** Both `balance_unreachable` and `balance_budget_exhausted` treat an owner past its equal share as terminal, which is only true while claims are permanent. When the current board carries repaintable cells, the engine suppresses that over-claim test in both conditions rather than report a false loss — see [03_levels.md](03_levels.md#lose-conditions).
 
 ---
 
