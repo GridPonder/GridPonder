@@ -148,10 +148,25 @@ Objects that span multiple cells or have internal state beyond what a single ent
 |-------|------|----------|-------------|
 | `id` | string | **yes** | Unique identifier for this object instance. Referenced by rules and systems. |
 | `kind` | string | **yes** | Multi-cell object kind (e.g., `"pipe"`). |
-| `cells` | array of `[x,y]` | **yes** | All cells this object occupies. |
+| `cells` | array | **yes** | All cells this object occupies. Each entry is either `[x,y]` or an extended cell object. |
 | `params` | object | no | Kind-specific parameters (queue contents, exit position, etc.). |
 
 Multi-cell objects are rendered on the `structures` layer by default.
+
+An extended cell object adds a non-semantic per-cell sprite override while
+keeping the same board position semantics:
+
+```json
+{
+  "position": [0, 1],
+  "sprite": "assets/sprites/pipe_corner.png"
+}
+```
+
+| Extended cell field | Type | Required | Description |
+|---------------------|------|----------|-------------|
+| `position` | `[x,y]` | **yes** | Cell occupied by the multi-cell object. |
+| `sprite` | string | no | Pack-relative sprite used for this cell instead of the kind's default sprite. Engines that do not render may ignore it. |
 
 ---
 

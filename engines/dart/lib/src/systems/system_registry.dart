@@ -11,6 +11,7 @@ import 'push_objects_system.dart';
 import 'queued_emitters_system.dart';
 import 'region_transform_system.dart';
 import 'sided_box_system.dart';
+import 'sliding_blocks_system.dart';
 import 'slide_merge_system.dart';
 import 'tile_teleport_system.dart';
 
@@ -29,6 +30,8 @@ class SystemRegistry {
     'overlay_cursor': (id, _) => OverlayCursorSystem(id: id),
     'region_transform': (id, _) => RegionTransformSystem(id: id),
     'sided_box': (id, _) => SidedBoxSystem(id: id),
+    'sliding_blocks': (id, config) =>
+        SlidingBlocksSystem(id: id, config: config),
     'flood_fill': (id, _) => FloodFillSystem(id: id),
     'tile_teleport': (id, _) => TileTeleportSystem(id: id),
     'ice_slide': (id, _) => IceSlideSystem(id: id),

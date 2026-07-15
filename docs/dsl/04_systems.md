@@ -1,6 +1,6 @@
 # Gridponder DSL — System Catalog
 
-The ten built-in engine systems, their execution order, and the per-system configuration reference.
+The built-in engine systems, their execution order, and the per-system configuration reference.
 
 ## 1. System Architecture
 
@@ -96,7 +96,110 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 
 ---
 
-### 2.3 `portals`
+### 2.3 `sliding_blocks`
+
+**Purpose:** Move rigid `multiCellObjects` directly, one cell at a time, using a `move` action that carries both a start `position` and a `direction`.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `multi_cell_object_moved`, `multi_cell_object_exited`,
+`object_placed`, `object_removed`, `line_of_sight_collected`,
+`cell_transformed`, `variable_changed`
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `moveAction` | string | `"move"` | Action id that triggers block movement. |
+| `validGroundTags` | array of strings | `["walkable"]` | Tags required on the ground cell for every destination cell that remains on the board. |
+| `blockingLayers` | array of strings | `["objects"]` | Ordinary board layers that can block a sliding object. |
+| `blockingTags` | array of strings | `["solid"]` | Tags that block movement on `blockingLayers`. Empty means any entity on those layers blocks. |
+| `coverableTags` | array of strings | `[]` | Blocking entity tags that ordinary sliding objects may overlap, for example a floor hatch or pressure plate that remains present under a block. |
+| `coverableBlockedRoles` | array of strings | `["escapee"]` | Object roles that must still treat `coverableTags` as blocking. This lets scenery cover a tagged cell without allowing a protected role to enter it. |
+| `exitTags` | array of strings | `["exit"]` | Ground tags that allow an escapee to leave the board. |
+| `escapedVariable` | string | `"escapedCount"` | Variable incremented when an escapee exits. |
+| `revealOnUncovered` | array | `[]` | Spawn configured objects after a block moves away from their hidden positions. |
+| `collectOnEnter` | array | `[]` | Collect configured objects when a moving multi-cell object enters their cells. |
+| `lineOfSightCollect` | array | `[]` | After an accepted slide, collect configured objects that have an unobstructed same-row or same-column line to an eligible multi-cell collector. |
+| `objectInteractions` | array | `[]` | Transform or remove configured objects when variable requirements are satisfied. By default interactions check the moving object's destination cells; `scope: "board"` checks the whole target layer. |
+
+**Multi-cell object params:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `axis` | string | `"horizontal"`, `"vertical"`, `"both"`, or any other value to make the object immovable. |
+| `role` | string | Use `"escapee"` for blocks allowed to leave through an exit edge. |
+
+**Presentation convention:** Give directly manipulated multi-cell entity kinds
+the semantic tag `sliding_block`. UI clients may use this tag to render those
+objects above ordinary cell layers and to show selection feedback. The engine
+does not require the tag; movement is determined by the action and object
+params above.
+
+**Behavior:**
+1. Read the action's `position` and find the `multiCellObject` occupying that cell.
+2. Reject the action if no block is found or if the block's `axis` does not allow the requested `direction`.
+3. Compute the block's translated cells one step in that direction.
+4. Reject the action if any translated cell collides with another multi-cell object, a new blocking entity, void, out-of-bounds space, or invalid ground. Rejected actions leave the board, variables, counters, and undo history unchanged. A block may continue to overlap a blocking entity that was already under one of its old cells. It may enter a blocking entity tagged by `coverableTags` only when its role is not listed in `coverableBlockedRoles`.
+5. If the translated cells leave the board, allow the move only when the block has `role: "escapee"` and its leading edge is currently on a ground cell tagged by `exitTags`. The block is then removed, `escapedVariable` is incremented, and the post-move reveal, line-of-sight, and board interaction steps still run.
+6. Before collision validation, apply matching destination-scoped `objectInteractions` to destination cells. This supports generic cases such as a collected key opening a locked gate.
+7. Otherwise, replace the block's cell list with the translated cell list.
+8. After the move, apply matching `collectOnEnter` rules to the block's new cells.
+9. After the move, apply `revealOnUncovered` rules whose hidden positions are no longer covered by any multi-cell object.
+10. After the move, apply matching `lineOfSightCollect` rules to every eligible collector. A collectible covered by another multi-cell object cannot be collected.
+11. After collection and reveal effects, apply `objectInteractions` again. This lets board-scoped interactions update visible objects immediately after a variable changes, for example opening all visible locked gates as soon as a key is collected.
+
+**Optional `revealOnUncovered` entries:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `position` | position | Hidden cell to watch. |
+| `layer` | string | Layer to place the revealed object on, usually `"objects"`. |
+| `kind` | string | Entity kind to spawn when the position is no longer covered. |
+| `revealedVariable` | string | Optional boolean variable set after the reveal to prevent duplicate spawns. |
+
+**Optional `collectOnEnter` entries:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `roles` | array of strings | Optional allowed multi-cell object roles, such as `["escapee"]`. |
+| `layer` | string | Layer to inspect for collectible objects. |
+| `kinds` | array of strings | Optional specific entity kinds to collect. |
+| `tags` | array of strings | Optional entity tags to collect. |
+| `variable` | string | Optional variable incremented for each collected object. |
+| `remove` | boolean | Whether to remove the collected object. Defaults to `true`. |
+
+**Optional `lineOfSightCollect` entries:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `roles` | array of strings | Optional allowed multi-cell object roles, such as `["escapee"]`. |
+| `layer` | string | Layer to inspect for collectible objects. |
+| `kinds` | array of strings | Optional specific entity kinds to collect. |
+| `tags` | array of strings | Optional entity tags to collect. |
+| `variable` | string | Optional variable incremented for each collected object. |
+| `remove` | boolean | Whether to remove the collected object. Defaults to `true`. |
+| `blockingLayers` | array of strings | Layers checked as line-of-sight blockers. Defaults to the system `blockingLayers`. |
+| `blockingTags` | array of strings | Tags that block line of sight on `blockingLayers`. Defaults to the system `blockingTags`. |
+
+**Optional `objectInteractions` entries:**
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `layer` | string | Layer to inspect for target objects. |
+| `targetKinds` | array of strings | Optional specific target entity kinds. |
+| `targetTags` | array of strings | Optional target entity tags. |
+| `requiredVariable` | string | Optional variable that must meet `minValue`. |
+| `minValue` | number | Minimum required variable value. Defaults to `1`. |
+| `toKind` | string | Entity kind to transform the target into. |
+| `remove` | boolean | Whether to remove the target instead of transforming it. |
+| `scope` | string | `"destination"` checks only the moving object's destination cells. `"board"` checks every occupied cell on `layer`. Defaults to `"destination"`. |
+
+**Gesture convention:** UI clients should map a drag start cell to `position` and the drag direction to `direction`. There is no separate engine-level selection state.
+
+---
+
+### 2.4 `portals`
 
 **Purpose:** Teleport avatar (or objects) between paired portal entities.
 
@@ -123,7 +226,7 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 
 ---
 
-### 2.4 `slide_merge`
+### 2.5 `slide_merge`
 
 **Purpose:** Slide all mergeable tiles in the swipe direction; merge matching tiles.
 
@@ -153,7 +256,7 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 
 ---
 
-### 2.5 `queued_emitters`
+### 2.6 `queued_emitters`
 
 **Purpose:** Release one item per turn from each multi-cell emitter whose exit cell is empty.
 
@@ -194,7 +297,7 @@ Each turn the pipe runs two phases:
 
 ---
 
-### 2.6 `overlay_cursor`
+### 2.7 `overlay_cursor`
 
 **Purpose:** Maintain a movable overlay region that `region_transform` operates on.
 
@@ -365,6 +468,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 |--------|------|-------|---------------|
 | Avatar Navigation | `avatar_navigation` | `action_resolution` | `move` |
 | Push Objects | `push_objects` | `movement_resolution` | (automatic on move into pushable) |
+| Sliding Blocks | `sliding_blocks` | `action_resolution` | `move(position, direction)` |
 | Portals | `portals` | `movement_resolution` | (automatic on portal entry) |
 | Slide Merge | `slide_merge` | `action_resolution` | `move` |
 | Queued Emitters | `queued_emitters` | `cascade_resolution` | (event-triggered) |
@@ -391,6 +495,9 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 
 ### Number-style with diagonal swaps
 `slide_merge` + `overlay_cursor` + `region_transform` (diagonal_swap op) (with `sequence_match` goal)
+
+### Direct sliding-block escape games
+`sliding_blocks` (with `multiCellObjects` and a `variable_threshold` escape goal)
 
 ### Transformation-style games (pattern matching)
 `overlay_cursor` + `region_transform` (rotate + flip ops) + `flood_fill`

@@ -89,7 +89,10 @@ class TurnEngine:
         params: Optional[dict] = None,
         save_history: bool = True,
     ) -> TurnResult:
-        """Execute one turn. Returns TurnResult. State is mutated in place.
+        """Execute one turn transactionally and return its result.
+
+        Systems mutate a working state in place. The live state is replaced
+        only after the action is accepted, so vetoed actions have no effects.
 
         Parameters
         ----------
@@ -108,8 +111,10 @@ class TurnEngine:
         if save_history:
             self._history.append(self._state.copy())
 
-        state = self._state
-        systems = instantiate_systems(self._game)
+        # Systems mutate state in place. Run the turn on a working copy so a
+        # later veto cannot leak earlier system effects into the live state.
+        state = self._state.copy()
+        systems = instantiate_systems(self._game, self._level.get("systemOverrides"))
         all_events: list[dict] = []
 
         # Phase 2: Action resolution
@@ -121,7 +126,7 @@ class TurnEngine:
         if any(e["type"] == "action_vetoed" for e in all_events):
             if save_history:
                 self._history.pop()
-            return TurnResult(accepted=False, events=all_events, is_won=False, is_lost=False)
+            return TurnResult(accepted=False, events=[], is_won=False, is_lost=False)
 
         # Phase 3: Movement resolution
         for sys in systems:
@@ -174,6 +179,7 @@ class TurnEngine:
                 state.is_lost = True
 
         all_events.append(ev.turn_ended(state.turn_count))
+        self._state = state
 
         return TurnResult(
             accepted=True,
@@ -216,7 +222,10 @@ class TurnEngine:
                 )
         if not initial_events:
             return
-        systems = instantiate_systems(self._game)
+        systems = instantiate_systems(
+            self._game,
+            self._level.get("systemOverrides"),
+        )
         level_rules = self._level.get("rules", []) or []
         norm_level_rules = [
             {
