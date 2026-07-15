@@ -23,6 +23,7 @@ from .._models import Pos, GameState, dir_delta, transform_delta, CARDINALS, Ent
 from .._game_def import GameDef
 from .. import _events as ev
 from ._base import GameSystem
+from ._claim import apply_claim
 
 # Buckets resolve in this fixed order so that a board whose actors travel in
 # several directions at once is still fully deterministic.
@@ -107,11 +108,9 @@ class CoupledActorsSystem(GameSystem):
             events.append(ev.actor_moved(entity.kind, pos, target, direction))
             events.append(ev.actor_entered(entity.kind, target, pos, direction))
 
-            if claim is not None:
-                claim_layer_id = claim["layer"]
-                claim_kind = claim.get("map", {}).get(entity.kind)
-                if claim_kind is not None and board.get_entity(claim_layer_id, target) is None:
-                    board.set_entity(claim_layer_id, target, Entity(claim_kind))
-                    events.append(ev.cell_claimed(target, claim_layer_id, claim_kind, entity.kind))
+            claim_event = apply_claim(
+                board, game, claim, ground_layer_id, target, entity.kind)
+            if claim_event is not None:
+                events.append(claim_event)
 
         return events

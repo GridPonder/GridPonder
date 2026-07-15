@@ -10,6 +10,7 @@ from .._game_def import GameDef
 from .._models import CARDINALS, Entity, GameState, Pos, dir_delta
 from .. import _events as ev
 from ._base import GameSystem
+from ._claim import apply_claim
 
 
 class IndividualActorsSystem(GameSystem):
@@ -98,13 +99,10 @@ class IndividualActorsSystem(GameSystem):
             ev.actor_entered(entity.kind, target, pos, direction),
         ]
 
-        claim = config.get("claim")
-        if claim is not None:
-            claim_layer_id = claim["layer"]
-            claim_kind = claim.get("map", {}).get(entity.kind)
-            if claim_kind is not None and board.get_entity(claim_layer_id, target) is None:
-                board.set_entity(claim_layer_id, target, Entity(claim_kind))
-                events.append(ev.cell_claimed(target, claim_layer_id, claim_kind, entity.kind))
+        claim_event = apply_claim(
+            board, game, config.get("claim"), ground_layer_id, target, entity.kind)
+        if claim_event is not None:
+            events.append(claim_event)
 
         if remaining is not None:
             remaining[entity.kind] = int(remaining.get(entity.kind, 0)) - 1

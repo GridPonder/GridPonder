@@ -6,6 +6,7 @@ import '../models/game_action.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
+import 'claim_policy.dart';
 
 /// One actor resolved for this turn, with the effective direction it travels
 /// in after its `directionTransforms` entry is applied.
@@ -150,17 +151,9 @@ class CoupledActorsSystem extends GameSystem {
       events
           .add(GameEvent.actorEntered(entity.kind, target, pos, directionStr));
 
-      if (claim != null) {
-        final claimLayerId = claim['layer'] as String;
-        final claimMap = claim['map'] as Map<String, dynamic>? ?? const {};
-        final claimKind = claimMap[entity.kind] as String?;
-        if (claimKind != null &&
-            board.getEntity(claimLayerId, target) == null) {
-          board.setEntity(claimLayerId, target, EntityInstance(claimKind));
-          events.add(GameEvent.cellClaimed(
-              target, claimLayerId, claimKind, entity.kind));
-        }
-      }
+      final claimEvent =
+          applyClaim(board, game, claim, groundLayerId, target, entity.kind);
+      if (claimEvent != null) events.add(claimEvent);
     }
 
     return events;

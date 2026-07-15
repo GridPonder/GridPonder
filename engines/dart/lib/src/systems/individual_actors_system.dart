@@ -5,6 +5,7 @@ import '../models/game_action.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
+import 'claim_policy.dart';
 
 /// Selects one actor with a tap action, then moves only that selected actor
 /// with the configured move action. Optional claiming and per-actor successful
@@ -123,17 +124,15 @@ class IndividualActorsSystem extends GameSystem {
       GameEvent.actorEntered(entity.kind, target, pos, directionStr),
     ];
 
-    final claim = config['claim'] as Map<String, dynamic>?;
-    if (claim != null) {
-      final claimLayerId = claim['layer'] as String;
-      final claimMap = claim['map'] as Map<String, dynamic>? ?? const {};
-      final claimKind = claimMap[entity.kind] as String?;
-      if (claimKind != null && board.getEntity(claimLayerId, target) == null) {
-        board.setEntity(claimLayerId, target, EntityInstance(claimKind));
-        events.add(GameEvent.cellClaimed(
-            target, claimLayerId, claimKind, entity.kind));
-      }
-    }
+    final claimEvent = applyClaim(
+      board,
+      game,
+      config['claim'] as Map<String, dynamic>?,
+      groundLayerId,
+      target,
+      entity.kind,
+    );
+    if (claimEvent != null) events.add(claimEvent);
 
     if (remaining != null) {
       remaining[entity.kind] = (remaining[entity.kind] ?? 0) - 1;
