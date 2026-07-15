@@ -297,6 +297,83 @@ def test_claim_not_applied_to_blocked_actor() -> None:
     print("  OK  claim_not_applied_to_blocked_actor")
 
 
+# ---------------------------------------------------------------------------
+# directionTransforms (DSL 0.10) — per-actor direction mapping
+# ---------------------------------------------------------------------------
+
+def _make_game_with_transforms(transforms: dict) -> GameDef:
+    """A fresh GameDef whose `movement` system carries `directionTransforms`.
+
+    Built per-call (not mutated in place) so tests can't leak config into
+    each other.
+    """
+    game = _make_game()
+    for s in game.systems:
+        if s["id"] == "movement":
+            s.setdefault("config", {})["directionTransforms"] = transforms
+    return game
+
+
+def test_identity_transforms_match_legacy_order() -> None:
+    """COMPATIBILITY GUARANTEE: an explicit all-identity config must behave
+    exactly like no config at all — one bucket, unchanged front-first sort."""
+    results = []
+    for game in (_make_game(),
+                 _make_game_with_transforms({"wei": "identity", "shu": "identity"})):
+        level = _make_level(actors=[(1, 0, "wei"), (2, 0, "shu")], walls=[])
+        engine = TurnEngine(game, level)
+        engine.execute_turn("move", {"direction": "right"})
+        results.append({
+            "wei": _actor_pos(engine, "wei"),
+            "shu": _actor_pos(engine, "shu"),
+        })
+
+    assert results[0] == results[1], (
+        f"identity transforms diverged from legacy behaviour: {results[0]} vs {results[1]}"
+    )
+    print("  OK  identity_transforms_match_legacy_order")
+
+
+def test_invert_moves_actor_opposite() -> None:
+    """One order, two directions: wei steps right, shu (inverted) steps left.
+
+    Starts are 1 and 4 so the two never contend for the same destination —
+    they converge to 2 and 3, staying distinct.
+    """
+    game = _make_game_with_transforms({"shu": "invert"})
+    level = _make_level(actors=[(1, 0, "wei"), (4, 0, "shu")], walls=[])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(2, 0), (
+        f"wei should step right to (2,0), got {_actor_pos(engine, 'wei')}"
+    )
+    assert _actor_pos(engine, "shu") == Pos(3, 0), (
+        f"shu (inverted) should step left to (3,0), got {_actor_pos(engine, 'shu')}"
+    )
+    print("  OK  invert_moves_actor_opposite")
+
+
+def test_inverted_actors_swapping_cells_both_block() -> None:
+    """Mutual swap: wei at 2 moving right, shu at 3 inverted moving left. Each
+    targets the other's occupied cell, so both stay put. Falls out of the live
+    `occupied` set — no special case needed."""
+    game = _make_game_with_transforms({"shu": "invert"})
+    level = _make_level(actors=[(2, 0, "wei"), (3, 0, "shu")], walls=[])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(2, 0), (
+        f"wei must stay at (2,0) in a mutual swap, got {_actor_pos(engine, 'wei')}"
+    )
+    assert _actor_pos(engine, "shu") == Pos(3, 0), (
+        f"shu must stay at (3,0) in a mutual swap, got {_actor_pos(engine, 'shu')}"
+    )
+    print("  OK  inverted_actors_swapping_cells_both_block")
+
+
 def run_all() -> bool:
     tests = [
         test_open_move_shifts_and_trains_both_actors,
@@ -306,6 +383,9 @@ def run_all() -> bool:
         test_claim_marks_fresh_destination_cells_for_each_mover,
         test_claim_does_not_overwrite_already_owned_cell,
         test_claim_not_applied_to_blocked_actor,
+        test_identity_transforms_match_legacy_order,
+        test_invert_moves_actor_opposite,
+        test_inverted_actors_swapping_cells_both_block,
     ]
     passed = 0
     failed = 0

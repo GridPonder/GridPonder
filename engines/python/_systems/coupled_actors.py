@@ -19,10 +19,14 @@ to blocked/staying actors or to actors' initial cells.
 """
 from __future__ import annotations
 
-from .._models import Pos, GameState, dir_delta, CARDINALS, Entity
+from .._models import Pos, GameState, dir_delta, transform_delta, CARDINALS, Entity
 from .._game_def import GameDef
 from .. import _events as ev
 from ._base import GameSystem
+
+# Buckets resolve in this fixed order so that a board whose actors travel in
+# several directions at once is still fully deterministic.
+_CANONICAL_BUCKETS = ((0, -1), (0, 1), (-1, 0), (1, 0))  # up, down, left, right
 
 
 class CoupledActorsSystem(GameSystem):
@@ -58,21 +62,35 @@ class CoupledActorsSystem(GameSystem):
         if not actors:
             return []
 
-        # Front-first order: sort by the projection of position onto the
-        # direction of travel, descending (the actor nearest the direction
-        # of travel resolves first). Ties broken by the other-axis
-        # coordinate then kind, for a fully deterministic order.
-        actors.sort(key=lambda pe: (
-            -(pe[0].x * dx + pe[0].y * dy),
-            pe[0].x * abs(dy) + pe[0].y * abs(dx),
-            pe[1].kind,
-        ))
+        transforms = config.get("directionTransforms", {}) or {}
+
+        # Each actor travels in its own effective direction.
+        triples = [
+            (pos, entity, transform_delta((dx, dy), transforms.get(entity.kind)))
+            for pos, entity in actors
+        ]
+
+        # Bucket by effective direction; buckets resolve in canonical order.
+        # Within a bucket, front-first exactly as before: projection onto that
+        # bucket's direction descending, then the other-axis coordinate, then
+        # kind — fully deterministic. With all-identity transforms there is a
+        # single bucket and this reproduces the pre-0.10 order exactly.
+        ordered: list[tuple[Pos, Entity, tuple[int, int]]] = []
+        for bucket in _CANONICAL_BUCKETS:
+            bdx, bdy = bucket
+            members = [t for t in triples if t[2] == bucket]
+            members.sort(key=lambda t: (
+                -(t[0].x * bdx + t[0].y * bdy),
+                t[0].x * abs(bdy) + t[0].y * abs(bdx),
+                t[1].kind,
+            ))
+            ordered.extend(members)
 
         occupied = {pos for pos, _ in actors}
         events: list[dict] = []
 
-        for pos, entity in actors:
-            target = Pos(pos.x + dx, pos.y + dy)
+        for pos, entity, (edx, edy) in ordered:
+            target = Pos(pos.x + edx, pos.y + edy)
             blocked = (
                 not board.is_in_bounds(target)
                 or board.has_tag_at(ground_layer_id, target, wall_tag, game.entity_kinds)

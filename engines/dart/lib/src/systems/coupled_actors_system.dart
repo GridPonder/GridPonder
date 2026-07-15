@@ -1,10 +1,21 @@
 import '../engine/game_system.dart';
+import '../models/direction_transform.dart';
 import '../models/entity.dart';
 import '../models/event.dart';
 import '../models/game_action.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
+
+/// One actor resolved for this turn, with the effective direction it travels
+/// in after its `directionTransforms` entry is applied.
+class _Mover {
+  final Position pos;
+  final EntityInstance entity;
+  final Position eff;
+
+  const _Mover(this.pos, this.entity, this.eff);
+}
 
 /// CoupledActorsSystem — see docs/dsl/04_systems.md.
 ///
@@ -30,6 +41,15 @@ class CoupledActorsSystem extends GameSystem {
       : super(type: 'coupled_actors');
 
   static const _defaultDirections = ['up', 'down', 'left', 'right'];
+
+  /// Buckets resolve in this fixed order so that a board whose actors travel in
+  /// several directions at once is still fully deterministic.
+  static const _canonicalBuckets = [
+    Position(0, -1), // up
+    Position(0, 1), // down
+    Position(-1, 0), // left
+    Position(1, 0), // right
+  ];
 
   @override
   List<GameEvent> executeActionResolution(
@@ -69,27 +89,49 @@ class CoupledActorsSystem extends GameSystem {
     final actors = actorLayer.entries().toList();
     if (actors.isEmpty) return const [];
 
-    // Front-first order: sort by the projection of position onto the
-    // direction of travel, descending (the actor nearest the direction of
-    // travel resolves first). Ties broken by the other-axis coordinate then
-    // kind, for a fully deterministic order.
-    actors.sort((a, b) {
-      final projA = a.key.x * delta.x + a.key.y * delta.y;
-      final projB = b.key.x * delta.x + b.key.y * delta.y;
-      if (projA != projB) return projB.compareTo(projA);
-      final otherA = a.key.x * delta.y.abs() + a.key.y * delta.x.abs();
-      final otherB = b.key.x * delta.y.abs() + b.key.y * delta.x.abs();
-      if (otherA != otherB) return otherA.compareTo(otherB);
-      return a.value.kind.compareTo(b.value.kind);
-    });
+    final transforms =
+        config['directionTransforms'] as Map<String, dynamic>? ?? const {};
+
+    // Each actor travels in its own effective direction.
+    final movers = [
+      for (final e in actors)
+        _Mover(
+          e.key,
+          e.value,
+          transformDelta(
+            Position(delta.x, delta.y),
+            transforms[e.value.kind] as String?,
+          ),
+        ),
+    ];
+
+    // Bucket by effective direction; buckets resolve in canonical order. Within
+    // a bucket, front-first exactly as before: projection onto that bucket's
+    // direction descending, then the other-axis coordinate, then kind — fully
+    // deterministic. With all-identity transforms there is a single bucket and
+    // this reproduces the pre-0.10 order exactly.
+    final ordered = <_Mover>[];
+    for (final bucket in _canonicalBuckets) {
+      final members = movers.where((m) => m.eff == bucket).toList();
+      members.sort((a, b) {
+        final projA = a.pos.x * bucket.x + a.pos.y * bucket.y;
+        final projB = b.pos.x * bucket.x + b.pos.y * bucket.y;
+        if (projA != projB) return projB.compareTo(projA);
+        final otherA = a.pos.x * bucket.y.abs() + a.pos.y * bucket.x.abs();
+        final otherB = b.pos.x * bucket.y.abs() + b.pos.y * bucket.x.abs();
+        if (otherA != otherB) return otherA.compareTo(otherB);
+        return a.entity.kind.compareTo(b.entity.kind);
+      });
+      ordered.addAll(members);
+    }
 
     final occupied = {for (final e in actors) e.key};
     final events = <GameEvent>[];
 
-    for (final entry in actors) {
-      final pos = entry.key;
-      final entity = entry.value;
-      final target = Position(pos.x + delta.x, pos.y + delta.y);
+    for (final mover in ordered) {
+      final pos = mover.pos;
+      final entity = mover.entity;
+      final target = Position(pos.x + mover.eff.x, pos.y + mover.eff.y);
 
       final blocked = !board.isInBounds(target) ||
           board.hasTagAt(groundLayerId, target, wallTag, game.entityKinds) ||

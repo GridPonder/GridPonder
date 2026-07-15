@@ -207,7 +207,133 @@ List<GameEvent> _claimEvents(TurnResult result) =>
 
 GameAction _moveRight() => GameAction('move', {'direction': 'right'});
 
+// ---------------------------------------------------------------------------
+// directionTransforms (DSL 0.10) — per-actor direction mapping
+// ---------------------------------------------------------------------------
+
+/// A fresh GameDefinition whose `movement` system carries `directionTransforms`.
+/// Built per-call so tests can't leak config into each other.
+GameDefinition _makeGameWithTransforms(Map<String, String> transforms) {
+  final data = {
+    'id': 'com.gridponder.test_coupled_actors',
+    'layers': [
+      {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+      {'id': 'actors', 'occupancy': 'zero_or_one'},
+    ],
+    'entityKinds': {
+      'empty': {
+        'layer': 'ground',
+        'tags': ['walkable'],
+        'symbol': '.',
+      },
+      'wall': {
+        'layer': 'ground',
+        'tags': ['solid'],
+        'symbol': '#',
+      },
+      'wei': {
+        'layer': 'actors',
+        'tags': ['actor'],
+        'symbol': 'W',
+      },
+      'shu': {
+        'layer': 'actors',
+        'tags': ['actor'],
+        'symbol': 'S',
+      },
+    },
+    'actions': [
+      {
+        'id': 'move',
+        'params': {
+          'direction': {
+            'type': 'direction',
+            'values': ['up', 'down', 'left', 'right'],
+          },
+        },
+      },
+    ],
+    'systems': [
+      {
+        'id': 'movement',
+        'type': 'coupled_actors',
+        'config': {'directionTransforms': transforms},
+      },
+    ],
+  };
+  return GameDefinition.fromJson(data, id: 'test_coupled_actors');
+}
+
 void main() {
+  group('coupled_actors — directionTransforms', () {
+    test('identity transforms match legacy order (compatibility guarantee)',
+        () {
+      // An explicit all-identity config must behave exactly like no config at
+      // all — one bucket, unchanged front-first sort.
+      final results = <Map<String, Position?>>[];
+      for (final game in [
+        _makeGame(),
+        _makeGameWithTransforms({'wei': 'identity', 'shu': 'identity'}),
+      ]) {
+        final engine = _engineFor(
+            game,
+            _makeLevel(actors: [
+              [1, 0, 'wei'],
+              [2, 0, 'shu'],
+            ]));
+        engine.executeTurn(_moveRight());
+        results.add({
+          'wei': _actorPos(engine, 'wei'),
+          'shu': _actorPos(engine, 'shu'),
+        });
+      }
+
+      expect(results[0]['wei'], equals(results[1]['wei']),
+          reason: 'identity transforms diverged from legacy behaviour (wei)');
+      expect(results[0]['shu'], equals(results[1]['shu']),
+          reason: 'identity transforms diverged from legacy behaviour (shu)');
+    });
+
+    test('invert moves actor opposite', () {
+      // Starts are 1 and 4 so the two never contend for the same destination —
+      // they converge to 2 and 3, staying distinct.
+      final game = _makeGameWithTransforms({'shu': 'invert'});
+      final engine = _engineFor(
+          game,
+          _makeLevel(actors: [
+            [1, 0, 'wei'],
+            [4, 0, 'shu'],
+          ]));
+
+      engine.executeTurn(_moveRight());
+
+      expect(_actorPos(engine, 'wei'), equals(const Position(2, 0)),
+          reason: 'wei should step right to (2,0)');
+      expect(_actorPos(engine, 'shu'), equals(const Position(3, 0)),
+          reason: 'shu (inverted) should step left to (3,0)');
+    });
+
+    test('mutual swap blocks both actors', () {
+      // wei at 2 moving right, shu at 3 inverted moving left. Each targets the
+      // other's occupied cell, so both stay put — falls out of the live
+      // `occupied` set, no special case needed.
+      final game = _makeGameWithTransforms({'shu': 'invert'});
+      final engine = _engineFor(
+          game,
+          _makeLevel(actors: [
+            [2, 0, 'wei'],
+            [3, 0, 'shu'],
+          ]));
+
+      engine.executeTurn(_moveRight());
+
+      expect(_actorPos(engine, 'wei'), equals(const Position(2, 0)),
+          reason: 'wei must stay at (2,0) in a mutual swap');
+      expect(_actorPos(engine, 'shu'), equals(const Position(3, 0)),
+          reason: 'shu must stay at (3,0) in a mutual swap');
+    });
+  });
+
   group('coupled_actors — movement', () {
     test('open move shifts and trains both actors', () {
       final game = _makeGame();
