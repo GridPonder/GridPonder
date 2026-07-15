@@ -91,8 +91,8 @@ class LevelState {
     Board board,
   ) {
     final avatarJson = stateJson['avatar'] as Map<String, dynamic>? ?? {};
-    final vars = Map<String, dynamic>.from(
-        stateJson['variables'] as Map? ?? {});
+    final vars =
+        Map<String, dynamic>.from(stateJson['variables'] as Map? ?? {});
     final overlayJson = stateJson['overlay'] as Map<String, dynamic>?;
 
     return LevelState(
@@ -107,7 +107,7 @@ class LevelState {
   LevelState copy() => LevelState(
         board: board.copy(),
         avatar: avatar,
-        variables: Map.from(variables),
+        variables: _deepCopyMap(variables),
         overlay: overlay,
         turnCount: turnCount,
         actionCount: actionCount,
@@ -117,4 +117,21 @@ class LevelState {
         isWon: isWon,
         isLost: isLost,
       );
+}
+
+Map<String, dynamic> _deepCopyMap(Map<String, dynamic> source) {
+  return source.map((key, value) => MapEntry(key, _deepCopyValue(value)));
+}
+
+dynamic _deepCopyValue(dynamic value) {
+  if (value is Map) {
+    return value.map((k, v) => MapEntry(k, _deepCopyValue(v)));
+  }
+  if (value is List) {
+    return value.map(_deepCopyValue).toList();
+  }
+  if (value is Set) {
+    return value.map(_deepCopyValue).toSet();
+  }
+  return value;
 }

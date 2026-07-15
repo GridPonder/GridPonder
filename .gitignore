@@ -56,3 +56,8 @@ website/public/game/
 .claude/settings.local.json
 .claude/memory/
 .claude/scheduled_tasks.lock
+
+# Private pack dev wiring (populated locally from the gridponder-private submodule;
+# see app/lib/src/services/pack_registry.dart bundledAssetRoots)
+packs-private
+app/assets/packs-private

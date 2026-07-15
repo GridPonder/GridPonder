@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/services.dart';
 
 /// Abstracts reading pack files regardless of storage location.
@@ -15,19 +14,26 @@ abstract class PackFileReader {
 /// Reads pack files from the Flutter asset bundle (for built-in packs).
 class BundledPackFileReader implements PackFileReader {
   final String packId;
+
+  /// The asset root this pack was bundled under. Defaults to the production
+  /// `assets/packs` root; `PackRegistry` passes a different root (e.g. a
+  /// dev-only `assets/packs-private`) for packs discovered there, so every
+  /// downstream read follows the pack back to the root it actually came from.
   final String assetRoot;
 
-  const BundledPackFileReader(this.packId,
-      {this.assetRoot = 'assets/packs'});
+  const BundledPackFileReader(this.packId, {this.assetRoot = 'assets/packs'});
+
+  /// This pack's root path within the asset bundle, e.g. `<assetRoot>/foo`.
+  String get assetBase => '$assetRoot/$packId';
 
   @override
   Future<String> readString(String relativePath) =>
-      rootBundle.loadString('$assetRoot/$packId/$relativePath');
+      rootBundle.loadString('$assetBase/$relativePath');
 
   @override
   Future<Uint8List?> readBytes(String relativePath) async {
     try {
-      final data = await rootBundle.load('$assetRoot/$packId/$relativePath');
+      final data = await rootBundle.load('$assetBase/$relativePath');
       return data.buffer.asUint8List();
     } catch (_) {
       return null;
@@ -58,7 +64,6 @@ class InMemoryPackFileReader implements PackFileReader {
       _files[relativePath];
 
   @override
-  Future<Map<String, Uint8List>> preloadAssets() async => Map.fromEntries(
-        _files.entries.where((e) => !e.key.endsWith('.json')),
-      );
+  Future<Map<String, Uint8List>> preloadAssets() async =>
+      Map.fromEntries(_files.entries.where((e) => !e.key.endsWith('.json')));
 }

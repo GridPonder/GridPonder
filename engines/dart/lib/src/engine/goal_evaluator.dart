@@ -60,6 +60,8 @@ class GoalEvaluator {
         return _countConstraint(goal, state);
       case 'param_match':
         return _paramMatch(goal, state);
+      case 'balance':
+        return _balance(goal, state, game);
       default:
         return (false, 0.0);
     }
@@ -433,5 +435,70 @@ class GoalEvaluator {
 
     if (total == 0) return (false, 0.0);
     return (matched == total, matched / total);
+  }
+
+  /// Returns the declared default kind of the layer with id [layerId], or
+  /// null if the layer isn't declared (or has no default).
+  ///
+  /// This returns the raw declared `LayerDef.defaultKind`, which may be null
+  /// (whereas `Board.fromJson` normalizes a missing `exactly_one` default to
+  /// `'empty'` when seeding cells). That is intentional and matches Python's
+  /// `_count_claimable`, which also yields 0 claimable cells in the malformed
+  /// "no declared default" case — so there is no cross-engine divergence.
+  String? _layerDefaultKind(GameDefinition game, String? layerId) {
+    for (final l in game.layers) {
+      if (l.id == layerId) return l.defaultKind;
+    }
+    return null;
+  }
+
+  /// Counts cells in `cfg["claimableLayer"]` whose kind == `cfg["claimableKind"]`
+  /// (default: that layer's declared default kind) — every non-wall ground
+  /// cell eligible to be owned.
+  int _countClaimable(
+      Board board, Map<String, dynamic> cfg, GameDefinition game) {
+    final claimableLayerId = cfg['claimableLayer'] as String?;
+    final layer = board.layers[claimableLayerId];
+    if (layer == null) return 0;
+    final claimableKind = (cfg['claimableKind'] as String?) ??
+        _layerDefaultKind(game, claimableLayerId);
+    return layer.entries().where((e) => e.value.kind == claimableKind).length;
+  }
+
+  /// Win when a territory layer is divided completely and into exactly-equal
+  /// shares among the configured owners (or per requireComplete/requireEqual).
+  ///
+  /// Config fields:
+  ///   layer            — territory layer id to scan
+  ///   owners           — entity kinds tallied as "owned" cells
+  ///   claimableLayer   — layer id whose cells are eligible to be claimed
+  ///   claimableKind    — kind that counts as claimable (default: that
+  ///                      layer's declared default kind)
+  ///   requireComplete  — require owned == claimable (default true)
+  ///   requireEqual     — require every owner's count to match (default true)
+  (bool, double) _balance(
+      GoalDef goal, LevelState state, GameDefinition game) {
+    final owners = (goal.config['owners'] as List?)?.cast<String>() ?? [];
+    final counts = <String, int>{for (final o in owners) o: 0};
+
+    final layerId = goal.config['layer'] as String?;
+    final layer = state.board.layers[layerId];
+    if (layer != null) {
+      for (final entry in layer.entries()) {
+        final kind = entry.value.kind;
+        if (counts.containsKey(kind)) counts[kind] = counts[kind]! + 1;
+      }
+    }
+
+    final claimable = _countClaimable(state.board, goal.config, game);
+    final owned = counts.values.fold(0, (a, b) => a + b);
+    final equal = counts.values.toSet().length == 1;
+    final complete = owned == claimable;
+    final progress = claimable != 0 ? owned / claimable : 1.0;
+
+    final requireEqual = (goal.config['requireEqual'] as bool?) ?? true;
+    final requireComplete = (goal.config['requireComplete'] as bool?) ?? true;
+    final done = (equal || !requireEqual) && (complete || !requireComplete);
+    return (done, progress);
   }
 }

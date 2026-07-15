@@ -159,6 +159,44 @@ def object_settled(kind: str, pos: Pos, from_pos: Pos) -> dict:
     }
 
 
+def actor_moved(kind: str, from_pos: Pos, to_pos: Pos, direction: str) -> dict:
+    return {
+        "type": "actor_moved",
+        "kind": kind,
+        "fromPosition": from_pos,
+        "position": to_pos,
+        "direction": direction,
+    }
+
+
+def actor_entered(kind: str, pos: Pos, from_pos: Pos, direction: str) -> dict:
+    return {
+        "type": "actor_entered",
+        "kind": kind,
+        "fromPosition": from_pos,
+        "position": pos,
+        "direction": direction,
+    }
+
+
+def actor_blocked(kind: str, pos: Pos) -> dict:
+    return {"type": "actor_blocked", "kind": kind, "position": pos}
+
+
+def actor_selected(kind: str, pos: Pos) -> dict:
+    return {"type": "actor_selected", "kind": kind, "position": pos}
+
+
+def cell_claimed(pos: Pos, layer: str, kind: str, owner_kind: str) -> dict:
+    return {
+        "type": "cell_claimed",
+        "position": pos,
+        "layer": layer,
+        "kind": kind,
+        "ownerKind": owner_kind,
+    }
+
+
 def variable_changed(name: str, old_val: Any, new_val: Any) -> dict:
     return {
         "type": "variable_changed",

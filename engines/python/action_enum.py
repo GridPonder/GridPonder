@@ -23,7 +23,7 @@ def enumerate_actions(game_def, state) -> list[dict[str, Any]]:
         if not params_def:
             actions.append({"action": action_def["id"]})
         else:
-            _enumerate(action_def["id"], list(params_def.items()), {}, actions)
+            _enumerate(action_def["id"], list(params_def.items()), {}, actions, state)
     return actions
 
 
@@ -32,11 +32,21 @@ def _enumerate(
     param_entries: list[tuple[str, dict]],
     current: dict[str, Any],
     out: list[dict[str, Any]],
+    state,
 ) -> None:
     if not param_entries:
         out.append({"action": action_id, **current})
         return
     name, param_def = param_entries[0]
     rest = param_entries[1:]
-    for value in param_def.get("values", []):
-        _enumerate(action_id, rest, {**current, name: value}, out)
+    if param_def.get("type") == "position":
+        values = [
+            [x, y]
+            for y in range(state.board.height)
+            for x in range(state.board.width)
+        ]
+    else:
+        values = param_def.get("values", [])
+
+    for value in values:
+        _enumerate(action_id, rest, {**current, name: value}, out, state)

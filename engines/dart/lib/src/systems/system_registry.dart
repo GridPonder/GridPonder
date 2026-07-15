@@ -2,8 +2,10 @@ import '../engine/game_system.dart';
 import '../models/game_definition.dart';
 import 'anchor_point_system.dart';
 import 'avatar_navigation_system.dart';
+import 'coupled_actors_system.dart';
 import 'flood_fill_system.dart';
 import 'ice_slide_system.dart';
+import 'individual_actors_system.dart';
 import 'follower_npcs_system.dart';
 import 'overlay_cursor_system.dart';
 import 'portals_system.dart';
@@ -16,12 +18,15 @@ import 'slide_merge_system.dart';
 import 'tile_teleport_system.dart';
 
 /// Creates a GameSystem instance from a SystemDef.
-typedef SystemFactory = GameSystem Function(String id, Map<String, dynamic> config);
+typedef SystemFactory = GameSystem Function(
+    String id, Map<String, dynamic> config);
 
 class SystemRegistry {
   static final Map<String, SystemFactory> _factories = {
     'anchor_point': (id, _) => AnchorPointSystem(id: id),
     'avatar_navigation': (id, _) => AvatarNavigationSystem(id: id),
+    'coupled_actors': (id, _) => CoupledActorsSystem(id: id),
+    'individual_actors': (id, _) => IndividualActorsSystem(id: id),
     'push_objects': (id, _) => PushObjectsSystem(id: id),
     'portals': (id, _) => PortalsSystem(id: id),
     'follower_npcs': (id, _) => FollowerNpcsSystem(id: id),
@@ -43,8 +48,9 @@ class SystemRegistry {
     GameDefinition game,
     Map<String, Map<String, dynamic>>? levelOverrides,
   ) {
+    final effectiveGame = game.withSystemOverrides(levelOverrides);
     final systems = <GameSystem>[];
-    for (final def in game.systems) {
+    for (final def in effectiveGame.systems) {
       if (!def.enabled) continue;
       final factory = _factories[def.type];
       if (factory == null) continue; // unknown system type, skip

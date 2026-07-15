@@ -14,9 +14,11 @@ from .._game_def import GameDef
 from ._base import GameSystem
 from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
+from .coupled_actors import CoupledActorsSystem
 from .flood_fill import FloodFillSystem
 from .follower_npcs import FollowerNpcsSystem
 from .ice_slide import IceSlideSystem
+from .individual_actors import IndividualActorsSystem
 from .overlay_cursor import OverlayCursorSystem
 from .portals import PortalsSystem
 from .push_objects import PushObjectsSystem
@@ -45,17 +47,20 @@ _REGISTRY: dict[str, SystemFactory] = {
     "sided_box": lambda sys_id, _: SidedBoxSystem(sys_id),
     "sliding_blocks": lambda sys_id, config: SlidingBlocksSystem(sys_id, config),
     "follower_npcs": lambda sys_id, _: FollowerNpcsSystem(sys_id),
+    "coupled_actors": lambda sys_id, _: CoupledActorsSystem(sys_id),
+    "individual_actors": lambda sys_id, _: IndividualActorsSystem(sys_id),
 }
 
 
 def instantiate_systems(game: GameDef, overrides: Optional[dict] = None) -> list[GameSystem]:
+    effective_game = game.with_system_overrides(overrides)
     systems = []
-    for sys_def in game.systems:
+    for sys_def in effective_game.systems:
         if not sys_def.get("enabled", True):
             continue
         factory = _REGISTRY.get(sys_def["type"])
         if factory is not None:
-            config = game.system_config(sys_def["id"], overrides)
+            config = effective_game.system_config(sys_def["id"])
             systems.append(factory(sys_def["id"], config))
     return systems
 

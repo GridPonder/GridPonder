@@ -74,7 +74,7 @@ class TextRenderer {
       }
     }
 
-    final layerOrder = ['actors', 'markers', 'objects', 'ground'];
+    final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
 
     final lines = <String>[];
     for (int y = 0; y < h; y++) {
@@ -231,7 +231,7 @@ class TextRenderer {
     final x2 = overlay.x + overlay.width - 1;
     final y2 = overlay.y + overlay.height - 1;
 
-    const layerOrder = ['actors', 'markers', 'objects', 'ground'];
+    const layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
     final rows = <String>[];
     for (int dy = 0; dy < overlay.height; dy++) {
       final buf = StringBuffer();
@@ -269,7 +269,7 @@ class TextRenderer {
   static String _buildStackedBlock(
       LevelState state, GameDefinition game, Position? avatarPos,
       {Map<String, String>? kindSymbolOverrides}) {
-    final layerOrder = ['actors', 'markers', 'objects', 'ground'];
+    final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
     final entries = <String>[];
 
     final w = state.board.width;
@@ -337,7 +337,7 @@ class TextRenderer {
     final entries = <String>[];
     final w = state.board.width;
     final h = state.board.height;
-    const layerOrder = ['actors', 'markers', 'objects', 'ground'];
+    const layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
         final pos = Position(x, y);

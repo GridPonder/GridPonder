@@ -73,6 +73,7 @@ class _PlayScreenState extends State<PlayScreen> {
   Map<Position, String>? _animOverlays;
   List<SightlineFeedback> _sightlineFeedbacks = const [];
   bool _animating = false;
+  Map<String, String> _actorFacingByKind = {};
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
 
@@ -102,7 +103,8 @@ class _PlayScreenState extends State<PlayScreen> {
     if (startId != null) {
       // For integration tests: jump directly to the requested level.
       final idx = _sequence.indexWhere(
-          (e) => e.type == 'level' && e.ref == startId);
+        (e) => e.type == 'level' && e.ref == startId,
+      );
       _seqIndex = idx >= 0 ? idx : 0;
     } else {
       _seqIndex = 0; // may start on a story entry
@@ -134,6 +136,7 @@ class _PlayScreenState extends State<PlayScreen> {
     _agentAttempt = 1;
     _agentMemory.clear();
     _lastFloodColor = null;
+    _actorFacingByKind = {};
     _wonHandled = false;
     _selectedMultiCellObjectId = null;
     _sightlineFeedbacks = const [];
@@ -156,9 +159,10 @@ class _PlayScreenState extends State<PlayScreen> {
     // Record the chosen colour for any colour-pick action (any action that
     // declares a `color` in game.json). The play screen uses it to tint the
     // most recently flooded region in flood_colors-style packs.
-    final actionDef = widget.packService.game.actions
-        .firstWhere((a) => a.id == action.actionId,
-            orElse: () => const ActionDef(id: '', params: {}));
+    final actionDef = widget.packService.game.actions.firstWhere(
+      (a) => a.id == action.actionId,
+      orElse: () => const ActionDef(id: '', params: {}),
+    );
     if (actionDef.color != null) {
       _lastFloodColor = cellNamedColor(
         actionDef.color!,
@@ -181,7 +185,9 @@ class _PlayScreenState extends State<PlayScreen> {
       for (int i = 0; i < avatarMoves.length - 1; i++) {
         if (!mounted) return;
         final toRaw = avatarMoves[i].extra['to'] as List;
-        setState(() => _avatarSlidePos = Position(toRaw[0] as int, toRaw[1] as int));
+        setState(
+          () => _avatarSlidePos = Position(toRaw[0] as int, toRaw[1] as int),
+        );
         await Future.delayed(const Duration(milliseconds: 130));
       }
       // _avatarSlidePos now holds Pip's last ice cell. Do NOT clear it yet —
@@ -214,7 +220,7 @@ class _PlayScreenState extends State<PlayScreen> {
     if (hasSlide) {
       if (!mounted) return;
       setState(() {
-        _preAnimState = null;    // no-op if _playObjectSlide already cleared it
+        _preAnimState = null; // no-op if _playObjectSlide already cleared it
         _avatarSlidePos = null;
       });
     }
@@ -222,17 +228,22 @@ class _PlayScreenState extends State<PlayScreen> {
     // Stage-aware playback for new motion primitives.
     // Group remaining animations by stage; play each stage to completion
     // before starting the next.
-    final remaining = result.animations
-        .where((s) => s.type == 'entity_move' || s.type == 'entity_animation')
-        .toList()
-      ..sort((a, b) => a.stage.compareTo(b.stage));
+    final remaining =
+        result.animations
+            .where(
+              (s) => s.type == 'entity_move' || s.type == 'entity_animation',
+            )
+            .toList()
+          ..sort((a, b) => a.stage.compareTo(b.stage));
 
     int? currentStage;
     final stageBuf = <AnimationStep>[];
     Future<void> flushStage() async {
       if (stageBuf.isEmpty) return;
       final moves = stageBuf.where((s) => s.type == 'entity_move').toList();
-      final anims = stageBuf.where((s) => s.type == 'entity_animation').toList();
+      final anims = stageBuf
+          .where((s) => s.type == 'entity_animation')
+          .toList();
       if (moves.isNotEmpty) {
         await _playSlideMotion(preState, moves);
       }
@@ -305,7 +316,7 @@ class _PlayScreenState extends State<PlayScreen> {
     for (final entry in transientObjects.entries) {
       final layer =
           widget.packService.game.entityKinds[entry.value.kind]?.layer ??
-              'objects';
+          'objects';
       transientState.board.setEntity(layer, entry.key, entry.value);
     }
 
@@ -410,6 +421,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final paths = <List<Position>>[];
     final entities = <EntityInstance>[];
     final layers = <String>[];
+    final directions = <String?>[];
 
     for (final step in moves) {
       final fromRaw = step.extra['from'];
@@ -437,6 +449,7 @@ class _PlayScreenState extends State<PlayScreen> {
       paths.add(path);
       entities.add(entity);
       layers.add(layer);
+      directions.add(_directionBetween(from, to));
     }
 
     if (paths.isEmpty) return;
@@ -464,7 +477,15 @@ class _PlayScreenState extends State<PlayScreen> {
         final path = paths[i];
         final pos = path[frame.clamp(0, path.length - 1)];
         if (animState.board.getEntity(layers[i], pos) == null) {
-          animState.board.setEntity(layers[i], pos, entities[i]);
+          final direction = directions[i];
+          final entity = direction == null
+              ? entities[i]
+              : EntityInstance(entities[i].kind, {
+                  ...entities[i].params,
+                  '_motionDirection': direction,
+                  '_motionFrame': frame,
+                });
+          animState.board.setEntity(layers[i], pos, entity);
         }
       }
       setState(() {
@@ -473,9 +494,33 @@ class _PlayScreenState extends State<PlayScreen> {
       });
       await Future.delayed(Duration(milliseconds: frameMs));
     }
+
+    final facingUpdates = <String, String>{};
+    for (int i = 0; i < entities.length; i++) {
+      final direction = directions[i];
+      if (layers[i] == 'actors' && direction != null) {
+        facingUpdates[entities[i].kind] = direction;
+      }
+    }
+    if (facingUpdates.isNotEmpty && mounted) {
+      setState(() {
+        _actorFacingByKind = {..._actorFacingByKind, ...facingUpdates};
+      });
+    }
   }
 
-  Future<void> _playEntityAnimation(LevelState preState, AnimationStep step) async {
+  String? _directionBetween(Position from, Position to) {
+    final dx = to.x - from.x;
+    final dy = to.y - from.y;
+    if (dx.abs() > dy.abs()) return dx > 0 ? 'right' : 'left';
+    if (dy != 0) return dy > 0 ? 'down' : 'up';
+    return null;
+  }
+
+  Future<void> _playEntityAnimation(
+    LevelState preState,
+    AnimationStep step,
+  ) async {
     final kindDef = widget.packService.game.entityKinds[step.entityKind];
     final animDef = kindDef?.animations[step.animationName!];
     if (animDef == null || animDef.frames.isEmpty) return;
@@ -485,7 +530,9 @@ class _PlayScreenState extends State<PlayScreen> {
     // For ground-layer entities (ice…), keep the original tile visible beneath
     // the overlay frames — clearing ground would show void/black behind the anim.
     final cleanState = preState.copy();
-    final layer = widget.packService.game.entityKinds[step.entityKind]?.layer ?? 'objects';
+    final layer =
+        widget.packService.game.entityKinds[step.entityKind]?.layer ??
+        'objects';
     if (layer == 'objects') {
       cleanState.board.setEntity('objects', step.position, null);
     }
@@ -519,6 +566,7 @@ class _PlayScreenState extends State<PlayScreen> {
       _lastFloodColor = null;
       _selectedMultiCellObjectId = null;
       _sightlineFeedbacks = const [];
+      _actorFacingByKind = {};
     });
   }
 
@@ -598,21 +646,32 @@ class _PlayScreenState extends State<PlayScreen> {
       widget.packService.game.actions.any((a) => a.id == 'diagonal_swap');
   bool get _hasMoveAction =>
       widget.packService.game.actions.any((a) => a.id == 'move');
-  bool get _moveActionNeedsPosition =>
-      widget.packService.game.actions
-          .where((a) => a.id == 'move')
-          .any((a) => a.params.containsKey('position'));
+  bool get _moveActionNeedsPosition => widget.packService.game.actions
+      .where((a) => a.id == 'move')
+      .any((a) => a.params.containsKey('position'));
   bool get _hasCellTapGesture =>
-      widget.packService.theme?.controls?.gestureMap
-          .any((b) => b.gesture == 'tap_cell') ??
-      false;
+      widget.packService.theme?.controls?.gestureMap.any(
+            (b) => b.gesture == 'tap_cell',
+          ) ==
+          true &&
+      _levelEnablesSystemType('individual_actors');
+
+  bool _levelEnablesSystemType(String type) {
+    for (final system in widget.packService.game.systems) {
+      if (system.type != type) continue;
+      final override = _levelDef.systemOverrides[system.id];
+      return override?['enabled'] as bool? ?? system.enabled;
+    }
+    return false;
+  }
 
   /// Action IDs whose colour is currently adjacent to the flood region.
   /// Only computed when the game has colour-pick actions (declared via the
   /// `color` field on an ActionDef).
   Set<String>? _availableFloodActions(LevelState state) {
-    final hasFloodActions =
-        widget.packService.game.actions.any((a) => a.color != null);
+    final hasFloodActions = widget.packService.game.actions.any(
+      (a) => a.color != null,
+    );
     if (!hasFloodActions) return null;
 
     final layer = state.board.layers['objects'];
@@ -625,12 +684,17 @@ class _PlayScreenState extends State<PlayScreen> {
         if (entity?.kind != 'cell_flooded') continue;
         for (final delta in [(-1, 0), (1, 0), (0, -1), (0, 1)]) {
           final nx = x + delta.$1, ny = y + delta.$2;
-          if (nx < 0 || ny < 0 ||
-              nx >= state.board.width || ny >= state.board.height) continue;
+          if (nx < 0 ||
+              ny < 0 ||
+              nx >= state.board.width ||
+              ny >= state.board.height)
+            continue;
           final nb = layer.getAt(Position(nx, ny));
           final kind = nb?.kind;
-          if (kind != null && kind.startsWith('cell_') &&
-              kind != 'cell_flooded' && kind != 'cell_wall') {
+          if (kind != null &&
+              kind.startsWith('cell_') &&
+              kind != 'cell_flooded' &&
+              kind != 'cell_wall') {
             available.add('flood_${kind.substring(5)}');
           }
         }
@@ -802,12 +866,16 @@ class _PlayScreenState extends State<PlayScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(Icons.lightbulb_outline,
-                color: Colors.amber.shade600, size: 26),
+            Icon(
+              Icons.lightbulb_outline,
+              color: Colors.amber.shade600,
+              size: 26,
+            ),
             const SizedBox(width: 10),
-            const Text('Use Hint',
-                style:
-                    TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+            const Text(
+              'Use Hint',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: Column(
@@ -828,14 +896,15 @@ class _PlayScreenState extends State<PlayScreen> {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.refresh,
-                      color: Colors.orange.shade700, size: 18),
+                  Icon(Icons.refresh, color: Colors.orange.shade700, size: 18),
                   const SizedBox(width: 8),
                   const Expanded(
                     child: Text(
                       'The level will be reset to its starting state.',
                       style: TextStyle(
-                          fontSize: 13, fontWeight: FontWeight.w500),
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
                 ],
@@ -846,8 +915,10 @@ class _PlayScreenState extends State<PlayScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: Text('Cancel',
-                style: TextStyle(color: Colors.grey.shade600)),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey.shade600),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.of(ctx).pop(true),
@@ -855,10 +926,13 @@ class _PlayScreenState extends State<PlayScreen> {
               backgroundColor: Colors.amber.shade600,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8)),
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: const Text('Reset & Play Hint',
-                style: TextStyle(fontWeight: FontWeight.w600)),
+            child: const Text(
+              'Reset & Play Hint',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
@@ -891,8 +965,11 @@ class _PlayScreenState extends State<PlayScreen> {
       _engine.reset();
       _selectedMultiCellObjectId = null;
       _sightlineFeedbacks = const [];
+      _actorFacingByKind = {};
     });
-    await Future.delayed(kDebugMode ? Duration.zero : const Duration(milliseconds: 200));
+    await Future.delayed(
+      kDebugMode ? Duration.zero : const Duration(milliseconds: 200),
+    );
 
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
       if (!mounted) return;
@@ -977,7 +1054,8 @@ class _PlayScreenState extends State<PlayScreen> {
       if (key == null || key.isEmpty) {
         throw Exception('No Google API key set. Add it in Settings.');
       }
-      final useThinking = s.googleThinkingEnabled &&
+      final useThinking =
+          s.googleThinkingEnabled &&
           GoogleModel.supportsThinking(s.googleModel);
       final baseTokens = _baseModeTokens;
       var builder = ai()
@@ -1004,9 +1082,11 @@ class _PlayScreenState extends State<PlayScreen> {
       final useThink =
           s.ollamaThinkEnabled && OllamaModel.supportsThinking(s.ollamaModel);
       final provider = await ai()
-          .ollama(OllamaModel.supportsThinking(s.ollamaModel)
-              ? (o) => o.reasoning(useThink)
-              : null)
+          .ollama(
+            OllamaModel.supportsThinking(s.ollamaModel)
+                ? (o) => o.reasoning(useThink)
+                : null,
+          )
           .baseUrl(s.ollamaBaseUrl)
           .model(s.ollamaModel)
           .maxTokens(useThink ? 32768 : _baseModeTokens)
@@ -1104,9 +1184,13 @@ class _PlayScreenState extends State<PlayScreen> {
         title: Row(
           children: [
             Expanded(
-              child: Text(title,
-                  style: const TextStyle(
-                      fontSize: 16, fontWeight: FontWeight.w600)),
+              child: Text(
+                title,
+                style: const TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.copy, size: 18),
@@ -1115,8 +1199,9 @@ class _PlayScreenState extends State<PlayScreen> {
                 Clipboard.setData(ClipboardData(text: text));
                 ScaffoldMessenger.of(ctx).showSnackBar(
                   const SnackBar(
-                      content: Text('Copied'),
-                      duration: Duration(seconds: 1)),
+                    content: Text('Copied'),
+                    duration: Duration(seconds: 1),
+                  ),
                 );
               },
             ),
@@ -1128,7 +1213,10 @@ class _PlayScreenState extends State<PlayScreen> {
             child: SelectableText(
               text,
               style: const TextStyle(
-                  fontSize: 12, height: 1.5, fontFamily: 'monospace'),
+                fontSize: 12,
+                height: 1.5,
+                fontFamily: 'monospace',
+              ),
             ),
           ),
         ),
@@ -1175,19 +1263,32 @@ class _PlayScreenState extends State<PlayScreen> {
 
   static LogicalKeyboardKey? _keyForChar(String char) {
     const map = {
-      'a': LogicalKeyboardKey.keyA, 'b': LogicalKeyboardKey.keyB,
-      'c': LogicalKeyboardKey.keyC, 'd': LogicalKeyboardKey.keyD,
-      'e': LogicalKeyboardKey.keyE, 'f': LogicalKeyboardKey.keyF,
-      'g': LogicalKeyboardKey.keyG, 'h': LogicalKeyboardKey.keyH,
-      'i': LogicalKeyboardKey.keyI, 'j': LogicalKeyboardKey.keyJ,
-      'k': LogicalKeyboardKey.keyK, 'l': LogicalKeyboardKey.keyL,
-      'm': LogicalKeyboardKey.keyM, 'n': LogicalKeyboardKey.keyN,
-      'o': LogicalKeyboardKey.keyO, 'p': LogicalKeyboardKey.keyP,
-      'q': LogicalKeyboardKey.keyQ, 'r': LogicalKeyboardKey.keyR,
-      's': LogicalKeyboardKey.keyS, 't': LogicalKeyboardKey.keyT,
-      'u': LogicalKeyboardKey.keyU, 'v': LogicalKeyboardKey.keyV,
-      'w': LogicalKeyboardKey.keyW, 'x': LogicalKeyboardKey.keyX,
-      'y': LogicalKeyboardKey.keyY, 'z': LogicalKeyboardKey.keyZ,
+      'a': LogicalKeyboardKey.keyA,
+      'b': LogicalKeyboardKey.keyB,
+      'c': LogicalKeyboardKey.keyC,
+      'd': LogicalKeyboardKey.keyD,
+      'e': LogicalKeyboardKey.keyE,
+      'f': LogicalKeyboardKey.keyF,
+      'g': LogicalKeyboardKey.keyG,
+      'h': LogicalKeyboardKey.keyH,
+      'i': LogicalKeyboardKey.keyI,
+      'j': LogicalKeyboardKey.keyJ,
+      'k': LogicalKeyboardKey.keyK,
+      'l': LogicalKeyboardKey.keyL,
+      'm': LogicalKeyboardKey.keyM,
+      'n': LogicalKeyboardKey.keyN,
+      'o': LogicalKeyboardKey.keyO,
+      'p': LogicalKeyboardKey.keyP,
+      'q': LogicalKeyboardKey.keyQ,
+      'r': LogicalKeyboardKey.keyR,
+      's': LogicalKeyboardKey.keyS,
+      't': LogicalKeyboardKey.keyT,
+      'u': LogicalKeyboardKey.keyU,
+      'v': LogicalKeyboardKey.keyV,
+      'w': LogicalKeyboardKey.keyW,
+      'x': LogicalKeyboardKey.keyX,
+      'y': LogicalKeyboardKey.keyY,
+      'z': LogicalKeyboardKey.keyZ,
     };
     return map[char.toLowerCase()];
   }
@@ -1227,15 +1328,19 @@ class _PlayScreenState extends State<PlayScreen> {
                 _levelDef.title ?? levelId,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.black87),
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black87,
+                ),
               ),
             ),
             const SizedBox(width: 4),
             IconButton(
-              icon: const Icon(Icons.info_outline,
-                  color: Colors.black45, size: 20),
+              icon: const Icon(
+                Icons.info_outline,
+                color: Colors.black45,
+                size: 20,
+              ),
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
               tooltip: 'How to play',
@@ -1255,9 +1360,7 @@ class _PlayScreenState extends State<PlayScreen> {
           IconButton(
             icon: Icon(
               _nextIsLocked ? Icons.lock_outline : Icons.navigate_next,
-              color: _nextIsLocked
-                  ? Colors.black26
-                  : Colors.black54,
+              color: _nextIsLocked ? Colors.black26 : Colors.black54,
             ),
             onPressed: _advance,
           ),
@@ -1299,75 +1402,87 @@ class _PlayScreenState extends State<PlayScreen> {
           if (_moveActionNeedsPosition) {
             final selectedPos = _selectedMovePosition();
             if (selectedPos == null) return KeyEventResult.ignored;
-            _onAction(GameAction('move', {
-              'direction': dir,
-              'position': [selectedPos.x, selectedPos.y],
-            }));
+            _onAction(
+              GameAction('move', {
+                'direction': dir,
+                'position': [selectedPos.x, selectedPos.y],
+              }),
+            );
           } else {
             _onAction(GameAction('move', {'direction': dir}));
           }
           return KeyEventResult.handled;
         },
         child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onPanStart: (_aiRunning || _animating) ? null : _onPanStart,
-        onPanUpdate: (_aiRunning || _animating) ? null : _onPanUpdate,
-        onPanEnd: (_aiRunning || _animating) ? null : _onPanEnd,
-        onPanCancel: (_aiRunning || _animating) ? null : _onPanCancel,
-        child: SafeArea(
-        child: Column(
-          children: [
-            _buildStatusBar(state),
-            if (widget.packService.game.ui.showGoal ||
-                widget.packService.game.ui.showGuide)
-              _buildGoalGuidePanel(state),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Center(
-                  child: BoardRenderer(
-                    key: _boardKey,
-                    state: state,
-                    game: widget.packService.game,
-                    packService: widget.packService,
-                    animationOverlays: _animOverlays,
-                    onCellTap: (_hasCellTapGesture || _moveActionNeedsPosition)
-                        ? _onCellTap
-                        : null,
-                    selectedMultiCellObjectId: _moveActionNeedsPosition
-                        ? _selectedMultiCellObjectId
-                        : null,
-                    sightlineFeedbacks: _sightlineFeedbacks,
-                    floodedColorOverride: _lastFloodColor,
-                    avatarPositionOverride: _avatarSlidePos,
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (_aiRunning || _animating) ? null : _onPanStart,
+          onPanUpdate: (_aiRunning || _animating) ? null : _onPanUpdate,
+          onPanEnd: (_aiRunning || _animating) ? null : _onPanEnd,
+          onPanCancel: (_aiRunning || _animating) ? null : _onPanCancel,
+          child: SafeArea(
+            child: Column(
+              children: [
+                _buildStatusBar(state),
+                if (widget.packService.game.ui.showGoal ||
+                    widget.packService.game.ui.showGuide)
+                  _buildGoalGuidePanel(state),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Center(
+                      child: BoardRenderer(
+                        key: _boardKey,
+                        state: state,
+                        game: widget.packService.game,
+                        packService: widget.packService,
+                        animationOverlays: _animOverlays,
+                        actorFacingByKind: _actorFacingByKind,
+                        onCellTap:
+                            (_hasCellTapGesture || _moveActionNeedsPosition)
+                            ? _onCellTap
+                            : null,
+                        selectedMultiCellObjectId: _moveActionNeedsPosition
+                            ? _selectedMultiCellObjectId
+                            : null,
+                        sightlineFeedbacks: _sightlineFeedbacks,
+                        floodedColorOverride: _lastFloodColor,
+                        avatarPositionOverride: _avatarSlidePos,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                if (state.isWon) _buildWinBanner(),
+                if (state.isLost) _buildLossBanner(),
+                if (s.aiPlayEnabled &&
+                    !state.isWon &&
+                    !state.isLost &&
+                    _aiRunning)
+                  _buildAiPanel(),
+                if (s.aiPlayEnabled &&
+                    !state.isWon &&
+                    !state.isLost &&
+                    !_aiRunning)
+                  _buildAiStartButton(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: ControlsWidget(
+                    game: widget.packService.game,
+                    onAction: _onAction,
+                    onUndo: _onUndo,
+                    onReset: _onReset,
+                    onExit: _onExit,
+                    onHint: hintAvailable ? _onHint : null,
+                    onSolve: kDebugMode ? _onSolve : null,
+                    canUndo: _engine.undoDepth > 0 && !_aiRunning,
+                    hintStatuses: hintStatuses,
+                    availableActionIds: _availableFloodActions(state),
+                    palette: widget.packService.theme?.palette,
+                  ),
+                ),
+              ],
             ),
-            if (state.isWon) _buildWinBanner(),
-            if (state.isLost) _buildLossBanner(),
-            if (s.aiPlayEnabled && !state.isWon && !state.isLost && _aiRunning) _buildAiPanel(),
-            if (s.aiPlayEnabled && !state.isWon && !state.isLost && !_aiRunning) _buildAiStartButton(),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: ControlsWidget(
-                game: widget.packService.game,
-                onAction: _onAction,
-                onUndo: _onUndo,
-                onReset: _onReset,
-                onExit: _onExit,
-                onHint: hintAvailable ? _onHint : null,
-                onSolve: kDebugMode ? _onSolve : null,
-                canUndo: _engine.undoDepth > 0 && !_aiRunning,
-                hintStatuses: hintStatuses,
-                availableActionIds: _availableFloodActions(state),
-                palette: widget.packService.theme?.palette,
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
-      ),
       ),
     );
   }
@@ -1412,15 +1527,20 @@ class _PlayScreenState extends State<PlayScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(children: [
-            Icon(Icons.flag_outlined, color: Colors.green.shade600, size: 14),
-            const SizedBox(width: 4),
-            Text('Goal',
+          Row(
+            children: [
+              Icon(Icons.flag_outlined, color: Colors.green.shade600, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                'Goal',
                 style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade700)),
-          ]),
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.grey.shade700,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 6),
           _buildGoalContent(state),
         ],
@@ -1431,9 +1551,12 @@ class _PlayScreenState extends State<PlayScreen> {
   Widget _buildGoalContent(LevelState state) {
     // Sum and count constraint goals are rendered together (rows + cols in one view).
     final constraintGoals = _levelDef.goals
-        .where((g) => g.type == 'sum_constraint' || g.type == 'count_constraint')
+        .where(
+          (g) => g.type == 'sum_constraint' || g.type == 'count_constraint',
+        )
         .toList();
-    if (constraintGoals.isNotEmpty) return _buildConstraintGoals(constraintGoals, state);
+    if (constraintGoals.isNotEmpty)
+      return _buildConstraintGoals(constraintGoals, state);
 
     for (final goal in _levelDef.goals) {
       if (goal.type == 'sequence_match') {
@@ -1446,13 +1569,15 @@ class _PlayScreenState extends State<PlayScreen> {
         }
       }
       if (goal.type == 'board_match') {
-        final targetLayers = goal.config['targetLayers'] as Map<String, dynamic>?;
+        final targetLayers =
+            goal.config['targetLayers'] as Map<String, dynamic>?;
         if (targetLayers != null) {
           return Center(
             child: TargetBoardRenderer(
-                targetLayers: targetLayers,
-                currentState: state,
-                palette: widget.packService.theme?.palette),
+              targetLayers: targetLayers,
+              currentState: state,
+              palette: widget.packService.theme?.palette,
+            ),
           );
         }
       }
@@ -1473,8 +1598,11 @@ class _PlayScreenState extends State<PlayScreen> {
           if (i < sequence.length - 1)
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Icon(Icons.arrow_forward,
-                  size: 12, color: Colors.grey.shade500),
+              child: Icon(
+                Icons.arrow_forward,
+                size: 12,
+                color: Colors.grey.shade500,
+              ),
             ),
         ],
       ],
@@ -1524,15 +1652,21 @@ class _PlayScreenState extends State<PlayScreen> {
 
     // Each annotation slot holds: (computeValue, checkSatisfied) per index.
     // We store a list of checkers per row/col so multiple constraints can apply.
-    final rowCheckers = <int, List<(String Function(int y), bool Function(int y))>>{};
-    final colCheckers = <int, List<(String Function(int x), bool Function(int x))>>{};
+    final rowCheckers =
+        <int, List<(String Function(int y), bool Function(int y))>>{};
+    final colCheckers =
+        <int, List<(String Function(int x), bool Function(int x))>>{};
     final descriptions = <String>[];
 
     for (final goal in goals) {
       final scope = (goal.config['scope'] as String?) ?? 'board';
       final target = goal.config['target'] as num;
       final cmp = (goal.config['comparison'] as String?) ?? 'eq';
-      final op = switch (cmp) { 'gte' => '≥', 'lte' => '≤', _ => '=' };
+      final op = switch (cmp) {
+        'gte' => '≥',
+        'lte' => '≤',
+        _ => '=',
+      };
       final t = target.toInt();
 
       if (goal.type == 'sum_constraint') {
@@ -1541,10 +1675,10 @@ class _PlayScreenState extends State<PlayScreen> {
         int colSum(int x) =>
             List.generate(h, (y) => cellVal(x, y)).fold(0, (a, b) => a + b);
         bool checkSum(int sum) => switch (cmp) {
-              'gte' => sum >= target,
-              'lte' => sum <= target,
-              _ => sum == target,
-            };
+          'gte' => sum >= target,
+          'lte' => sum <= target,
+          _ => sum == target,
+        };
 
         switch (scope) {
           case 'all_rows':
@@ -1591,9 +1725,12 @@ class _PlayScreenState extends State<PlayScreen> {
         bool matchesPred(int value) {
           if (predicate == 'even') return value % 2 == 0;
           if (predicate == 'odd') return value % 2 != 0;
-          if (predicate.startsWith('gte_')) return value >= int.parse(predicate.substring(4));
-          if (predicate.startsWith('lte_')) return value <= int.parse(predicate.substring(4));
-          if (predicate.startsWith('eq_')) return value == int.parse(predicate.substring(3));
+          if (predicate.startsWith('gte_'))
+            return value >= int.parse(predicate.substring(4));
+          if (predicate.startsWith('lte_'))
+            return value <= int.parse(predicate.substring(4));
+          if (predicate.startsWith('eq_'))
+            return value == int.parse(predicate.substring(3));
           return false;
         }
 
@@ -1602,16 +1739,18 @@ class _PlayScreenState extends State<PlayScreen> {
           for (int x = 0; x < w; x++) if (matchesPred(cellVal(x, y))) c++;
           return c;
         }
+
         int colCount(int x) {
           int c = 0;
           for (int y = 0; y < h; y++) if (matchesPred(cellVal(x, y))) c++;
           return c;
         }
+
         bool checkCount(int count) => switch (cmp) {
-              'gte' => count >= target,
-              'lte' => count <= target,
-              _ => count == target,
-            };
+          'gte' => count >= target,
+          'lte' => count <= target,
+          _ => count == target,
+        };
 
         switch (scope) {
           case 'all_rows':
@@ -1652,37 +1791,43 @@ class _PlayScreenState extends State<PlayScreen> {
     const annotW = 28.0;
 
     Widget miniCell(int val) => Container(
-          width: cellSz,
-          height: cellSz,
-          margin: const EdgeInsets.all(1.5),
-          decoration: BoxDecoration(
-            color: Colors.grey.shade300,
-            borderRadius: BorderRadius.circular(3),
+      width: cellSz,
+      height: cellSz,
+      margin: const EdgeInsets.all(1.5),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade300,
+        borderRadius: BorderRadius.circular(3),
+      ),
+      child: Center(
+        child: Text(
+          '$val',
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey.shade800,
           ),
-          child: Center(
-            child: Text('$val',
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey.shade800)),
-          ),
-        );
+        ),
+      ),
+    );
 
     Widget annotation(String label, bool? satisfied) {
       final color = satisfied == null
           ? Colors.grey.shade400
           : satisfied
-              ? Colors.green.shade700
-              : Colors.orange.shade800;
+          ? Colors.green.shade700
+          : Colors.orange.shade800;
       return SizedBox(
         width: annotW,
         height: cellSz + 3,
         child: Center(
-          child: Text(label,
-              style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: FontWeight.bold,
-                  color: color)),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
         ),
       );
     }
@@ -1700,9 +1845,10 @@ class _PlayScreenState extends State<PlayScreen> {
         Text(
           descriptions.join(' · '),
           style: TextStyle(
-              fontSize: 11,
-              color: Colors.grey.shade600,
-              fontStyle: FontStyle.italic),
+            fontSize: 11,
+            color: Colors.grey.shade600,
+            fontStyle: FontStyle.italic,
+          ),
         ),
         const SizedBox(height: 6),
         Row(
@@ -1743,8 +1889,8 @@ class _PlayScreenState extends State<PlayScreen> {
                                 fontWeight: FontWeight.bold,
                                 color: colCheckers.containsKey(x)
                                     ? (colSatisfied(x)
-                                        ? Colors.green.shade700
-                                        : Colors.orange.shade800)
+                                          ? Colors.green.shade700
+                                          : Colors.orange.shade800)
                                     : Colors.grey.shade400,
                               ),
                             ),
@@ -1773,20 +1919,28 @@ class _PlayScreenState extends State<PlayScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(children: [
-            Icon(Icons.info_outline, color: Colors.blue.shade600, size: 14),
-            const SizedBox(width: 4),
-            Text('Guide',
+          Row(
+            children: [
+              Icon(Icons.info_outline, color: Colors.blue.shade600, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                'Guide',
                 style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.blue.shade700)),
-          ]),
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.blue.shade700,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: 6),
           Text(
             _levelDef.guide!,
             style: TextStyle(
-                fontSize: 11, color: Colors.blue.shade900, height: 1.4),
+              fontSize: 11,
+              color: Colors.blue.shade900,
+              height: 1.4,
+            ),
           ),
         ],
       ),
@@ -1875,11 +2029,13 @@ class _PlayScreenState extends State<PlayScreen> {
                     foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
-                  child: const Text("Let's go!",
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w600)),
+                  child: const Text(
+                    "Let's go!",
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
                 ),
               ),
             ),
@@ -1909,6 +2065,28 @@ class _PlayScreenState extends State<PlayScreen> {
     return limit != null ? 'Moves: $count/$limit' : 'Moves: $count';
   }
 
+  String? _selectedActorBudgetLabel(LevelState state) {
+    final selectedKind = state.variables['selectedActorKind'] as String?;
+    final remaining = state.variables['actorMovesRemaining'];
+    if (selectedKind == null || remaining is! Map) return null;
+    final value = remaining[selectedKind];
+    if (value is! num) return null;
+
+    final name =
+        widget.packService.game.entityKinds[selectedKind]?.uiName ??
+        selectedKind;
+    final count = value.toInt();
+    return '$name: $count ${count == 1 ? 'move' : 'moves'}';
+  }
+
+  bool _selectedActorBudgetExhausted(LevelState state) {
+    final selectedKind = state.variables['selectedActorKind'] as String?;
+    final remaining = state.variables['actorMovesRemaining'];
+    if (selectedKind == null || remaining is! Map) return false;
+    final value = remaining[selectedKind];
+    return value is num && value <= 0;
+  }
+
   void _showGameInfo() {
     final info = widget.packService.info;
     showDialog<void>(
@@ -1933,40 +2111,76 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   Widget _buildStatusBar(LevelState state) {
+    final selectedBudgetLabel = _selectedActorBudgetLabel(state);
+    final selectedBudgetExhausted = _selectedActorBudgetExhausted(state);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
         children: [
-          Text('${_levelIndex + 1}/${_levelIds.length}',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+          Text(
+            '${_levelIndex + 1}/${_levelIds.length}',
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+          ),
           const Spacer(),
           if (_aiRunning) ...[
-            Text('Attempt: $_agentAttempt',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+            Text(
+              'Attempt: $_agentAttempt',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+            ),
             const SizedBox(width: 12),
           ],
-          Text(_movesLabel(state),
-              style: TextStyle(
-                color: state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
-                fontSize: 13,
-                fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
-              )),
+          if (selectedBudgetLabel != null) ...[
+            Flexible(
+              child: Text(
+                selectedBudgetLabel,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: selectedBudgetExhausted
+                      ? Colors.red.shade600
+                      : Colors.grey.shade600,
+                  fontSize: 13,
+                  fontWeight: selectedBudgetExhausted
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+          ],
+          Text(
+            _movesLabel(state),
+            style: TextStyle(
+              color: state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
+              fontSize: 13,
+              fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
           const SizedBox(width: 4),
           GestureDetector(
             onTap: () {
-              final boardText = TextRenderer.render(state, widget.packService.game);
-              final moves = _engine.actionHistory.map(_actionShorthand).join('');
+              final boardText = TextRenderer.render(
+                state,
+                widget.packService.game,
+              );
+              final moves = _engine.actionHistory
+                  .map(_actionShorthand)
+                  .join('');
               final text = moves.isEmpty
                   ? boardText
                   : '$boardText\nMoves: $moves';
               Clipboard.setData(ClipboardData(text: text));
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                    content: Text('Grid + moves copied to clipboard'),
-                    duration: Duration(seconds: 1)),
+                  content: Text('Grid + moves copied to clipboard'),
+                  duration: Duration(seconds: 1),
+                ),
               );
             },
-            child: Icon(Icons.content_copy, size: 14, color: Colors.grey.shade400),
+            child: Icon(
+              Icons.content_copy,
+              size: 14,
+              color: Colors.grey.shade400,
+            ),
           ),
         ],
       ),
@@ -1985,11 +2199,14 @@ class _PlayScreenState extends State<PlayScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Level Complete!',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold)),
+          const Text(
+            'Level Complete!',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -1997,16 +2214,18 @@ class _PlayScreenState extends State<PlayScreen> {
               ElevatedButton(
                 onPressed: _onReset,
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.green.shade700),
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.green.shade700,
+                ),
                 child: const Text('Replay'),
               ),
               const SizedBox(width: 12),
               ElevatedButton(
                 onPressed: _advance,
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.green.shade700),
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.green.shade700,
+                ),
                 child: const Text('Next Level'),
               ),
             ],
@@ -2028,14 +2247,19 @@ class _PlayScreenState extends State<PlayScreen> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text('Out of Moves!',
-              style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold)),
+          const Text(
+            'Out of Moves!',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 4),
-          const Text('Plan the order more carefully.',
-              style: TextStyle(color: Colors.white70, fontSize: 13)),
+          const Text(
+            'Plan the order more carefully.',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
           const SizedBox(height: 10),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -2043,8 +2267,9 @@ class _PlayScreenState extends State<PlayScreen> {
               ElevatedButton(
                 onPressed: _onReset,
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white,
-                    foregroundColor: Colors.red.shade700),
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.red.shade700,
+                ),
                 child: const Text('Try Again'),
               ),
               const SizedBox(width: 12),
@@ -2067,7 +2292,8 @@ class _PlayScreenState extends State<PlayScreen> {
         child: Align(
           alignment: Alignment.centerRight,
           child: Tooltip(
-            message: 'AI play requires the native app (browser security restricts API calls)',
+            message:
+                'AI play requires the native app (browser security restricts API calls)',
             child: TextButton.icon(
               icon: const Icon(Icons.smart_toy_outlined, size: 18),
               label: const Text('Start AI'),
@@ -2103,17 +2329,21 @@ class _PlayScreenState extends State<PlayScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.smart_toy_outlined,
-                  size: 16, color: Colors.indigo.shade400),
+              Icon(
+                Icons.smart_toy_outlined,
+                size: 16,
+                color: Colors.indigo.shade400,
+              ),
               const SizedBox(width: 6),
               Text(
                 isStep
                     ? (isPaused ? 'AI ready' : 'AI thinking…')
                     : 'AI playing…',
                 style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.indigo.shade700),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.indigo.shade700,
+                ),
               ),
               const Spacer(),
               if (_currentAgent is LlmAgent) ...[
@@ -2126,21 +2356,27 @@ class _PlayScreenState extends State<PlayScreen> {
                 TextButton.icon(
                   icon: const Icon(Icons.person_outline, size: 18),
                   label: const Text('Take over'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.grey.shade700),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey.shade700,
+                  ),
                   onPressed: _stopAgent,
                 ),
                 TextButton.icon(
                   icon: const Icon(Icons.skip_next, size: 18),
-                  label: Text(s.inferenceMode == 'single'
-                      ? 'Infer Action'
-                      : 'Infer Actions'),
+                  label: Text(
+                    s.inferenceMode == 'single'
+                        ? 'Infer Action'
+                        : 'Infer Actions',
+                  ),
                   onPressed: _stepAgent,
                 ),
               ] else ...[
                 TextButton.icon(
                   icon: const Icon(Icons.person_outline, size: 18),
                   label: const Text('Take over'),
-                  style: TextButton.styleFrom(foregroundColor: Colors.grey.shade700),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.grey.shade700,
+                  ),
                   onPressed: _stopAgent,
                 ),
               ],
@@ -2193,13 +2429,18 @@ class _PlayScreenState extends State<PlayScreen> {
   Widget _buildThinkingText(String text) {
     final parts = text.split('```');
     final baseStyle = TextStyle(
-        fontSize: 12, color: Colors.indigo.shade800, height: 1.4);
+      fontSize: 12,
+      color: Colors.indigo.shade800,
+      height: 1.4,
+    );
     final monoStyle = baseStyle.copyWith(fontFamily: 'Courier');
 
     final spans = <TextSpan>[];
     for (int i = 0; i < parts.length; i++) {
       if (parts[i].isEmpty) continue;
-      spans.add(TextSpan(text: parts[i], style: i.isOdd ? monoStyle : baseStyle));
+      spans.add(
+        TextSpan(text: parts[i], style: i.isOdd ? monoStyle : baseStyle),
+      );
     }
     return SelectableText.rich(TextSpan(children: spans));
   }
@@ -2215,12 +2456,15 @@ class _PlayScreenState extends State<PlayScreen> {
           borderRadius: BorderRadius.circular(4),
           color: Colors.grey.shade100,
         ),
-        child: Text(label,
-            style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: Colors.grey.shade600,
-                fontFamily: 'monospace')),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Colors.grey.shade600,
+            fontFamily: 'monospace',
+          ),
+        ),
       ),
     );
   }

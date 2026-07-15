@@ -49,19 +49,78 @@ class SightlineFeedback {
   });
 }
 
+/// Resolves the sprite path for an entity instance, including optional
+/// direction-aware motion sprites declared under `motion.sprites`.
+String? resolveEntitySpritePath(
+  EntityKindDef? kindDef,
+  EntityInstance entity, {
+  String? facingDirection,
+}) {
+  final sprite = kindDef?.sprite;
+  if (sprite == null) return null;
+
+  final motionSprite = _motionSpritePath(
+    kindDef!.motion,
+    entity,
+    facingDirection: facingDirection,
+  );
+  if (motionSprite != null) return motionSprite;
+
+  final spriteParam = kindDef.spriteParam;
+  if (spriteParam == null) return sprite;
+  final value = entity.param(spriteParam);
+  return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
+}
+
+String? _motionSpritePath(
+  Map<String, dynamic> motion,
+  EntityInstance entity, {
+  String? facingDirection,
+}) {
+  final sprites = motion['sprites'];
+  if (sprites is! Map) return null;
+
+  final movementDirection = entity.param('_motionDirection');
+  if (movementDirection is String) {
+    final walk = sprites['walk'];
+    final frames = walk is Map ? walk[movementDirection] : null;
+    if (frames is List && frames.isNotEmpty) {
+      final rawFrame = entity.param('_motionFrame');
+      final frame = rawFrame is int ? rawFrame : 0;
+      return frames[frame % frames.length] as String?;
+    }
+  }
+
+  if (facingDirection != null) {
+    final idle = sprites['idle'];
+    final frame = idle is Map ? idle[facingDirection] : null;
+    if (frame is String) return frame;
+  }
+
+  return null;
+}
+
 class BoardRenderer extends StatelessWidget {
   final LevelState state;
   final GameDefinition game;
   final PackService packService;
+
   /// Optional overlay sprites rendered on top of the objects layer, used during
   /// entity destruction animations. Maps cell position → DSL sprite path.
   /// Resolved pack-first then gridponder-base, matching static sprite behaviour.
   final Map<Position, String>? animationOverlays;
+
   /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
   final void Function(int x, int y)? onCellTap;
+
+  /// Last known facing direction per actor kind. Used to render idle actor
+  /// sprites after movement animation has finished.
+  final Map<String, String> actorFacingByKind;
+
   /// When set, cell_flooded entities are rendered in this color instead of
   /// their default color — used by Flood Colors to show the last chosen color.
   final Color? floodedColorOverride;
+
   /// When set, the avatar is rendered at this position instead of
   /// state.avatar.position — used during ice slide animations.
   final Position? avatarPositionOverride;
@@ -79,6 +138,7 @@ class BoardRenderer extends StatelessWidget {
     required this.packService,
     this.animationOverlays,
     this.onCellTap,
+    this.actorFacingByKind = const {},
     this.floodedColorOverride,
     this.avatarPositionOverride,
     this.selectedMultiCellObjectId,
@@ -148,6 +208,7 @@ class BoardRenderer extends StatelessWidget {
                               skipGround: backgroundMcoPosSet.contains(
                                 Position(x, y),
                               ),
+                              actorFacingByKind: actorFacingByKind,
                               floodedColorOverride: floodedColorOverride,
                             ),
                           )
@@ -161,6 +222,7 @@ class BoardRenderer extends StatelessWidget {
                             skipGround: backgroundMcoPosSet.contains(
                               Position(x, y),
                             ),
+                            actorFacingByKind: actorFacingByKind,
                             floodedColorOverride: floodedColorOverride,
                           ),
                   ),
@@ -181,6 +243,8 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               ),
+              if (_selectedActorPosition() case final selectedPos?)
+                _buildSelectedActorRing(selectedPos, cellSize),
               if (animationOverlays != null)
                 for (final entry in animationOverlays!.entries)
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
@@ -222,10 +286,8 @@ class BoardRenderer extends StatelessWidget {
     final exitPos = exitList != null
         ? Position(exitList[0] as int, exitList[1] as int)
         : null;
-    final queue = (mco.params['queue'] as List?)
-            ?.map((e) => e as int)
-            .toList() ??
-        [];
+    final queue =
+        (mco.params['queue'] as List?)?.map((e) => e as int).toList() ?? [];
     final currentIndex = (mco.params['currentIndex'] as int?) ?? 0;
 
     // Assign queued values to pipe cells.
@@ -268,7 +330,8 @@ class BoardRenderer extends StatelessWidget {
           width: cellSize,
           height: cellSize,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _mcoFallback(pos, mco, exitPos, cellSize),
+          errorBuilder: (_, __, ___) =>
+              _mcoFallback(pos, mco, exitPos, cellSize),
         );
       } else {
         background = _mcoFallback(pos, mco, exitPos, cellSize);
@@ -379,8 +442,12 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _mcoFallback(Position pos, MultiCellObjectInstance mco,
-      Position? exitPos, double cellSize) {
+  Widget _mcoFallback(
+    Position pos,
+    MultiCellObjectInstance mco,
+    Position? exitPos,
+    double cellSize,
+  ) {
     final cellSet = mco.cells.toSet();
     final isExit = pos == exitPos;
     return CustomPaint(
@@ -403,9 +470,46 @@ class BoardRenderer extends StatelessWidget {
       child: IgnorePointer(
         child: Container(
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.amber.withOpacity(0.9), width: 2.5),
+            border: Border.all(
+              color: Colors.amber.withOpacity(0.9),
+              width: 2.5,
+            ),
             color: Colors.amber.withOpacity(0.08),
             borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Position? _selectedActorPosition() {
+    final selectedKind = state.variables['selectedActorKind'] as String?;
+    if (selectedKind == null) return null;
+    final layer = state.board.layers['actors'];
+    if (layer == null) return null;
+    for (final entry in layer.entries()) {
+      if (entry.value.kind == selectedKind) return entry.key;
+    }
+    return null;
+  }
+
+  Widget _buildSelectedActorRing(Position pos, double cellSize) {
+    return Positioned(
+      left: pos.x * cellSize,
+      top: pos.y * cellSize,
+      width: cellSize,
+      height: cellSize,
+      child: IgnorePointer(
+        child: Padding(
+          padding: EdgeInsets.all(cellSize * 0.08),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: const Color(0xFFFFD45A),
+                width: max(2.0, cellSize * 0.045),
+              ),
+              borderRadius: BorderRadius.circular(cellSize * 0.18),
+            ),
           ),
         ),
       ),
@@ -432,8 +536,9 @@ class BoardRenderer extends StatelessWidget {
   }
 
   Widget _buildAvatar(AvatarState avatar, double cellSize) {
-    final assetPath =
-        packService.resolveAvatarSprite(_avatarSpriteFile(avatar.facing.toJson()));
+    final assetPath = packService.resolveAvatarSprite(
+      _avatarSpriteFile(avatar.facing.toJson()),
+    );
     final slot = avatar.inventory.slot;
 
     // When an overlay exists, center the avatar at the overlay's midpoint.
@@ -552,6 +657,7 @@ class _Cell extends StatelessWidget {
   final PackService packService;
   final double cellSize;
   final bool skipGround;
+  final Map<String, String> actorFacingByKind;
   final Color? floodedColorOverride;
 
   const _Cell({
@@ -562,6 +668,7 @@ class _Cell extends StatelessWidget {
     required this.packService,
     required this.cellSize,
     this.skipGround = false,
+    this.actorFacingByKind = const {},
     this.floodedColorOverride,
   });
 
@@ -571,7 +678,7 @@ class _Cell extends StatelessWidget {
     final groundEntity = state.board.getEntity('ground', pos);
     if (groundEntity?.kind == 'void' && !skipGround) {
       final kindDef = game.entityKinds['void'];
-      final spritePath = _entitySpritePath(kindDef, groundEntity!);
+      final spritePath = resolveEntitySpritePath(kindDef, groundEntity!);
       if (spritePath != null) {
         return Image.asset(
           packService.resolveSprite(spritePath),
@@ -595,11 +702,13 @@ class _Cell extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return Container(
-      decoration:
-          BoxDecoration(border: Border.all(color: Colors.black12, width: 0.5)),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.black12, width: 0.5),
+      ),
       child: Stack(
         children: [
           if (!skipGround) _layer('ground', pos),
+          _layer('territory', pos),
           _layer('portals', pos),
           _layer('objects', pos),
           _layer('clone', pos),
@@ -610,22 +719,18 @@ class _Cell extends StatelessWidget {
     );
   }
 
-  /// Resolves the sprite path for an entity instance, substituting the
-  /// `{paramName}` placeholder when the kind uses [EntityKindDef.spriteParam].
-  String? _entitySpritePath(EntityKindDef? kindDef, EntityInstance entity) {
-    final sprite = kindDef?.sprite;
-    if (sprite == null) return null;
-    final spriteParam = kindDef!.spriteParam;
-    if (spriteParam == null) return sprite;
-    final value = entity.param(spriteParam);
-    return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
-  }
-
   Widget _layer(String layerId, Position pos) {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
     final kindDef = game.entityKinds[entity.kind];
-    final spritePath = _entitySpritePath(kindDef, entity);
+    final facingDirection = layerId == 'actors'
+        ? actorFacingByKind[entity.kind]
+        : null;
+    final spritePath = resolveEntitySpritePath(
+      kindDef,
+      entity,
+      facingDirection: facingDirection,
+    );
     if (spritePath != null) {
       // Try pack-specific path first; fall back to gridponder-base for shared sprites.
       return Image(
@@ -703,7 +808,10 @@ class _Cell extends StatelessWidget {
   /// null when [display] doesn't specify a recognised type (caller falls
   /// back to legacy procedural paths). Sole pack-visible vocabulary, so
   /// the renderer doesn't have to recognise specific entity-kind names.
-  Widget? _renderFromDisplay(Map<String, dynamic> display, EntityInstance entity) {
+  Widget? _renderFromDisplay(
+    Map<String, dynamic> display,
+    EntityInstance entity,
+  ) {
     final type = display['type'] as String?;
     final color = _resolveDisplayColor(display['color'], entity);
     switch (type) {
@@ -714,7 +822,11 @@ class _Cell extends StatelessWidget {
             color: color ?? _namedColor('grey'),
             borderRadius: BorderRadius.circular(cellSize * 0.1),
             boxShadow: const [
-              BoxShadow(color: Colors.black26, blurRadius: 2, offset: Offset(1, 1)),
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 2,
+                offset: Offset(1, 1),
+              ),
             ],
           ),
         );
@@ -734,7 +846,8 @@ class _Cell extends StatelessWidget {
           ),
         );
       case 'label':
-        final labelText = _resolveDisplayString(display['label'], entity) ?? '?';
+        final labelText =
+            _resolveDisplayString(display['label'], entity) ?? '?';
         return Container(
           color: color ?? _namedColor('grey'),
           alignment: Alignment.center,
@@ -812,11 +925,11 @@ class _Cell extends StatelessWidget {
   /// Tiny lookup so a pack can name a Material icon by its standard name.
   /// Extend as needed; unknown names render the default placeholder.
   IconData _materialIcon(String? name) => switch (name) {
-        'blur_on' => Icons.blur_on,
-        'star' => Icons.star,
-        'flag' => Icons.flag,
-        _ => Icons.circle_outlined,
-      };
+    'blur_on' => Icons.blur_on,
+    'star' => Icons.star,
+    'flag' => Icons.flag,
+    _ => Icons.circle_outlined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -829,14 +942,19 @@ class _Cell extends StatelessWidget {
 class TargetBoardRenderer extends StatelessWidget {
   final Map<String, dynamic> targetLayers;
   final LevelState? currentState;
+
   /// Pack-specific colour overrides forwarded to [cellNamedColor]. Pass
   /// `packService.theme?.palette` from the caller; null falls back to
   /// the renderer's built-in palette.
   final Map<String, String>? palette;
   static const double _cellSize = 24.0;
 
-  const TargetBoardRenderer(
-      {super.key, required this.targetLayers, this.currentState, this.palette});
+  const TargetBoardRenderer({
+    super.key,
+    required this.targetLayers,
+    this.currentState,
+    this.palette,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -859,11 +977,12 @@ class TargetBoardRenderer extends StatelessWidget {
                 width: _cellSize,
                 height: _cellSize,
                 child: _TargetCell(
-                    x: x,
-                    y: y,
-                    targetLayers: targetLayers,
-                    currentState: currentState,
-                    palette: palette),
+                  x: x,
+                  y: y,
+                  targetLayers: targetLayers,
+                  currentState: currentState,
+                  palette: palette,
+                ),
               ),
         ],
       ),
@@ -877,12 +996,13 @@ class _TargetCell extends StatelessWidget {
   final LevelState? currentState;
   final Map<String, String>? palette;
 
-  const _TargetCell(
-      {required this.x,
-      required this.y,
-      required this.targetLayers,
-      this.currentState,
-      this.palette});
+  const _TargetCell({
+    required this.x,
+    required this.y,
+    required this.targetLayers,
+    this.currentState,
+    this.palette,
+  });
 
   String? _kindAt(String layerId) {
     final layer = targetLayers[layerId] as List?;
@@ -913,13 +1033,15 @@ class _TargetCell extends StatelessWidget {
         break;
       }
     }
-    final bgColor =
-        matched ? Colors.lightGreen.shade200 : const Color(0xFFF5F0E8);
+    final bgColor = matched
+        ? Colors.lightGreen.shade200
+        : const Color(0xFFF5F0E8);
     return Container(
       decoration: BoxDecoration(
         color: bgColor,
         border: const Border.fromBorderSide(
-            BorderSide(color: Colors.black12, width: 0.5)),
+          BorderSide(color: Colors.black12, width: 0.5),
+        ),
       ),
       child: kind != null ? _buildTargetCell(kind) : null,
     );
@@ -984,10 +1106,10 @@ class _PipeCellPainter extends CustomPainter {
     required this.isExit,
   });
 
-  static const _bg = Color(0xFF37474F);       // dark steel background
-  static const _wall = Color(0xFF263238);      // darker outline
-  static const _lumen = Color(0xFF78909C);     // inner channel fill
-  static const _lumenLight = Color(0xFF90A4AE);// highlight inside channel
+  static const _bg = Color(0xFF37474F); // dark steel background
+  static const _wall = Color(0xFF263238); // darker outline
+  static const _lumen = Color(0xFF78909C); // inner channel fill
+  static const _lumenLight = Color(0xFF90A4AE); // highlight inside channel
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1001,7 +1123,7 @@ class _PipeCellPainter extends CustomPainter {
 
     final lumenPaint = Paint()..color = _lumen;
     final lightPaint = Paint()..color = _lumenLight;
-    final wallPaint  = Paint()
+    final wallPaint = Paint()
       ..color = _wall
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
@@ -1018,30 +1140,35 @@ class _PipeCellPainter extends CustomPainter {
       final isHoriz = (y2 - y1).abs() < (x2 - x1).abs();
       if (isHoriz) {
         canvas.drawRect(
-            Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.25),
-            lightPaint);
+          Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.25),
+          lightPaint,
+        );
       } else {
         canvas.drawRect(
-            Rect.fromLTWH(rect.left, rect.top, rect.width * 0.25, rect.height),
-            lightPaint);
+          Rect.fromLTWH(rect.left, rect.top, rect.width * 0.25, rect.height),
+          lightPaint,
+        );
       }
       canvas.drawRect(rect, wallPaint);
     }
 
     // Center square — filled whenever two or more sides are open.
     final centerRect = Rect.fromLTWH(cx - cr, cy - cr, cr * 2, cr * 2);
-    final openCount = [openLeft, openRight, openUp, openDown]
-        .where((v) => v)
-        .length;
+    final openCount = [
+      openLeft,
+      openRight,
+      openUp,
+      openDown,
+    ].where((v) => v).length;
     if (openCount >= 2) {
       canvas.drawRect(centerRect, lumenPaint);
       canvas.drawRect(centerRect, wallPaint);
     }
 
-    if (openLeft)  drawSegment(0,      cy - cr, cx, cy + cr);
-    if (openRight) drawSegment(cx,     cy - cr, w,  cy + cr);
-    if (openUp)    drawSegment(cx - cr, 0,      cx + cr, cy);
-    if (openDown)  drawSegment(cx - cr, cy,     cx + cr, h);
+    if (openLeft) drawSegment(0, cy - cr, cx, cy + cr);
+    if (openRight) drawSegment(cx, cy - cr, w, cy + cr);
+    if (openUp) drawSegment(cx - cr, 0, cx + cr, cy);
+    if (openDown) drawSegment(cx - cr, cy, cx + cr, h);
 
     // Exit indicator: small downward chevron at the bottom edge.
     if (isExit) {
@@ -1090,7 +1217,8 @@ class _OutlinePainter extends CustomPainter {
       final outline = kindDef.outline;
       if (outline == null) continue;
 
-      final color = _parseHex(outline['color'] as String?) ?? const Color(0xFF222222);
+      final color =
+          _parseHex(outline['color'] as String?) ?? const Color(0xFF222222);
       final width = (outline['width'] as num?)?.toDouble() ?? 2.0;
       final paint = Paint()
         ..color = color

@@ -8,6 +8,7 @@ runtime state.
 from __future__ import annotations
 
 import bisect
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -463,7 +464,7 @@ class GameState:
         return GameState(
             self.board.copy(),
             self.avatar.copy(),
-            dict(self.variables),
+            copy.deepcopy(self.variables),
             self.overlay.copy() if self.overlay else None,
             self.turn_count,
             self.action_count,
@@ -499,5 +500,15 @@ class GameState:
         )
         av = self.avatar
         avatar_key = (av.enabled, av.position, av.facing, av.item)
-        vars_key = tuple(sorted(self.variables.items()))
+        vars_key = _freeze_value(self.variables)
         return (board_key, mco_key, avatar_key, vars_key)
+
+
+def _freeze_value(value):
+    if isinstance(value, dict):
+        return tuple((k, _freeze_value(v)) for k, v in sorted(value.items()))
+    if isinstance(value, list):
+        return tuple(_freeze_value(v) for v in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_value(v) for v in value))
+    return value
