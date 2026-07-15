@@ -51,6 +51,21 @@ def object_removed(pos: Pos, kind: str, animation: str | None = None) -> dict:
     return e
 
 
+def line_of_sight_collected(
+    source: Pos,
+    target: Pos,
+    kind: str,
+    collector_id: str,
+) -> dict:
+    return {
+        "type": "line_of_sight_collected",
+        "sourcePosition": source,
+        "position": target,
+        "kind": kind,
+        "collectorId": collector_id,
+    }
+
+
 def cell_cleared(pos: Pos, previous_kind: str) -> dict:
     return {"type": "cell_cleared", "position": pos, "previousKind": previous_kind}
 

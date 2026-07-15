@@ -46,7 +46,7 @@ class SlidingBlocksSystem(GameSystem):
             old_value = state.variables.get(variable, 0)
             new_value = old_value + 1
             state.variables[variable] = new_value
-            return [
+            events.extend([
                 {
                     "type": "multi_cell_object_exited",
                     "id": block.id,
@@ -54,12 +54,16 @@ class SlidingBlocksSystem(GameSystem):
                     "direction": direction,
                 },
                 ev.variable_changed(variable, old_value, new_value),
-            ]
+            ])
+            events.extend(_reveal_uncovered(state, config))
+            events.extend(_line_of_sight_collect(state, game, config))
+            events.extend(_resolve_object_interactions(new_cells, state, game, config))
+            return events
 
         events.extend(_resolve_object_interactions(new_cells, state, game, config))
 
         for cell in new_cells:
-            if not _is_valid_destination(cell, old_set, state, game, config):
+            if not _is_valid_destination(cell, block, old_set, state, game, config):
                 return [ev.action_vetoed()]
 
         block.cells = new_cells
@@ -75,7 +79,8 @@ class SlidingBlocksSystem(GameSystem):
         )
         events.extend(_collect_on_enter(block, new_cells, state, game, config))
         events.extend(_reveal_uncovered(state, config))
-        events.extend(_line_of_sight_collect(block, state, game, config))
+        events.extend(_line_of_sight_collect(state, game, config))
+        events.extend(_resolve_object_interactions(new_cells, state, game, config))
         return events
 
 
@@ -104,6 +109,7 @@ def _axis_allows(axis: str, direction: str) -> bool:
 
 def _is_valid_destination(
     pos: Pos,
+    moving_block,
     moving_block_cells: set[Pos],
     state: GameState,
     game: GameDef,
@@ -124,6 +130,9 @@ def _is_valid_destination(
 
     blocking_layers = [str(t) for t in config.get("blockingLayers", ["objects"])]
     blocking_tags = [str(t) for t in config.get("blockingTags", ["solid"])]
+    coverable_tags = [str(t) for t in config.get("coverableTags", [])]
+    coverable_blocked_roles = {str(t) for t in config.get("coverableBlockedRoles", ["escapee"])}
+    moving_role = moving_block.params.get("role")
     for layer_id in blocking_layers:
         entity = state.board.get_entity(layer_id, pos)
         if entity is None:
@@ -131,6 +140,14 @@ def _is_valid_destination(
         if pos in moving_block_cells:
             continue
         if not blocking_tags or any(game.has_tag(entity.kind, tag) for tag in blocking_tags):
+            can_cover = any(
+                game.has_tag(entity.kind, tag) for tag in coverable_tags
+            ) and (
+                moving_role is None
+                or str(moving_role) not in coverable_blocked_roles
+            )
+            if can_cover:
+                continue
             return False
 
     return True
@@ -228,6 +245,9 @@ def _resolve_object_interactions(new_cells: list[Pos], state: GameState, game: G
     events: list[dict] = []
     for item in config.get("objectInteractions", []):
         layer_id = str(item.get("layer", "objects"))
+        layer = state.board.layers.get(layer_id)
+        if layer is None:
+            continue
         target_kinds = {str(k) for k in item.get("targetKinds", [])}
         target_tags = {str(t) for t in item.get("targetTags", [])}
         required_variable = item.get("requiredVariable")
@@ -237,7 +257,9 @@ def _resolve_object_interactions(new_cells: list[Pos], state: GameState, game: G
                 continue
         to_kind = item.get("toKind")
         remove = item.get("remove", False)
-        for pos in new_cells:
+        scope = str(item.get("scope", "destination"))
+        positions = [pos for pos, _ in layer.entries()] if scope == "board" else new_cells
+        for pos in positions:
             entity = state.board.get_entity(layer_id, pos)
             if entity is None:
                 continue
@@ -249,16 +271,23 @@ def _resolve_object_interactions(new_cells: list[Pos], state: GameState, game: G
                 state.board.set_entity(layer_id, pos, None)
                 events.append(ev.object_removed(pos, entity.kind))
             elif to_kind is not None:
+                if entity.kind == str(to_kind):
+                    continue
                 state.board.set_entity(layer_id, pos, Entity(str(to_kind)))
                 events.append(ev.cell_transformed(pos, entity.kind, str(to_kind), layer_id))
     return events
 
 
-def _line_of_sight_collect(block, state: GameState, game: GameDef, config: dict) -> list[dict]:
+def _line_of_sight_collect(state: GameState, game: GameDef, config: dict) -> list[dict]:
     events: list[dict] = []
     for item in config.get("lineOfSightCollect", []):
         roles = {str(r) for r in item.get("roles", [])}
-        if roles and str(block.params.get("role")) not in roles:
+        collectors = [
+            collector
+            for collector in state.board.multi_cell_objects
+            if not roles or str(collector.params.get("role")) in roles
+        ]
+        if not collectors:
             continue
         layer_id = str(item.get("layer", "objects"))
         layer = state.board.layers.get(layer_id)
@@ -276,11 +305,34 @@ def _line_of_sight_collect(block, state: GameState, game: GameDef, config: dict)
                 continue
             if collect_tags and not any(game.has_tag(entity.kind, tag) for tag in collect_tags):
                 continue
-            if not any(_has_clear_line(cell, key_pos, block, state, game, blocking_layers, blocking_tags) for cell in block.cells):
+            covering_block = _block_at(state, key_pos)
+            source = None
+            collector_id = None
+            for collector in collectors:
+                if covering_block is not None and covering_block.id != collector.id:
+                    continue
+                for cell in collector.cells:
+                    if _has_clear_line(
+                        cell, key_pos, collector, state, game, blocking_layers, blocking_tags
+                    ):
+                        source = cell
+                        collector_id = collector.id
+                        break
+                if source is not None:
+                    break
+            if source is None or collector_id is None:
                 continue
             if remove:
                 state.board.set_entity(layer_id, key_pos, None)
                 events.append(ev.object_removed(key_pos, entity.kind))
+            events.append(
+                ev.line_of_sight_collected(
+                    source,
+                    key_pos,
+                    entity.kind,
+                    str(collector_id),
+                )
+            )
             if variable:
                 old_value = state.variables.get(variable, 0)
                 new_value = old_value + 1

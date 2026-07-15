@@ -37,6 +37,18 @@ Color? _parsePaletteHex(String hex) {
   return v == null ? null : Color(v);
 }
 
+class SightlineFeedback {
+  final Position source;
+  final Position target;
+  final String kind;
+
+  const SightlineFeedback({
+    required this.source,
+    required this.target,
+    required this.kind,
+  });
+}
+
 class BoardRenderer extends StatelessWidget {
   final LevelState state;
   final GameDefinition game;
@@ -54,6 +66,12 @@ class BoardRenderer extends StatelessWidget {
   /// state.avatar.position — used during ice slide animations.
   final Position? avatarPositionOverride;
 
+  /// UI-only selection state for direct-manipulation multi-cell objects.
+  final String? selectedMultiCellObjectId;
+
+  /// Short-lived result feedback for line-of-sight collection.
+  final List<SightlineFeedback> sightlineFeedbacks;
+
   const BoardRenderer({
     super.key,
     required this.state,
@@ -63,6 +81,8 @@ class BoardRenderer extends StatelessWidget {
     this.onCellTap,
     this.floodedColorOverride,
     this.avatarPositionOverride,
+    this.selectedMultiCellObjectId,
+    this.sightlineFeedbacks = const [],
   });
 
   @override
@@ -80,10 +100,20 @@ class BoardRenderer extends StatelessWidget {
         final gridWidth = cellSize * cols;
         final gridHeight = cellSize * rows;
 
-        // Positions that belong to a multi-cell object — ground layer is
-        // suppressed there so pipe tiles show through as the background.
-        final mcoPosSet = <Position>{
-          for (final mco in state.board.multiCellObjects) ...mco.cells,
+        // Background structures such as pipes stay below cell layers. Physical
+        // sliding blocks render above them so covered objects remain hidden.
+        final backgroundMcos = state.board.multiCellObjects
+            .where((mco) => !game.hasTag(mco.kind, 'sliding_block'))
+            .toList();
+        final foregroundMcos = state.board.multiCellObjects
+            .where((mco) => game.hasTag(mco.kind, 'sliding_block'))
+            .toList();
+
+        // Background structures replace the ground tile (for example pipes).
+        // Foreground multi-cell objects keep the ground below them so
+        // transparent sprites render correctly.
+        final backgroundMcoPosSet = <Position>{
+          for (final mco in backgroundMcos) ...mco.cells,
         };
 
         return SizedBox(
@@ -91,9 +121,12 @@ class BoardRenderer extends StatelessWidget {
           height: gridHeight,
           child: Stack(
             children: [
-              // Pipe tile backgrounds rendered first so entity layers sit on top.
-              for (final mco in state.board.multiCellObjects)
-                ..._buildMcoCells(mco, cellSize),
+              for (final mco in backgroundMcos)
+                ..._buildMcoCells(
+                  mco,
+                  cellSize,
+                  selected: mco.id == selectedMultiCellObjectId,
+                ),
               for (int y = 0; y < rows; y++)
                 for (int x = 0; x < cols; x++)
                   Positioned(
@@ -112,7 +145,9 @@ class BoardRenderer extends StatelessWidget {
                               game: game,
                               packService: packService,
                               cellSize: cellSize,
-                              skipGround: mcoPosSet.contains(Position(x, y)),
+                              skipGround: backgroundMcoPosSet.contains(
+                                Position(x, y),
+                              ),
                               floodedColorOverride: floodedColorOverride,
                             ),
                           )
@@ -123,10 +158,18 @@ class BoardRenderer extends StatelessWidget {
                             game: game,
                             packService: packService,
                             cellSize: cellSize,
-                            skipGround: mcoPosSet.contains(Position(x, y)),
+                            skipGround: backgroundMcoPosSet.contains(
+                              Position(x, y),
+                            ),
                             floodedColorOverride: floodedColorOverride,
                           ),
                   ),
+              for (final mco in foregroundMcos)
+                ..._buildMcoCells(
+                  mco,
+                  cellSize,
+                  selected: mco.id == selectedMultiCellObjectId,
+                ),
               // Region outlines: stroke the perimeter of contiguous cells
               // for any kind that has `outline` set in game.json. Painted
               // above cells but below avatar / animation overlays so the
@@ -143,6 +186,19 @@ class BoardRenderer extends StatelessWidget {
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
               if (state.overlay != null)
                 _buildOverlay(state.overlay!, cellSize),
+              if (sightlineFeedbacks.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _SightlineFeedbackPainter(
+                        sightlineFeedbacks,
+                        cellSize,
+                      ),
+                    ),
+                  ),
+                ),
+              for (final feedback in sightlineFeedbacks)
+                _buildSightlinePickup(feedback, cellSize),
               if (state.avatar.enabled && state.avatar.position != null)
                 _buildAvatar(
                   avatarPositionOverride != null
@@ -157,7 +213,11 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildMcoCells(MultiCellObjectInstance mco, double cellSize) {
+  List<Widget> _buildMcoCells(
+    MultiCellObjectInstance mco,
+    double cellSize, {
+    bool selected = false,
+  }) {
     final exitList = mco.params['exitPosition'] as List?;
     final exitPos = exitList != null
         ? Position(exitList[0] as int, exitList[1] as int)
@@ -199,7 +259,6 @@ class BoardRenderer extends StatelessWidget {
     }
 
     return mco.cells.map((pos) {
-      final isExit = pos == exitPos;
       final sprite = mco.cellSprites[pos];
 
       Widget background;
@@ -230,16 +289,94 @@ class BoardRenderer extends StatelessWidget {
         );
       }
 
+      final cell = Stack(
+        fit: StackFit.expand,
+        children: [
+          background,
+          if (label != null) label,
+          if (selected) _selectedMcoCellOverlay(cellSize),
+        ],
+      );
+
       return Positioned(
         left: pos.x * cellSize,
         top: pos.y * cellSize,
         width: cellSize,
         height: cellSize,
-        child: label != null
-            ? Stack(children: [background, label])
-            : background,
+        child: cell,
       );
     }).toList();
+  }
+
+  Widget _selectedMcoCellOverlay(double cellSize) {
+    final borderWidth = (cellSize * 0.055).clamp(2.0, 4.0);
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: const Color(0xFFFFC107),
+            width: borderWidth,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFFC107).withValues(alpha: 0.35),
+              blurRadius: borderWidth * 2.4,
+              spreadRadius: borderWidth * 0.25,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSightlinePickup(SightlineFeedback feedback, double cellSize) {
+    final assetPath = game.entityKinds[feedback.kind]?.sprite;
+    final child = assetPath != null
+        ? Image(
+            image: packService.resolvePackImage(assetPath),
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => Icon(
+              Icons.auto_awesome,
+              color: Colors.amber.shade600,
+              size: cellSize * 0.58,
+            ),
+          )
+        : Icon(
+            Icons.auto_awesome,
+            color: Colors.amber.shade600,
+            size: cellSize * 0.58,
+          );
+
+    return Positioned(
+      left: feedback.target.x * cellSize,
+      top: feedback.target.y * cellSize,
+      width: cellSize,
+      height: cellSize,
+      child: IgnorePointer(
+        child: Center(
+          child: Transform.scale(
+            scale: 1.22,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.amber.withValues(alpha: 0.6),
+                    blurRadius: cellSize * 0.22,
+                    spreadRadius: cellSize * 0.04,
+                  ),
+                ],
+              ),
+              child: SizedBox(
+                width: cellSize * 0.78,
+                height: cellSize * 0.78,
+                child: child,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _mcoFallback(Position pos, MultiCellObjectInstance mco,
@@ -367,6 +504,44 @@ class BoardRenderer extends StatelessWidget {
       default:
         return 'rabbit_looking_right.png';
     }
+  }
+}
+
+class _SightlineFeedbackPainter extends CustomPainter {
+  final List<SightlineFeedback> feedbacks;
+  final double cellSize;
+
+  const _SightlineFeedbackPainter(this.feedbacks, this.cellSize);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final linePaint = Paint()
+      ..color = const Color(0xFFFFD54F).withValues(alpha: 0.9)
+      ..strokeWidth = (cellSize * 0.075).clamp(3.0, 7.0)
+      ..strokeCap = StrokeCap.round;
+    final glowPaint = Paint()
+      ..color = const Color(0xFFFFF176).withValues(alpha: 0.32)
+      ..strokeWidth = (cellSize * 0.19).clamp(8.0, 16.0)
+      ..strokeCap = StrokeCap.round;
+
+    for (final feedback in feedbacks) {
+      final source = Offset(
+        (feedback.source.x + 0.5) * cellSize,
+        (feedback.source.y + 0.5) * cellSize,
+      );
+      final target = Offset(
+        (feedback.target.x + 0.5) * cellSize,
+        (feedback.target.y + 0.5) * cellSize,
+      );
+      canvas.drawLine(source, target, glowPaint);
+      canvas.drawLine(source, target, linePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _SightlineFeedbackPainter oldDelegate) {
+    return oldDelegate.feedbacks != feedbacks ||
+        oldDelegate.cellSize != cellSize;
   }
 }
 

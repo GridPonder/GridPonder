@@ -11,7 +11,7 @@ class SlidingBlocksSystem extends GameSystem {
   final Map<String, dynamic>? config;
 
   const SlidingBlocksSystem({required super.id, this.config})
-    : super(type: 'sliding_blocks');
+      : super(type: 'sliding_blocks');
 
   @override
   List<GameEvent> executeActionResolution(
@@ -43,9 +43,8 @@ class SlidingBlocksSystem extends GameSystem {
     final oldSet = oldCells.toSet();
     final events = <GameEvent>[];
 
-    final outOfBounds = newCells
-        .where((p) => !state.board.isInBounds(p))
-        .toList();
+    final outOfBounds =
+        newCells.where((p) => !state.board.isInBounds(p)).toList();
     if (outOfBounds.isNotEmpty) {
       if (!_canEscape(
         block,
@@ -63,14 +62,20 @@ class SlidingBlocksSystem extends GameSystem {
       final oldValue = (state.variables[variable] as num?) ?? 0;
       final newValue = oldValue + 1;
       state.variables[variable] = newValue;
-      return [
+      events.addAll([
         GameEvent('multi_cell_object_exited', {
           'id': block.id,
           'kind': block.kind,
           'direction': direction.toJson(),
         }),
         GameEvent.variableChanged(variable, oldValue, newValue),
-      ];
+      ]);
+      events.addAll(_revealUncovered(state, effectiveConfig));
+      events.addAll(_lineOfSightCollect(state, game, effectiveConfig));
+      events.addAll(
+        _resolveObjectInteractions(newCells, state, game, effectiveConfig),
+      );
+      return events;
     }
 
     events.addAll(
@@ -78,7 +83,14 @@ class SlidingBlocksSystem extends GameSystem {
     );
 
     for (final cell in newCells) {
-      if (!_isValidDestination(cell, oldSet, state, game, effectiveConfig)) {
+      if (!_isValidDestination(
+        cell,
+        block,
+        oldSet,
+        state,
+        game,
+        effectiveConfig,
+      )) {
         return [GameEvent.actionVetoed()];
       }
     }
@@ -97,7 +109,10 @@ class SlidingBlocksSystem extends GameSystem {
       _collectOnEnter(block, newCells, state, game, effectiveConfig),
     );
     events.addAll(_revealUncovered(state, effectiveConfig));
-    events.addAll(_lineOfSightCollect(block, state, game, effectiveConfig));
+    events.addAll(_lineOfSightCollect(state, game, effectiveConfig));
+    events.addAll(
+      _resolveObjectInteractions(newCells, state, game, effectiveConfig),
+    );
     return events;
   }
 
@@ -128,6 +143,7 @@ class SlidingBlocksSystem extends GameSystem {
 
   bool _isValidDestination(
     Position pos,
+    MultiCellObjectInstance movingBlock,
     Set<Position> movingBlockCells,
     LevelState state,
     GameDefinition game,
@@ -156,12 +172,24 @@ class SlidingBlocksSystem extends GameSystem {
     final blockingTags = (config['blockingTags'] as List? ?? ['solid'])
         .map((v) => v.toString())
         .toList();
+    final coverableTags = (config['coverableTags'] as List? ?? const [])
+        .map((v) => v.toString())
+        .toList();
+    final coverableBlockedRoles =
+        (config['coverableBlockedRoles'] as List? ?? const ['escapee'])
+            .map((v) => v.toString())
+            .toSet();
+    final movingRole = movingBlock.params['role']?.toString();
     for (final layerId in blockingLayers) {
       final entity = state.board.getEntity(layerId, pos);
       if (entity == null) continue;
       if (movingBlockCells.contains(pos)) continue;
       if (blockingTags.isEmpty ||
           blockingTags.any((tag) => game.hasTag(entity.kind, tag))) {
+        final canCover = coverableTags
+                .any((tag) => game.hasTag(entity.kind, tag)) &&
+            (movingRole == null || !coverableBlockedRoles.contains(movingRole));
+        if (canCover) continue;
         return false;
       }
     }
@@ -279,19 +307,16 @@ class SlidingBlocksSystem extends GameSystem {
     for (final raw in config['collectOnEnter'] as List? ?? const []) {
       if (raw is! Map) continue;
       final item = raw.cast<String, dynamic>();
-      final roles = (item['roles'] as List? ?? const [])
-          .map((v) => v.toString())
-          .toSet();
+      final roles =
+          (item['roles'] as List? ?? const []).map((v) => v.toString()).toSet();
       final role = block.params['role']?.toString();
       if (roles.isNotEmpty && !roles.contains(role)) continue;
 
       final layerId = item['layer'] as String? ?? 'objects';
-      final kinds = (item['kinds'] as List? ?? const [])
-          .map((v) => v.toString())
-          .toSet();
-      final tags = (item['tags'] as List? ?? const [])
-          .map((v) => v.toString())
-          .toSet();
+      final kinds =
+          (item['kinds'] as List? ?? const []).map((v) => v.toString()).toSet();
+      final tags =
+          (item['tags'] as List? ?? const []).map((v) => v.toString()).toSet();
       final variable = item['variable'] as String?;
       final remove = item['remove'] as bool? ?? true;
       for (final pos in newCells) {
@@ -328,6 +353,8 @@ class SlidingBlocksSystem extends GameSystem {
       if (raw is! Map) continue;
       final item = raw.cast<String, dynamic>();
       final layerId = item['layer'] as String? ?? 'objects';
+      final layer = state.board.layers[layerId];
+      if (layer == null) continue;
       final targetKinds = (item['targetKinds'] as List? ?? const [])
           .map((v) => v.toString())
           .toSet();
@@ -342,7 +369,11 @@ class SlidingBlocksSystem extends GameSystem {
       }
       final toKind = item['toKind'] as String?;
       final remove = item['remove'] as bool? ?? false;
-      for (final pos in newCells) {
+      final scope = item['scope'] as String? ?? 'destination';
+      final positions = scope == 'board'
+          ? layer.entries().map((entry) => entry.key).toList()
+          : newCells;
+      for (final pos in positions) {
         final entity = state.board.getEntity(layerId, pos);
         if (entity == null) continue;
         if (targetKinds.isNotEmpty && !targetKinds.contains(entity.kind)) {
@@ -356,6 +387,7 @@ class SlidingBlocksSystem extends GameSystem {
           state.board.setEntity(layerId, pos, null);
           events.add(GameEvent.objectRemoved(pos, entity.kind));
         } else if (toKind != null) {
+          if (entity.kind == toKind) continue;
           state.board.setEntity(layerId, pos, EntityInstance(toKind));
           events.add(
             GameEvent.cellTransformed(pos, entity.kind, toKind, layerId),
@@ -367,7 +399,6 @@ class SlidingBlocksSystem extends GameSystem {
   }
 
   List<GameEvent> _lineOfSightCollect(
-    MultiCellObjectInstance block,
     LevelState state,
     GameDefinition game,
     Map<String, dynamic> config,
@@ -376,35 +407,33 @@ class SlidingBlocksSystem extends GameSystem {
     for (final raw in config['lineOfSightCollect'] as List? ?? const []) {
       if (raw is! Map) continue;
       final item = raw.cast<String, dynamic>();
-      final roles = (item['roles'] as List? ?? const [])
-          .map((v) => v.toString())
-          .toSet();
-      final role = block.params['role']?.toString();
-      if (roles.isNotEmpty && !roles.contains(role)) continue;
+      final roles =
+          (item['roles'] as List? ?? const []).map((v) => v.toString()).toSet();
+      final collectors = state.board.multiCellObjects.where((collector) {
+        final role = collector.params['role']?.toString();
+        return roles.isEmpty || roles.contains(role);
+      }).toList();
+      if (collectors.isEmpty) continue;
 
       final layerId = item['layer'] as String? ?? 'objects';
       final layer = state.board.layers[layerId];
       if (layer == null) continue;
-      final kinds = (item['kinds'] as List? ?? const [])
-          .map((v) => v.toString())
-          .toSet();
-      final tags = (item['tags'] as List? ?? const [])
-          .map((v) => v.toString())
-          .toSet();
+      final kinds =
+          (item['kinds'] as List? ?? const []).map((v) => v.toString()).toSet();
+      final tags =
+          (item['tags'] as List? ?? const []).map((v) => v.toString()).toSet();
       final variable = item['variable'] as String?;
       final remove = item['remove'] as bool? ?? true;
-      final blockingLayers =
-          (item['blockingLayers'] as List? ??
-                  config['blockingLayers'] as List? ??
-                  const ['objects'])
-              .map((v) => v.toString())
-              .toList();
-      final blockingTags =
-          (item['blockingTags'] as List? ??
-                  config['blockingTags'] as List? ??
-                  const ['solid'])
-              .map((v) => v.toString())
-              .toList();
+      final blockingLayers = (item['blockingLayers'] as List? ??
+              config['blockingLayers'] as List? ??
+              const ['objects'])
+          .map((v) => v.toString())
+          .toList();
+      final blockingTags = (item['blockingTags'] as List? ??
+              config['blockingTags'] as List? ??
+              const ['solid'])
+          .map((v) => v.toString())
+          .toList();
 
       for (final entry in layer.entries().toList()) {
         final keyPos = entry.key;
@@ -414,23 +443,44 @@ class SlidingBlocksSystem extends GameSystem {
             !tags.any((tag) => game.hasTag(entity.kind, tag))) {
           continue;
         }
-        final canCollect = block.cells.any(
-          (cell) => _hasClearLine(
-            cell,
-            keyPos,
-            block,
-            state,
-            game,
-            blockingLayers,
-            blockingTags,
-          ),
-        );
-        if (!canCollect) continue;
+        final coveringBlock = _blockAt(state, keyPos);
+        Position? source;
+        String? collectorId;
+        for (final collector in collectors) {
+          if (coveringBlock != null && coveringBlock.id != collector.id) {
+            continue;
+          }
+          for (final cell in collector.cells) {
+            if (_hasClearLine(
+              cell,
+              keyPos,
+              collector,
+              state,
+              game,
+              blockingLayers,
+              blockingTags,
+            )) {
+              source = cell;
+              collectorId = collector.id;
+              break;
+            }
+          }
+          if (source != null) break;
+        }
+        if (source == null || collectorId == null) continue;
 
         if (remove) {
           state.board.setEntity(layerId, keyPos, null);
           events.add(GameEvent.objectRemoved(keyPos, entity.kind));
         }
+        events.add(
+          GameEvent.lineOfSightCollected(
+            source,
+            keyPos,
+            entity.kind,
+            collectorId,
+          ),
+        );
         if (variable != null) {
           final oldValue = (state.variables[variable] as num?) ?? 0;
           final newValue = oldValue + 1;

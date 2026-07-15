@@ -103,7 +103,8 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 **Phase:** `action_resolution`
 
 **Events emitted:** `multi_cell_object_moved`, `multi_cell_object_exited`,
-`object_placed`, `object_removed`, `cell_transformed`, `variable_changed`
+`object_placed`, `object_removed`, `line_of_sight_collected`,
+`cell_transformed`, `variable_changed`
 
 **Config:**
 
@@ -113,12 +114,14 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `validGroundTags` | array of strings | `["walkable"]` | Tags required on the ground cell for every destination cell that remains on the board. |
 | `blockingLayers` | array of strings | `["objects"]` | Ordinary board layers that can block a sliding object. |
 | `blockingTags` | array of strings | `["solid"]` | Tags that block movement on `blockingLayers`. Empty means any entity on those layers blocks. |
+| `coverableTags` | array of strings | `[]` | Blocking entity tags that ordinary sliding objects may overlap, for example a floor hatch or pressure plate that remains present under a block. |
+| `coverableBlockedRoles` | array of strings | `["escapee"]` | Object roles that must still treat `coverableTags` as blocking. This lets scenery cover a tagged cell without allowing a protected role to enter it. |
 | `exitTags` | array of strings | `["exit"]` | Ground tags that allow an escapee to leave the board. |
 | `escapedVariable` | string | `"escapedCount"` | Variable incremented when an escapee exits. |
 | `revealOnUncovered` | array | `[]` | Spawn configured objects after a block moves away from their hidden positions. |
 | `collectOnEnter` | array | `[]` | Collect configured objects when a moving multi-cell object enters their cells. |
-| `lineOfSightCollect` | array | `[]` | Collect configured objects when a moving multi-cell object has an unobstructed same-row or same-column line to them. |
-| `objectInteractions` | array | `[]` | Transform or remove configured blocking objects before movement validation when variable requirements are satisfied. |
+| `lineOfSightCollect` | array | `[]` | After an accepted slide, collect configured objects that have an unobstructed same-row or same-column line to an eligible multi-cell collector. |
+| `objectInteractions` | array | `[]` | Transform or remove configured objects when variable requirements are satisfied. By default interactions check the moving object's destination cells; `scope: "board"` checks the whole target layer. |
 
 **Multi-cell object params:**
 
@@ -127,17 +130,24 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `axis` | string | `"horizontal"`, `"vertical"`, `"both"`, or any other value to make the object immovable. |
 | `role` | string | Use `"escapee"` for blocks allowed to leave through an exit edge. |
 
+**Presentation convention:** Give directly manipulated multi-cell entity kinds
+the semantic tag `sliding_block`. UI clients may use this tag to render those
+objects above ordinary cell layers and to show selection feedback. The engine
+does not require the tag; movement is determined by the action and object
+params above.
+
 **Behavior:**
 1. Read the action's `position` and find the `multiCellObject` occupying that cell.
 2. Reject the action if no block is found or if the block's `axis` does not allow the requested `direction`.
 3. Compute the block's translated cells one step in that direction.
-4. Reject the action if any translated cell collides with another multi-cell object, a new blocking entity, void, out-of-bounds space, or invalid ground. A block may continue to overlap a blocking entity that was already under one of its old cells, allowing covered objects such as gates or buried items to be revealed by sliding away.
-5. If the translated cells leave the board, allow the move only when the block has `role: "escapee"` and its leading edge is currently on a ground cell tagged by `exitTags`. The block is then removed and `escapedVariable` is incremented.
-6. Before collision validation, apply matching `objectInteractions` to destination cells. This supports generic cases such as a collected key opening a locked gate.
+4. Reject the action if any translated cell collides with another multi-cell object, a new blocking entity, void, out-of-bounds space, or invalid ground. Rejected actions leave the board, variables, counters, and undo history unchanged. A block may continue to overlap a blocking entity that was already under one of its old cells. It may enter a blocking entity tagged by `coverableTags` only when its role is not listed in `coverableBlockedRoles`.
+5. If the translated cells leave the board, allow the move only when the block has `role: "escapee"` and its leading edge is currently on a ground cell tagged by `exitTags`. The block is then removed, `escapedVariable` is incremented, and the post-move reveal, line-of-sight, and board interaction steps still run.
+6. Before collision validation, apply matching destination-scoped `objectInteractions` to destination cells. This supports generic cases such as a collected key opening a locked gate.
 7. Otherwise, replace the block's cell list with the translated cell list.
 8. After the move, apply matching `collectOnEnter` rules to the block's new cells.
 9. After the move, apply `revealOnUncovered` rules whose hidden positions are no longer covered by any multi-cell object.
-10. After the move, apply matching `lineOfSightCollect` rules.
+10. After the move, apply matching `lineOfSightCollect` rules to every eligible collector. A collectible covered by another multi-cell object cannot be collected.
+11. After collection and reveal effects, apply `objectInteractions` again. This lets board-scoped interactions update visible objects immediately after a variable changes, for example opening all visible locked gates as soon as a key is collected.
 
 **Optional `revealOnUncovered` entries:**
 
@@ -183,6 +193,7 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `minValue` | number | Minimum required variable value. Defaults to `1`. |
 | `toKind` | string | Entity kind to transform the target into. |
 | `remove` | boolean | Whether to remove the target instead of transforming it. |
+| `scope` | string | `"destination"` checks only the moving object's destination cells. `"board"` checks every occupied cell on `layer`. Defaults to `"destination"`. |
 
 **Gesture convention:** UI clients should map a drag start cell to `position` and the drag direction to `direction`. There is no separate engine-level selection state.
 
@@ -312,7 +323,7 @@ Each turn the pipe runs two phases:
 
 ---
 
-### 2.9 `region_transform`
+### 2.8 `region_transform`
 
 **Purpose:** Apply spatial transformations (rotate, flip, diagonal swap) to cell contents within the overlay region.
 
@@ -394,7 +405,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 
 ---
 
-### 2.10 `flood_fill`
+### 2.9 `flood_fill`
 
 **Purpose:** Flood fill from a source position, changing connected same-kind/same-color cells.
 
@@ -422,7 +433,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 
 ---
 
-### 2.11 `anchor_point`
+### 2.10 `anchor_point`
 
 **Purpose:** Maintain a single movable anchor on the board. On the configured action: if no anchor entity exists, place one at the avatar's current position; if one exists, teleport the avatar to the anchor and remove it.
 

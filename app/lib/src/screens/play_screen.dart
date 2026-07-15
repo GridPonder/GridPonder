@@ -8,7 +8,8 @@ import '../services/hint_service.dart';
 import '../services/pack_service.dart';
 import '../services/progress_service.dart';
 import '../services/settings_service.dart';
-import '../widgets/board_renderer.dart' show BoardRenderer, TargetBoardRenderer, cellNamedColor;
+import '../widgets/board_renderer.dart'
+    show BoardRenderer, SightlineFeedback, TargetBoardRenderer, cellNamedColor;
 import '../widgets/controls_widget.dart';
 
 class PlayScreen extends StatefulWidget {
@@ -27,6 +28,14 @@ class PlayScreen extends StatefulWidget {
 
   @override
   State<PlayScreen> createState() => _PlayScreenState();
+}
+
+class _TransientPlacement {
+  final Position position;
+  final String kind;
+  final Map<String, dynamic> params;
+
+  const _TransientPlacement(this.position, this.kind, this.params);
 }
 
 class _PlayScreenState extends State<PlayScreen> {
@@ -53,6 +62,7 @@ class _PlayScreenState extends State<PlayScreen> {
   final GlobalKey _boardKey = GlobalKey();
   Offset? _panStart;
   Position? _panStartCell;
+  String? _selectedMultiCellObjectId;
   static const double _swipeThreshold = 18.0;
 
   // Periodic timer to refresh hint dot availability
@@ -61,6 +71,7 @@ class _PlayScreenState extends State<PlayScreen> {
   // Animation state: non-null while an entity animation is playing.
   LevelState? _preAnimState;
   Map<Position, String>? _animOverlays;
+  List<SightlineFeedback> _sightlineFeedbacks = const [];
   bool _animating = false;
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
@@ -124,6 +135,8 @@ class _PlayScreenState extends State<PlayScreen> {
     _agentMemory.clear();
     _lastFloodColor = null;
     _wonHandled = false;
+    _selectedMultiCellObjectId = null;
+    _sightlineFeedbacks = const [];
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -138,6 +151,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final preState = _engine.state.copy();
     final result = _engine.executeTurn(action);
     if (!result.accepted) return;
+    _syncSelectedMultiCellObject();
 
     // Record the chosen colour for any colour-pick action (any action that
     // declares a `color` in game.json). The play screen uses it to tint the
@@ -250,8 +264,91 @@ class _PlayScreenState extends State<PlayScreen> {
       });
     }
 
+    await _playTransientPlacements(result.events);
+    await _playSightlineFeedback(result.events);
+
     if (!mounted) return;
     setState(() => _animating = false);
+  }
+
+  /// Briefly shows objects that were created and consumed in the same turn.
+  Future<void> _playTransientPlacements(List<GameEvent> events) async {
+    final transientObjects = <Position, EntityInstance>{};
+    final placed = <String, _TransientPlacement>{};
+
+    for (final event in events) {
+      final pos = event.position;
+      final kind = event.payload['kind'] as String?;
+      if (pos == null || kind == null) continue;
+      final key = '${pos.x},${pos.y},$kind';
+
+      if (event.type == 'object_placed') {
+        final rawParams = event.payload['params'];
+        final params = rawParams is Map
+            ? rawParams.cast<String, dynamic>()
+            : const <String, dynamic>{};
+        placed[key] = _TransientPlacement(pos, kind, params);
+      } else if (event.type == 'object_removed') {
+        final placement = placed.remove(key);
+        if (placement != null) {
+          transientObjects[placement.position] = EntityInstance(
+            placement.kind,
+            placement.params,
+          );
+        }
+      }
+    }
+
+    if (transientObjects.isEmpty) return;
+
+    final transientState = _engine.state.copy();
+    for (final entry in transientObjects.entries) {
+      final layer =
+          widget.packService.game.entityKinds[entry.value.kind]?.layer ??
+              'objects';
+      transientState.board.setEntity(layer, entry.key, entry.value);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = transientState;
+      _animOverlays = null;
+    });
+    await Future.delayed(const Duration(milliseconds: 120));
+    if (!mounted) return;
+    setState(() => _preAnimState = null);
+  }
+
+  Future<void> _playSightlineFeedback(List<GameEvent> events) async {
+    final feedbacks = <SightlineFeedback>[];
+    for (final event in events) {
+      if (event.type != 'line_of_sight_collected') continue;
+      final source = _positionFromPayload(event.payload['sourcePosition']);
+      final target = event.position;
+      final kind = event.payload['kind'] as String?;
+      if (source == null || target == null || kind == null) continue;
+      feedbacks.add(
+        SightlineFeedback(source: source, target: target, kind: kind),
+      );
+    }
+    if (feedbacks.isEmpty) return;
+
+    if (!mounted) return;
+    setState(() => _sightlineFeedbacks = feedbacks);
+    await Future.delayed(const Duration(milliseconds: 220));
+    if (!mounted) return;
+    setState(() => _sightlineFeedbacks = const []);
+  }
+
+  Position? _positionFromPayload(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is Position) return raw;
+    if (raw is List && raw.length >= 2) {
+      final x = raw[0];
+      final y = raw[1];
+      if (x is int && y is int) return Position(x, y);
+    }
+    return null;
   }
 
   /// Animates a sliding object through its sequence of ice-slide positions.
@@ -409,6 +506,7 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() {
       _engine.undo();
       _lastFloodColor = null;
+      _syncSelectedMultiCellObject();
     });
   }
 
@@ -419,6 +517,8 @@ class _PlayScreenState extends State<PlayScreen> {
       _lastThinking = null;
       _lastResponse = null;
       _lastFloodColor = null;
+      _selectedMultiCellObjectId = null;
+      _sightlineFeedbacks = const [];
     });
   }
 
@@ -540,6 +640,7 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   void _onCellTap(int x, int y) {
+    if (_aiRunning || _animating) return;
     final gestureMap =
         widget.packService.theme?.controls?.gestureMap ?? const [];
     for (final binding in gestureMap) {
@@ -552,11 +653,24 @@ class _PlayScreenState extends State<PlayScreen> {
       _onAction(GameAction(binding.action, params));
       break;
     }
+    if (_moveActionNeedsPosition) {
+      setState(() {
+        _selectedMultiCellObjectId = _multiCellObjectIdAt(Position(x, y));
+      });
+    }
   }
 
   void _onPanStart(DragStartDetails d) {
     _panStart = d.globalPosition;
     _panStartCell = _cellAtGlobalPosition(d.globalPosition);
+    if (_moveActionNeedsPosition) {
+      final selectedId = _panStartCell == null
+          ? null
+          : _multiCellObjectIdAt(_panStartCell!);
+      if (selectedId != _selectedMultiCellObjectId) {
+        setState(() => _selectedMultiCellObjectId = selectedId);
+      }
+    }
   }
 
   void _onPanCancel() {
@@ -599,6 +713,30 @@ class _PlayScreenState extends State<PlayScreen> {
     final y = (local.dy / (size.height / board.height)).floor();
     if (x < 0 || y < 0 || x >= board.width || y >= board.height) return null;
     return Position(x, y);
+  }
+
+  String? _multiCellObjectIdAt(Position pos) {
+    for (final block in _engine.state.board.multiCellObjects) {
+      if (block.cells.contains(pos)) return block.id;
+    }
+    return null;
+  }
+
+  Position? _selectedMovePosition() {
+    final id = _selectedMultiCellObjectId;
+    if (id == null) return null;
+    for (final block in _engine.state.board.multiCellObjects) {
+      if (block.id == id && block.cells.isNotEmpty) return block.cells.first;
+    }
+    return null;
+  }
+
+  void _syncSelectedMultiCellObject() {
+    if (_selectedMultiCellObjectId == null) return;
+    final stillPresent = _engine.state.board.multiCellObjects.any(
+      (block) => block.id == _selectedMultiCellObjectId,
+    );
+    if (!stillPresent) _selectedMultiCellObjectId = null;
   }
 
   GameAction? _detectSwipeAction(Offset delta) {
@@ -731,7 +869,11 @@ class _PlayScreenState extends State<PlayScreen> {
   Future<void> _onSolve() async {
     final goldPath = _levelDef.solution.goldPath;
     if (goldPath.isEmpty) return;
-    setState(() => _engine.reset());
+    setState(() {
+      _engine.reset();
+      _selectedMultiCellObjectId = null;
+      _sightlineFeedbacks = const [];
+    });
     await Future.delayed(Duration.zero);
     for (int i = 0; i < goldPath.length; i++) {
       if (!mounted) return;
@@ -745,7 +887,11 @@ class _PlayScreenState extends State<PlayScreen> {
     final stopCount = _levelDef.solution.hintStops[hintIndex];
     final goldPath = _levelDef.solution.goldPath;
 
-    setState(() => _engine.reset());
+    setState(() {
+      _engine.reset();
+      _selectedMultiCellObjectId = null;
+      _sightlineFeedbacks = const [];
+    });
     await Future.delayed(kDebugMode ? Duration.zero : const Duration(milliseconds: 200));
 
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
@@ -896,6 +1042,8 @@ class _PlayScreenState extends State<PlayScreen> {
       _lastResponse = null;
       _agentAttempt = 1;
       _currentAgent = agent;
+      _selectedMultiCellObjectId = null;
+      _sightlineFeedbacks = const [];
     });
 
     final runner = AgentRunner();
@@ -1139,20 +1287,33 @@ class _PlayScreenState extends State<PlayScreen> {
             LogicalKeyboardKey.arrowDown => 'down',
             LogicalKeyboardKey.arrowLeft => 'left',
             LogicalKeyboardKey.arrowRight => 'right',
+            LogicalKeyboardKey.keyW => 'up',
+            LogicalKeyboardKey.keyS => 'down',
+            LogicalKeyboardKey.keyA => 'left',
+            LogicalKeyboardKey.keyD => 'right',
             _ => null,
           };
-          if (dir == null || !_hasMoveAction || _moveActionNeedsPosition) {
+          if (dir == null || !_hasMoveAction) {
             return KeyEventResult.ignored;
           }
-          _onAction(GameAction('move', {'direction': dir}));
+          if (_moveActionNeedsPosition) {
+            final selectedPos = _selectedMovePosition();
+            if (selectedPos == null) return KeyEventResult.ignored;
+            _onAction(GameAction('move', {
+              'direction': dir,
+              'position': [selectedPos.x, selectedPos.y],
+            }));
+          } else {
+            _onAction(GameAction('move', {'direction': dir}));
+          }
           return KeyEventResult.handled;
         },
         child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onPanStart: _aiRunning ? null : _onPanStart,
-        onPanUpdate: _aiRunning ? null : _onPanUpdate,
-        onPanEnd: _aiRunning ? null : _onPanEnd,
-        onPanCancel: _aiRunning ? null : _onPanCancel,
+        onPanStart: (_aiRunning || _animating) ? null : _onPanStart,
+        onPanUpdate: (_aiRunning || _animating) ? null : _onPanUpdate,
+        onPanEnd: (_aiRunning || _animating) ? null : _onPanEnd,
+        onPanCancel: (_aiRunning || _animating) ? null : _onPanCancel,
         child: SafeArea(
         child: Column(
           children: [
@@ -1170,7 +1331,13 @@ class _PlayScreenState extends State<PlayScreen> {
                     game: widget.packService.game,
                     packService: widget.packService,
                     animationOverlays: _animOverlays,
-                    onCellTap: _hasCellTapGesture ? _onCellTap : null,
+                    onCellTap: (_hasCellTapGesture || _moveActionNeedsPosition)
+                        ? _onCellTap
+                        : null,
+                    selectedMultiCellObjectId: _moveActionNeedsPosition
+                        ? _selectedMultiCellObjectId
+                        : null,
+                    sightlineFeedbacks: _sightlineFeedbacks,
                     floodedColorOverride: _lastFloodColor,
                     avatarPositionOverride: _avatarSlidePos,
                   ),
@@ -1824,12 +1991,25 @@ class _PlayScreenState extends State<PlayScreen> {
                   fontSize: 20,
                   fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
-          ElevatedButton(
-            onPressed: _advance,
-            style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: Colors.green.shade700),
-            child: const Text('Next Level'),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton(
+                onPressed: _onReset,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.green.shade700),
+                child: const Text('Replay'),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton(
+                onPressed: _advance,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.white,
+                    foregroundColor: Colors.green.shade700),
+                child: const Text('Next Level'),
+              ),
+            ],
           ),
         ],
       ),
