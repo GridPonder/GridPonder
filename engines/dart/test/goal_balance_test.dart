@@ -27,6 +27,11 @@ GameDefinition _makeGame() {
         'tags': ['solid'],
         'symbol': '#',
       },
+      'contested': {
+        'layer': 'ground',
+        'tags': ['walkable', 'contested'],
+        'symbol': 'C',
+      },
       'terr_wei': {
         'layer': 'territory',
         'tags': ['territory'],
@@ -49,13 +54,26 @@ GameDefinition _makeGame() {
   return GameDefinition.fromJson(data, id: 'test_balance_goal');
 }
 
-/// 3x3 all-`empty` ground (claimable=9), territory cells as given.
+/// 3x3 ground (claimable=9 when every cell counts), territory cells as given.
+///
+/// [contestedCells] marks ground cells as the `contested` kind — used by the
+/// list-valued `claimableKind` case and by the overwrite-guard tests, where the
+/// *board* carrying tagged cells (not the config) is what matters.
 LevelState _makeState(GameDefinition game, List<List<dynamic>> territory,
-    {int size = 3}) {
+    {int size = 3, List<List<int>> contestedCells = const []}) {
   final boardJson = <String, dynamic>{
     'size': [size, size],
     'layers': {
-      'ground': {'format': 'sparse', 'entries': []},
+      'ground': {
+        'format': 'sparse',
+        'entries': [
+          for (final c in contestedCells)
+            {
+              'position': [c[0], c[1]],
+              'kind': 'contested',
+            }
+        ],
+      },
       'territory': {
         'format': 'sparse',
         'entries': [
@@ -109,6 +127,21 @@ GoalDef _goalNoClaimableKind() => const GoalDef(
         'layer': 'territory',
         'owners': ['terr_wei', 'terr_shu', 'terr_wu'],
         'claimableLayer': 'ground',
+        'requireComplete': true,
+        'requireEqual': true,
+      },
+    );
+
+/// Same as [_goal] but with a list-valued `claimableKind`, so both `empty` and
+/// `contested` ground count toward the claimable total.
+GoalDef _goalListClaimableKind() => const GoalDef(
+      id: 'balance_goal',
+      type: 'balance',
+      config: {
+        'layer': 'territory',
+        'owners': ['terr_wei', 'terr_shu', 'terr_wu'],
+        'claimableLayer': 'ground',
+        'claimableKind': ['empty', 'contested'],
         'requireComplete': true,
         'requireEqual': true,
       },
@@ -196,6 +229,30 @@ void main() {
       expect(status.isWon, isTrue,
           reason: 'omitted claimableKind must fall back to layer default '
               '(empty) → claimable=9 → complete + equal → done');
+      expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
+    });
+
+    test('claimableKind accepts a list of kinds', () {
+      // 3x3 with 3 `contested` cells and 6 `empty`. Territory is 3/3/3 = 9 owned.
+      //   claimableKind 'empty'                -> claimable=6, owned=9 -> not complete
+      //   claimableKind ['empty','contested']  -> claimable=9, owned=9 -> complete + equal
+      final game = _makeGame();
+      final territory =
+          _territory({'terr_wei': 3, 'terr_shu': 3, 'terr_wu': 3});
+      final state = _makeState(game, territory, contestedCells: const [
+        [0, 0],
+        [1, 0],
+        [2, 0],
+      ]);
+
+      expect(_evaluate(game, state).isWon, isFalse,
+          reason: 'string claimableKind counts only `empty` (6), '
+              'so 9 owned != 6 claimable');
+
+      final status = _evaluateWith(game, state, _goalListClaimableKind());
+      expect(status.isWon, isTrue,
+          reason: 'list claimableKind must count empty+contested (9) '
+              '-> complete + equal -> done');
       expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
     });
   });

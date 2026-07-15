@@ -29,6 +29,7 @@ def _make_game() -> GameDef:
         "entityKinds": {
             "empty": {"layer": "ground", "tags": ["walkable"]},
             "wall":  {"layer": "ground", "tags": ["solid"]},
+            "contested": {"layer": "ground", "tags": ["walkable", "contested"]},
             "terr_wei": {"layer": "territory", "tags": ["territory"]},
             "terr_shu": {"layer": "territory", "tags": ["territory"]},
             "terr_wu":  {"layer": "territory", "tags": ["territory"]},
@@ -39,13 +40,29 @@ def _make_game() -> GameDef:
     return GameDef.from_dict(data, id="test_balance_goal")
 
 
-def _make_state(game: GameDef, territory: list[tuple[int, int, str]], size: int = 3) -> GameState:
-    """3x3 all-`empty` ground (claimable=9), territory cells as given."""
+def _make_state(
+    game: GameDef,
+    territory: list[tuple[int, int, str]],
+    size: int = 3,
+    contested_cells: list[tuple[int, int]] | None = None,
+) -> GameState:
+    """3x3 ground (claimable=9 when every cell counts), territory cells as given.
+
+    `contested_cells` marks ground cells as the `contested` kind — used by the
+    list-valued `claimableKind` case and by the overwrite-guard tests, where the
+    *board* carrying tagged cells (not the config) is what matters.
+    """
     level = {
         "board": {
             "size": [size, size],
             "layers": {
-                "ground": {"format": "sparse", "entries": []},
+                "ground": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [x, y], "kind": "contested"}
+                        for x, y in (contested_cells or [])
+                    ],
+                },
                 "territory": {
                     "format": "sparse",
                     "entries": [{"position": [x, y], "kind": kind} for x, y, kind in territory],
@@ -159,6 +176,30 @@ def test_omitted_claimable_kind_falls_back_to_layer_default() -> None:
     print("  OK  omitted_claimable_kind_falls_back_to_layer_default")
 
 
+def test_claimable_kind_accepts_list() -> None:
+    """A board may have more than one claimable ground kind.
+
+    3x3 with 3 `contested` cells and 6 `empty`. Territory is 3/3/3 = 9 owned.
+      - claimableKind "empty"                 -> claimable=6, owned=9 -> not complete
+      - claimableKind ["empty", "contested"]  -> claimable=9, owned=9 -> complete + equal
+    """
+    game = _make_game()
+    territory = _territory({"terr_wei": 3, "terr_shu": 3, "terr_wu": 3})
+    contested = [(0, 0), (1, 0), (2, 0)]
+    state = _make_state(game, territory, contested_cells=contested)
+
+    string_goal = {**_GOAL, "config": {**_GOAL["config"], "claimableKind": "empty"}}
+    done, _ = _evaluate_goal(string_goal, state, game, [])
+    assert not done, "string claimableKind must count only `empty` (6), so 9 owned != 6 claimable"
+
+    list_goal = {**_GOAL, "config": {**_GOAL["config"],
+                                     "claimableKind": ["empty", "contested"]}}
+    done, progress = _evaluate_goal(list_goal, state, game, [])
+    assert done, "list claimableKind must count empty+contested (9) -> complete + equal -> done"
+    assert abs(progress - 1.0) < 1e-9, f"expected progress 1.0, got {progress}"
+    print("  OK  claimable_kind_accepts_list")
+
+
 # Lose condition mirroring the balance goal above (resolved via goalId).
 _LOSE_UNREACHABLE = [{"type": "balance_unreachable", "config": {"goalId": "balance_goal"}}]
 
@@ -211,6 +252,7 @@ def run_all() -> bool:
         test_complete_but_unequal_is_not_done,
         test_complete_and_equal_is_done,
         test_omitted_claimable_kind_falls_back_to_layer_default,
+        test_claimable_kind_accepts_list,
         test_balance_unreachable_fires_on_overclaim,
         test_balance_unreachable_quiet_on_valid_partial,
         test_balance_unreachable_quiet_on_balanced_state,

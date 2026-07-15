@@ -28,8 +28,7 @@ class GoalEvaluator {
     bool allDone = true;
 
     for (final goal in goals) {
-      final (done, prog) =
-          _evaluateGoal(goal, state, game, pendingEvents);
+      final (done, prog) = _evaluateGoal(goal, state, game, pendingEvents);
       progress[goal.id] = prog;
       if (!done) allDone = false;
     }
@@ -98,10 +97,8 @@ class GoalEvaluator {
     GameDefinition game,
     List<GameEvent> pendingEvents,
   ) {
-    final sequence = (goal.config['sequence'] as List?)
-            ?.map((e) => e as int)
-            .toList() ??
-        [];
+    final sequence =
+        (goal.config['sequence'] as List?)?.map((e) => e as int).toList() ?? [];
     if (sequence.isEmpty) return (true, 1.0);
 
     final currentIndex = state.sequenceIndices[goal.id] ?? 0;
@@ -143,7 +140,8 @@ class GoalEvaluator {
 
   MapEntry<String, Position>? _findNumberOnBoard(
       Board board, int target, GameDefinition game) {
-    for (final entry in (board.layers['objects']?.entries() ?? const <MapEntry<Position, EntityInstance>>[])) {
+    for (final entry in (board.layers['objects']?.entries() ??
+        const <MapEntry<Position, EntityInstance>>[])) {
       if (entry.value.kind == 'number') {
         final v = entry.value.param('value');
         if (v == target || v?.toString() == target.toString()) {
@@ -158,8 +156,7 @@ class GoalEvaluator {
       GoalDef goal, LevelState state, GameDefinition game) {
     final targetLayers =
         goal.config['targetLayers'] as Map<String, dynamic>? ?? {};
-    final matchMode =
-        (goal.config['matchMode'] as String?) ?? 'exact_non_null';
+    final matchMode = (goal.config['matchMode'] as String?) ?? 'exact_non_null';
 
     int totalCells = 0;
     int matchedCells = 0;
@@ -203,8 +200,7 @@ class GoalEvaluator {
   (bool, double) _variableThreshold(GoalDef goal, LevelState state) {
     final name = goal.config['variable'] as String;
     final target = goal.config['target'] as num;
-    final comparison =
-        (goal.config['comparison'] as String?) ?? 'gte';
+    final comparison = (goal.config['comparison'] as String?) ?? 'gte';
     final current = state.variables[name];
     if (current == null) return (false, 0.0);
     final numCurrent = current as num;
@@ -221,9 +217,8 @@ class GoalEvaluator {
         done = false;
     }
 
-    final prog = (target == 0)
-        ? 1.0
-        : (numCurrent / target).clamp(0.0, 1.0).toDouble();
+    final prog =
+        (target == 0) ? 1.0 : (numCurrent / target).clamp(0.0, 1.0).toDouble();
     return (done, prog);
   }
 
@@ -260,10 +255,10 @@ class GoalEvaluator {
       return 0;
     }
 
-    int rowSum(int y) =>
-        List.generate(w, (x) => cellValue(Position(x, y))).fold(0, (a, b) => a + b);
-    int colSum(int x) =>
-        List.generate(h, (y) => cellValue(Position(x, y))).fold(0, (a, b) => a + b);
+    int rowSum(int y) => List.generate(w, (x) => cellValue(Position(x, y)))
+        .fold(0, (a, b) => a + b);
+    int colSum(int x) => List.generate(h, (y) => cellValue(Position(x, y)))
+        .fold(0, (a, b) => a + b);
 
     bool satisfies(int sum) => switch (comparison) {
           'gte' => sum >= target,
@@ -452,17 +447,22 @@ class GoalEvaluator {
     return null;
   }
 
-  /// Counts cells in `cfg["claimableLayer"]` whose kind == `cfg["claimableKind"]`
-  /// (default: that layer's declared default kind) — every non-wall ground
-  /// cell eligible to be owned.
+  /// Counts cells in `cfg["claimableLayer"]` whose kind matches
+  /// `cfg["claimableKind"]` (default: that layer's declared default kind) —
+  /// every non-wall ground cell eligible to be owned.
+  ///
+  /// `claimableKind` accepts a single kind or a list of kinds, for boards where
+  /// more than one ground kind can be owned.
   int _countClaimable(
       Board board, Map<String, dynamic> cfg, GameDefinition game) {
     final claimableLayerId = cfg['claimableLayer'] as String?;
     final layer = board.layers[claimableLayerId];
     if (layer == null) return 0;
-    final claimableKind = (cfg['claimableKind'] as String?) ??
-        _layerDefaultKind(game, claimableLayerId);
-    return layer.entries().where((e) => e.value.kind == claimableKind).length;
+    final raw = cfg['claimableKind'];
+    final kinds = raw is List
+        ? raw.map((k) => k.toString()).toSet()
+        : {(raw as String?) ?? _layerDefaultKind(game, claimableLayerId)};
+    return layer.entries().where((e) => kinds.contains(e.value.kind)).length;
   }
 
   /// Win when a territory layer is divided completely and into exactly-equal
@@ -476,8 +476,7 @@ class GoalEvaluator {
   ///                      layer's declared default kind)
   ///   requireComplete  — require owned == claimable (default true)
   ///   requireEqual     — require every owner's count to match (default true)
-  (bool, double) _balance(
-      GoalDef goal, LevelState state, GameDefinition game) {
+  (bool, double) _balance(GoalDef goal, LevelState state, GameDefinition game) {
     final owners = (goal.config['owners'] as List?)?.cast<String>() ?? [];
     final counts = <String, int>{for (final o in owners) o: 0};
 

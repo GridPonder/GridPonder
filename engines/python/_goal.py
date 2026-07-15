@@ -301,9 +301,10 @@ def _param_match(cfg: dict, state: GameState) -> tuple[bool, float]:
 
 
 def _count_claimable(board: Any, cfg: dict) -> int:
-    """Count cells in `cfg["claimableLayer"]` whose kind == `cfg["claimableKind"]`
+    """Count cells in `cfg["claimableLayer"]` whose kind matches `cfg["claimableKind"]`
     (default: that layer's default kind) — every non-wall ground cell eligible
-    to be owned.
+    to be owned. `claimableKind` accepts a single kind or a list of kinds, for
+    boards where more than one ground kind can be owned.
 
     NOTE (engine parity, tracked follow-up): this reads the layer's declared
     (un-normalized) `default_kind` as set on `BoardLayer`. Dart's `Board.fromJson`
@@ -319,7 +320,9 @@ def _count_claimable(board: Any, cfg: dict) -> int:
     if layer is None:
         return 0
     claimable_kind = cfg.get("claimableKind", layer.default_kind)
-    return sum(1 for _pos, entity in layer.entries() if entity.kind == claimable_kind)
+    kinds = (set(claimable_kind) if isinstance(claimable_kind, (list, tuple))
+             else {claimable_kind})
+    return sum(1 for _pos, entity in layer.entries() if entity.kind in kinds)
 
 
 def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
@@ -488,10 +491,16 @@ def _count_claimable_for_budget_loss(
     if claimable_kind is None:
         claimable_kind = "empty"
 
+    # `claimableKind` accepts a single kind or a list. Must agree with
+    # `_count_claimable` above — if the goal and the lose conditions disagree
+    # about the claimable count, the level is unwinnable or falsely lost.
+    kinds = (set(claimable_kind) if isinstance(claimable_kind, (list, tuple))
+             else {claimable_kind})
+
     layer = state.board.layers.get(layer_id)
     if layer is None:
         return 0
-    return sum(1 for _pos, entity in layer.entries() if entity.kind == claimable_kind)
+    return sum(1 for _pos, entity in layer.entries() if entity.kind in kinds)
 
 
 def _individual_actor_to_owner(game: GameDef | None) -> dict[str, str]:

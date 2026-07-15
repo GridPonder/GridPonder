@@ -174,14 +174,22 @@ class LoseEvaluator {
     GameDefinition? game,
   ) {
     final layerId = goalConfig['claimableLayer'] as String? ?? 'ground';
-    final claimableKind = (goalConfig['claimableKind'] as String?) ??
-        _layerDefaultKind(game, layerId) ??
-        'empty';
+    // `claimableKind` accepts a single kind or a list. Must agree with
+    // GoalEvaluator._countClaimable — if the goal and the lose conditions
+    // disagree about the claimable count, the level is unwinnable or falsely
+    // lost. Note this site keeps its own 'empty' backstop, which the goal
+    // evaluator deliberately does not have.
+    final raw = goalConfig['claimableKind'];
+    final kinds = raw is List
+        ? raw.map((k) => k.toString()).toSet()
+        : {
+            (raw as String?) ?? _layerDefaultKind(game, layerId) ?? 'empty',
+          };
     final layer = state.board.layers[layerId];
     if (layer == null) return 0;
     return layer
         .entries()
-        .where((entry) => entry.value.kind == claimableKind)
+        .where((entry) => kinds.contains(entry.value.kind))
         .length;
   }
 
