@@ -49,13 +49,14 @@ class GameEvent {
   static GameEvent objectRemoved(Position pos, String kind) =>
       GameEvent('object_removed', {'position': pos, 'kind': kind});
 
-  static GameEvent lineOfSightCollected(
-          Position source, Position target, String kind, String collectorId) =>
-      GameEvent('line_of_sight_collected', {
+  static GameEvent lineOfSightDetected(Position source, Position target,
+          String targetKind, String sourceId, String sourceKind) =>
+      GameEvent('line_of_sight_detected', {
         'sourcePosition': source,
         'position': target,
-        'kind': kind,
-        'collectorId': collectorId,
+        'kind': targetKind,
+        'sourceId': sourceId,
+        'sourceKind': sourceKind,
       });
 
   /// Like [objectRemoved] but signals that [animationName] should play first.

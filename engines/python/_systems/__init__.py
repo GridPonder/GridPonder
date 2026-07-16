@@ -19,6 +19,7 @@ from .flood_fill import FloodFillSystem
 from .follower_npcs import FollowerNpcsSystem
 from .ice_slide import IceSlideSystem
 from .individual_actors import IndividualActorsSystem
+from .line_of_sight import LineOfSightSystem
 from .overlay_cursor import OverlayCursorSystem
 from .portals import PortalsSystem
 from .push_objects import PushObjectsSystem
@@ -46,6 +47,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "tile_teleport": lambda sys_id, _: TileTeleportSystem(sys_id),
     "sided_box": lambda sys_id, _: SidedBoxSystem(sys_id),
     "sliding_blocks": lambda sys_id, config: SlidingBlocksSystem(sys_id, config),
+    "line_of_sight": lambda sys_id, config: LineOfSightSystem(sys_id, config),
     "follower_npcs": lambda sys_id, _: FollowerNpcsSystem(sys_id),
     "coupled_actors": lambda sys_id, _: CoupledActorsSystem(sys_id),
     "individual_actors": lambda sys_id, _: IndividualActorsSystem(sys_id),

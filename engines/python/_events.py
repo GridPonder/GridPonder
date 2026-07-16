@@ -51,18 +51,20 @@ def object_removed(pos: Pos, kind: str, animation: str | None = None) -> dict:
     return e
 
 
-def line_of_sight_collected(
+def line_of_sight_detected(
     source: Pos,
     target: Pos,
-    kind: str,
-    collector_id: str,
+    target_kind: str,
+    source_id: str,
+    source_kind: str,
 ) -> dict:
     return {
-        "type": "line_of_sight_collected",
+        "type": "line_of_sight_detected",
         "sourcePosition": source,
         "position": target,
-        "kind": kind,
-        "collectorId": collector_id,
+        "kind": target_kind,
+        "sourceId": source_id,
+        "sourceKind": source_kind,
     }
 
 

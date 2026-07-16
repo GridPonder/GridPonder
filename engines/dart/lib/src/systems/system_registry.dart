@@ -7,6 +7,7 @@ import 'flood_fill_system.dart';
 import 'ice_slide_system.dart';
 import 'individual_actors_system.dart';
 import 'follower_npcs_system.dart';
+import 'line_of_sight_system.dart';
 import 'overlay_cursor_system.dart';
 import 'portals_system.dart';
 import 'push_objects_system.dart';
@@ -37,6 +38,7 @@ class SystemRegistry {
     'sided_box': (id, _) => SidedBoxSystem(id: id),
     'sliding_blocks': (id, config) =>
         SlidingBlocksSystem(id: id, config: config),
+    'line_of_sight': (id, config) => LineOfSightSystem(id: id, config: config),
     'flood_fill': (id, _) => FloodFillSystem(id: id),
     'tile_teleport': (id, _) => TileTeleportSystem(id: id),
     'ice_slide': (id, _) => IceSlideSystem(id: id),

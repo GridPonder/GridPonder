@@ -103,8 +103,7 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 **Phase:** `action_resolution`
 
 **Events emitted:** `multi_cell_object_moved`, `multi_cell_object_exited`,
-`object_placed`, `object_removed`, `line_of_sight_collected`,
-`cell_transformed`, `variable_changed`
+`variable_changed` (only when an object exits)
 
 **Config:**
 
@@ -116,19 +115,16 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `blockingTags` | array of strings | `["solid"]` | Tags that block movement on `blockingLayers`. Empty means any entity on those layers blocks. |
 | `coverableTags` | array of strings | `[]` | Blocking entity tags that ordinary sliding objects may overlap, for example a floor hatch or pressure plate that remains present under a block. |
 | `coverableBlockedRoles` | array of strings | `["escapee"]` | Object roles that must still treat `coverableTags` as blocking. This lets scenery cover a tagged cell without allowing a protected role to enter it. |
-| `exitTags` | array of strings | `["exit"]` | Ground tags that allow an escapee to leave the board. |
-| `escapedVariable` | string | `"escapedCount"` | Variable incremented when an escapee exits. |
-| `revealOnUncovered` | array | `[]` | Spawn configured objects after a block moves away from their hidden positions. |
-| `collectOnEnter` | array | `[]` | Collect configured objects when a moving multi-cell object enters their cells. |
-| `lineOfSightCollect` | array | `[]` | After an accepted slide, collect configured objects that have an unobstructed same-row or same-column line to an eligible multi-cell collector. |
-| `objectInteractions` | array | `[]` | Transform or remove configured objects when variable requirements are satisfied. By default interactions check the moving object's destination cells; `scope: "board"` checks the whole target layer. |
+| `escapeRoles` | array of strings | `["escapee"]` | Multi-cell object roles allowed to leave the board through an exit edge. |
+| `exitTags` | array of strings | `["exit"]` | Ground tags that permit a configured escape role to leave the board. |
+| `escapedVariable` | string | `"escapedCount"` | Variable incremented when a multi-cell object exits. |
 
 **Multi-cell object params:**
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `axis` | string | `"horizontal"`, `"vertical"`, `"both"`, or any other value to make the object immovable. |
-| `role` | string | Use `"escapee"` for blocks allowed to leave through an exit edge. |
+| `role` | string | Semantic role used by `escapeRoles`, `coverableBlockedRoles`, and other systems. |
 
 **Presentation convention:** Give directly manipulated multi-cell entity kinds
 the semantic tag `sliding_block`. UI clients may use this tag to render those
@@ -141,59 +137,12 @@ params above.
 2. Reject the action if no block is found or if the block's `axis` does not allow the requested `direction`.
 3. Compute the block's translated cells one step in that direction.
 4. Reject the action if any translated cell collides with another multi-cell object, a new blocking entity, void, out-of-bounds space, or invalid ground. Rejected actions leave the board, variables, counters, and undo history unchanged. A block may continue to overlap a blocking entity that was already under one of its old cells. It may enter a blocking entity tagged by `coverableTags` only when its role is not listed in `coverableBlockedRoles`.
-5. If the translated cells leave the board, allow the move only when the block has `role: "escapee"` and its leading edge is currently on a ground cell tagged by `exitTags`. The block is then removed, `escapedVariable` is incremented, and the post-move reveal, line-of-sight, and board interaction steps still run.
-6. Before collision validation, apply matching destination-scoped `objectInteractions` to destination cells. This supports generic cases such as a collected key opening a locked gate.
-7. Otherwise, replace the block's cell list with the translated cell list.
-8. After the move, apply matching `collectOnEnter` rules to the block's new cells.
-9. After the move, apply `revealOnUncovered` rules whose hidden positions are no longer covered by any multi-cell object.
-10. After the move, apply matching `lineOfSightCollect` rules to every eligible collector. A collectible covered by another multi-cell object cannot be collected.
-11. After collection and reveal effects, apply `objectInteractions` again. This lets board-scoped interactions update visible objects immediately after a variable changes, for example opening all visible locked gates as soon as a key is collected.
+5. If the translated cells leave the board, allow the move only when the block's `role` is listed in `escapeRoles` and its leading edge is currently on a ground cell tagged by `exitTags`. Remove the object, increment `escapedVariable`, and emit `multi_cell_object_exited`.
+6. Otherwise, replace the block's cell list with the translated cell list and preserve each cell's optional sprite mapping.
 
-**Optional `revealOnUncovered` entries:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `position` | position | Hidden cell to watch. |
-| `layer` | string | Layer to place the revealed object on, usually `"objects"`. |
-| `kind` | string | Entity kind to spawn when the position is no longer covered. |
-| `revealedVariable` | string | Optional boolean variable set after the reveal to prevent duplicate spawns. |
-
-**Optional `collectOnEnter` entries:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `roles` | array of strings | Optional allowed multi-cell object roles, such as `["escapee"]`. |
-| `layer` | string | Layer to inspect for collectible objects. |
-| `kinds` | array of strings | Optional specific entity kinds to collect. |
-| `tags` | array of strings | Optional entity tags to collect. |
-| `variable` | string | Optional variable incremented for each collected object. |
-| `remove` | boolean | Whether to remove the collected object. Defaults to `true`. |
-
-**Optional `lineOfSightCollect` entries:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `roles` | array of strings | Optional allowed multi-cell object roles, such as `["escapee"]`. |
-| `layer` | string | Layer to inspect for collectible objects. |
-| `kinds` | array of strings | Optional specific entity kinds to collect. |
-| `tags` | array of strings | Optional entity tags to collect. |
-| `variable` | string | Optional variable incremented for each collected object. |
-| `remove` | boolean | Whether to remove the collected object. Defaults to `true`. |
-| `blockingLayers` | array of strings | Layers checked as line-of-sight blockers. Defaults to the system `blockingLayers`. |
-| `blockingTags` | array of strings | Tags that block line of sight on `blockingLayers`. Defaults to the system `blockingTags`. |
-
-**Optional `objectInteractions` entries:**
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `layer` | string | Layer to inspect for target objects. |
-| `targetKinds` | array of strings | Optional specific target entity kinds. |
-| `targetTags` | array of strings | Optional target entity tags. |
-| `requiredVariable` | string | Optional variable that must meet `minValue`. |
-| `minValue` | number | Minimum required variable value. Defaults to `1`. |
-| `toKind` | string | Entity kind to transform the target into. |
-| `remove` | boolean | Whether to remove the target instead of transforming it. |
-| `scope` | string | `"destination"` checks only the moving object's destination cells. `"board"` checks every occupied cell on `layer`. Defaults to `"destination"`. |
+The system does not contain collection, visibility, inventory, or door logic.
+Compose it with [`line_of_sight`](#213-line_of_sight) and ordinary rules when
+those mechanics are needed.
 
 **Gesture convention:** UI clients should map a drag start cell to `position` and the drag direction to `direction`. There is no separate engine-level selection state.
 
@@ -488,7 +437,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 |-------|------|-------------|
 | `layer` | string | Territory layer to write claims into. Must be declared in the game's `layers` array. |
 | `map` | object | Mover's entity kind → claim-mark entity kind written to `claim.layer`. |
-| `overwrite` | object | Optional. Policy for entering a cell that is already owned. Defaults to `{mode: "never"}` — the pre-0.10 behaviour. See [Claim overwrite](#claim-overwrite). |
+| `overwrite` | object | Optional. Policy for entering a cell that is already owned. Defaults to `{mode: "never"}` — the pre-0.10 behaviour. See [Claim overwrite](#214-claim-overwrite). |
 
 Example config:
 ```json
@@ -508,7 +457,7 @@ Example config:
 2. Group actors into **buckets** by effective direction. Buckets resolve in the fixed canonical order `up, down, left, right`. Within a bucket, sort front-first: by the projection of `position` onto that bucket's direction, descending; ties are broken by the other-axis coordinate, then by kind — fully deterministic. When every actor uses `identity` there is exactly one bucket and this is identical to pre-0.10 ordering.
 3. Seed the `occupied` set with every actor's current position.
 4. For each actor in order: if its target cell is out of bounds, tagged `wallTag` on `groundLayer`, or still in `occupied`, the actor stays and emits `actor_blocked`. Otherwise it moves — `occupied` is updated live (old cell freed, new cell claimed) before the next actor resolves, the actor is relocated on `actorLayer`, and `actor_moved` + `actor_entered` are emitted.
-5. If `claim` is configured and the actor moved, apply the claim policy — see [Claim overwrite](#claim-overwrite). Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
+5. If `claim` is configured and the actor moved, apply the claim policy — see [Claim overwrite](#214-claim-overwrite). Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
 
 **Mirrored actors.** `directionTransforms` lets one input drive actors in different directions at once — mirrored/opposed avatars, tug-of-war pairs, reflection puzzles. Two actors that target each other's cells (a mutual swap) both stay put; this falls out of the live `occupied` set and needs no special case. `actor_moved` / `actor_entered` always report the **action's** direction, not the effective one.
 
@@ -558,13 +507,72 @@ Example config:
 1. On `selectAction`, if the tapped cell contains an actor entity, store its kind in `selectedVariable` and emit `actor_selected`. If `budgets` is configured, initialise `budgetVariable` from it the first time an actor is selected.
 2. On `moveAction`, reject with `action_vetoed` if no actor is selected, the selected actor is missing, or its remaining budget is 0.
 3. Compute the selected actor's target cell. If the target is out of bounds, tagged `wallTag` on `groundLayer`, or occupied by another actor, the actor stays and emits `actor_blocked`.
-4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, apply the claim policy to the destination cell (see [Claim overwrite](#claim-overwrite)), and decrement that actor's remaining budget when budgets are configured.
+4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, apply the claim policy to the destination cell (see [Claim overwrite](#214-claim-overwrite)), and decrement that actor's remaining budget when budgets are configured.
 
 **Reuse:** Game-agnostic — any game with multiple layer-entity actors can use it for tap-to-select movement, squad puzzles, or budgeted routing.
 
 ---
 
-### 2.13 Claim overwrite
+### 2.13 `line_of_sight`
+
+**Purpose:** Detect an unobstructed horizontal or vertical relation between
+configured source entities and target entities. The system is read-only:
+games use rules to decide whether detection means collection, activation,
+attack, communication, or something else.
+
+**Phase:** `cascade_resolution`
+
+**Events emitted:** `line_of_sight_detected`
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `triggerEvents` | array of strings | `["multi_cell_object_moved"]` | Run detection when at least one pending event has a listed type. |
+| `sourceLayer` | string | — | Optional ordinary board layer containing source entities. When omitted, sources are selected from `multiCellObjects`. |
+| `sourceKinds` | array of strings | `[]` | Optional source kind filter. |
+| `sourceTags` | array of strings | `[]` | Optional source tag filter. |
+| `sourceRoles` | array of strings | `[]` | Optional `multiCellObjects.params.role` filter. Ignored when `sourceLayer` is set. |
+| `targetLayer` | string | `"objects"` | Layer containing candidate target entities. |
+| `targetKinds` | array of strings | `[]` | Optional target kind filter. |
+| `targetTags` | array of strings | `[]` | Optional target tag filter. |
+| `blockingLayers` | array of strings | `["objects"]` | Ordinary layers checked between source and target. |
+| `blockingTags` | array of strings | `["solid"]` | Entity tags that block sight. Empty means every entity on `blockingLayers` blocks. |
+| `multiCellObjectsBlock` | boolean | `true` | Whether other multi-cell objects block sight and prevent detection of a covered target. |
+| `maxMatches` | integer | `1` | Maximum events emitted per cascade pass. A value at or below zero means unlimited. |
+
+**Behavior:**
+1. Ignore a cascade pass unless one of its pending events matches `triggerEvents`.
+2. Resolve sources from `sourceLayer`, or from `multiCellObjects` when no source layer is configured.
+3. Filter sources and targets by their configured kinds, tags, and roles.
+4. A source and target match only when they share a row or column, differ in position, and every intermediate cell is clear.
+5. Void cells, matching blockers on `blockingLayers`, and optionally other multi-cell objects break the sightline. A target covered by another multi-cell object is not detected.
+6. Emit `line_of_sight_detected` without modifying the board or variables. Rules can react with standard effects such as `destroy`, `transform`, `set_variable`, or `increment_variable`.
+
+Example:
+
+```json
+{
+  "id": "visibility",
+  "type": "line_of_sight",
+  "config": {
+    "triggerEvents": ["multi_cell_object_moved"],
+    "sourceRoles": ["observer"],
+    "targetLayer": "objects",
+    "targetTags": ["signal"],
+    "blockingLayers": ["objects"],
+    "blockingTags": ["opaque"]
+  }
+}
+```
+
+**Reuse:** The same detector can support remote pickup, lasers, sentries,
+line-activation switches, communication links, or visibility puzzles without
+embedding any of those effects in the system.
+
+---
+
+### 2.14 Claim overwrite
 
 Shared by `coupled_actors` and `individual_actors` — both resolve claims identically.
 
@@ -604,6 +612,7 @@ Shared by `coupled_actors` and `individual_actors` — both resolve claims ident
 | Avatar Navigation | `avatar_navigation` | `action_resolution` | `move` |
 | Push Objects | `push_objects` | `movement_resolution` | (automatic on move into pushable) |
 | Sliding Blocks | `sliding_blocks` | `action_resolution` | `move(position, direction)` |
+| Line of Sight | `line_of_sight` | `cascade_resolution` | event-triggered detection |
 | Portals | `portals` | `movement_resolution` | (automatic on portal entry) |
 | Slide Merge | `slide_merge` | `action_resolution` | `move` |
 | Queued Emitters | `queued_emitters` | `cascade_resolution` | (event-triggered) |
@@ -634,7 +643,8 @@ Shared by `coupled_actors` and `individual_actors` — both resolve claims ident
 `slide_merge` + `overlay_cursor` + `region_transform` (diagonal_swap op) (with `sequence_match` goal)
 
 ### Direct sliding-block escape games
-`sliding_blocks` (with `multiCellObjects` and a `variable_threshold` escape goal)
+`sliding_blocks` (with `multiCellObjects` and a `variable_threshold` escape goal);
+optionally add `line_of_sight` and rules for remote interactions.
 
 ### Transformation-style games (pattern matching)
 `overlay_cursor` + `region_transform` (rotate + flip ops) + `flood_fill`

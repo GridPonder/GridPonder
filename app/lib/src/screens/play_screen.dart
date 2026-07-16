@@ -9,7 +9,11 @@ import '../services/pack_service.dart';
 import '../services/progress_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/board_renderer.dart'
-    show BoardRenderer, SightlineFeedback, TargetBoardRenderer, cellNamedColor;
+    show
+        BoardRenderer,
+        LineOfSightFeedback,
+        TargetBoardRenderer,
+        cellNamedColor;
 import '../widgets/controls_widget.dart';
 
 class PlayScreen extends StatefulWidget {
@@ -71,7 +75,7 @@ class _PlayScreenState extends State<PlayScreen> {
   // Animation state: non-null while an entity animation is playing.
   LevelState? _preAnimState;
   Map<Position, String>? _animOverlays;
-  List<SightlineFeedback> _sightlineFeedbacks = const [];
+  List<LineOfSightFeedback> _lineOfSightFeedbacks = const [];
   bool _animating = false;
   Map<String, String> _actorFacingByKind = {};
   // Non-null during ice slide: overrides the avatar's rendered position.
@@ -139,7 +143,7 @@ class _PlayScreenState extends State<PlayScreen> {
     _actorFacingByKind = {};
     _wonHandled = false;
     _selectedMultiCellObjectId = null;
-    _sightlineFeedbacks = const [];
+    _lineOfSightFeedbacks = const [];
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -276,7 +280,7 @@ class _PlayScreenState extends State<PlayScreen> {
     }
 
     await _playTransientPlacements(result.events);
-    await _playSightlineFeedback(result.events);
+    await _playLineOfSightFeedback(result.events);
 
     if (!mounted) return;
     setState(() => _animating = false);
@@ -330,25 +334,25 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() => _preAnimState = null);
   }
 
-  Future<void> _playSightlineFeedback(List<GameEvent> events) async {
-    final feedbacks = <SightlineFeedback>[];
+  Future<void> _playLineOfSightFeedback(List<GameEvent> events) async {
+    final feedbacks = <LineOfSightFeedback>[];
     for (final event in events) {
-      if (event.type != 'line_of_sight_collected') continue;
+      if (event.type != 'line_of_sight_detected') continue;
       final source = _positionFromPayload(event.payload['sourcePosition']);
       final target = event.position;
       final kind = event.payload['kind'] as String?;
       if (source == null || target == null || kind == null) continue;
       feedbacks.add(
-        SightlineFeedback(source: source, target: target, kind: kind),
+        LineOfSightFeedback(source: source, target: target, kind: kind),
       );
     }
     if (feedbacks.isEmpty) return;
 
     if (!mounted) return;
-    setState(() => _sightlineFeedbacks = feedbacks);
+    setState(() => _lineOfSightFeedbacks = feedbacks);
     await Future.delayed(const Duration(milliseconds: 220));
     if (!mounted) return;
-    setState(() => _sightlineFeedbacks = const []);
+    setState(() => _lineOfSightFeedbacks = const []);
   }
 
   Position? _positionFromPayload(dynamic raw) {
@@ -565,7 +569,7 @@ class _PlayScreenState extends State<PlayScreen> {
       _lastResponse = null;
       _lastFloodColor = null;
       _selectedMultiCellObjectId = null;
-      _sightlineFeedbacks = const [];
+      _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
   }
@@ -946,7 +950,7 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() {
       _engine.reset();
       _selectedMultiCellObjectId = null;
-      _sightlineFeedbacks = const [];
+      _lineOfSightFeedbacks = const [];
     });
     await Future.delayed(Duration.zero);
     for (int i = 0; i < goldPath.length; i++) {
@@ -964,7 +968,7 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() {
       _engine.reset();
       _selectedMultiCellObjectId = null;
-      _sightlineFeedbacks = const [];
+      _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
     await Future.delayed(
@@ -1123,7 +1127,7 @@ class _PlayScreenState extends State<PlayScreen> {
       _agentAttempt = 1;
       _currentAgent = agent;
       _selectedMultiCellObjectId = null;
-      _sightlineFeedbacks = const [];
+      _lineOfSightFeedbacks = const [];
     });
 
     final runner = AgentRunner();
@@ -1444,7 +1448,7 @@ class _PlayScreenState extends State<PlayScreen> {
                         selectedMultiCellObjectId: _moveActionNeedsPosition
                             ? _selectedMultiCellObjectId
                             : null,
-                        sightlineFeedbacks: _sightlineFeedbacks,
+                        lineOfSightFeedbacks: _lineOfSightFeedbacks,
                         floodedColorOverride: _lastFloodColor,
                         avatarPositionOverride: _avatarSlidePos,
                       ),

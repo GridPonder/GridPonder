@@ -37,12 +37,12 @@ Color? _parsePaletteHex(String hex) {
   return v == null ? null : Color(v);
 }
 
-class SightlineFeedback {
+class LineOfSightFeedback {
   final Position source;
   final Position target;
   final String kind;
 
-  const SightlineFeedback({
+  const LineOfSightFeedback({
     required this.source,
     required this.target,
     required this.kind,
@@ -128,8 +128,8 @@ class BoardRenderer extends StatelessWidget {
   /// UI-only selection state for direct-manipulation multi-cell objects.
   final String? selectedMultiCellObjectId;
 
-  /// Short-lived result feedback for line-of-sight collection.
-  final List<SightlineFeedback> sightlineFeedbacks;
+  /// Short-lived visual feedback for a line-of-sight detection event.
+  final List<LineOfSightFeedback> lineOfSightFeedbacks;
 
   const BoardRenderer({
     super.key,
@@ -142,7 +142,7 @@ class BoardRenderer extends StatelessWidget {
     this.floodedColorOverride,
     this.avatarPositionOverride,
     this.selectedMultiCellObjectId,
-    this.sightlineFeedbacks = const [],
+    this.lineOfSightFeedbacks = const [],
   });
 
   @override
@@ -250,19 +250,19 @@ class BoardRenderer extends StatelessWidget {
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
               if (state.overlay != null)
                 _buildOverlay(state.overlay!, cellSize),
-              if (sightlineFeedbacks.isNotEmpty)
+              if (lineOfSightFeedbacks.isNotEmpty)
                 Positioned.fill(
                   child: IgnorePointer(
                     child: CustomPaint(
-                      painter: _SightlineFeedbackPainter(
-                        sightlineFeedbacks,
+                      painter: _LineOfSightFeedbackPainter(
+                        lineOfSightFeedbacks,
                         cellSize,
                       ),
                     ),
                   ),
                 ),
-              for (final feedback in sightlineFeedbacks)
-                _buildSightlinePickup(feedback, cellSize),
+              for (final feedback in lineOfSightFeedbacks)
+                _buildLineOfSightTargetFeedback(feedback, cellSize),
               if (state.avatar.enabled && state.avatar.position != null)
                 _buildAvatar(
                   avatarPositionOverride != null
@@ -392,7 +392,10 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _buildSightlinePickup(SightlineFeedback feedback, double cellSize) {
+  Widget _buildLineOfSightTargetFeedback(
+    LineOfSightFeedback feedback,
+    double cellSize,
+  ) {
     final assetPath = game.entityKinds[feedback.kind]?.sprite;
     final child = assetPath != null
         ? Image(
@@ -612,11 +615,11 @@ class BoardRenderer extends StatelessWidget {
   }
 }
 
-class _SightlineFeedbackPainter extends CustomPainter {
-  final List<SightlineFeedback> feedbacks;
+class _LineOfSightFeedbackPainter extends CustomPainter {
+  final List<LineOfSightFeedback> feedbacks;
   final double cellSize;
 
-  const _SightlineFeedbackPainter(this.feedbacks, this.cellSize);
+  const _LineOfSightFeedbackPainter(this.feedbacks, this.cellSize);
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -644,7 +647,7 @@ class _SightlineFeedbackPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _SightlineFeedbackPainter oldDelegate) {
+  bool shouldRepaint(covariant _LineOfSightFeedbackPainter oldDelegate) {
     return oldDelegate.feedbacks != feedbacks ||
         oldDelegate.cellSize != cellSize;
   }
