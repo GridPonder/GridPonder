@@ -157,7 +157,7 @@ class SlidingBlocksSystem extends GameSystem {
         .map((v) => v.toString())
         .toList();
     final coverableBlockedRoles =
-        (config['coverableBlockedRoles'] as List? ?? const ['escapee'])
+        (config['coverableBlockedRoles'] as List? ?? const [])
             .map((v) => v.toString())
             .toSet();
     final movingRole = movingBlock.params['role']?.toString();
@@ -186,7 +186,7 @@ class SlidingBlocksSystem extends GameSystem {
     GameDefinition game,
     Map<String, dynamic> config,
   ) {
-    final escapeRoles = (config['escapeRoles'] as List? ?? const ['escapee'])
+    final escapeRoles = (config['escapeRoles'] as List? ?? const [])
         .map((value) => value.toString())
         .toSet();
     if (!escapeRoles.contains(block.params['role']?.toString())) return false;

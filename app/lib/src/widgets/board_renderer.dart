@@ -928,11 +928,11 @@ class _Cell extends StatelessWidget {
   /// Tiny lookup so a pack can name a Material icon by its standard name.
   /// Extend as needed; unknown names render the default placeholder.
   IconData _materialIcon(String? name) => switch (name) {
-    'blur_on' => Icons.blur_on,
-    'star' => Icons.star,
-    'flag' => Icons.flag,
-    _ => Icons.circle_outlined,
-  };
+        'blur_on' => Icons.blur_on,
+        'star' => Icons.star,
+        'flag' => Icons.flag,
+        _ => Icons.circle_outlined,
+      };
 }
 
 // ---------------------------------------------------------------------------
@@ -980,10 +980,10 @@ class TargetBoardRenderer extends StatelessWidget {
                 width: _cellSize,
                 height: _cellSize,
                 child: _TargetCell(
-                  x: x,
-                  y: y,
-                  targetLayers: targetLayers,
-                  currentState: currentState,
+                    x: x,
+                    y: y,
+                    targetLayers: targetLayers,
+                    currentState: currentState,
                   palette: palette,
                 ),
               ),
@@ -1001,9 +1001,9 @@ class _TargetCell extends StatelessWidget {
 
   const _TargetCell({
     required this.x,
-    required this.y,
-    required this.targetLayers,
-    this.currentState,
+      required this.y,
+      required this.targetLayers,
+      this.currentState,
     this.palette,
   });
 
@@ -1109,10 +1109,10 @@ class _PipeCellPainter extends CustomPainter {
     required this.isExit,
   });
 
-  static const _bg = Color(0xFF37474F); // dark steel background
-  static const _wall = Color(0xFF263238); // darker outline
-  static const _lumen = Color(0xFF78909C); // inner channel fill
-  static const _lumenLight = Color(0xFF90A4AE); // highlight inside channel
+  static const _bg = Color(0xFF37474F);       // dark steel background
+  static const _wall = Color(0xFF263238);      // darker outline
+  static const _lumen = Color(0xFF78909C);     // inner channel fill
+  static const _lumenLight = Color(0xFF90A4AE);// highlight inside channel
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1126,7 +1126,7 @@ class _PipeCellPainter extends CustomPainter {
 
     final lumenPaint = Paint()..color = _lumen;
     final lightPaint = Paint()..color = _lumenLight;
-    final wallPaint = Paint()
+    final wallPaint  = Paint()
       ..color = _wall
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
@@ -1143,12 +1143,12 @@ class _PipeCellPainter extends CustomPainter {
       final isHoriz = (y2 - y1).abs() < (x2 - x1).abs();
       if (isHoriz) {
         canvas.drawRect(
-          Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.25),
+            Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.25),
           lightPaint,
         );
       } else {
         canvas.drawRect(
-          Rect.fromLTWH(rect.left, rect.top, rect.width * 0.25, rect.height),
+            Rect.fromLTWH(rect.left, rect.top, rect.width * 0.25, rect.height),
           lightPaint,
         );
       }
@@ -1168,10 +1168,10 @@ class _PipeCellPainter extends CustomPainter {
       canvas.drawRect(centerRect, wallPaint);
     }
 
-    if (openLeft) drawSegment(0, cy - cr, cx, cy + cr);
-    if (openRight) drawSegment(cx, cy - cr, w, cy + cr);
-    if (openUp) drawSegment(cx - cr, 0, cx + cr, cy);
-    if (openDown) drawSegment(cx - cr, cy, cx + cr, h);
+    if (openLeft)  drawSegment(0,      cy - cr, cx, cy + cr);
+    if (openRight) drawSegment(cx,     cy - cr, w,  cy + cr);
+    if (openUp)    drawSegment(cx - cr, 0,      cx + cr, cy);
+    if (openDown)  drawSegment(cx - cr, cy,     cx + cr, h);
 
     // Exit indicator: small downward chevron at the bottom edge.
     if (isExit) {

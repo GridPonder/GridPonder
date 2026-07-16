@@ -114,8 +114,8 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `blockingLayers` | array of strings | `["objects"]` | Ordinary board layers that can block a sliding object. |
 | `blockingTags` | array of strings | `["solid"]` | Tags that block movement on `blockingLayers`. Empty means any entity on those layers blocks. |
 | `coverableTags` | array of strings | `[]` | Blocking entity tags that ordinary sliding objects may overlap, for example a floor hatch or pressure plate that remains present under a block. |
-| `coverableBlockedRoles` | array of strings | `["escapee"]` | Object roles that must still treat `coverableTags` as blocking. This lets scenery cover a tagged cell without allowing a protected role to enter it. |
-| `escapeRoles` | array of strings | `["escapee"]` | Multi-cell object roles allowed to leave the board through an exit edge. |
+| `coverableBlockedRoles` | array of strings | `[]` | Object roles that must still treat `coverableTags` as blocking. This lets scenery cover a tagged cell without allowing a protected role to enter it. |
+| `escapeRoles` | array of strings | `[]` | Multi-cell object roles allowed to leave the board through an exit edge. |
 | `exitTags` | array of strings | `["exit"]` | Ground tags that permit a configured escape role to leave the board. |
 | `escapedVariable` | string | `"escapedCount"` | Variable incremented when a multi-cell object exits. |
 

@@ -145,7 +145,7 @@ def _is_valid_destination(
     ]
     coverable_blocked_roles = {
         str(role)
-        for role in config.get("coverableBlockedRoles", ["escapee"])
+        for role in config.get("coverableBlockedRoles", [])
     }
     moving_role = moving_block.params.get("role")
 
@@ -180,7 +180,7 @@ def _can_escape(
     config: dict,
 ) -> bool:
     escape_roles = {
-        str(role) for role in config.get("escapeRoles", ["escapee"])
+        str(role) for role in config.get("escapeRoles", [])
     }
     if str(block.params.get("role")) not in escape_roles:
         return False

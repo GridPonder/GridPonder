@@ -34,14 +34,6 @@ class PlayScreen extends StatefulWidget {
   State<PlayScreen> createState() => _PlayScreenState();
 }
 
-class _TransientPlacement {
-  final Position position;
-  final String kind;
-  final Map<String, dynamic> params;
-
-  const _TransientPlacement(this.position, this.kind, this.params);
-}
-
 class _PlayScreenState extends State<PlayScreen> {
   late List<SequenceEntry> _sequence;
   late int _seqIndex;
@@ -224,7 +216,7 @@ class _PlayScreenState extends State<PlayScreen> {
     if (hasSlide) {
       if (!mounted) return;
       setState(() {
-        _preAnimState = null; // no-op if _playObjectSlide already cleared it
+        _preAnimState = null;    // no-op if _playObjectSlide already cleared it
         _avatarSlidePos = null;
       });
     }
@@ -237,8 +229,8 @@ class _PlayScreenState extends State<PlayScreen> {
             .where(
               (s) => s.type == 'entity_move' || s.type == 'entity_animation',
             )
-            .toList()
-          ..sort((a, b) => a.stage.compareTo(b.stage));
+        .toList()
+      ..sort((a, b) => a.stage.compareTo(b.stage));
 
     int? currentStage;
     final stageBuf = <AnimationStep>[];
@@ -279,59 +271,10 @@ class _PlayScreenState extends State<PlayScreen> {
       });
     }
 
-    await _playTransientPlacements(result.events);
     await _playLineOfSightFeedback(result.events);
 
     if (!mounted) return;
     setState(() => _animating = false);
-  }
-
-  /// Briefly shows objects that were created and consumed in the same turn.
-  Future<void> _playTransientPlacements(List<GameEvent> events) async {
-    final transientObjects = <Position, EntityInstance>{};
-    final placed = <String, _TransientPlacement>{};
-
-    for (final event in events) {
-      final pos = event.position;
-      final kind = event.payload['kind'] as String?;
-      if (pos == null || kind == null) continue;
-      final key = '${pos.x},${pos.y},$kind';
-
-      if (event.type == 'object_placed') {
-        final rawParams = event.payload['params'];
-        final params = rawParams is Map
-            ? rawParams.cast<String, dynamic>()
-            : const <String, dynamic>{};
-        placed[key] = _TransientPlacement(pos, kind, params);
-      } else if (event.type == 'object_removed') {
-        final placement = placed.remove(key);
-        if (placement != null) {
-          transientObjects[placement.position] = EntityInstance(
-            placement.kind,
-            placement.params,
-          );
-        }
-      }
-    }
-
-    if (transientObjects.isEmpty) return;
-
-    final transientState = _engine.state.copy();
-    for (final entry in transientObjects.entries) {
-      final layer =
-          widget.packService.game.entityKinds[entry.value.kind]?.layer ??
-          'objects';
-      transientState.board.setEntity(layer, entry.key, entry.value);
-    }
-
-    if (!mounted) return;
-    setState(() {
-      _preAnimState = transientState;
-      _animOverlays = null;
-    });
-    await Future.delayed(const Duration(milliseconds: 120));
-    if (!mounted) return;
-    setState(() => _preAnimState = null);
   }
 
   Future<void> _playLineOfSightFeedback(List<GameEvent> events) async {
@@ -1088,7 +1031,7 @@ class _PlayScreenState extends State<PlayScreen> {
       final provider = await ai()
           .ollama(
             OllamaModel.supportsThinking(s.ollamaModel)
-                ? (o) => o.reasoning(useThink)
+              ? (o) => o.reasoning(useThink)
                 : null,
           )
           .baseUrl(s.ollamaBaseUrl)
@@ -1190,7 +1133,7 @@ class _PlayScreenState extends State<PlayScreen> {
             Expanded(
               child: Text(
                 title,
-                style: const TextStyle(
+                  style: const TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1203,7 +1146,7 @@ class _PlayScreenState extends State<PlayScreen> {
                 Clipboard.setData(ClipboardData(text: text));
                 ScaffoldMessenger.of(ctx).showSnackBar(
                   const SnackBar(
-                    content: Text('Copied'),
+                      content: Text('Copied'),
                     duration: Duration(seconds: 1),
                   ),
                 );
@@ -1332,8 +1275,8 @@ class _PlayScreenState extends State<PlayScreen> {
                 _levelDef.title ?? levelId,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
                   color: Colors.black87,
                 ),
               ),
@@ -1413,33 +1356,33 @@ class _PlayScreenState extends State<PlayScreen> {
               }),
             );
           } else {
-            _onAction(GameAction('move', {'direction': dir}));
+          _onAction(GameAction('move', {'direction': dir}));
           }
           return KeyEventResult.handled;
         },
         child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
+        behavior: HitTestBehavior.opaque,
           onPanStart: (_aiRunning || _animating) ? null : _onPanStart,
           onPanUpdate: (_aiRunning || _animating) ? null : _onPanUpdate,
           onPanEnd: (_aiRunning || _animating) ? null : _onPanEnd,
           onPanCancel: (_aiRunning || _animating) ? null : _onPanCancel,
-          child: SafeArea(
-            child: Column(
-              children: [
-                _buildStatusBar(state),
-                if (widget.packService.game.ui.showGoal ||
-                    widget.packService.game.ui.showGuide)
-                  _buildGoalGuidePanel(state),
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Center(
-                      child: BoardRenderer(
+        child: SafeArea(
+        child: Column(
+          children: [
+            _buildStatusBar(state),
+            if (widget.packService.game.ui.showGoal ||
+                widget.packService.game.ui.showGuide)
+              _buildGoalGuidePanel(state),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Center(
+                  child: BoardRenderer(
                         key: _boardKey,
-                        state: state,
-                        game: widget.packService.game,
-                        packService: widget.packService,
-                        animationOverlays: _animOverlays,
+                    state: state,
+                    game: widget.packService.game,
+                    packService: widget.packService,
+                    animationOverlays: _animOverlays,
                         actorFacingByKind: _actorFacingByKind,
                         onCellTap:
                             (_hasCellTapGesture || _moveActionNeedsPosition)
@@ -1449,14 +1392,14 @@ class _PlayScreenState extends State<PlayScreen> {
                             ? _selectedMultiCellObjectId
                             : null,
                         lineOfSightFeedbacks: _lineOfSightFeedbacks,
-                        floodedColorOverride: _lastFloodColor,
-                        avatarPositionOverride: _avatarSlidePos,
-                      ),
-                    ),
+                    floodedColorOverride: _lastFloodColor,
+                    avatarPositionOverride: _avatarSlidePos,
                   ),
                 ),
-                if (state.isWon) _buildWinBanner(),
-                if (state.isLost) _buildLossBanner(),
+              ),
+            ),
+            if (state.isWon) _buildWinBanner(),
+            if (state.isLost) _buildLossBanner(),
                 if (s.aiPlayEnabled &&
                     !state.isWon &&
                     !state.isLost &&
@@ -1467,26 +1410,26 @@ class _PlayScreenState extends State<PlayScreen> {
                     !state.isLost &&
                     !_aiRunning)
                   _buildAiStartButton(),
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  child: ControlsWidget(
-                    game: widget.packService.game,
-                    onAction: _onAction,
-                    onUndo: _onUndo,
-                    onReset: _onReset,
-                    onExit: _onExit,
-                    onHint: hintAvailable ? _onHint : null,
-                    onSolve: kDebugMode ? _onSolve : null,
-                    canUndo: _engine.undoDepth > 0 && !_aiRunning,
-                    hintStatuses: hintStatuses,
-                    availableActionIds: _availableFloodActions(state),
-                    palette: widget.packService.theme?.palette,
-                  ),
-                ),
-              ],
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: ControlsWidget(
+                game: widget.packService.game,
+                onAction: _onAction,
+                onUndo: _onUndo,
+                onReset: _onReset,
+                onExit: _onExit,
+                onHint: hintAvailable ? _onHint : null,
+                onSolve: kDebugMode ? _onSolve : null,
+                canUndo: _engine.undoDepth > 0 && !_aiRunning,
+                hintStatuses: hintStatuses,
+                availableActionIds: _availableFloodActions(state),
+                palette: widget.packService.theme?.palette,
+              ),
             ),
-          ),
+          ],
         ),
+      ),
+      ),
       ),
     );
   }
@@ -1533,13 +1476,13 @@ class _PlayScreenState extends State<PlayScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.flag_outlined, color: Colors.green.shade600, size: 14),
-              const SizedBox(width: 4),
+            Icon(Icons.flag_outlined, color: Colors.green.shade600, size: 14),
+            const SizedBox(width: 4),
               Text(
                 'Goal',
                 style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
                   color: Colors.grey.shade700,
                 ),
               ),
@@ -1578,8 +1521,8 @@ class _PlayScreenState extends State<PlayScreen> {
         if (targetLayers != null) {
           return Center(
             child: TargetBoardRenderer(
-              targetLayers: targetLayers,
-              currentState: state,
+                targetLayers: targetLayers,
+                currentState: state,
               palette: widget.packService.theme?.palette,
             ),
           );
@@ -1679,10 +1622,10 @@ class _PlayScreenState extends State<PlayScreen> {
         int colSum(int x) =>
             List.generate(h, (y) => cellVal(x, y)).fold(0, (a, b) => a + b);
         bool checkSum(int sum) => switch (cmp) {
-          'gte' => sum >= target,
-          'lte' => sum <= target,
-          _ => sum == target,
-        };
+              'gte' => sum >= target,
+              'lte' => sum <= target,
+              _ => sum == target,
+            };
 
         switch (scope) {
           case 'all_rows':
@@ -1751,10 +1694,10 @@ class _PlayScreenState extends State<PlayScreen> {
         }
 
         bool checkCount(int count) => switch (cmp) {
-          'gte' => count >= target,
-          'lte' => count <= target,
-          _ => count == target,
-        };
+              'gte' => count >= target,
+              'lte' => count <= target,
+              _ => count == target,
+            };
 
         switch (scope) {
           case 'all_rows':
@@ -1795,40 +1738,40 @@ class _PlayScreenState extends State<PlayScreen> {
     const annotW = 28.0;
 
     Widget miniCell(int val) => Container(
-      width: cellSz,
-      height: cellSz,
-      margin: const EdgeInsets.all(1.5),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade300,
-        borderRadius: BorderRadius.circular(3),
-      ),
-      child: Center(
+          width: cellSz,
+          height: cellSz,
+          margin: const EdgeInsets.all(1.5),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300,
+            borderRadius: BorderRadius.circular(3),
+          ),
+          child: Center(
         child: Text(
           '$val',
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.bold,
+                style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
             color: Colors.grey.shade800,
           ),
         ),
-      ),
-    );
+          ),
+        );
 
     Widget annotation(String label, bool? satisfied) {
       final color = satisfied == null
           ? Colors.grey.shade400
           : satisfied
-          ? Colors.green.shade700
-          : Colors.orange.shade800;
+              ? Colors.green.shade700
+              : Colors.orange.shade800;
       return SizedBox(
         width: annotW,
         height: cellSz + 3,
         child: Center(
           child: Text(
             label,
-            style: TextStyle(
-              fontSize: 10,
-              fontWeight: FontWeight.bold,
+              style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold,
               color: color,
             ),
           ),
@@ -1849,8 +1792,8 @@ class _PlayScreenState extends State<PlayScreen> {
         Text(
           descriptions.join(' · '),
           style: TextStyle(
-            fontSize: 11,
-            color: Colors.grey.shade600,
+              fontSize: 11,
+              color: Colors.grey.shade600,
             fontStyle: FontStyle.italic,
           ),
         ),
@@ -1893,8 +1836,8 @@ class _PlayScreenState extends State<PlayScreen> {
                                 fontWeight: FontWeight.bold,
                                 color: colCheckers.containsKey(x)
                                     ? (colSatisfied(x)
-                                          ? Colors.green.shade700
-                                          : Colors.orange.shade800)
+                                        ? Colors.green.shade700
+                                        : Colors.orange.shade800)
                                     : Colors.grey.shade400,
                               ),
                             ),
@@ -1925,13 +1868,13 @@ class _PlayScreenState extends State<PlayScreen> {
         children: [
           Row(
             children: [
-              Icon(Icons.info_outline, color: Colors.blue.shade600, size: 14),
-              const SizedBox(width: 4),
+            Icon(Icons.info_outline, color: Colors.blue.shade600, size: 14),
+            const SizedBox(width: 4),
               Text(
                 'Guide',
                 style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
                   color: Colors.blue.shade700,
                 ),
               ),
@@ -2153,10 +2096,10 @@ class _PlayScreenState extends State<PlayScreen> {
           ],
           Text(
             _movesLabel(state),
-            style: TextStyle(
-              color: state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
-              fontSize: 13,
-              fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
+              style: TextStyle(
+                color: state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
+                fontSize: 13,
+                fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
             ),
           ),
           const SizedBox(width: 4),
@@ -2175,7 +2118,7 @@ class _PlayScreenState extends State<PlayScreen> {
               Clipboard.setData(ClipboardData(text: text));
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('Grid + moves copied to clipboard'),
+                    content: Text('Grid + moves copied to clipboard'),
                   duration: Duration(seconds: 1),
                 ),
               );
@@ -2205,9 +2148,9 @@ class _PlayScreenState extends State<PlayScreen> {
         children: [
           const Text(
             'Level Complete!',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -2224,16 +2167,16 @@ class _PlayScreenState extends State<PlayScreen> {
                 child: const Text('Replay'),
               ),
               const SizedBox(width: 12),
-              ElevatedButton(
-                onPressed: _advance,
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
+          ElevatedButton(
+            onPressed: _advance,
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white,
                   foregroundColor: Colors.green.shade700,
                 ),
-                child: const Text('Next Level'),
-              ),
-            ],
+            child: const Text('Next Level'),
           ),
+        ],
+      ),
         ],
       ),
     );
@@ -2253,9 +2196,9 @@ class _PlayScreenState extends State<PlayScreen> {
         children: [
           const Text(
             'Out of Moves!',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 20,
+              style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -2271,7 +2214,7 @@ class _PlayScreenState extends State<PlayScreen> {
               ElevatedButton(
                 onPressed: _onReset,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
+                    backgroundColor: Colors.white,
                   foregroundColor: Colors.red.shade700,
                 ),
                 child: const Text('Try Again'),
@@ -2344,8 +2287,8 @@ class _PlayScreenState extends State<PlayScreen> {
                     ? (isPaused ? 'AI ready' : 'AI thinking…')
                     : 'AI playing…',
                 style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
                   color: Colors.indigo.shade700,
                 ),
               ),
@@ -2369,7 +2312,7 @@ class _PlayScreenState extends State<PlayScreen> {
                   icon: const Icon(Icons.skip_next, size: 18),
                   label: Text(
                     s.inferenceMode == 'single'
-                        ? 'Infer Action'
+                      ? 'Infer Action'
                         : 'Infer Actions',
                   ),
                   onPressed: _stepAgent,
@@ -2462,10 +2405,10 @@ class _PlayScreenState extends State<PlayScreen> {
         ),
         child: Text(
           label,
-          style: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w600,
-            color: Colors.grey.shade600,
+            style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey.shade600,
             fontFamily: 'monospace',
           ),
         ),
