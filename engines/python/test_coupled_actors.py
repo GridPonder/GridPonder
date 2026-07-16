@@ -298,7 +298,7 @@ def test_claim_not_applied_to_blocked_actor() -> None:
 
 
 # ---------------------------------------------------------------------------
-# directionTransforms (DSL 0.10) — per-actor direction mapping
+# directionTransforms (DSL 0.8) — per-actor direction mapping
 # ---------------------------------------------------------------------------
 
 def _make_game_with_transforms(transforms: dict) -> GameDef:

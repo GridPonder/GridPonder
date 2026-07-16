@@ -169,7 +169,7 @@ LoseStatus _loseUnreachable(GameDefinition game, LevelState state) =>
     );
 
 // ---------------------------------------------------------------------------
-// Over-claim guard under claim.overwrite (DSL 0.10)
+// Over-claim guard under claim.overwrite (DSL 0.8)
 //
 // Both balance lose conditions share an over-claim test ("someone holds more
 // than their equal share, and claims are permanent, so this is dead"). That

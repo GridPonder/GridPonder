@@ -1,10 +1,10 @@
 {
-  "dslVersion": "0.9",
+  "dslVersion": "0.8",
   "packVersion": 1,
   "gameId": "actor_balance_smoke",
   "title": "Actor Balance Smoke Fixture",
   "shortDescription": "Throwaway fixture exercising coupled_actors + balance for engine parity tests.",
   "description": "Not a real pack. Two actors move down a 2-column board, painting territory behind them until the board is fully and evenly claimed.",
   "version": "1.0.0",
-  "minEngineVersion": "0.9.0"
+  "minEngineVersion": "0.8.0"
 }

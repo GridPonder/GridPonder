@@ -437,7 +437,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 |-------|------|-------------|
 | `layer` | string | Territory layer to write claims into. Must be declared in the game's `layers` array. |
 | `map` | object | Mover's entity kind → claim-mark entity kind written to `claim.layer`. |
-| `overwrite` | object | Optional. Policy for entering a cell that is already owned. Defaults to `{mode: "never"}` — the pre-0.10 behaviour. See [Claim overwrite](#214-claim-overwrite). |
+| `overwrite` | object | Optional. Policy for entering a cell that is already owned. Defaults to `{mode: "never"}` — the pre-0.8 behaviour. See [Claim overwrite](#214-claim-overwrite). |
 
 Example config:
 ```json
@@ -454,7 +454,7 @@ Example config:
 
 **Behavior:**
 1. On `moveAction` with a direction in `directions`, collect every actor entity on `actorLayer` as `(position, kind)` pairs, and compute each actor's **effective direction** by applying its `directionTransforms` entry to the action's direction.
-2. Group actors into **buckets** by effective direction. Buckets resolve in the fixed canonical order `up, down, left, right`. Within a bucket, sort front-first: by the projection of `position` onto that bucket's direction, descending; ties are broken by the other-axis coordinate, then by kind — fully deterministic. When every actor uses `identity` there is exactly one bucket and this is identical to pre-0.10 ordering.
+2. Group actors into **buckets** by effective direction. Buckets resolve in the fixed canonical order `up, down, left, right`. Within a bucket, sort front-first: by the projection of `position` onto that bucket's direction, descending; ties are broken by the other-axis coordinate, then by kind — fully deterministic. When every actor uses `identity` there is exactly one bucket and this is identical to pre-0.8 ordering.
 3. Seed the `occupied` set with every actor's current position.
 4. For each actor in order: if its target cell is out of bounds, tagged `wallTag` on `groundLayer`, or still in `occupied`, the actor stays and emits `actor_blocked`. Otherwise it moves — `occupied` is updated live (old cell freed, new cell claimed) before the next actor resolves, the actor is relocated on `actorLayer`, and `actor_moved` + `actor_entered` are emitted.
 5. If `claim` is configured and the actor moved, apply the claim policy — see [Claim overwrite](#214-claim-overwrite). Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
@@ -580,7 +580,7 @@ Shared by `coupled_actors` and `individual_actors` — both resolve claims ident
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `mode` | string | `"never"` | `never` — an owned cell is never repainted (pre-0.10 behaviour). `always` — the last visitor owns every cell. `tagged` — the last visitor owns only cells carrying `tag`. |
+| `mode` | string | `"never"` | `never` — an owned cell is never repainted (pre-0.8 behaviour). `always` — the last visitor owns every cell. `tagged` — the last visitor owns only cells carrying `tag`. |
 | `tag` | string | — | Required when `mode` is `"tagged"`. |
 | `layer` | string | the system's `groundLayer` | Layer checked for `tag`. |
 

@@ -110,7 +110,7 @@ class CoupledActorsSystem extends GameSystem {
     // a bucket, front-first exactly as before: projection onto that bucket's
     // direction descending, then the other-axis coordinate, then kind — fully
     // deterministic. With all-identity transforms there is a single bucket and
-    // this reproduces the pre-0.10 order exactly.
+    // this reproduces the pre-0.8 order exactly.
     final ordered = <_Mover>[];
     for (final bucket in _canonicalBuckets) {
       final members = movers.where((m) => m.eff == bucket).toList();

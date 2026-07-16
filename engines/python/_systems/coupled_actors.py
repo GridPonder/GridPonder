@@ -75,7 +75,7 @@ class CoupledActorsSystem(GameSystem):
         # Within a bucket, front-first exactly as before: projection onto that
         # bucket's direction descending, then the other-axis coordinate, then
         # kind — fully deterministic. With all-identity transforms there is a
-        # single bucket and this reproduces the pre-0.10 order exactly.
+        # single bucket and this reproduces the pre-0.8 order exactly.
         ordered: list[tuple[Pos, Entity, tuple[int, int]]] = []
         for bucket in _CANONICAL_BUCKETS:
             bdx, bdy = bucket

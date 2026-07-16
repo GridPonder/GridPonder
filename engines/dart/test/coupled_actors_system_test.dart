@@ -208,7 +208,7 @@ List<GameEvent> _claimEvents(TurnResult result) =>
 GameAction _moveRight() => GameAction('move', {'direction': 'right'});
 
 // ---------------------------------------------------------------------------
-// directionTransforms (DSL 0.10) — per-actor direction mapping
+// directionTransforms (DSL 0.8) — per-actor direction mapping
 // ---------------------------------------------------------------------------
 
 /// A fresh GameDefinition whose `movement` system carries `directionTransforms`.
