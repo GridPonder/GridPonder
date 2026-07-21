@@ -91,8 +91,8 @@ class LevelState {
     Board board,
   ) {
     final avatarJson = stateJson['avatar'] as Map<String, dynamic>? ?? {};
-    final vars =
-        Map<String, dynamic>.from(stateJson['variables'] as Map? ?? {});
+    final vars = Map<String, dynamic>.from(
+        stateJson['variables'] as Map? ?? {});
     final overlayJson = stateJson['overlay'] as Map<String, dynamic>?;
 
     return LevelState(

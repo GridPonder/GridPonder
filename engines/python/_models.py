@@ -330,7 +330,11 @@ class Board:
         raw_layers = j.get("layers", {})
         layers: dict[str, BoardLayer] = {}
         for ldef in layer_defs:
-            default_kind = ldef["defaultKind"] if ldef["isExactlyOne"] else None
+            default_kind = (
+                ldef["defaultKind"] or "empty"
+                if ldef["isExactlyOne"]
+                else None
+            )
             layers[ldef["id"]] = BoardLayer.from_json(
                 raw_layers.get(ldef["id"]), w, h, default_kind
             )

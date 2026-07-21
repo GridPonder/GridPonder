@@ -178,15 +178,12 @@ class PhaseRunner {
         if (pos != null && from != null && kind != null) {
           final fromPos = from is Position ? from : Position.fromJson(from);
           final layer = event.payload['layer'] as String? ?? 'objects';
-          final params =
-              (event.payload['params'] as Map?)?.cast<String, dynamic>() ??
-                  const <String, dynamic>{};
+          final params = (event.payload['params'] as Map?)
+                  ?.cast<String, dynamic>() ??
+              const <String, dynamic>{};
           final dur = _motionDurationMs(kind, 'moveDurationMs', 130);
           out.add(AnimationStep.entityMove(
-            fromPos,
-            pos,
-            kind,
-            layer,
+            fromPos, pos, kind, layer,
             durationMs: dur,
             stage: motionStage,
             params: params,
@@ -212,12 +209,7 @@ class PhaseRunner {
           };
           final dur = _motionDurationMs(kind, 'mergeDurationMs', 200);
           out.add(AnimationStep.entityMerge(
-            pos,
-            sources,
-            sourceKinds,
-            sourceParams,
-            kind,
-            resultParams,
+            pos, sources, sourceKinds, sourceParams, kind, resultParams,
             'objects',
             durationMs: dur,
             stage: mergeStage,

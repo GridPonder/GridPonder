@@ -104,12 +104,10 @@ class BoardRenderer extends StatelessWidget {
   final LevelState state;
   final GameDefinition game;
   final PackService packService;
-
   /// Optional overlay sprites rendered on top of the objects layer, used during
   /// entity destruction animations. Maps cell position → DSL sprite path.
   /// Resolved pack-first then gridponder-base, matching static sprite behaviour.
   final Map<Position, String>? animationOverlays;
-
   /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
   final void Function(int x, int y)? onCellTap;
 
@@ -120,13 +118,15 @@ class BoardRenderer extends StatelessWidget {
   /// When set, cell_flooded entities are rendered in this color instead of
   /// their default color — used by Flood Colors to show the last chosen color.
   final Color? floodedColorOverride;
-
   /// When set, the avatar is rendered at this position instead of
   /// state.avatar.position — used during ice slide animations.
   final Position? avatarPositionOverride;
 
   /// UI-only selection state for direct-manipulation multi-cell objects.
   final String? selectedMultiCellObjectId;
+
+  /// UI-only selection state for an individually controlled actor.
+  final Position? selectedActorPosition;
 
   /// Short-lived visual feedback for a line-of-sight detection event.
   final List<LineOfSightFeedback> lineOfSightFeedbacks;
@@ -142,6 +142,7 @@ class BoardRenderer extends StatelessWidget {
     this.floodedColorOverride,
     this.avatarPositionOverride,
     this.selectedMultiCellObjectId,
+    this.selectedActorPosition,
     this.lineOfSightFeedbacks = const [],
   });
 
@@ -243,7 +244,7 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               ),
-              if (_selectedActorPosition() case final selectedPos?)
+              if (selectedActorPosition case final selectedPos?)
                 _buildSelectedActorRing(selectedPos, cellSize),
               if (animationOverlays != null)
                 for (final entry in animationOverlays!.entries)
@@ -286,8 +287,10 @@ class BoardRenderer extends StatelessWidget {
     final exitPos = exitList != null
         ? Position(exitList[0] as int, exitList[1] as int)
         : null;
-    final queue =
-        (mco.params['queue'] as List?)?.map((e) => e as int).toList() ?? [];
+    final queue = (mco.params['queue'] as List?)
+            ?.map((e) => e as int)
+            .toList() ??
+        [];
     final currentIndex = (mco.params['currentIndex'] as int?) ?? 0;
 
     // Assign queued values to pipe cells.
@@ -330,8 +333,7 @@ class BoardRenderer extends StatelessWidget {
           width: cellSize,
           height: cellSize,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) =>
-              _mcoFallback(pos, mco, exitPos, cellSize),
+          errorBuilder: (_, __, ___) => _mcoFallback(pos, mco, exitPos, cellSize),
         );
       } else {
         background = _mcoFallback(pos, mco, exitPos, cellSize);
@@ -473,27 +475,13 @@ class BoardRenderer extends StatelessWidget {
       child: IgnorePointer(
         child: Container(
           decoration: BoxDecoration(
-            border: Border.all(
-              color: Colors.amber.withOpacity(0.9),
-              width: 2.5,
-            ),
+            border: Border.all(color: Colors.amber.withOpacity(0.9), width: 2.5),
             color: Colors.amber.withOpacity(0.08),
             borderRadius: BorderRadius.circular(3),
           ),
         ),
       ),
     );
-  }
-
-  Position? _selectedActorPosition() {
-    final selectedKind = state.variables['selectedActorKind'] as String?;
-    if (selectedKind == null) return null;
-    final layer = state.board.layers['actors'];
-    if (layer == null) return null;
-    for (final entry in layer.entries()) {
-      if (entry.value.kind == selectedKind) return entry.key;
-    }
-    return null;
   }
 
   Widget _buildSelectedActorRing(Position pos, double cellSize) {
@@ -539,9 +527,8 @@ class BoardRenderer extends StatelessWidget {
   }
 
   Widget _buildAvatar(AvatarState avatar, double cellSize) {
-    final assetPath = packService.resolveAvatarSprite(
-      _avatarSpriteFile(avatar.facing.toJson()),
-    );
+    final assetPath =
+        packService.resolveAvatarSprite(_avatarSpriteFile(avatar.facing.toJson()));
     final slot = avatar.inventory.slot;
 
     // When an overlay exists, center the avatar at the overlay's midpoint.
@@ -705,9 +692,8 @@ class _Cell extends StatelessWidget {
       return const SizedBox.shrink();
     }
     return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.black12, width: 0.5),
-      ),
+      decoration:
+          BoxDecoration(border: Border.all(color: Colors.black12, width: 0.5)),
       child: Stack(
         children: [
           if (!skipGround) _layer('ground', pos),
@@ -811,10 +797,7 @@ class _Cell extends StatelessWidget {
   /// null when [display] doesn't specify a recognised type (caller falls
   /// back to legacy procedural paths). Sole pack-visible vocabulary, so
   /// the renderer doesn't have to recognise specific entity-kind names.
-  Widget? _renderFromDisplay(
-    Map<String, dynamic> display,
-    EntityInstance entity,
-  ) {
+  Widget? _renderFromDisplay(Map<String, dynamic> display, EntityInstance entity) {
     final type = display['type'] as String?;
     final color = _resolveDisplayColor(display['color'], entity);
     switch (type) {
@@ -825,11 +808,7 @@ class _Cell extends StatelessWidget {
             color: color ?? _namedColor('grey'),
             borderRadius: BorderRadius.circular(cellSize * 0.1),
             boxShadow: const [
-              BoxShadow(
-                color: Colors.black26,
-                blurRadius: 2,
-                offset: Offset(1, 1),
-              ),
+              BoxShadow(color: Colors.black26, blurRadius: 2, offset: Offset(1, 1)),
             ],
           ),
         );
@@ -849,8 +828,7 @@ class _Cell extends StatelessWidget {
           ),
         );
       case 'label':
-        final labelText =
-            _resolveDisplayString(display['label'], entity) ?? '?';
+        final labelText = _resolveDisplayString(display['label'], entity) ?? '?';
         return Container(
           color: color ?? _namedColor('grey'),
           alignment: Alignment.center,
@@ -945,19 +923,14 @@ class _Cell extends StatelessWidget {
 class TargetBoardRenderer extends StatelessWidget {
   final Map<String, dynamic> targetLayers;
   final LevelState? currentState;
-
   /// Pack-specific colour overrides forwarded to [cellNamedColor]. Pass
   /// `packService.theme?.palette` from the caller; null falls back to
   /// the renderer's built-in palette.
   final Map<String, String>? palette;
   static const double _cellSize = 24.0;
 
-  const TargetBoardRenderer({
-    super.key,
-    required this.targetLayers,
-    this.currentState,
-    this.palette,
-  });
+  const TargetBoardRenderer(
+      {super.key, required this.targetLayers, this.currentState, this.palette});
 
   @override
   Widget build(BuildContext context) {
@@ -984,8 +957,7 @@ class TargetBoardRenderer extends StatelessWidget {
                     y: y,
                     targetLayers: targetLayers,
                     currentState: currentState,
-                  palette: palette,
-                ),
+                    palette: palette),
               ),
         ],
       ),
@@ -999,13 +971,12 @@ class _TargetCell extends StatelessWidget {
   final LevelState? currentState;
   final Map<String, String>? palette;
 
-  const _TargetCell({
-    required this.x,
+  const _TargetCell(
+      {required this.x,
       required this.y,
       required this.targetLayers,
       this.currentState,
-    this.palette,
-  });
+      this.palette});
 
   String? _kindAt(String layerId) {
     final layer = targetLayers[layerId] as List?;
@@ -1036,15 +1007,13 @@ class _TargetCell extends StatelessWidget {
         break;
       }
     }
-    final bgColor = matched
-        ? Colors.lightGreen.shade200
-        : const Color(0xFFF5F0E8);
+    final bgColor =
+        matched ? Colors.lightGreen.shade200 : const Color(0xFFF5F0E8);
     return Container(
       decoration: BoxDecoration(
         color: bgColor,
         border: const Border.fromBorderSide(
-          BorderSide(color: Colors.black12, width: 0.5),
-        ),
+            BorderSide(color: Colors.black12, width: 0.5)),
       ),
       child: kind != null ? _buildTargetCell(kind) : null,
     );
@@ -1144,25 +1113,20 @@ class _PipeCellPainter extends CustomPainter {
       if (isHoriz) {
         canvas.drawRect(
             Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.25),
-          lightPaint,
-        );
+            lightPaint);
       } else {
         canvas.drawRect(
             Rect.fromLTWH(rect.left, rect.top, rect.width * 0.25, rect.height),
-          lightPaint,
-        );
+            lightPaint);
       }
       canvas.drawRect(rect, wallPaint);
     }
 
     // Center square — filled whenever two or more sides are open.
     final centerRect = Rect.fromLTWH(cx - cr, cy - cr, cr * 2, cr * 2);
-    final openCount = [
-      openLeft,
-      openRight,
-      openUp,
-      openDown,
-    ].where((v) => v).length;
+    final openCount = [openLeft, openRight, openUp, openDown]
+        .where((v) => v)
+        .length;
     if (openCount >= 2) {
       canvas.drawRect(centerRect, lumenPaint);
       canvas.drawRect(centerRect, wallPaint);
@@ -1220,8 +1184,7 @@ class _OutlinePainter extends CustomPainter {
       final outline = kindDef.outline;
       if (outline == null) continue;
 
-      final color =
-          _parseHex(outline['color'] as String?) ?? const Color(0xFF222222);
+      final color = _parseHex(outline['color'] as String?) ?? const Color(0xFF222222);
       final width = (outline['width'] as num?)?.toDouble() ?? 2.0;
       final paint = Paint()
         ..color = color

@@ -52,6 +52,70 @@ def _level(*, individual: bool) -> dict:
     }
 
 
+def _sliding_state_and_info() -> tuple[ea.EngineState, ea.EngineInfo]:
+    game = ea.GameDef.from_dict({
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+        ],
+        "entityKinds": {
+            "empty": {"layer": "ground", "tags": ["walkable"]},
+            "block": {"layer": "ground", "tags": ["sliding_block"]},
+        },
+        "actions": [
+            {
+                "id": "move",
+                "params": {
+                    "position": {"type": "position"},
+                    "direction": {
+                        "type": "direction",
+                        "values": ["up", "down", "left", "right"],
+                    },
+                },
+            },
+            {"id": "give_up", "params": {}},
+        ],
+        "systems": [
+            {"id": "blocks", "type": "sliding_blocks", "config": {}},
+        ],
+    })
+    level = {
+        "id": "sliding_solver_smoke",
+        "board": {
+            "size": [3, 2],
+            "layers": {},
+            "multiCellObjects": [
+                {
+                    "id": "horizontal",
+                    "kind": "block",
+                    "cells": [[0, 0], [1, 0]],
+                    "params": {"axis": "horizontal"},
+                },
+                {
+                    "id": "vertical",
+                    "kind": "block",
+                    "cells": [[2, 0], [2, 1]],
+                    "params": {"axis": "vertical"},
+                },
+            ],
+        },
+        "state": {},
+        "goals": [],
+        "loseConditions": [],
+    }
+    engine = ea.TurnEngine(game, level)
+    state = ea.EngineState(engine.state.copy())
+    info = ea.EngineInfo(
+        game=game,
+        level_def=level,
+        pack_dir=Path("."),
+        ACTIONS=ea._build_actions(game, 3, 2),
+        level_id=level["id"],
+        width=3,
+        height=2,
+    )
+    return state, info
+
+
 class ActorBalanceSolverTests(unittest.TestCase):
     def test_unknown_standard_pack_uses_generic_dsl_solver(self) -> None:
         level_path = FIXTURE_PACK / "levels" / "actor_balance_smoke_01.json"
@@ -119,6 +183,24 @@ class ActorBalanceSolverTests(unittest.TestCase):
             ["move_1_0_left"],
         )
 
+    def test_sliding_actions_use_one_canonical_position_per_block(self) -> None:
+        state, info = _sliding_state_and_info()
+
+        self.assertEqual(
+            ea.legal_actions(state, info),
+            [
+                "move_0_0_left",
+                "move_0_0_right",
+                "move_2_0_up",
+                "move_2_0_down",
+                "give_up",
+            ],
+        )
+        self.assertEqual(
+            ea.canonicalize_path(["move_1_0_right"], state, info),
+            ["move_0_0_right"],
+        )
+
     def test_unsupported_balance_config_falls_back_to_plain_search(self) -> None:
         state, info = ea.load(_level(individual=True), FIXTURE_PACK)
         individual = next(
@@ -147,6 +229,31 @@ class ActorBalanceSolverTests(unittest.TestCase):
 
         self.assertIn("move_down", actions)
         self.assertIn("move_right", actions)
+
+    def test_custom_actor_layer_keeps_balance_optimization_sound(self) -> None:
+        state, info = ea.load(_level(individual=True), FIXTURE_PACK)
+        individual = next(
+            system for system in info.game.systems
+            if system["type"] == "individual_actors"
+        )
+        individual["config"]["actorLayer"] = "pieces"
+        state.game_state.board.layers["pieces"] = (
+            state.game_state.board.layers.pop("actors")
+        )
+
+        self.assertEqual(ea.heuristic(state, info), 8.0)
+        self.assertFalse(ea.can_prune(state, info, depth=0, max_depth=20))
+
+    def test_mismatched_claimable_and_movement_layers_disable_optimization(self) -> None:
+        state, info = ea.load(_level(individual=True), FIXTURE_PACK)
+        individual = next(
+            system for system in info.game.systems
+            if system["type"] == "individual_actors"
+        )
+        individual["config"]["groundLayer"] = "territory"
+
+        self.assertEqual(ea.heuristic(state, info), 0.0)
+        self.assertFalse(ea.can_prune(state, info, depth=0, max_depth=20))
 
 
 if __name__ == "__main__":

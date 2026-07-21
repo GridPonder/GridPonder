@@ -31,18 +31,13 @@ class LoseEvaluator {
             final numVal = current as num;
             bool lost;
             switch (comparison) {
-              case 'eq':
-                lost = numVal == target;
-              case 'gte':
-                lost = numVal >= target;
-              case 'lte':
-                lost = numVal <= target;
-              default:
-                lost = false;
+              case 'eq': lost = numVal == target;
+              case 'gte': lost = numVal >= target;
+              case 'lte': lost = numVal <= target;
+              default: lost = false;
             }
             if (lost) {
-              return LoseStatus(
-                  isLost: true, reason: 'variable_threshold:$name');
+              return LoseStatus(isLost: true, reason: 'variable_threshold:$name');
             }
           }
         case 'balance_budget_exhausted':
@@ -80,6 +75,7 @@ class LoseEvaluator {
   ) {
     final goal = _balanceGoalForCondition(config, goals);
     if (goal == null) return false;
+    if (!_requiresCompleteEqualBalance(goal.config)) return false;
 
     final owners =
         (goal.config['owners'] as List<dynamic>? ?? const []).cast<String>();
@@ -157,6 +153,7 @@ class LoseEvaluator {
   ) {
     final goal = _balanceGoalForCondition(config, goals);
     if (goal == null) return false;
+    if (!_requiresCompleteEqualBalance(goal.config)) return false;
 
     final owners =
         (goal.config['owners'] as List<dynamic>? ?? const []).cast<String>();
@@ -221,6 +218,12 @@ class LoseEvaluator {
       if (goalId == null || goal.id == goalId) return goal;
     }
     return null;
+  }
+
+  bool _requiresCompleteEqualBalance(Map<String, dynamic> config) {
+    final requireComplete = config['requireComplete'] as bool? ?? true;
+    final requireEqual = config['requireEqual'] as bool? ?? true;
+    return requireComplete && requireEqual;
   }
 
   int _countClaimable(

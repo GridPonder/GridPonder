@@ -28,7 +28,8 @@ class GoalEvaluator {
     bool allDone = true;
 
     for (final goal in goals) {
-      final (done, prog) = _evaluateGoal(goal, state, game, pendingEvents);
+      final (done, prog) =
+          _evaluateGoal(goal, state, game, pendingEvents);
       progress[goal.id] = prog;
       if (!done) allDone = false;
     }
@@ -97,8 +98,10 @@ class GoalEvaluator {
     GameDefinition game,
     List<GameEvent> pendingEvents,
   ) {
-    final sequence =
-        (goal.config['sequence'] as List?)?.map((e) => e as int).toList() ?? [];
+    final sequence = (goal.config['sequence'] as List?)
+            ?.map((e) => e as int)
+            .toList() ??
+        [];
     if (sequence.isEmpty) return (true, 1.0);
 
     final currentIndex = state.sequenceIndices[goal.id] ?? 0;
@@ -140,8 +143,7 @@ class GoalEvaluator {
 
   MapEntry<String, Position>? _findNumberOnBoard(
       Board board, int target, GameDefinition game) {
-    for (final entry in (board.layers['objects']?.entries() ??
-        const <MapEntry<Position, EntityInstance>>[])) {
+    for (final entry in (board.layers['objects']?.entries() ?? const <MapEntry<Position, EntityInstance>>[])) {
       if (entry.value.kind == 'number') {
         final v = entry.value.param('value');
         if (v == target || v?.toString() == target.toString()) {
@@ -156,7 +158,8 @@ class GoalEvaluator {
       GoalDef goal, LevelState state, GameDefinition game) {
     final targetLayers =
         goal.config['targetLayers'] as Map<String, dynamic>? ?? {};
-    final matchMode = (goal.config['matchMode'] as String?) ?? 'exact_non_null';
+    final matchMode =
+        (goal.config['matchMode'] as String?) ?? 'exact_non_null';
 
     int totalCells = 0;
     int matchedCells = 0;
@@ -200,7 +203,8 @@ class GoalEvaluator {
   (bool, double) _variableThreshold(GoalDef goal, LevelState state) {
     final name = goal.config['variable'] as String;
     final target = goal.config['target'] as num;
-    final comparison = (goal.config['comparison'] as String?) ?? 'gte';
+    final comparison =
+        (goal.config['comparison'] as String?) ?? 'gte';
     final current = state.variables[name];
     if (current == null) return (false, 0.0);
     final numCurrent = current as num;
@@ -255,10 +259,10 @@ class GoalEvaluator {
       return 0;
     }
 
-    int rowSum(int y) => List.generate(w, (x) => cellValue(Position(x, y)))
-        .fold(0, (a, b) => a + b);
-    int colSum(int x) => List.generate(h, (y) => cellValue(Position(x, y)))
-        .fold(0, (a, b) => a + b);
+    int rowSum(int y) =>
+        List.generate(w, (x) => cellValue(Position(x, y))).fold(0, (a, b) => a + b);
+    int colSum(int x) =>
+        List.generate(h, (y) => cellValue(Position(x, y))).fold(0, (a, b) => a + b);
 
     bool satisfies(int sum) => switch (comparison) {
           'gte' => sum >= target,
@@ -435,11 +439,8 @@ class GoalEvaluator {
   /// Returns the declared default kind of the layer with id [layerId], or
   /// null if the layer isn't declared (or has no default).
   ///
-  /// This returns the raw declared `LayerDef.defaultKind`, which may be null
-  /// (whereas `Board.fromJson` normalizes a missing `exactly_one` default to
-  /// `'empty'` when seeding cells). That is intentional and matches Python's
-  /// `_count_claimable`, which also yields 0 claimable cells in the malformed
-  /// "no declared default" case — so there is no cross-engine divergence.
+  /// `Board.fromJson` normalizes a missing `exactly_one` default to `empty`, so
+  /// callers use the same fallback when the declaration itself is null.
   String? _layerDefaultKind(GameDefinition game, String? layerId) {
     for (final l in game.layers) {
       if (l.id == layerId) return l.defaultKind;
@@ -461,7 +462,11 @@ class GoalEvaluator {
     final raw = cfg['claimableKind'];
     final kinds = raw is List
         ? raw.map((k) => k.toString()).toSet()
-        : {(raw as String?) ?? _layerDefaultKind(game, claimableLayerId)};
+        : {
+            (raw as String?) ??
+                _layerDefaultKind(game, claimableLayerId) ??
+                'empty',
+          };
     return layer.entries().where((e) => kinds.contains(e.value.kind)).length;
   }
 

@@ -19,8 +19,7 @@ import 'slide_merge_system.dart';
 import 'tile_teleport_system.dart';
 
 /// Creates a GameSystem instance from a SystemDef.
-typedef SystemFactory = GameSystem Function(
-    String id, Map<String, dynamic> config);
+typedef SystemFactory = GameSystem Function(String id, Map<String, dynamic> config);
 
 class SystemRegistry {
   static final Map<String, SystemFactory> _factories = {

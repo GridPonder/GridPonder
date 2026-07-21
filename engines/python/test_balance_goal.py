@@ -19,11 +19,14 @@ from engines.python._models import Board, GameState
 from engines.python._goal import _evaluate_goal, evaluate_lose
 
 
-def _make_game() -> GameDef:
+def _make_game(*, declare_ground_default: bool = True) -> GameDef:
+    ground_layer = {"id": "ground", "occupancy": "exactly_one"}
+    if declare_ground_default:
+        ground_layer["default"] = "empty"
     data = {
         "id": "com.gridponder.test_balance_goal",
         "layers": [
-            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            ground_layer,
             {"id": "territory", "occupancy": "zero_or_one"},
         ],
         "entityKinds": {
@@ -214,6 +217,54 @@ def test_omitted_claimable_layer_defaults_to_ground() -> None:
     assert done
     assert abs(progress - 1.0) < 1e-9
     print("  OK  omitted_claimable_layer_defaults_to_ground")
+
+
+def test_missing_declared_default_matches_effective_empty_kind() -> None:
+    game = _make_game(declare_ground_default=False)
+    state = _make_state(
+        game,
+        _territory({"terr_wei": 3, "terr_shu": 3, "terr_wu": 3}),
+    )
+
+    done, progress = _evaluate_goal(_GOAL_NO_CLAIMABLE_KIND, state, game, [])
+    is_lost, _ = evaluate_lose(
+        _LOSE_UNREACHABLE,
+        state,
+        [_GOAL_NO_CLAIMABLE_KIND],
+        game,
+    )
+
+    assert done
+    assert abs(progress - 1.0) < 1e-9
+    assert not is_lost
+    print("  OK  missing_declared_default_matches_effective_empty_kind")
+
+
+def test_balance_lose_conditions_ignore_non_complete_or_non_equal_goals() -> None:
+    game = _make_game()
+    unequal_state = _make_state(
+        game,
+        _territory({"terr_wei": 4, "terr_shu": 3, "terr_wu": 2}),
+    )
+    unequal_goal = {
+        **_GOAL,
+        "config": {**_GOAL["config"], "requireEqual": False},
+    }
+    partial_state = _make_state(
+        game,
+        _territory({"terr_wei": 1, "terr_shu": 1, "terr_wu": 1}),
+        size=4,
+    )
+    partial_goal = {
+        **_GOAL,
+        "config": {**_GOAL["config"], "requireComplete": False},
+    }
+
+    for state, goal in ((unequal_state, unequal_goal), (partial_state, partial_goal)):
+        for condition in (_LOSE_UNREACHABLE, _LOSE_BUDGET):
+            is_lost, _ = evaluate_lose(condition, state, [goal], game)
+            assert not is_lost
+    print("  OK  balance_lose_conditions_ignore_non_complete_or_non_equal_goals")
 
 
 def test_require_complete_false_needs_owned_territory() -> None:
@@ -420,6 +471,8 @@ def run_all() -> bool:
         test_omitted_claimable_kind_falls_back_to_layer_default,
         test_claimable_kind_accepts_list,
         test_omitted_claimable_layer_defaults_to_ground,
+        test_missing_declared_default_matches_effective_empty_kind,
+        test_balance_lose_conditions_ignore_non_complete_or_non_equal_goals,
         test_require_complete_false_needs_owned_territory,
         test_balance_budget_aggregates_actors_for_one_owner,
         test_balance_unreachable_fires_on_overclaim,

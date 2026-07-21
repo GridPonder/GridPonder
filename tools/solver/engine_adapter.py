@@ -39,10 +39,10 @@ Usage
 
 from __future__ import annotations
 
+from collections import deque
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from collections import deque
 from typing import Any, Optional
 
 # Make engines/ importable when running from tools/solver/
@@ -54,10 +54,6 @@ from engines.python._game_def import GameDef
 from engines.python._models import GameState, Pos
 from engines.python._turn_engine import TurnEngine
 from engines.python.loader import load_pack
-
-# Per-level cache of the (constant) claimable-cell count, keyed by id(info).
-_CLAIMABLE_CACHE: dict[int, int] = {}
-
 
 # ---------------------------------------------------------------------------
 # EngineState — hashable wrapper around GameState
@@ -298,6 +294,7 @@ def can_prune(
             actor_kind,
             int(remaining.get(actor_kind, 0)),
             deficit,
+            actor_layer_id=sys_cfg.get("actorLayer", "actors"),
             ground_layer=cfg.get("claimableLayer", "ground"),
             claim_kind=cfg.get("claimableKind", "empty"),
             territory_layer=cfg.get("layer", "territory"),
@@ -317,6 +314,7 @@ def _actor_can_reach_enough_claims(
     actor_kind: str,
     budget: int,
     deficit: int,
+    actor_layer_id: str,
     ground_layer: str,
     claim_kind: str,
     territory_layer: str,
@@ -325,7 +323,7 @@ def _actor_can_reach_enough_claims(
         return False
 
     board = state._state.board
-    actor_layer = board.layers.get("actors")
+    actor_layer = board.layers.get(actor_layer_id)
     start = None
     if actor_layer is not None:
         for pos, entity in actor_layer.entries():
@@ -368,9 +366,6 @@ def _balance_goal(info: EngineInfo) -> Optional[dict]:
 
 
 def _claimable_count(state: EngineState, info: EngineInfo, ground_layer: str, claim_kind: str) -> int:
-    cached = _CLAIMABLE_CACHE.get(id(info))
-    if cached is not None:
-        return cached
     board = state._state.board
     count = 0
     for y in range(info.height):
@@ -378,7 +373,6 @@ def _claimable_count(state: EngineState, info: EngineInfo, ground_layer: str, cl
             entity = board.get_entity(ground_layer, Pos(x, y))
             if entity is not None and entity.kind == claim_kind:
                 count += 1
-    _CLAIMABLE_CACHE[id(info)] = count
     return count
 
 
@@ -413,6 +407,14 @@ def _coupled_system(info: EngineInfo) -> Optional[dict]:
     return None
 
 
+def _sliding_system(info: EngineInfo) -> Optional[dict]:
+    """Return the enabled ``sliding_blocks`` system, if this level uses one."""
+    for system in _effective_game(info).systems:
+        if system["type"] == "sliding_blocks" and system.get("enabled", True):
+            return system
+    return None
+
+
 def _balance_optimizations_supported(
     state: EngineState,
     info: EngineInfo,
@@ -436,6 +438,8 @@ def _balance_optimizations_supported(
         return False
     movement = individual or coupled
     sys_cfg = movement.get("config", {})
+    if sys_cfg.get("groundLayer", "ground") != claimable_layer:
+        return False
     claim = sys_cfg.get("claim", {})
     actor_to_owner = claim.get("map", {})
     if (
@@ -645,6 +649,13 @@ def legal_actions(state: EngineState, info: EngineInfo) -> list[str]:
     system are unaffected (the full ACTIONS list is returned).
     """
     indiv = _individual_system(info)
+    sliding = _sliding_system(info)
+    # Combining two selection models needs game-specific arbitration. Falling
+    # back to the complete static action set is slower but remains sound.
+    if indiv is not None and sliding is not None:
+        return info.ACTIONS
+    if sliding is not None:
+        return _sliding_legal_actions(state, info, sliding)
     if indiv is None:
         return info.ACTIONS
 
@@ -726,6 +737,90 @@ def legal_actions(state: EngineState, info: EngineInfo) -> list[str]:
             result.append(action)
         else:
             result.append(action)
+    return result
+
+
+def _sliding_legal_actions(
+    state: EngineState,
+    info: EngineInfo,
+    system: dict,
+) -> list[str]:
+    """Use one canonical position per block instead of every board cell."""
+    config = system.get("config", {})
+    move_action = config.get("moveAction", "move")
+    action_def = next(
+        (action for action in info.game.actions if action["id"] == move_action),
+        None,
+    )
+    if action_def is None:
+        return info.ACTIONS
+    params = action_def.get("params", {})
+    if "position" not in params or "direction" not in params:
+        return info.ACTIONS
+
+    declared_directions = params["direction"].get(
+        "values", ["up", "down", "left", "right"]
+    )
+    allowed_by_axis = {
+        "horizontal": {"left", "right"},
+        "vertical": {"up", "down"},
+        "both": {"up", "down", "left", "right"},
+    }
+    result: list[str] = []
+    for block in state.game_state.board.multi_cell_objects:
+        if not block.cells:
+            continue
+        position = min(block.cells, key=lambda pos: (pos.y, pos.x))
+        allowed = allowed_by_axis.get(str(block.params.get("axis", "both")), set())
+        for direction in declared_directions:
+            if direction in allowed:
+                result.append(
+                    f"{move_action}_{position.x}_{position.y}_{direction}"
+                )
+
+    for action in info.ACTIONS:
+        try:
+            action_id, _params = _parse_action(action, info.game)
+        except (TypeError, ValueError):
+            continue
+        if action_id != move_action:
+            result.append(action)
+    return result
+
+
+def canonicalize_path(
+    actions: list[str],
+    initial: EngineState,
+    info: EngineInfo,
+) -> list[str]:
+    """Normalize equivalent sliding-block cell selections along a path."""
+    sliding = _sliding_system(info)
+    if sliding is None:
+        return actions
+    move_action = sliding.get("config", {}).get("moveAction", "move")
+
+    state = initial
+    result: list[str] = []
+    for action in actions:
+        canonical = action
+        action_id, params = _parse_action(action, info.game)
+        position_raw = params.get("position")
+        direction = params.get("direction")
+        if action_id == move_action and position_raw is not None and direction:
+            position = Pos.from_json(position_raw)
+            block = next(
+                (
+                    item
+                    for item in state.game_state.board.multi_cell_objects
+                    if position in item.cells
+                ),
+                None,
+            )
+            if block is not None and block.cells:
+                first = min(block.cells, key=lambda pos: (pos.y, pos.x))
+                canonical = f"{move_action}_{first.x}_{first.y}_{direction}"
+        result.append(canonical)
+        state, _won, _events = apply(state, canonical, info)
     return result
 
 

@@ -9,11 +9,16 @@ import 'package:test/test.dart';
 // Fixtures: a 3x3 territory layer over a 3x3 all-`empty` ground (claimable=9).
 // ---------------------------------------------------------------------------
 
-GameDefinition _makeGame() {
+GameDefinition _makeGame({bool declareGroundDefault = true}) {
+  final groundLayer = <String, dynamic>{
+    'id': 'ground',
+    'occupancy': 'exactly_one',
+    if (declareGroundDefault) 'default': 'empty',
+  };
   final data = {
     'id': 'com.gridponder.test_balance_goal',
     'layers': [
-      {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+      groundLayer,
       {'id': 'territory', 'occupancy': 'zero_or_one'},
     ],
     'entityKinds': {
@@ -366,6 +371,32 @@ void main() {
       expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
     });
 
+    test('missing declared default matches effective empty kind', () {
+      final game = _makeGame(declareGroundDefault: false);
+      final state = _makeState(
+        game,
+        _territory({'terr_wei': 3, 'terr_shu': 3, 'terr_wu': 3}),
+      );
+      final goal = _goalNoClaimableKind();
+
+      final status = _evaluateWith(game, state, goal);
+      final loseStatus = LoseEvaluator().evaluate(
+        <LoseConditionDef>[
+          LoseConditionDef.fromJson(const {
+            'type': 'balance_unreachable',
+            'config': {'goalId': 'balance_goal'},
+          }),
+        ],
+        state,
+        goals: [goal],
+        game: game,
+      );
+
+      expect(status.isWon, isTrue);
+      expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
+      expect(loseStatus.isLost, isFalse);
+    });
+
     test('requireComplete false does not win with zero owned territory', () {
       final game = _makeGame();
       final state = _makeState(game, const []);
@@ -382,6 +413,54 @@ void main() {
 
       expect(status.isWon, isFalse);
       expect(status.progress['balance_goal'], 0.0);
+    });
+
+    test('lose conditions ignore non-complete or non-equal balance goals', () {
+      final game = _makeGame();
+      final unequalState = _makeState(
+        game,
+        _territory({'terr_wei': 4, 'terr_shu': 3, 'terr_wu': 2}),
+      );
+      final partialState = _makeState(
+        game,
+        _territory({'terr_wei': 1, 'terr_shu': 1, 'terr_wu': 1}),
+        size: 4,
+      );
+      final cases = <(LevelState, GoalDef)>[
+        (
+          unequalState,
+          GoalDef(
+            id: 'balance_goal',
+            type: 'balance',
+            config: {..._goal().config, 'requireEqual': false},
+          ),
+        ),
+        (
+          partialState,
+          GoalDef(
+            id: 'balance_goal',
+            type: 'balance',
+            config: {..._goal().config, 'requireComplete': false},
+          ),
+        ),
+      ];
+
+      for (final (state, goal) in cases) {
+        for (final type in ['balance_unreachable', 'balance_budget_exhausted']) {
+          final status = LoseEvaluator().evaluate(
+            <LoseConditionDef>[
+              LoseConditionDef.fromJson({
+                'type': type,
+                'config': const {'goalId': 'balance_goal'},
+              }),
+            ],
+            state,
+            goals: [goal],
+            game: game,
+          );
+          expect(status.isLost, isFalse, reason: '$type must be conservative');
+        }
+      }
     });
   });
 

@@ -306,20 +306,15 @@ def _count_claimable(board: Any, cfg: dict) -> int:
     to be owned. `claimableKind` accepts a single kind or a list of kinds, for
     boards where more than one ground kind can be owned.
 
-    NOTE (engine parity, tracked follow-up): this reads the layer's declared
-    (un-normalized) `default_kind` as set on `BoardLayer`. Dart's `Board.fromJson`
-    normalizes a missing `exactly_one` layer `default` to `'empty'`, while this
-    Python model does not perform that normalization. A claimable layer that
-    omits `default` entirely, combined with a `balance` goal that also omits
-    `claimableKind`, could therefore diverge between engines (Python: `None`
-    here vs. Dart: `'empty'`). This is non-divergent for well-formed packs,
-    which declare an explicit `default` on `exactly_one` layers. Follow-up:
-    normalize the missing `exactly_one` default in `_models.py` to match Dart.
+    Board parsing treats a missing `exactly_one` default as `empty`, so this
+    counter uses the same fallback when the declaration itself is absent.
     """
     layer = board.layers.get(cfg.get("claimableLayer", "ground"))
     if layer is None:
         return 0
-    claimable_kind = cfg.get("claimableKind", layer.default_kind)
+    claimable_kind = cfg.get("claimableKind")
+    if claimable_kind is None:
+        claimable_kind = layer.default_kind or "empty"
     kinds = (set(claimable_kind) if isinstance(claimable_kind, (list, tuple))
              else {claimable_kind})
     return sum(1 for _pos, entity in layer.entries() if entity.kind in kinds)
@@ -435,6 +430,8 @@ def _balance_budget_exhausted(
         return False
 
     goal_cfg = goal.get("config", {})
+    if not _requires_complete_equal_balance(goal_cfg):
+        return False
     owners = goal_cfg.get("owners", [])
     if not owners:
         return False
@@ -507,6 +504,8 @@ def _balance_unreachable(
         return False
 
     goal_cfg = goal.get("config", {})
+    if not _requires_complete_equal_balance(goal_cfg):
+        return False
     owners = goal_cfg.get("owners", [])
     if not owners:
         return False
@@ -537,6 +536,13 @@ def _balance_goal_for_condition(cfg: dict, goals: list[dict]) -> dict | None:
         if goal_id is None or goal.get("id") == goal_id:
             return goal
     return None
+
+
+def _requires_complete_equal_balance(goal_cfg: dict) -> bool:
+    return (
+        goal_cfg.get("requireComplete", True)
+        and goal_cfg.get("requireEqual", True)
+    )
 
 
 def _count_claimable_for_budget_loss(
