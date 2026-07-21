@@ -170,7 +170,10 @@ class PackService {
     ImageProvider? coverImage;
     if (coverImagePath != null) {
       if (!isInstalled) {
-        coverImage = AssetImage('assets/packs/$packId/$coverImagePath');
+        // Safe: every non-installed entry is built with a BundledPackFileReader
+        // (PackRegistry.listAll(), and the load()/loadInfo() statics below).
+        final base = (reader as BundledPackFileReader).assetBase;
+        coverImage = AssetImage('$base/$coverImagePath');
       } else {
         final bytes = await reader.readBytes(coverImagePath);
         if (bytes != null) coverImage = MemoryImage(bytes);
@@ -201,7 +204,10 @@ class PackService {
   /// Bundled packs → [AssetImage]. Installed packs → [MemoryImage] from cache.
   ImageProvider resolvePackImage(String packRelativePath) {
     if (!info.isInstalled) {
-      return AssetImage('assets/packs/${info.id}/$packRelativePath');
+      // Safe: every non-installed entry is built with a BundledPackFileReader
+      // (PackRegistry.listAll(), and the load()/loadInfo() statics below).
+      final base = (_reader as BundledPackFileReader).assetBase;
+      return AssetImage('$base/$packRelativePath');
     }
     final bytes = _assetCache[packRelativePath];
     if (bytes != null) return MemoryImage(bytes);
@@ -211,8 +217,10 @@ class PackService {
 
   /// Legacy path-based resolver — still used by the shared sprite systems
   /// (gridponder-base) which is always bundled.
+  // Safe: bundled packs are always constructed with a BundledPackFileReader
+  // (PackRegistry.listAll(), and the load()/loadInfo() statics above).
   String resolvePackAsset(String packRelativePath) =>
-      'assets/packs/${info.id}/$packRelativePath';
+      '${(_reader as BundledPackFileReader).assetBase}/$packRelativePath';
 
   String resolveSprite(String dslPath) {
     final filename = dslPath.split('/').last;

@@ -1,0 +1,47 @@
+{
+  "id": "actor_balance_smoke_01",
+  "title": "Actor Balance Smoke",
+  "board": {
+    "size": [2, 3],
+    "layers": {
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "actor_a"},
+          {"position": [1, 0], "kind": "actor_b"}
+        ]
+      },
+      "territory": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 0], "kind": "territory_a"},
+          {"position": [1, 0], "kind": "territory_b"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "balance_goal",
+      "type": "balance",
+      "config": {
+        "layer": "territory",
+        "owners": ["territory_a", "territory_b"],
+        "claimableLayer": "ground",
+        "claimableKind": "empty",
+        "requireComplete": true,
+        "requireEqual": true
+      }
+    }
+  ],
+  "loseConditions": [],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"}
+    ]
+  }
+}

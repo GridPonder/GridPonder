@@ -39,6 +39,7 @@ def _evaluate_goal(goal: dict, state: GameState, game: GameDef, pending_events: 
         case "sum_constraint": return _sum_constraint(cfg, state)
         case "count_constraint": return _count_constraint(cfg, state)
         case "param_match":    return _param_match(cfg, state)
+        case "balance":        return _balance(cfg, state, game)
         case _:                return False, 0.0
 
 
@@ -299,11 +300,56 @@ def _param_match(cfg: dict, state: GameState) -> tuple[bool, float]:
     return matched == total, matched / total
 
 
+def _count_claimable(board: Any, cfg: dict) -> int:
+    """Count cells in `cfg["claimableLayer"]` whose kind matches `cfg["claimableKind"]`
+    (default: that layer's default kind) — every non-wall ground cell eligible
+    to be owned. `claimableKind` accepts a single kind or a list of kinds, for
+    boards where more than one ground kind can be owned.
+
+    Board parsing treats a missing `exactly_one` default as `empty`, so this
+    counter uses the same fallback when the declaration itself is absent.
+    """
+    layer = board.layers.get(cfg.get("claimableLayer", "ground"))
+    if layer is None:
+        return 0
+    claimable_kind = cfg.get("claimableKind")
+    if claimable_kind is None:
+        claimable_kind = layer.default_kind or "empty"
+    kinds = (set(claimable_kind) if isinstance(claimable_kind, (list, tuple))
+             else {claimable_kind})
+    return sum(1 for _pos, entity in layer.entries() if entity.kind in kinds)
+
+
+def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
+    """Win when a territory layer is divided completely and into exactly-equal
+    shares among the configured owners (or per requireComplete/requireEqual)."""
+    layer = state.board.layers.get(cfg.get("layer"))
+    counts = {o: 0 for o in cfg.get("owners", [])}
+    if layer is not None:
+        for _pos, entity in layer.entries():
+            if entity.kind in counts:
+                counts[entity.kind] += 1
+    claimable = _count_claimable(state.board, cfg)
+    owned = sum(counts.values())
+    equal = len(set(counts.values())) == 1
+    complete = owned == claimable
+    progress = owned / claimable if claimable else 0.0
+    done = owned > 0 and \
+           (equal or not cfg.get("requireEqual", True)) and \
+           (complete or not cfg.get("requireComplete", True))
+    return done, progress
+
+
 # ---------------------------------------------------------------------------
 # Lose evaluator
 # ---------------------------------------------------------------------------
 
-def evaluate_lose(lose_conditions: list[dict], state: GameState) -> tuple[bool, str | None]:
+def evaluate_lose(
+    lose_conditions: list[dict],
+    state: GameState,
+    goals: list[dict] | None = None,
+    game: GameDef | None = None,
+) -> tuple[bool, str | None]:
     """Return (is_lost, reason | None)."""
     for cond in lose_conditions:
         ctype = cond["type"]
@@ -321,4 +367,224 @@ def evaluate_lose(lose_conditions: list[dict], state: GameState) -> tuple[bool, 
                 lost = {"eq": cur == target, "gte": cur >= target, "lte": cur <= target}.get(comparison, False)
                 if lost:
                     return True, f"variable_threshold:{name}"
+        elif ctype == "balance_budget_exhausted":
+            if _balance_budget_exhausted(cfg, state, goals or [], game):
+                return True, "balance_budget_exhausted"
+        elif ctype == "balance_unreachable":
+            if _balance_unreachable(cfg, state, goals or [], game):
+                return True, "balance_unreachable"
     return False, None
+
+
+def _claims_are_overwritable(state: GameState, game: GameDef | None) -> bool:
+    """True when an owned cell on THIS board could actually be repainted.
+
+    Both balance lose conditions share an over-claim test that assumes claims
+    are permanent: an owner past its equal share can never come back down. That
+    breaks when cells can be repainted, so the test must stay quiet rather than
+    report a false loss.
+
+    Deliberately a board-level question, not a config-level one. A pack may
+    declare a `tagged` policy game-wide while most of its boards carry no tagged
+    cells; on those boards claims *are* permanent and the conditions must still
+    fire. Asking only "is a policy declared?" would silently disable the fail
+    condition for the whole pack, and no gold-path test would catch it — a
+    winning path never trips a lose condition.
+    """
+    if game is None:
+        return False
+    for system in getattr(game, "systems", []):
+        if not system.get("enabled", True):
+            continue
+        if system.get("type") not in ("coupled_actors", "individual_actors"):
+            continue
+        config = system.get("config") or {}
+        claim = config.get("claim") or {}
+        overwrite = claim.get("overwrite") or {}
+        mode = overwrite.get("mode", "never")
+        if mode == "always":
+            return True
+        if mode != "tagged":
+            continue
+        tag = overwrite.get("tag")
+        if not tag:
+            continue
+        layer_id = overwrite.get("layer", config.get("groundLayer", "ground"))
+        layer = state.board.layers.get(layer_id)
+        if layer is None:
+            continue
+        for pos, _entity in layer.entries():
+            if state.board.has_tag_at(layer_id, pos, tag, game.entity_kinds):
+                return True
+    return False
+
+
+def _balance_budget_exhausted(
+    cfg: dict,
+    state: GameState,
+    goals: list[dict],
+    game: GameDef | None,
+) -> bool:
+    goal = _balance_goal_for_condition(cfg, goals)
+    if goal is None:
+        return False
+
+    goal_cfg = goal.get("config", {})
+    if not _requires_complete_equal_balance(goal_cfg):
+        return False
+    owners = goal_cfg.get("owners", [])
+    if not owners:
+        return False
+
+    claimable = _count_claimable_for_budget_loss(state, goal_cfg, game)
+    if claimable % len(owners) != 0:
+        return True
+    target = claimable // len(owners)
+
+    owned = {owner: 0 for owner in owners}
+    layer = state.board.layers.get(goal_cfg.get("layer", "territory"))
+    if layer is not None:
+        for _pos, entity in layer.entries():
+            if entity.kind in owned:
+                owned[entity.kind] += 1
+
+    # Over-claim is only terminal while claims are permanent. The deficit check
+    # below stays sound under reclaim (a claimer still spends a move per cell).
+    if (any(count > target for count in owned.values())
+            and not _claims_are_overwritable(state, game)):
+        return True
+
+    actor_to_owner = (
+        cfg.get("actorToOwner", {})
+        if "actorToOwner" in cfg
+        else _individual_actor_to_owner(game)
+    )
+    if not actor_to_owner:
+        return False
+
+    budget_key = cfg.get("budgetVariable", "actorMovesRemaining")
+    remaining = state.variables.get(budget_key)
+    if not isinstance(remaining, dict):
+        remaining = _individual_budgets(game)
+    if not isinstance(remaining, dict) or not remaining:
+        return False
+
+    remaining_by_owner = {owner: 0 for owner in owners}
+    for actor_kind, owner_kind in actor_to_owner.items():
+        if owner_kind in remaining_by_owner:
+            remaining_by_owner[owner_kind] += int(remaining.get(actor_kind, 0))
+
+    for owner_kind, owner_count in owned.items():
+        deficit = target - owner_count
+        if deficit > remaining_by_owner[owner_kind]:
+            return True
+    return False
+
+
+def _balance_unreachable(
+    cfg: dict,
+    state: GameState,
+    goals: list[dict],
+    game: GameDef | None,
+) -> bool:
+    """Fires when the `balance` goal's equal-share requirement has already
+    become impossible: some owner has claimed strictly more than its equal
+    share (`claimable / owners`). Because a claimed cell can never change owner,
+    an over-target owner can never come back down, so the level is unwinnable
+    and is lost immediately rather than only when the action cap is reached.
+    Also fires if `claimable` is not divisible by the owner count (equal shares
+    are arithmetically impossible). Generic across coupled and individual modes;
+    unlike `balance_budget_exhausted` it needs no actor/budget wiring.
+
+    The over-claim half is suppressed when the board carries repaintable cells
+    (see `_claims_are_overwritable`) — an over-share owner can then be repainted
+    back down, so it is not terminal."""
+    goal = _balance_goal_for_condition(cfg, goals)
+    if goal is None:
+        return False
+
+    goal_cfg = goal.get("config", {})
+    if not _requires_complete_equal_balance(goal_cfg):
+        return False
+    owners = goal_cfg.get("owners", [])
+    if not owners:
+        return False
+
+    claimable = _count_claimable_for_budget_loss(state, goal_cfg, game)
+    if claimable % len(owners) != 0:
+        return True
+    target = claimable // len(owners)
+
+    if _claims_are_overwritable(state, game):
+        return False
+
+    owned = {owner: 0 for owner in owners}
+    layer = state.board.layers.get(goal_cfg.get("layer", "territory"))
+    if layer is not None:
+        for _pos, entity in layer.entries():
+            if entity.kind in owned:
+                owned[entity.kind] += 1
+
+    return any(count > target for count in owned.values())
+
+
+def _balance_goal_for_condition(cfg: dict, goals: list[dict]) -> dict | None:
+    goal_id = cfg.get("goalId")
+    for goal in goals:
+        if goal.get("type") != "balance":
+            continue
+        if goal_id is None or goal.get("id") == goal_id:
+            return goal
+    return None
+
+
+def _requires_complete_equal_balance(goal_cfg: dict) -> bool:
+    return (
+        goal_cfg.get("requireComplete", True)
+        and goal_cfg.get("requireEqual", True)
+    )
+
+
+def _count_claimable_for_budget_loss(
+    state: GameState,
+    goal_cfg: dict,
+    game: GameDef | None,
+) -> int:
+    layer_id = goal_cfg.get("claimableLayer", "ground")
+    claimable_kind = goal_cfg.get("claimableKind")
+    if claimable_kind is None and game is not None:
+        layer_def = next((layer for layer in game.layers if layer.get("id") == layer_id), None)
+        claimable_kind = layer_def.get("defaultKind") if layer_def is not None else None
+    if claimable_kind is None:
+        claimable_kind = "empty"
+
+    # `claimableKind` accepts a single kind or a list. Must agree with
+    # `_count_claimable` above — if the goal and the lose conditions disagree
+    # about the claimable count, the level is unwinnable or falsely lost.
+    kinds = (set(claimable_kind) if isinstance(claimable_kind, (list, tuple))
+             else {claimable_kind})
+
+    layer = state.board.layers.get(layer_id)
+    if layer is None:
+        return 0
+    return sum(1 for _pos, entity in layer.entries() if entity.kind in kinds)
+
+
+def _individual_actor_to_owner(game: GameDef | None) -> dict[str, str]:
+    if game is None:
+        return {}
+    for system in game.systems:
+        if system.get("type") == "individual_actors" and system.get("enabled", True):
+            claim = system.get("config", {}).get("claim", {})
+            return {str(k): str(v) for k, v in claim.get("map", {}).items()}
+    return {}
+
+
+def _individual_budgets(game: GameDef | None) -> dict[str, int]:
+    if game is None:
+        return {}
+    for system in game.systems:
+        if system.get("type") == "individual_actors" and system.get("enabled", True):
+            budgets = system.get("config", {}).get("budgets", {})
+            return {str(k): int(v) for k, v in budgets.items()}
+    return {}

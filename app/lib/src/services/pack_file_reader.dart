@@ -20,6 +20,8 @@ class BundledPackFileReader implements PackFileReader {
   const BundledPackFileReader(this.packId,
       {this.assetRoot = 'assets/packs'});
 
+  String get assetBase => '$assetRoot/$packId';
+
   @override
   Future<String> readString(String relativePath) =>
       rootBundle.loadString('$assetRoot/$packId/$relativePath');

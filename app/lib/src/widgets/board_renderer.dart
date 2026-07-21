@@ -37,6 +37,69 @@ Color? _parsePaletteHex(String hex) {
   return v == null ? null : Color(v);
 }
 
+class LineOfSightFeedback {
+  final Position source;
+  final Position target;
+  final String kind;
+
+  const LineOfSightFeedback({
+    required this.source,
+    required this.target,
+    required this.kind,
+  });
+}
+
+/// Resolves the sprite path for an entity instance, including optional
+/// direction-aware motion sprites declared under `motion.sprites`.
+String? resolveEntitySpritePath(
+  EntityKindDef? kindDef,
+  EntityInstance entity, {
+  String? facingDirection,
+}) {
+  final sprite = kindDef?.sprite;
+  if (sprite == null) return null;
+
+  final motionSprite = _motionSpritePath(
+    kindDef!.motion,
+    entity,
+    facingDirection: facingDirection,
+  );
+  if (motionSprite != null) return motionSprite;
+
+  final spriteParam = kindDef.spriteParam;
+  if (spriteParam == null) return sprite;
+  final value = entity.param(spriteParam);
+  return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
+}
+
+String? _motionSpritePath(
+  Map<String, dynamic> motion,
+  EntityInstance entity, {
+  String? facingDirection,
+}) {
+  final sprites = motion['sprites'];
+  if (sprites is! Map) return null;
+
+  final movementDirection = entity.param('_motionDirection');
+  if (movementDirection is String) {
+    final walk = sprites['walk'];
+    final frames = walk is Map ? walk[movementDirection] : null;
+    if (frames is List && frames.isNotEmpty) {
+      final rawFrame = entity.param('_motionFrame');
+      final frame = rawFrame is int ? rawFrame : 0;
+      return frames[frame % frames.length] as String?;
+    }
+  }
+
+  if (facingDirection != null) {
+    final idle = sprites['idle'];
+    final frame = idle is Map ? idle[facingDirection] : null;
+    if (frame is String) return frame;
+  }
+
+  return null;
+}
+
 class BoardRenderer extends StatelessWidget {
   final LevelState state;
   final GameDefinition game;
@@ -47,12 +110,26 @@ class BoardRenderer extends StatelessWidget {
   final Map<Position, String>? animationOverlays;
   /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
   final void Function(int x, int y)? onCellTap;
+
+  /// Last known facing direction per actor kind. Used to render idle actor
+  /// sprites after movement animation has finished.
+  final Map<String, String> actorFacingByKind;
+
   /// When set, cell_flooded entities are rendered in this color instead of
   /// their default color — used by Flood Colors to show the last chosen color.
   final Color? floodedColorOverride;
   /// When set, the avatar is rendered at this position instead of
   /// state.avatar.position — used during ice slide animations.
   final Position? avatarPositionOverride;
+
+  /// UI-only selection state for direct-manipulation multi-cell objects.
+  final String? selectedMultiCellObjectId;
+
+  /// UI-only selection state for an individually controlled actor.
+  final Position? selectedActorPosition;
+
+  /// Short-lived visual feedback for a line-of-sight detection event.
+  final List<LineOfSightFeedback> lineOfSightFeedbacks;
 
   const BoardRenderer({
     super.key,
@@ -61,8 +138,12 @@ class BoardRenderer extends StatelessWidget {
     required this.packService,
     this.animationOverlays,
     this.onCellTap,
+    this.actorFacingByKind = const {},
     this.floodedColorOverride,
     this.avatarPositionOverride,
+    this.selectedMultiCellObjectId,
+    this.selectedActorPosition,
+    this.lineOfSightFeedbacks = const [],
   });
 
   @override
@@ -80,10 +161,20 @@ class BoardRenderer extends StatelessWidget {
         final gridWidth = cellSize * cols;
         final gridHeight = cellSize * rows;
 
-        // Positions that belong to a multi-cell object — ground layer is
-        // suppressed there so pipe tiles show through as the background.
-        final mcoPosSet = <Position>{
-          for (final mco in state.board.multiCellObjects) ...mco.cells,
+        // Background structures such as pipes stay below cell layers. Physical
+        // sliding blocks render above them so covered objects remain hidden.
+        final backgroundMcos = state.board.multiCellObjects
+            .where((mco) => !game.hasTag(mco.kind, 'sliding_block'))
+            .toList();
+        final foregroundMcos = state.board.multiCellObjects
+            .where((mco) => game.hasTag(mco.kind, 'sliding_block'))
+            .toList();
+
+        // Background structures replace the ground tile (for example pipes).
+        // Foreground multi-cell objects keep the ground below them so
+        // transparent sprites render correctly.
+        final backgroundMcoPosSet = <Position>{
+          for (final mco in backgroundMcos) ...mco.cells,
         };
 
         return SizedBox(
@@ -91,9 +182,12 @@ class BoardRenderer extends StatelessWidget {
           height: gridHeight,
           child: Stack(
             children: [
-              // Pipe tile backgrounds rendered first so entity layers sit on top.
-              for (final mco in state.board.multiCellObjects)
-                ..._buildMcoCells(mco, cellSize),
+              for (final mco in backgroundMcos)
+                ..._buildMcoCells(
+                  mco,
+                  cellSize,
+                  selected: mco.id == selectedMultiCellObjectId,
+                ),
               for (int y = 0; y < rows; y++)
                 for (int x = 0; x < cols; x++)
                   Positioned(
@@ -112,7 +206,10 @@ class BoardRenderer extends StatelessWidget {
                               game: game,
                               packService: packService,
                               cellSize: cellSize,
-                              skipGround: mcoPosSet.contains(Position(x, y)),
+                              skipGround: backgroundMcoPosSet.contains(
+                                Position(x, y),
+                              ),
+                              actorFacingByKind: actorFacingByKind,
                               floodedColorOverride: floodedColorOverride,
                             ),
                           )
@@ -123,10 +220,19 @@ class BoardRenderer extends StatelessWidget {
                             game: game,
                             packService: packService,
                             cellSize: cellSize,
-                            skipGround: mcoPosSet.contains(Position(x, y)),
+                            skipGround: backgroundMcoPosSet.contains(
+                              Position(x, y),
+                            ),
+                            actorFacingByKind: actorFacingByKind,
                             floodedColorOverride: floodedColorOverride,
                           ),
                   ),
+              for (final mco in foregroundMcos)
+                ..._buildMcoCells(
+                  mco,
+                  cellSize,
+                  selected: mco.id == selectedMultiCellObjectId,
+                ),
               // Region outlines: stroke the perimeter of contiguous cells
               // for any kind that has `outline` set in game.json. Painted
               // above cells but below avatar / animation overlays so the
@@ -138,11 +244,26 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               ),
+              if (selectedActorPosition case final selectedPos?)
+                _buildSelectedActorRing(selectedPos, cellSize),
               if (animationOverlays != null)
                 for (final entry in animationOverlays!.entries)
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
               if (state.overlay != null)
                 _buildOverlay(state.overlay!, cellSize),
+              if (lineOfSightFeedbacks.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _LineOfSightFeedbackPainter(
+                        lineOfSightFeedbacks,
+                        cellSize,
+                      ),
+                    ),
+                  ),
+                ),
+              for (final feedback in lineOfSightFeedbacks)
+                _buildLineOfSightTargetFeedback(feedback, cellSize),
               if (state.avatar.enabled && state.avatar.position != null)
                 _buildAvatar(
                   avatarPositionOverride != null
@@ -157,7 +278,11 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  List<Widget> _buildMcoCells(MultiCellObjectInstance mco, double cellSize) {
+  List<Widget> _buildMcoCells(
+    MultiCellObjectInstance mco,
+    double cellSize, {
+    bool selected = false,
+  }) {
     final exitList = mco.params['exitPosition'] as List?;
     final exitPos = exitList != null
         ? Position(exitList[0] as int, exitList[1] as int)
@@ -199,7 +324,6 @@ class BoardRenderer extends StatelessWidget {
     }
 
     return mco.cells.map((pos) {
-      final isExit = pos == exitPos;
       final sprite = mco.cellSprites[pos];
 
       Widget background;
@@ -230,20 +354,105 @@ class BoardRenderer extends StatelessWidget {
         );
       }
 
+      final cell = Stack(
+        fit: StackFit.expand,
+        children: [
+          background,
+          if (label != null) label,
+          if (selected) _selectedMcoCellOverlay(cellSize),
+        ],
+      );
+
       return Positioned(
         left: pos.x * cellSize,
         top: pos.y * cellSize,
         width: cellSize,
         height: cellSize,
-        child: label != null
-            ? Stack(children: [background, label])
-            : background,
+        child: cell,
       );
     }).toList();
   }
 
-  Widget _mcoFallback(Position pos, MultiCellObjectInstance mco,
-      Position? exitPos, double cellSize) {
+  Widget _selectedMcoCellOverlay(double cellSize) {
+    final borderWidth = (cellSize * 0.055).clamp(2.0, 4.0);
+    return IgnorePointer(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border.all(
+            color: const Color(0xFFFFC107),
+            width: borderWidth,
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFFFFC107).withValues(alpha: 0.35),
+              blurRadius: borderWidth * 2.4,
+              spreadRadius: borderWidth * 0.25,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLineOfSightTargetFeedback(
+    LineOfSightFeedback feedback,
+    double cellSize,
+  ) {
+    final assetPath = game.entityKinds[feedback.kind]?.sprite;
+    final child = assetPath != null
+        ? Image(
+            image: packService.resolvePackImage(assetPath),
+            fit: BoxFit.contain,
+            errorBuilder: (_, __, ___) => Icon(
+              Icons.auto_awesome,
+              color: Colors.amber.shade600,
+              size: cellSize * 0.58,
+            ),
+          )
+        : Icon(
+            Icons.auto_awesome,
+            color: Colors.amber.shade600,
+            size: cellSize * 0.58,
+          );
+
+    return Positioned(
+      left: feedback.target.x * cellSize,
+      top: feedback.target.y * cellSize,
+      width: cellSize,
+      height: cellSize,
+      child: IgnorePointer(
+        child: Center(
+          child: Transform.scale(
+            scale: 1.22,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.amber.withValues(alpha: 0.6),
+                    blurRadius: cellSize * 0.22,
+                    spreadRadius: cellSize * 0.04,
+                  ),
+                ],
+              ),
+              child: SizedBox(
+                width: cellSize * 0.78,
+                height: cellSize * 0.78,
+                child: child,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _mcoFallback(
+    Position pos,
+    MultiCellObjectInstance mco,
+    Position? exitPos,
+    double cellSize,
+  ) {
     final cellSet = mco.cells.toSet();
     final isExit = pos == exitPos;
     return CustomPaint(
@@ -269,6 +478,29 @@ class BoardRenderer extends StatelessWidget {
             border: Border.all(color: Colors.amber.withOpacity(0.9), width: 2.5),
             color: Colors.amber.withOpacity(0.08),
             borderRadius: BorderRadius.circular(3),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSelectedActorRing(Position pos, double cellSize) {
+    return Positioned(
+      left: pos.x * cellSize,
+      top: pos.y * cellSize,
+      width: cellSize,
+      height: cellSize,
+      child: IgnorePointer(
+        child: Padding(
+          padding: EdgeInsets.all(cellSize * 0.08),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.all(
+                color: const Color(0xFFFFD45A),
+                width: max(2.0, cellSize * 0.045),
+              ),
+              borderRadius: BorderRadius.circular(cellSize * 0.18),
+            ),
           ),
         ),
       ),
@@ -370,6 +602,44 @@ class BoardRenderer extends StatelessWidget {
   }
 }
 
+class _LineOfSightFeedbackPainter extends CustomPainter {
+  final List<LineOfSightFeedback> feedbacks;
+  final double cellSize;
+
+  const _LineOfSightFeedbackPainter(this.feedbacks, this.cellSize);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final linePaint = Paint()
+      ..color = const Color(0xFFFFD54F).withValues(alpha: 0.9)
+      ..strokeWidth = (cellSize * 0.075).clamp(3.0, 7.0)
+      ..strokeCap = StrokeCap.round;
+    final glowPaint = Paint()
+      ..color = const Color(0xFFFFF176).withValues(alpha: 0.32)
+      ..strokeWidth = (cellSize * 0.19).clamp(8.0, 16.0)
+      ..strokeCap = StrokeCap.round;
+
+    for (final feedback in feedbacks) {
+      final source = Offset(
+        (feedback.source.x + 0.5) * cellSize,
+        (feedback.source.y + 0.5) * cellSize,
+      );
+      final target = Offset(
+        (feedback.target.x + 0.5) * cellSize,
+        (feedback.target.y + 0.5) * cellSize,
+      );
+      canvas.drawLine(source, target, glowPaint);
+      canvas.drawLine(source, target, linePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _LineOfSightFeedbackPainter oldDelegate) {
+    return oldDelegate.feedbacks != feedbacks ||
+        oldDelegate.cellSize != cellSize;
+  }
+}
+
 class _Cell extends StatelessWidget {
   final int x, y;
   final LevelState state;
@@ -377,6 +647,7 @@ class _Cell extends StatelessWidget {
   final PackService packService;
   final double cellSize;
   final bool skipGround;
+  final Map<String, String> actorFacingByKind;
   final Color? floodedColorOverride;
 
   const _Cell({
@@ -387,6 +658,7 @@ class _Cell extends StatelessWidget {
     required this.packService,
     required this.cellSize,
     this.skipGround = false,
+    this.actorFacingByKind = const {},
     this.floodedColorOverride,
   });
 
@@ -396,7 +668,7 @@ class _Cell extends StatelessWidget {
     final groundEntity = state.board.getEntity('ground', pos);
     if (groundEntity?.kind == 'void' && !skipGround) {
       final kindDef = game.entityKinds['void'];
-      final spritePath = _entitySpritePath(kindDef, groundEntity!);
+      final spritePath = resolveEntitySpritePath(kindDef, groundEntity!);
       if (spritePath != null) {
         return Image.asset(
           packService.resolveSprite(spritePath),
@@ -425,6 +697,7 @@ class _Cell extends StatelessWidget {
       child: Stack(
         children: [
           if (!skipGround) _layer('ground', pos),
+          _layer('territory', pos),
           _layer('portals', pos),
           _layer('objects', pos),
           _layer('clone', pos),
@@ -435,22 +708,18 @@ class _Cell extends StatelessWidget {
     );
   }
 
-  /// Resolves the sprite path for an entity instance, substituting the
-  /// `{paramName}` placeholder when the kind uses [EntityKindDef.spriteParam].
-  String? _entitySpritePath(EntityKindDef? kindDef, EntityInstance entity) {
-    final sprite = kindDef?.sprite;
-    if (sprite == null) return null;
-    final spriteParam = kindDef!.spriteParam;
-    if (spriteParam == null) return sprite;
-    final value = entity.param(spriteParam);
-    return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
-  }
-
   Widget _layer(String layerId, Position pos) {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
     final kindDef = game.entityKinds[entity.kind];
-    final spritePath = _entitySpritePath(kindDef, entity);
+    final facingDirection = layerId == 'actors'
+        ? actorFacingByKind[entity.kind]
+        : null;
+    final spritePath = resolveEntitySpritePath(
+      kindDef,
+      entity,
+      facingDirection: facingDirection,
+    );
     if (spritePath != null) {
       // Try pack-specific path first; fall back to gridponder-base for shared sprites.
       return Image(

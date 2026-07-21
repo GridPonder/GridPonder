@@ -8,7 +8,12 @@ import '../services/hint_service.dart';
 import '../services/pack_service.dart';
 import '../services/progress_service.dart';
 import '../services/settings_service.dart';
-import '../widgets/board_renderer.dart' show BoardRenderer, TargetBoardRenderer, cellNamedColor;
+import '../widgets/board_renderer.dart'
+    show
+        BoardRenderer,
+        LineOfSightFeedback,
+        TargetBoardRenderer,
+        cellNamedColor;
 import '../widgets/controls_widget.dart';
 
 class PlayScreen extends StatefulWidget {
@@ -50,7 +55,10 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   // Swipe detection (covers full screen)
+  final GlobalKey _boardKey = GlobalKey();
   Offset? _panStart;
+  Position? _panStartCell;
+  String? _selectedMultiCellObjectId;
   static const double _swipeThreshold = 18.0;
 
   // Periodic timer to refresh hint dot availability
@@ -59,7 +67,9 @@ class _PlayScreenState extends State<PlayScreen> {
   // Animation state: non-null while an entity animation is playing.
   LevelState? _preAnimState;
   Map<Position, String>? _animOverlays;
+  List<LineOfSightFeedback> _lineOfSightFeedbacks = const [];
   bool _animating = false;
+  Map<String, String> _actorFacingByKind = {};
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
 
@@ -121,7 +131,10 @@ class _PlayScreenState extends State<PlayScreen> {
     _agentAttempt = 1;
     _agentMemory.clear();
     _lastFloodColor = null;
+    _actorFacingByKind = {};
     _wonHandled = false;
+    _selectedMultiCellObjectId = null;
+    _lineOfSightFeedbacks = const [];
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -136,6 +149,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final preState = _engine.state.copy();
     final result = _engine.executeTurn(action);
     if (!result.accepted) return;
+    _syncSelectedMultiCellObject();
 
     // Record the chosen colour for any colour-pick action (any action that
     // declares a `color` in game.json). The play screen uses it to tint the
@@ -248,8 +262,42 @@ class _PlayScreenState extends State<PlayScreen> {
       });
     }
 
+    await _playLineOfSightFeedback(result.events);
+
     if (!mounted) return;
     setState(() => _animating = false);
+  }
+
+  Future<void> _playLineOfSightFeedback(List<GameEvent> events) async {
+    final feedbacks = <LineOfSightFeedback>[];
+    for (final event in events) {
+      if (event.type != 'line_of_sight_detected') continue;
+      final source = _positionFromPayload(event.payload['sourcePosition']);
+      final target = event.position;
+      final kind = event.payload['kind'] as String?;
+      if (source == null || target == null || kind == null) continue;
+      feedbacks.add(
+        LineOfSightFeedback(source: source, target: target, kind: kind),
+      );
+    }
+    if (feedbacks.isEmpty) return;
+
+    if (!mounted) return;
+    setState(() => _lineOfSightFeedbacks = feedbacks);
+    await Future.delayed(const Duration(milliseconds: 220));
+    if (!mounted) return;
+    setState(() => _lineOfSightFeedbacks = const []);
+  }
+
+  Position? _positionFromPayload(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is Position) return raw;
+    if (raw is List && raw.length >= 2) {
+      final x = raw[0];
+      final y = raw[1];
+      if (x is int && y is int) return Position(x, y);
+    }
+    return null;
   }
 
   /// Animates a sliding object through its sequence of ice-slide positions.
@@ -311,6 +359,7 @@ class _PlayScreenState extends State<PlayScreen> {
     final paths = <List<Position>>[];
     final entities = <EntityInstance>[];
     final layers = <String>[];
+    final directions = <String?>[];
 
     for (final step in moves) {
       final fromRaw = step.extra['from'];
@@ -338,6 +387,7 @@ class _PlayScreenState extends State<PlayScreen> {
       paths.add(path);
       entities.add(entity);
       layers.add(layer);
+      directions.add(_directionBetween(from, to));
     }
 
     if (paths.isEmpty) return;
@@ -365,7 +415,15 @@ class _PlayScreenState extends State<PlayScreen> {
         final path = paths[i];
         final pos = path[frame.clamp(0, path.length - 1)];
         if (animState.board.getEntity(layers[i], pos) == null) {
-          animState.board.setEntity(layers[i], pos, entities[i]);
+          final direction = directions[i];
+          final entity = direction == null
+              ? entities[i]
+              : EntityInstance(entities[i].kind, {
+                  ...entities[i].params,
+                  '_motionDirection': direction,
+                  '_motionFrame': frame,
+                });
+          animState.board.setEntity(layers[i], pos, entity);
         }
       }
       setState(() {
@@ -374,6 +432,27 @@ class _PlayScreenState extends State<PlayScreen> {
       });
       await Future.delayed(Duration(milliseconds: frameMs));
     }
+
+    final facingUpdates = <String, String>{};
+    for (int i = 0; i < entities.length; i++) {
+      final direction = directions[i];
+      if (layers[i] == 'actors' && direction != null) {
+        facingUpdates[entities[i].kind] = direction;
+      }
+    }
+    if (facingUpdates.isNotEmpty && mounted) {
+      setState(() {
+        _actorFacingByKind = {..._actorFacingByKind, ...facingUpdates};
+      });
+    }
+  }
+
+  String? _directionBetween(Position from, Position to) {
+    final dx = to.x - from.x;
+    final dy = to.y - from.y;
+    if (dx.abs() > dy.abs()) return dx > 0 ? 'right' : 'left';
+    if (dy != 0) return dy > 0 ? 'down' : 'up';
+    return null;
   }
 
   Future<void> _playEntityAnimation(LevelState preState, AnimationStep step) async {
@@ -407,6 +486,7 @@ class _PlayScreenState extends State<PlayScreen> {
     setState(() {
       _engine.undo();
       _lastFloodColor = null;
+      _syncSelectedMultiCellObject();
     });
   }
 
@@ -417,6 +497,9 @@ class _PlayScreenState extends State<PlayScreen> {
       _lastThinking = null;
       _lastResponse = null;
       _lastFloodColor = null;
+      _selectedMultiCellObjectId = null;
+      _lineOfSightFeedbacks = const [];
+      _actorFacingByKind = {};
     });
   }
 
@@ -494,11 +577,40 @@ class _PlayScreenState extends State<PlayScreen> {
 
   bool get _hasDiagonalSwap =>
       widget.packService.game.actions.any((a) => a.id == 'diagonal_swap');
-  bool get _hasMoveAction =>
-      widget.packService.game.actions.any((a) => a.id == 'move');
+
+  SystemDef? get _individualActorSystem {
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type == 'individual_actors' && system.enabled) return system;
+    }
+    return null;
+  }
+
+  ActionDef? get _primaryMoveAction {
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type != 'sliding_blocks' || !system.enabled) continue;
+      final actionId = system.config['moveAction'] as String? ?? 'move';
+      for (final action in effectiveGame.actions) {
+        if (action.id == actionId) return action;
+      }
+    }
+    for (final action in effectiveGame.actions) {
+      if (action.id == 'move') return action;
+    }
+    return null;
+  }
+
+  bool get _hasMoveAction => _primaryMoveAction != null;
+  bool get _moveActionNeedsPosition =>
+      _primaryMoveAction?.params.containsKey('position') ?? false;
   bool get _hasCellTapGesture =>
       widget.packService.theme?.controls?.gestureMap
-          .any((b) => b.gesture == 'tap_cell') ??
+          .any((binding) => binding.gesture == 'tap_cell') ??
       false;
 
   /// Action IDs whose colour is currently adjacent to the flood region.
@@ -534,6 +646,7 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   void _onCellTap(int x, int y) {
+    if (_aiRunning || _animating) return;
     final gestureMap =
         widget.packService.theme?.controls?.gestureMap ?? const [];
     for (final binding in gestureMap) {
@@ -546,11 +659,35 @@ class _PlayScreenState extends State<PlayScreen> {
       _onAction(GameAction(binding.action, params));
       break;
     }
+    if (_moveActionNeedsPosition) {
+      setState(() {
+        _selectedMultiCellObjectId = _multiCellObjectIdAt(Position(x, y));
+      });
+    }
   }
 
-  void _onPanStart(DragStartDetails d) => _panStart = d.globalPosition;
-  void _onPanCancel() => _panStart = null;
-  void _onPanEnd(DragEndDetails _) => _panStart = null;
+  void _onPanStart(DragStartDetails d) {
+    _panStart = d.globalPosition;
+    _panStartCell = _cellAtGlobalPosition(d.globalPosition);
+    if (_moveActionNeedsPosition) {
+      final selectedId = _panStartCell == null
+          ? null
+          : _multiCellObjectIdAt(_panStartCell!);
+      if (selectedId != _selectedMultiCellObjectId) {
+        setState(() => _selectedMultiCellObjectId = selectedId);
+      }
+    }
+  }
+
+  void _onPanCancel() {
+    _panStart = null;
+    _panStartCell = null;
+  }
+
+  void _onPanEnd(DragEndDetails _) {
+    _panStart = null;
+    _panStartCell = null;
+  }
 
   void _onPanUpdate(DragUpdateDetails details) {
     if (_panStart == null) return;
@@ -561,7 +698,51 @@ class _PlayScreenState extends State<PlayScreen> {
     if (action == null) return;
 
     _panStart = null;
+    _panStartCell = null;
     _onAction(action);
+  }
+
+  Position? _cellAtGlobalPosition(Offset globalPosition) {
+    final context = _boardKey.currentContext;
+    final renderObject = context?.findRenderObject();
+    if (renderObject is! RenderBox) return null;
+    final local = renderObject.globalToLocal(globalPosition);
+    final size = renderObject.size;
+    if (local.dx < 0 ||
+        local.dy < 0 ||
+        local.dx >= size.width ||
+        local.dy >= size.height) {
+      return null;
+    }
+    final board = _engine.state.board;
+    final x = (local.dx / (size.width / board.width)).floor();
+    final y = (local.dy / (size.height / board.height)).floor();
+    if (x < 0 || y < 0 || x >= board.width || y >= board.height) return null;
+    return Position(x, y);
+  }
+
+  String? _multiCellObjectIdAt(Position pos) {
+    for (final block in _engine.state.board.multiCellObjects) {
+      if (block.cells.contains(pos)) return block.id;
+    }
+    return null;
+  }
+
+  Position? _selectedMovePosition() {
+    final id = _selectedMultiCellObjectId;
+    if (id == null) return null;
+    for (final block in _engine.state.board.multiCellObjects) {
+      if (block.id == id && block.cells.isNotEmpty) return block.cells.first;
+    }
+    return null;
+  }
+
+  void _syncSelectedMultiCellObject() {
+    if (_selectedMultiCellObjectId == null) return;
+    final stillPresent = _engine.state.board.multiCellObjects.any(
+      (block) => block.id == _selectedMultiCellObjectId,
+    );
+    if (!stillPresent) _selectedMultiCellObjectId = null;
   }
 
   GameAction? _detectSwipeAction(Offset delta) {
@@ -579,13 +760,18 @@ class _PlayScreenState extends State<PlayScreen> {
     }
 
     if (!_hasMoveAction) return null;
+    if (_moveActionNeedsPosition && _panStartCell == null) return null;
     final String dir;
     if (ax > ay) {
       dir = delta.dx > 0 ? 'right' : 'left';
     } else {
       dir = delta.dy > 0 ? 'down' : 'up';
     }
-    return GameAction('move', {'direction': dir});
+    return GameAction(_primaryMoveAction!.id, {
+      'direction': dir,
+      if (_moveActionNeedsPosition)
+        'position': [_panStartCell!.x, _panStartCell!.y],
+    });
   }
 
   String? _diagonalDir(Offset delta) {
@@ -689,7 +875,11 @@ class _PlayScreenState extends State<PlayScreen> {
   Future<void> _onSolve() async {
     final goldPath = _levelDef.solution.goldPath;
     if (goldPath.isEmpty) return;
-    setState(() => _engine.reset());
+    setState(() {
+      _engine.reset();
+      _selectedMultiCellObjectId = null;
+      _lineOfSightFeedbacks = const [];
+    });
     await Future.delayed(Duration.zero);
     for (int i = 0; i < goldPath.length; i++) {
       if (!mounted) return;
@@ -703,8 +893,15 @@ class _PlayScreenState extends State<PlayScreen> {
     final stopCount = _levelDef.solution.hintStops[hintIndex];
     final goldPath = _levelDef.solution.goldPath;
 
-    setState(() => _engine.reset());
-    await Future.delayed(kDebugMode ? Duration.zero : const Duration(milliseconds: 200));
+    setState(() {
+      _engine.reset();
+      _selectedMultiCellObjectId = null;
+      _lineOfSightFeedbacks = const [];
+      _actorFacingByKind = {};
+    });
+    await Future.delayed(
+      kDebugMode ? Duration.zero : const Duration(milliseconds: 200),
+    );
 
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
       if (!mounted) return;
@@ -854,6 +1051,8 @@ class _PlayScreenState extends State<PlayScreen> {
       _lastResponse = null;
       _agentAttempt = 1;
       _currentAgent = agent;
+      _selectedMultiCellObjectId = null;
+      _lineOfSightFeedbacks = const [];
     });
 
     final runner = AgentRunner();
@@ -1097,65 +1296,102 @@ class _PlayScreenState extends State<PlayScreen> {
             LogicalKeyboardKey.arrowDown => 'down',
             LogicalKeyboardKey.arrowLeft => 'left',
             LogicalKeyboardKey.arrowRight => 'right',
+            LogicalKeyboardKey.keyW => 'up',
+            LogicalKeyboardKey.keyS => 'down',
+            LogicalKeyboardKey.keyA => 'left',
+            LogicalKeyboardKey.keyD => 'right',
             _ => null,
           };
-          if (dir == null || !_hasMoveAction) return KeyEventResult.ignored;
-          _onAction(GameAction('move', {'direction': dir}));
+          if (dir == null || !_hasMoveAction) {
+            return KeyEventResult.ignored;
+          }
+          if (_moveActionNeedsPosition) {
+            final selectedPos = _selectedMovePosition();
+            if (selectedPos == null) return KeyEventResult.ignored;
+            _onAction(
+              GameAction(_primaryMoveAction!.id, {
+                'direction': dir,
+                'position': [selectedPos.x, selectedPos.y],
+              }),
+            );
+          } else {
+            _onAction(
+              GameAction(_primaryMoveAction!.id, {'direction': dir}),
+            );
+          }
           return KeyEventResult.handled;
         },
         child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
-        onPanStart: _aiRunning ? null : _onPanStart,
-        onPanUpdate: _aiRunning ? null : _onPanUpdate,
-        onPanEnd: _aiRunning ? null : _onPanEnd,
-        onPanCancel: _aiRunning ? null : _onPanCancel,
-        child: SafeArea(
-        child: Column(
-          children: [
-            _buildStatusBar(state),
-            if (widget.packService.game.ui.showGoal ||
-                widget.packService.game.ui.showGuide)
-              _buildGoalGuidePanel(state),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Center(
-                  child: BoardRenderer(
-                    state: state,
-                    game: widget.packService.game,
-                    packService: widget.packService,
-                    animationOverlays: _animOverlays,
-                    onCellTap: _hasCellTapGesture ? _onCellTap : null,
-                    floodedColorOverride: _lastFloodColor,
-                    avatarPositionOverride: _avatarSlidePos,
+          behavior: HitTestBehavior.opaque,
+          onPanStart: (_aiRunning || _animating) ? null : _onPanStart,
+          onPanUpdate: (_aiRunning || _animating) ? null : _onPanUpdate,
+          onPanEnd: (_aiRunning || _animating) ? null : _onPanEnd,
+          onPanCancel: (_aiRunning || _animating) ? null : _onPanCancel,
+          child: SafeArea(
+            child: Column(
+              children: [
+                _buildStatusBar(state),
+                if (widget.packService.game.ui.showGoal ||
+                    widget.packService.game.ui.showGuide)
+                  _buildGoalGuidePanel(state),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Center(
+                      child: BoardRenderer(
+                        key: _boardKey,
+                        state: state,
+                        game: widget.packService.game,
+                        packService: widget.packService,
+                        animationOverlays: _animOverlays,
+                        actorFacingByKind: _actorFacingByKind,
+                        onCellTap:
+                            (_hasCellTapGesture || _moveActionNeedsPosition)
+                                ? _onCellTap
+                                : null,
+                        selectedMultiCellObjectId: _moveActionNeedsPosition
+                            ? _selectedMultiCellObjectId
+                            : null,
+                        selectedActorPosition: _selectedActorPosition(state),
+                        lineOfSightFeedbacks: _lineOfSightFeedbacks,
+                        floodedColorOverride: _lastFloodColor,
+                        avatarPositionOverride: _avatarSlidePos,
+                      ),
+                    ),
                   ),
                 ),
-              ),
+                if (state.isWon) _buildWinBanner(),
+                if (state.isLost) _buildLossBanner(),
+                if (s.aiPlayEnabled &&
+                    !state.isWon &&
+                    !state.isLost &&
+                    _aiRunning)
+                  _buildAiPanel(),
+                if (s.aiPlayEnabled &&
+                    !state.isWon &&
+                    !state.isLost &&
+                    !_aiRunning)
+                  _buildAiStartButton(),
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  child: ControlsWidget(
+                    game: widget.packService.game,
+                    onAction: _onAction,
+                    onUndo: _onUndo,
+                    onReset: _onReset,
+                    onExit: _onExit,
+                    onHint: hintAvailable ? _onHint : null,
+                    onSolve: kDebugMode ? _onSolve : null,
+                    canUndo: _engine.undoDepth > 0 && !_aiRunning,
+                    hintStatuses: hintStatuses,
+                    availableActionIds: _availableFloodActions(state),
+                    palette: widget.packService.theme?.palette,
+                  ),
+                ),
+              ],
             ),
-            if (state.isWon) _buildWinBanner(),
-            if (state.isLost) _buildLossBanner(),
-            if (s.aiPlayEnabled && !state.isWon && !state.isLost && _aiRunning) _buildAiPanel(),
-            if (s.aiPlayEnabled && !state.isWon && !state.isLost && !_aiRunning) _buildAiStartButton(),
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: ControlsWidget(
-                game: widget.packService.game,
-                onAction: _onAction,
-                onUndo: _onUndo,
-                onReset: _onReset,
-                onExit: _onExit,
-                onHint: hintAvailable ? _onHint : null,
-                onSolve: kDebugMode ? _onSolve : null,
-                canUndo: _engine.undoDepth > 0 && !_aiRunning,
-                hintStatuses: hintStatuses,
-                availableActionIds: _availableFloodActions(state),
-                palette: widget.packService.theme?.palette,
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
-      ),
       ),
     );
   }
@@ -1697,6 +1933,48 @@ class _PlayScreenState extends State<PlayScreen> {
     return limit != null ? 'Moves: $count/$limit' : 'Moves: $count';
   }
 
+  String? _selectedActorBudgetLabel(LevelState state) {
+    final config = _individualActorSystem?.config;
+    if (config == null) return null;
+    final selectedKey =
+        config['selectedVariable'] as String? ?? 'selectedActorKind';
+    final budgetKey =
+        config['budgetVariable'] as String? ?? 'actorMovesRemaining';
+    final selectedKind = state.variables[selectedKey] as String?;
+    final remaining = state.variables[budgetKey];
+    if (selectedKind == null || remaining is! Map) return null;
+    final value = remaining[selectedKind];
+    if (value is! num) return null;
+
+    final name =
+        widget.packService.game.entityKinds[selectedKind]?.uiName ??
+        selectedKind;
+    final count = value.toInt();
+    return '$name: $count ${count == 1 ? 'move' : 'moves'}';
+  }
+
+  bool _selectedActorBudgetExhausted(LevelState state) {
+    final config = _individualActorSystem?.config;
+    if (config == null) return false;
+    final selectedKey =
+        config['selectedVariable'] as String? ?? 'selectedActorKind';
+    final budgetKey =
+        config['budgetVariable'] as String? ?? 'actorMovesRemaining';
+    final selectedKind = state.variables[selectedKey] as String?;
+    final remaining = state.variables[budgetKey];
+    if (selectedKind == null || remaining is! Map) return false;
+    final value = remaining[selectedKind];
+    return value is num && value <= 0;
+  }
+
+  Position? _selectedActorPosition(LevelState state) {
+    final config = _individualActorSystem?.config;
+    if (config == null) return null;
+    final positionKey = config['selectedPositionVariable'] as String? ??
+        'selectedActorPosition';
+    return _positionFromPayload(state.variables[positionKey]);
+  }
+
   void _showGameInfo() {
     final info = widget.packService.info;
     showDialog<void>(
@@ -1721,6 +1999,8 @@ class _PlayScreenState extends State<PlayScreen> {
   }
 
   Widget _buildStatusBar(LevelState state) {
+    final selectedBudgetLabel = _selectedActorBudgetLabel(state);
+    final selectedBudgetExhausted = _selectedActorBudgetExhausted(state);
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: Row(
@@ -1731,6 +2011,24 @@ class _PlayScreenState extends State<PlayScreen> {
           if (_aiRunning) ...[
             Text('Attempt: $_agentAttempt',
                 style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+            const SizedBox(width: 12),
+          ],
+          if (selectedBudgetLabel != null) ...[
+            Flexible(
+              child: Text(
+                selectedBudgetLabel,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: selectedBudgetExhausted
+                      ? Colors.red.shade600
+                      : Colors.grey.shade600,
+                  fontSize: 13,
+                  fontWeight: selectedBudgetExhausted
+                      ? FontWeight.bold
+                      : FontWeight.normal,
+                ),
+              ),
+            ),
             const SizedBox(width: 12),
           ],
           Text(_movesLabel(state),
@@ -1779,6 +2077,18 @@ class _PlayScreenState extends State<PlayScreen> {
                   fontSize: 20,
                   fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              ElevatedButton(
+                onPressed: _onReset,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.green.shade700,
+                ),
+                child: const Text('Replay'),
+              ),
+              const SizedBox(width: 12),
           ElevatedButton(
             onPressed: _advance,
             style: ElevatedButton.styleFrom(
@@ -1786,6 +2096,8 @@ class _PlayScreenState extends State<PlayScreen> {
                 foregroundColor: Colors.green.shade700),
             child: const Text('Next Level'),
           ),
+        ],
+      ),
         ],
       ),
     );

@@ -51,6 +51,23 @@ def object_removed(pos: Pos, kind: str, animation: str | None = None) -> dict:
     return e
 
 
+def line_of_sight_detected(
+    source: Pos,
+    target: Pos,
+    target_kind: str,
+    source_id: str,
+    source_kind: str,
+) -> dict:
+    return {
+        "type": "line_of_sight_detected",
+        "sourcePosition": source,
+        "position": target,
+        "kind": target_kind,
+        "sourceId": source_id,
+        "sourceKind": source_kind,
+    }
+
+
 def cell_cleared(pos: Pos, previous_kind: str) -> dict:
     return {"type": "cell_cleared", "position": pos, "previousKind": previous_kind}
 
@@ -141,6 +158,44 @@ def object_settled(kind: str, pos: Pos, from_pos: Pos) -> dict:
         "kind": kind,
         "position": pos,
         "fromPosition": from_pos,
+    }
+
+
+def actor_moved(kind: str, from_pos: Pos, to_pos: Pos, direction: str) -> dict:
+    return {
+        "type": "actor_moved",
+        "kind": kind,
+        "fromPosition": from_pos,
+        "position": to_pos,
+        "direction": direction,
+    }
+
+
+def actor_entered(kind: str, pos: Pos, from_pos: Pos, direction: str) -> dict:
+    return {
+        "type": "actor_entered",
+        "kind": kind,
+        "fromPosition": from_pos,
+        "position": pos,
+        "direction": direction,
+    }
+
+
+def actor_blocked(kind: str, pos: Pos) -> dict:
+    return {"type": "actor_blocked", "kind": kind, "position": pos}
+
+
+def actor_selected(kind: str, pos: Pos) -> dict:
+    return {"type": "actor_selected", "kind": kind, "position": pos}
+
+
+def cell_claimed(pos: Pos, layer: str, kind: str, owner_kind: str) -> dict:
+    return {
+        "type": "cell_claimed",
+        "position": pos,
+        "layer": layer,
+        "kind": kind,
+        "ownerKind": owner_kind,
     }
 
 

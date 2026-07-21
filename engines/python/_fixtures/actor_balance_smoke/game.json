@@ -1,0 +1,60 @@
+{
+  "layers": [
+    { "id": "ground", "occupancy": "exactly_one", "default": "empty" },
+    { "id": "actors", "occupancy": "zero_or_one" },
+    { "id": "territory", "occupancy": "zero_or_one" }
+  ],
+  "entityKinds": {
+    "empty": { "layer": "ground", "tags": ["walkable"], "symbol": "." },
+    "wall": { "layer": "ground", "tags": ["solid"], "symbol": "#" },
+    "actor_a": { "layer": "actors", "tags": ["actor"], "symbol": "A" },
+    "actor_b": { "layer": "actors", "tags": ["actor"], "symbol": "B" },
+    "territory_a": { "layer": "territory", "tags": ["territory"], "symbol": "1" },
+    "territory_b": { "layer": "territory", "tags": ["territory"], "symbol": "2" }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": { "direction": { "type": "direction", "values": ["up", "down", "left", "right"] } }
+    },
+    {
+      "id": "tap_cell",
+      "params": { "position": { "type": "position" } }
+    }
+  ],
+  "systems": [
+    {
+      "id": "movement",
+      "type": "coupled_actors",
+      "config": {
+        "actorLayer": "actors",
+        "groundLayer": "ground",
+        "claim": {
+          "layer": "territory",
+          "map": { "actor_a": "territory_a", "actor_b": "territory_b" }
+        }
+      }
+    },
+    {
+      "id": "individual_movement",
+      "type": "individual_actors",
+      "enabled": false,
+      "config": {
+        "actorLayer": "actors",
+        "groundLayer": "ground",
+        "budgets": { "actor_a": 6, "actor_b": 6 },
+        "claim": {
+          "layer": "territory",
+          "map": { "actor_a": "territory_a", "actor_b": "territory_b" }
+        }
+      }
+    }
+  ],
+  "rules": [],
+  "defaults": {
+    "avatar": { "enabled": false },
+    "maxCascadeDepth": 1
+  },
+  "ui": { "showGoal": true },
+  "levelSequence": []
+}

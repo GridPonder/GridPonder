@@ -100,6 +100,22 @@ void main() {
     }
   });
 
+  // --- actor_balance_smoke (throwaway coupled_actors + balance fixture) ---
+  group('actor_balance_smoke gold paths', () {
+    late LoadedPack pack;
+    setUpAll(
+      () => pack = _loadPack('../python/_fixtures/actor_balance_smoke'),
+    );
+
+    test(
+      'actor_balance_smoke_01',
+      () => _replayAndExpectWin(
+        _engineForLevel(pack, 'actor_balance_smoke_01'),
+        _goldPath(pack, 'actor_balance_smoke_01'),
+      ),
+    );
+  });
+
   group('undo/reset', () {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/carrot_quest'));

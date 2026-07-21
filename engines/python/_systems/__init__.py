@@ -8,50 +8,62 @@ Public API (re-exported for `from engines.python._systems import …`):
   - instantiate_systems   (entry point used by the turn engine)
 """
 from __future__ import annotations
-from typing import Optional
+from typing import Callable, Optional
 
 from .._game_def import GameDef
 from ._base import GameSystem
 from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
+from .coupled_actors import CoupledActorsSystem
 from .flood_fill import FloodFillSystem
 from .follower_npcs import FollowerNpcsSystem
 from .ice_slide import IceSlideSystem
+from .individual_actors import IndividualActorsSystem
+from .line_of_sight import LineOfSightSystem
 from .overlay_cursor import OverlayCursorSystem
 from .portals import PortalsSystem
 from .push_objects import PushObjectsSystem
 from .queued_emitters import QueuedEmittersSystem
 from .region_transform import RegionTransformSystem
 from .sided_box import SidedBoxSystem
+from .sliding_blocks import SlidingBlocksSystem
 from .slide_merge import SlideMergeSystem
 from .tile_teleport import TileTeleportSystem
 
 
-_REGISTRY: dict[str, type[GameSystem]] = {
-    "anchor_point":      AnchorPointSystem,
-    "avatar_navigation": AvatarNavigationSystem,
-    "push_objects":      PushObjectsSystem,
-    "portals":           PortalsSystem,
-    "ice_slide":         IceSlideSystem,
-    "flood_fill":        FloodFillSystem,
-    "slide_merge":       SlideMergeSystem,
-    "overlay_cursor":    OverlayCursorSystem,
-    "region_transform":  RegionTransformSystem,
-    "queued_emitters":   QueuedEmittersSystem,
-    "tile_teleport":     TileTeleportSystem,
-    "sided_box":         SidedBoxSystem,
-    "follower_npcs":     FollowerNpcsSystem,
+SystemFactory = Callable[[str, dict], GameSystem]
+
+_REGISTRY: dict[str, SystemFactory] = {
+    "anchor_point": lambda sys_id, _: AnchorPointSystem(sys_id),
+    "avatar_navigation": lambda sys_id, _: AvatarNavigationSystem(sys_id),
+    "push_objects": lambda sys_id, _: PushObjectsSystem(sys_id),
+    "portals": lambda sys_id, _: PortalsSystem(sys_id),
+    "ice_slide": lambda sys_id, _: IceSlideSystem(sys_id),
+    "flood_fill": lambda sys_id, _: FloodFillSystem(sys_id),
+    "slide_merge": lambda sys_id, _: SlideMergeSystem(sys_id),
+    "overlay_cursor": lambda sys_id, _: OverlayCursorSystem(sys_id),
+    "region_transform": lambda sys_id, _: RegionTransformSystem(sys_id),
+    "queued_emitters": lambda sys_id, _: QueuedEmittersSystem(sys_id),
+    "tile_teleport": lambda sys_id, _: TileTeleportSystem(sys_id),
+    "sided_box": lambda sys_id, _: SidedBoxSystem(sys_id),
+    "sliding_blocks": lambda sys_id, config: SlidingBlocksSystem(sys_id, config),
+    "line_of_sight": lambda sys_id, config: LineOfSightSystem(sys_id, config),
+    "follower_npcs": lambda sys_id, _: FollowerNpcsSystem(sys_id),
+    "coupled_actors": lambda sys_id, _: CoupledActorsSystem(sys_id),
+    "individual_actors": lambda sys_id, _: IndividualActorsSystem(sys_id),
 }
 
 
 def instantiate_systems(game: GameDef, overrides: Optional[dict] = None) -> list[GameSystem]:
+    effective_game = game.with_system_overrides(overrides)
     systems = []
-    for sys_def in game.systems:
+    for sys_def in effective_game.systems:
         if not sys_def.get("enabled", True):
             continue
-        cls = _REGISTRY.get(sys_def["type"])
-        if cls is not None:
-            systems.append(cls(sys_def["id"]))
+        factory = _REGISTRY.get(sys_def["type"])
+        if factory is not None:
+            config = effective_game.system_config(sys_def["id"])
+            systems.append(factory(sys_def["id"], config))
     return systems
 
 

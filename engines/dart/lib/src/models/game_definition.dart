@@ -214,6 +214,40 @@ class GameDefinition {
     return {...base, ...override};
   }
 
+  GameDefinition withSystemOverrides(
+      Map<String, Map<String, dynamic>>? overrides) {
+    if (overrides == null || overrides.isEmpty) return this;
+
+    return GameDefinition(
+      id: id,
+      title: title,
+      description: description,
+      layers: layers,
+      actions: actions,
+      entityKinds: entityKinds,
+      systems: [
+        for (final system in systems)
+          () {
+            final override = overrides[system.id];
+            if (override == null) return system;
+            final configOverride = Map<String, dynamic>.from(override)
+              ..remove('enabled');
+            return SystemDef(
+              id: system.id,
+              type: system.type,
+              config: {...system.config, ...configOverride},
+              enabled: override['enabled'] as bool? ?? system.enabled,
+            );
+          }(),
+      ],
+      rules: rules,
+      levelSequence: levelSequence,
+      defaults: defaults,
+      ui: ui,
+      goalDescriptions: goalDescriptions,
+    );
+  }
+
   bool isValidAction(GameAction action) =>
       actions.any((a) => a.id == action.actionId);
 }

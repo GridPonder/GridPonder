@@ -97,6 +97,9 @@ def _detect_game(level_path: Path) -> str:
             return "flood_colors"
         if part == "twinseed":
             return "twinseed"
+    # Unknown packs with the standard pack layout use the generic DSL adapter.
+    if (level_path.parent.parent / "game.json").is_file():
+        return "generic"
     return "number_crunch"
 
 
@@ -143,7 +146,9 @@ def _bfs_shortest(
         if depth >= max_depth:
             continue
 
-        for action in module.ACTIONS:
+        _legal = getattr(module, "legal_actions", None)
+        _actions = _legal(state, info) if _legal is not None else module.ACTIONS
+        for action in _actions:
             new_state, module_won, step_events = module.apply(state, action, info)
             if constraints and any(violates_constraint(step_events, c) for c in constraints):
                 continue
@@ -199,7 +204,9 @@ def _dfs_all(
 
     def _dfs(state: Any, path: List[str], path_states: set) -> None:
         depth = len(path)
-        for action in module.ACTIONS:
+        _legal = getattr(module, "legal_actions", None)
+        _actions = _legal(state, info) if _legal is not None else module.ACTIONS
+        for action in _actions:
             new_state, module_won, step_events = module.apply(state, action, info)
             if constraints and any(violates_constraint(step_events, c) for c in constraints):
                 continue
@@ -309,6 +316,20 @@ def _print_trace(path: List[str], initial: Any, module: Any, info: Any) -> None:
         state = new_state
 
 
+def _path_reaches_win(
+    path: List[str],
+    initial: Any,
+    module: Any,
+    info: Any,
+) -> bool:
+    """Replay a declared path so alternative valid paths are not reported invalid."""
+    state = initial
+    won = False
+    for action in path:
+        state, won, _events = module.apply(state, action, info)
+    return won
+
+
 # ---------------------------------------------------------------------------
 # Result printers (shared by all games)
 # ---------------------------------------------------------------------------
@@ -354,9 +375,10 @@ def _print_results(
         gold_str = " ".join(a.upper() for a in gold_actions)
         if gold_actions in solutions:
             print(f"  Gold path: ✓  {gold_str}")
+        elif _path_reaches_win(gold_actions, initial, module, info):
+            print(f"  Gold path: ✓  {gold_str}  (valid alternative path)")
         else:
-            note = f"(not among the {len(solutions)} solutions found)"
-            print(f"  Gold path: ✗  {gold_str}  {note}")
+            print(f"  Gold path: ✗  {gold_str}  (replay does not win)")
 
     shortest_count = len(by_depth.get(min_len, []))
     gold_len = len(gold_actions) if gold_actions else None
@@ -413,8 +435,10 @@ def _print_astar_result(
         gold_str = " ".join(a.upper() for a in gold_actions)
         if sol.path == gold_actions:
             print(f"  Gold path: ✓  {gold_str}")
+        elif _path_reaches_win(gold_actions, initial, module, info):
+            print(f"  Gold path: ✓  {gold_str}  (valid alternative path)")
         else:
-            print(f"  Gold path: ✗  {gold_str}  (A* found a different path)")
+            print(f"  Gold path: ✗  {gold_str}  (replay does not win)")
 
     gold_len = len(gold_actions) if gold_actions else None
     print()
@@ -758,8 +782,12 @@ def _solve_generic(
         ACTIONS = info.ACTIONS
         apply = staticmethod(ea.apply)
         can_prune = staticmethod(ea.can_prune)
+        legal_actions = staticmethod(ea.legal_actions)
+        heuristic = staticmethod(ea.heuristic)
 
     gold_actions = ea.gold_path_actions(level_json) or None
+    if gold_actions:
+        gold_actions = ea.canonicalize_path(gold_actions, initial, info)
     optimal_len = len(gold_actions) if gold_actions else None
 
     if mode == "astar":
@@ -840,6 +868,9 @@ def solve(
                        trace, constraints, **mc_kw)
     elif game == "flood_colors":
         _solve_generic(path, level_json, "Flood Colors", mode, max_depth, timeout,
+                       trace, constraints, **mc_kw)
+    elif game == "generic":
+        _solve_generic(path, level_json, "Generic DSL", mode, max_depth, timeout,
                        trace, constraints, **mc_kw)
     elif game == "twinseed":
         _solve_twinseed(path, level_json, mode, max_depth, timeout, trace,

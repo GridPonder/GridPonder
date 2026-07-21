@@ -148,10 +148,25 @@ Objects that span multiple cells or have internal state beyond what a single ent
 |-------|------|----------|-------------|
 | `id` | string | **yes** | Unique identifier for this object instance. Referenced by rules and systems. |
 | `kind` | string | **yes** | Multi-cell object kind (e.g., `"pipe"`). |
-| `cells` | array of `[x,y]` | **yes** | All cells this object occupies. |
+| `cells` | array | **yes** | All cells this object occupies. Each entry is either `[x,y]` or an extended cell object. |
 | `params` | object | no | Kind-specific parameters (queue contents, exit position, etc.). |
 
 Multi-cell objects are rendered on the `structures` layer by default.
+
+An extended cell object adds a non-semantic per-cell sprite override while
+keeping the same board position semantics:
+
+```json
+{
+  "position": [0, 1],
+  "sprite": "assets/sprites/pipe_corner.png"
+}
+```
+
+| Extended cell field | Type | Required | Description |
+|---------------------|------|----------|-------------|
+| `position` | `[x,y]` | **yes** | Cell occupied by the multi-cell object. |
+| `sprite` | string | no | Pack-relative sprite used for this cell instead of the kind's default sprite. Engines that do not render may ignore it. |
 
 ---
 
@@ -234,6 +249,7 @@ The engine tracks **partial progress** for each goal so the UI can visualize how
 - `board_match`: progress = number of matching cells / total non-null target cells.
 - `variable_threshold`: progress = current value / target value (clamped to 0–1).
 - `all_cleared`: progress = 1 − (remaining matching entities / initial count).
+- `balance`: progress = owned territory cells / total claimable cells.
 
 ### Goal Types
 
@@ -310,6 +326,33 @@ All entities matching a selector are removed from the board.
 { "type": "all_cleared", "config": { "kind": "monster" } }
 ```
 
+#### `balance`
+A territory layer is divided completely and equally among a fixed set of owners — the win condition for [`coupled_actors`](04_systems.md#211-coupled_actors) "painting" mechanics.
+
+```json
+{ "type": "balance", "config": {
+    "layer": "territory",
+    "owners": ["terr_wei", "terr_shu"],
+    "claimableLayer": "ground",
+    "claimableKind": "empty",
+    "requireComplete": true,
+    "requireEqual": true
+}}
+```
+
+| Config Field | Type | Description |
+|-------------|------|-------------|
+| `layer` | string | Territory layer to tally ownership on. |
+| `owners` | array of strings | Entity kinds counted as "owned" cells, one per owner. |
+| `claimableLayer` | string | Layer whose cells are eligible to be claimed. Default: `ground`. |
+| `claimableKind` | string or array of strings | Kind(s) that count as claimable. A list is allowed for boards where more than one ground kind can be owned. Default: that layer's declared `default` kind. |
+| `requireComplete` | boolean | Require every claimable cell to be owned (`owned == claimable`). Default: `true`. |
+| `requireEqual` | boolean | Require every owner's count to be identical. Default: `true`. |
+
+**Engine behavior:** Tally each owner's cell count on `layer`. `claimable` = number of `claimableLayer` cells whose kind matches `claimableKind`. At least one cell must be owned. The goal is then done when (`equal`, or `requireEqual` is `false`) and (`complete`, or `requireComplete` is `false`); progress = owned / claimable (or `0.0` when nothing is claimable).
+
+> **Keep `claimableKind` in step with the board.** The balance lose conditions count claimable cells the same way. If a board introduces a second walkable ground kind and `claimableKind` still names only one, `claimable` silently drops — which usually makes it indivisible by the owner count and fails the level as "equal shares impossible" before anything else is evaluated.
+
 ---
 
 ## Lose Conditions
@@ -333,6 +376,24 @@ Same as the goal type but triggers a loss.
 
 #### `board_state`
 A specific board condition is detected (e.g., an entity reaches a forbidden cell).
+
+#### `balance_budget_exhausted`
+Pairs with a [`balance`](#balance) goal under [`individual_actors`](04_systems.md#212-individual_actors): fails when equal-share balance can no longer be reached — either some owner has already claimed more than its equal share (`claimable / owners`), or the combined remaining move budget of the actors mapped to an owner is smaller than the number of cells that owner still needs. The condition is inactive when no actor mapping or move budgets are configured. Resolves the balance goal via `config.goalId` (or the first `balance` goal if omitted).
+
+#### `balance_unreachable`
+Pairs with a [`balance`](#balance) goal: fails the moment equal shares become impossible — any owner has claimed strictly more than its equal share (`claimable / owners`), or `claimable` is not divisible by the number of owners. Because a claimed cell can never change owner, an over-target owner can never come back down, so the level is unwinnable and is lost immediately (a "wrong claim" is reported at once instead of only when `max_actions` is reached). Works in both coupled and individual modes and, unlike `balance_budget_exhausted`, needs no actor/budget wiring. Config: `goalId` — the `balance` goal to check (optional; defaults to the first `balance` goal).
+
+```json
+{ "type": "balance_unreachable", "config": { "goalId": "balance_goal" } }
+```
+
+> **Soundness under [`claim.overwrite`](04_systems.md#214-claim-overwrite).** Both conditions above share an over-claim test: an owner past its equal share is treated as dead, because claims are permanent and it can never come back down. That premise fails when cells can be repainted — an over-share owner can be brought back down by losing cells.
+>
+> The engine therefore suppresses **the over-claim test in both conditions** when the current board actually carries repaintable cells: `overwrite.mode: "always"`, or `"tagged"` with at least one tagged cell present on the board. The check is board-level, not config-level, so a pack may declare a `tagged` policy game-wide and still get the full over-claim test on every board that places no tagged cells.
+>
+> `balance_budget_exhausted`'s *deficit* test (an owner needing more cells than it has moves left) stays active regardless — it remains sound under reclaim, since claiming a cell still costs a move.
+>
+> **Consequence for level design:** a level with repaintable cells cannot rely on either condition to punish overshooting, because overshooting is no longer fatal there. Bound such a level with `max_actions`, or with the deficit half of `balance_budget_exhausted`.
 
 ---
 

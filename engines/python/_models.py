@@ -8,6 +8,7 @@ runtime state.
 from __future__ import annotations
 
 import bisect
+import copy
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -71,6 +72,27 @@ CARDINALS = frozenset({"up", "down", "left", "right"})
 
 def dir_delta(d: str) -> tuple[int, int]:
     return _DIR_DELTA.get(d, (0, 0))
+
+
+_DIRECTION_TRANSFORMS = {
+    "identity": lambda dx, dy: (dx, dy),
+    "invert": lambda dx, dy: (-dx, -dy),
+    "mirror_x": lambda dx, dy: (-dx, dy),
+    "mirror_y": lambda dx, dy: (dx, -dy),
+}
+
+
+def transform_delta(delta: tuple[int, int], transform: Optional[str]) -> tuple[int, int]:
+    """Apply a per-actor direction transform to a movement delta.
+
+    See docs/dsl/04_systems.md (`coupled_actors.directionTransforms`).
+    Unrecognised or missing transforms are treated as `identity` — both engines
+    must agree, so this is deliberately lenient rather than throwing.
+    """
+    fn = _DIRECTION_TRANSFORMS.get(transform or "identity")
+    if fn is None:
+        return delta
+    return fn(delta[0], delta[1])
 
 
 def dir_opposite(d: str) -> str:
@@ -308,7 +330,11 @@ class Board:
         raw_layers = j.get("layers", {})
         layers: dict[str, BoardLayer] = {}
         for ldef in layer_defs:
-            default_kind = ldef["defaultKind"] if ldef["isExactlyOne"] else None
+            default_kind = (
+                ldef["defaultKind"] or "empty"
+                if ldef["isExactlyOne"]
+                else None
+            )
             layers[ldef["id"]] = BoardLayer.from_json(
                 raw_layers.get(ldef["id"]), w, h, default_kind
             )
@@ -463,7 +489,7 @@ class GameState:
         return GameState(
             self.board.copy(),
             self.avatar.copy(),
-            dict(self.variables),
+            copy.deepcopy(self.variables),
             self.overlay.copy() if self.overlay else None,
             self.turn_count,
             self.action_count,
@@ -489,10 +515,25 @@ class GameState:
             for lid, layer in sorted(self.board.layers.items())
         )
         mco_key = tuple(
-            (m.id, tuple(sorted(m.params.items())))
+            (
+                m.id,
+                m.kind,
+                tuple((p.x, p.y) for p in m.cells),
+                tuple(sorted(m.params.items())),
+            )
             for m in self.board.multi_cell_objects
         )
         av = self.avatar
         avatar_key = (av.enabled, av.position, av.facing, av.item)
-        vars_key = tuple(sorted(self.variables.items()))
+        vars_key = _freeze_value(self.variables)
         return (board_key, mco_key, avatar_key, vars_key)
+
+
+def _freeze_value(value):
+    if isinstance(value, dict):
+        return tuple((k, _freeze_value(v)) for k, v in sorted(value.items()))
+    if isinstance(value, list):
+        return tuple(_freeze_value(v) for v in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_value(v) for v in value))
+    return value

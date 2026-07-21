@@ -6,7 +6,7 @@ from __future__ import annotations
 from ._models import GameState, Pos
 
 _AVATAR_SYMBOL = "@"
-_LAYER_ORDER = ["actors", "markers", "objects", "ground"]
+_LAYER_ORDER = ["actors", "markers", "objects", "territory", "ground"]
 
 
 def render(

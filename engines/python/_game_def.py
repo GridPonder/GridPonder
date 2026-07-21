@@ -135,6 +135,24 @@ class GameDef:
                 return base
         return {}
 
+    def with_system_overrides(self, overrides: Optional[dict]) -> "GameDef":
+        if not overrides:
+            return self
+
+        effective = object.__new__(GameDef)
+        effective.__dict__ = self.__dict__.copy()
+        systems = []
+        for system in self.systems:
+            override = overrides.get(system["id"], {}) or {}
+            config_override = {k: v for k, v in override.items() if k != "enabled"}
+            systems.append({
+                **system,
+                "config": {**system.get("config", {}), **config_override},
+                "enabled": override.get("enabled", system.get("enabled", True)),
+            })
+        effective.systems = systems
+        return effective
+
     def get_system_by_type(self, sys_type: str) -> Optional[dict]:
         for s in self.systems:
             if s["type"] == sys_type:

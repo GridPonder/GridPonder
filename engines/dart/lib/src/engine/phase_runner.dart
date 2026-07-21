@@ -20,8 +20,9 @@ class PhaseRunner {
   PhaseRunner(this._game, this._level);
 
   TurnResult run(GameAction action, LevelState state) {
+    final effectiveGame = _game.withSystemOverrides(_level.systemOverrides);
     // Instantiate systems with any level-specific overrides
-    final systems = SystemRegistry.instantiate(_game, _level.systemOverrides);
+    final systems = SystemRegistry.instantiate(effectiveGame, null);
 
     // Phase 1: Input validation
     if (!_game.isValidAction(action)) {
@@ -44,7 +45,7 @@ class PhaseRunner {
 
     // Phase 2: Action resolution
     for (final sys in systems) {
-      final events = sys.executeActionResolution(action, state, _game);
+      final events = sys.executeActionResolution(action, state, effectiveGame);
       allEvents.addAll(events);
       _collectAnimations(events, state, animations, baseStage);
     }
@@ -57,7 +58,7 @@ class PhaseRunner {
     // Phase 3: Movement resolution
     baseStage = advanceBase();
     for (final sys in systems) {
-      final events = sys.executeMovementResolution(state, _game);
+      final events = sys.executeMovementResolution(state, effectiveGame);
       allEvents.addAll(events);
       _collectAnimations(events, state, animations, baseStage);
     }
@@ -72,14 +73,14 @@ class PhaseRunner {
     );
     final maxDepth = _game.defaults.maxCascadeDepth;
     final cascadeEvents = rulesEngine.evaluate(
-        allEvents, state, _game, maxDepth, systems);
+        allEvents, state, effectiveGame, maxDepth, systems);
     allEvents.addAll(cascadeEvents);
     _collectAnimationsFromList(cascadeEvents, state, animations, baseStage);
 
     // Phase 6: NPC resolution
     baseStage = advanceBase();
     for (final sys in systems) {
-      final events = sys.executeNpcResolution(state, _game);
+      final events = sys.executeNpcResolution(state, effectiveGame);
       allEvents.addAll(events);
       _collectAnimations(events, state, animations, baseStage);
     }
@@ -89,14 +90,19 @@ class PhaseRunner {
     state.turnCount++;
 
     // Check goals before lose conditions: winning on the last allowed move counts as a win.
-    final goalStatus = _goalEval.evaluate(
-        _level.goals, state, _game, allEvents);
+    final goalStatus =
+        _goalEval.evaluate(_level.goals, state, effectiveGame, allEvents);
     if (goalStatus.isWon) {
       state.isWon = true;
     }
 
     if (!state.isWon) {
-      final loseStatus = _loseEval.evaluate(_level.loseConditions, state);
+      final loseStatus = _loseEval.evaluate(
+        _level.loseConditions,
+        state,
+        goals: _level.goals,
+        game: effectiveGame,
+      );
       if (loseStatus.isLost) {
         state.isLost = true;
         return TurnResult(
@@ -149,6 +155,22 @@ class PhaseRunner {
           final fromPos = from is Position ? from : Position.fromJson(from);
           out.add(AnimationStep.avatarMove(fromPos, pos, stage: motionStage));
         }
+      } else if (event.type == 'actor_moved') {
+        final pos = event.position;
+        final from = event.payload['fromPosition'];
+        final kind = event.payload['kind'] as String?;
+        if (pos != null && from != null && kind != null) {
+          final fromPos = from is Position ? from : Position.fromJson(from);
+          final dur = _motionDurationMs(kind, 'moveDurationMs', 130);
+          out.add(AnimationStep.entityMove(
+            fromPos,
+            pos,
+            kind,
+            'actors',
+            durationMs: dur,
+            stage: motionStage,
+          ));
+        }
       } else if (event.type == 'tile_moved') {
         final pos = event.position;
         final from = event.payload['fromPosition'];
@@ -179,9 +201,8 @@ class PhaseRunner {
               (event.payload['inputValues'] as List?)?.cast<int>() ?? const [];
           final result = event.payload['resultValue'];
           // Build minimal source/result params; renderer can fall back to kind.
-          final sourceParams = inputValues
-              .map((v) => <String, dynamic>{'value': v})
-              .toList();
+          final sourceParams =
+              inputValues.map((v) => <String, dynamic>{'value': v}).toList();
           final sourceKinds = List<String>.filled(sources.length, kind);
           final resultParams = <String, dynamic>{
             if (result != null) 'value': result,

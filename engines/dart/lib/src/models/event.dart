@@ -48,6 +48,16 @@ class GameEvent {
   static GameEvent objectRemoved(Position pos, String kind) =>
       GameEvent('object_removed', {'position': pos, 'kind': kind});
 
+  static GameEvent lineOfSightDetected(Position source, Position target,
+          String targetKind, String sourceId, String sourceKind) =>
+      GameEvent('line_of_sight_detected', {
+        'sourcePosition': source,
+        'position': target,
+        'kind': targetKind,
+        'sourceId': sourceId,
+        'sourceKind': sourceKind,
+      });
+
   /// Like [objectRemoved] but signals that [animationName] should play first.
   static GameEvent objectRemovedAnimated(
           Position pos, String kind, String animationName) =>
@@ -133,13 +143,49 @@ class GameEvent {
         'toPosition': to,
       });
 
+  // --- Coupled actors (movement + territory claiming) ---
+
+  static GameEvent actorMoved(
+          String kind, Position from, Position to, String direction) =>
+      GameEvent('actor_moved', {
+        'kind': kind,
+        'fromPosition': from,
+        'position': to,
+        'direction': direction,
+      });
+
+  static GameEvent actorEntered(
+          String kind, Position pos, Position from, String direction) =>
+      GameEvent('actor_entered', {
+        'kind': kind,
+        'fromPosition': from,
+        'position': pos,
+        'direction': direction,
+      });
+
+  static GameEvent actorBlocked(String kind, Position pos) =>
+      GameEvent('actor_blocked', {'kind': kind, 'position': pos});
+
+  static GameEvent actorSelected(String kind, Position pos) =>
+      GameEvent('actor_selected', {'kind': kind, 'position': pos});
+
+  static GameEvent cellClaimed(
+          Position pos, String layer, String kind, String ownerKind) =>
+      GameEvent('cell_claimed', {
+        'position': pos,
+        'layer': layer,
+        'kind': kind,
+        'ownerKind': ownerKind,
+      });
+
   static GameEvent goalStepCompleted(String goalId, int stepIndex) =>
       GameEvent('goal_step_completed', {
         'goalId': goalId,
         'stepIndex': stepIndex,
       });
 
-  static GameEvent variableChanged(String name, dynamic oldVal, dynamic newVal) =>
+  static GameEvent variableChanged(
+          String name, dynamic oldVal, dynamic newVal) =>
       GameEvent('variable_changed', {
         'variable': name,
         'oldValue': oldVal,

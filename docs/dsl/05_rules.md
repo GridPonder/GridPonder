@@ -134,6 +134,19 @@ An entity was removed from the objects layer (by any mechanism: pickup, destruct
 | `position` | `[x, y]` | Cell it was removed from. |
 | `kind` | string | Entity kind that was removed. |
 
+### `line_of_sight_detected`
+The `line_of_sight` system found a clear horizontal or vertical relation
+between a configured source and target. Detection is read-only; rules decide
+what effect it has.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Target position. |
+| `kind` | string | Target entity kind. |
+| `sourcePosition` | `[x, y]` | Source cell that established the sightline. |
+| `sourceId` | string | Source multi-cell object id, or a generated layer-position id. |
+| `sourceKind` | string | Source entity kind. |
+
 ### `cell_cleared`
 A cell on the objects layer became empty (had content, now has `null`).
 

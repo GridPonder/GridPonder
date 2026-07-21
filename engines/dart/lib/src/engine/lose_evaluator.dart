@@ -1,3 +1,4 @@
+import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/goal.dart';
 
@@ -8,7 +9,12 @@ class LoseStatus {
 }
 
 class LoseEvaluator {
-  LoseStatus evaluate(List<LoseConditionDef> conditions, LevelState state) {
+  LoseStatus evaluate(
+    List<LoseConditionDef> conditions,
+    LevelState state, {
+    List<GoalDef> goals = const [],
+    GameDefinition? game,
+  }) {
     for (final cond in conditions) {
       switch (cond.type) {
         case 'max_actions':
@@ -34,8 +40,259 @@ class LoseEvaluator {
               return LoseStatus(isLost: true, reason: 'variable_threshold:$name');
             }
           }
+        case 'balance_budget_exhausted':
+          if (_balanceBudgetExhausted(cond.config, state, goals, game)) {
+            return const LoseStatus(
+              isLost: true,
+              reason: 'balance_budget_exhausted',
+            );
+          }
+        case 'balance_unreachable':
+          if (_balanceUnreachable(cond.config, state, goals, game)) {
+            return const LoseStatus(
+              isLost: true,
+              reason: 'balance_unreachable',
+            );
+          }
       }
     }
     return const LoseStatus(isLost: false);
+  }
+
+  /// Fires when the `balance` goal's equal-share requirement has already become
+  /// impossible: some owner has claimed strictly more than its equal share
+  /// (`claimable / owners`). Because a claimed cell can never change owner, an
+  /// over-target owner can never come back down, so the level is unwinnable and
+  /// is lost immediately rather than only when the action cap is reached. Also
+  /// fires if `claimable` is not divisible by the owner count (equal shares are
+  /// arithmetically impossible). Generic across coupled and individual modes;
+  /// unlike `balance_budget_exhausted` it needs no actor/budget wiring.
+  bool _balanceUnreachable(
+    Map<String, dynamic> config,
+    LevelState state,
+    List<GoalDef> goals,
+    GameDefinition? game,
+  ) {
+    final goal = _balanceGoalForCondition(config, goals);
+    if (goal == null) return false;
+    if (!_requiresCompleteEqualBalance(goal.config)) return false;
+
+    final owners =
+        (goal.config['owners'] as List<dynamic>? ?? const []).cast<String>();
+    if (owners.isEmpty) return false;
+
+    final claimable = _countClaimable(state, goal.config, game);
+    if (claimable % owners.length != 0) return true;
+    final target = claimable ~/ owners.length;
+
+    final owned = {for (final owner in owners) owner: 0};
+    final layerId = goal.config['layer'] as String? ?? 'territory';
+    final layer = state.board.layers[layerId];
+    if (layer != null) {
+      for (final entry in layer.entries()) {
+        final count = owned[entry.value.kind];
+        if (count != null) {
+          owned[entry.value.kind] = count + 1;
+        }
+      }
+    }
+
+    if (_claimsAreOverwritable(state, game)) return false;
+
+    return owned.values.any((count) => count > target);
+  }
+
+  /// True when an owned cell on THIS board could actually be repainted.
+  ///
+  /// Both balance lose conditions share an over-claim test that assumes claims
+  /// are permanent: an owner past its equal share can never come back down.
+  /// That breaks when cells can be repainted, so the test must stay quiet
+  /// rather than report a false loss.
+  ///
+  /// Deliberately a board-level question, not a config-level one. A pack may
+  /// declare a `tagged` policy game-wide while most of its boards carry no
+  /// tagged cells; on those boards claims *are* permanent and the conditions
+  /// must still fire. Asking only "is a policy declared?" would silently
+  /// disable the fail condition for the whole pack, and no gold-path test would
+  /// catch it — a winning path never trips a lose condition.
+  bool _claimsAreOverwritable(LevelState state, GameDefinition? game) {
+    if (game == null) return false;
+    for (final system in game.systems) {
+      if (!system.enabled) continue;
+      if (system.type != 'coupled_actors' &&
+          system.type != 'individual_actors') {
+        continue;
+      }
+      final config = system.config;
+      final claim = config['claim'] as Map<String, dynamic>? ?? const {};
+      final overwrite = claim['overwrite'] as Map<String, dynamic>? ?? const {};
+      final mode = overwrite['mode'] as String? ?? 'never';
+      if (mode == 'always') return true;
+      if (mode != 'tagged') continue;
+      final tag = overwrite['tag'] as String?;
+      if (tag == null || tag.isEmpty) continue;
+      final layerId = overwrite['layer'] as String? ??
+          config['groundLayer'] as String? ??
+          'ground';
+      final layer = state.board.layers[layerId];
+      if (layer == null) continue;
+      for (final entry in layer.entries()) {
+        if (state.board.hasTagAt(layerId, entry.key, tag, game.entityKinds)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  bool _balanceBudgetExhausted(
+    Map<String, dynamic> config,
+    LevelState state,
+    List<GoalDef> goals,
+    GameDefinition? game,
+  ) {
+    final goal = _balanceGoalForCondition(config, goals);
+    if (goal == null) return false;
+    if (!_requiresCompleteEqualBalance(goal.config)) return false;
+
+    final owners =
+        (goal.config['owners'] as List<dynamic>? ?? const []).cast<String>();
+    if (owners.isEmpty) return false;
+
+    final claimable = _countClaimable(state, goal.config, game);
+    if (claimable % owners.length != 0) return true;
+    final target = claimable ~/ owners.length;
+
+    final owned = {for (final owner in owners) owner: 0};
+    final layerId = goal.config['layer'] as String? ?? 'territory';
+    final layer = state.board.layers[layerId];
+    if (layer != null) {
+      for (final entry in layer.entries()) {
+        final count = owned[entry.value.kind];
+        if (count != null) {
+          owned[entry.value.kind] = count + 1;
+        }
+      }
+    }
+
+    // Over-claim is only terminal while claims are permanent. The deficit check
+    // below stays sound under reclaim (a claimer still spends a move per cell).
+    if (owned.values.any((count) => count > target) &&
+        !_claimsAreOverwritable(state, game)) {
+      return true;
+    }
+
+    final actorToOwner = _actorToOwner(config, game);
+    if (actorToOwner.isEmpty) return false;
+
+    final budgetKey =
+        config['budgetVariable'] as String? ?? 'actorMovesRemaining';
+    final rawRemaining = state.variables[budgetKey];
+    final remaining = rawRemaining is Map
+        ? rawRemaining.map((k, v) => MapEntry(k.toString(), (v as num).toInt()))
+        : _individualBudgets(game);
+    if (remaining.isEmpty) return false;
+
+    final remainingByOwner = {for (final owner in owners) owner: 0};
+    for (final entry in actorToOwner.entries) {
+      if (remainingByOwner.containsKey(entry.value)) {
+        remainingByOwner[entry.value] =
+            remainingByOwner[entry.value]! + (remaining[entry.key] ?? 0);
+      }
+    }
+
+    for (final entry in owned.entries) {
+      final deficit = target - entry.value;
+      if (deficit > remainingByOwner[entry.key]!) return true;
+    }
+    return false;
+  }
+
+  GoalDef? _balanceGoalForCondition(
+    Map<String, dynamic> config,
+    List<GoalDef> goals,
+  ) {
+    final goalId = config['goalId'] as String?;
+    for (final goal in goals) {
+      if (goal.type != 'balance') continue;
+      if (goalId == null || goal.id == goalId) return goal;
+    }
+    return null;
+  }
+
+  bool _requiresCompleteEqualBalance(Map<String, dynamic> config) {
+    final requireComplete = config['requireComplete'] as bool? ?? true;
+    final requireEqual = config['requireEqual'] as bool? ?? true;
+    return requireComplete && requireEqual;
+  }
+
+  int _countClaimable(
+    LevelState state,
+    Map<String, dynamic> goalConfig,
+    GameDefinition? game,
+  ) {
+    final layerId = goalConfig['claimableLayer'] as String? ?? 'ground';
+    // `claimableKind` accepts a single kind or a list. Must agree with
+    // GoalEvaluator._countClaimable — if the goal and the lose conditions
+    // disagree about the claimable count, the level is unwinnable or falsely
+    // lost. Note this site keeps its own 'empty' backstop, which the goal
+    // evaluator deliberately does not have.
+    final raw = goalConfig['claimableKind'];
+    final kinds = raw is List
+        ? raw.map((k) => k.toString()).toSet()
+        : {
+            (raw as String?) ?? _layerDefaultKind(game, layerId) ?? 'empty',
+          };
+    final layer = state.board.layers[layerId];
+    if (layer == null) return 0;
+    return layer
+        .entries()
+        .where((entry) => kinds.contains(entry.value.kind))
+        .length;
+  }
+
+  String? _layerDefaultKind(GameDefinition? game, String layerId) {
+    if (game == null) return null;
+    for (final layer in game.layers) {
+      if (layer.id == layerId) return layer.defaultKind;
+    }
+    return null;
+  }
+
+  Map<String, String> _actorToOwner(
+    Map<String, dynamic> config,
+    GameDefinition? game,
+  ) {
+    final explicit = config['actorToOwner'];
+    if (explicit is Map) {
+      return explicit.map((k, v) => MapEntry(k.toString(), v.toString()));
+    }
+    if (game == null) return const {};
+    for (final system in game.systems) {
+      if (system.type == 'individual_actors' && system.enabled) {
+        final claim = system.config['claim'];
+        if (claim is Map) {
+          final map = claim['map'];
+          if (map is Map) {
+            return map.map((k, v) => MapEntry(k.toString(), v.toString()));
+          }
+        }
+      }
+    }
+    return const {};
+  }
+
+  Map<String, int> _individualBudgets(GameDefinition? game) {
+    if (game == null) return const {};
+    for (final system in game.systems) {
+      if (system.type == 'individual_actors' && system.enabled) {
+        final budgets = system.config['budgets'];
+        if (budgets is Map) {
+          return budgets
+              .map((k, v) => MapEntry(k.toString(), (v as num).toInt()));
+        }
+      }
+    }
+    return const {};
   }
 }

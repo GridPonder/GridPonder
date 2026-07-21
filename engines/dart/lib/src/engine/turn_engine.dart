@@ -88,10 +88,11 @@ class TurnEngine {
       }
     }
     if (initialEvents.isEmpty) return;
-    final systems = SystemRegistry.instantiate(game, level.systemOverrides);
-    final rulesEngine = RulesEngine(game.rules, level.rules);
-    rulesEngine.evaluate(
-        initialEvents, _state, game, game.defaults.maxCascadeDepth, systems);
+    final effectiveGame = game.withSystemOverrides(level.systemOverrides);
+    final systems = SystemRegistry.instantiate(effectiveGame, null);
+    final rulesEngine = RulesEngine(effectiveGame.rules, level.rules);
+    rulesEngine.evaluate(initialEvents, _state, effectiveGame,
+        effectiveGame.defaults.maxCascadeDepth, systems);
   }
 
   /// How many undo steps are available.
