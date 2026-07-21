@@ -122,6 +122,7 @@ class LoseEvaluator {
   bool _claimsAreOverwritable(LevelState state, GameDefinition? game) {
     if (game == null) return false;
     for (final system in game.systems) {
+      if (!system.enabled) continue;
       if (system.type != 'coupled_actors' &&
           system.type != 'individual_actors') {
         continue;
@@ -195,12 +196,17 @@ class LoseEvaluator {
         : _individualBudgets(game);
     if (remaining.isEmpty) return false;
 
+    final remainingByOwner = {for (final owner in owners) owner: 0};
     for (final entry in actorToOwner.entries) {
-      final ownerKind = entry.value;
-      final ownerCount = owned[ownerKind];
-      if (ownerCount == null) continue;
-      final deficit = target - ownerCount;
-      if (deficit > (remaining[entry.key] ?? 0)) return true;
+      if (remainingByOwner.containsKey(entry.value)) {
+        remainingByOwner[entry.value] =
+            remainingByOwner[entry.value]! + (remaining[entry.key] ?? 0);
+      }
+    }
+
+    for (final entry in owned.entries) {
+      final deficit = target - entry.value;
+      if (deficit > remainingByOwner[entry.key]!) return true;
     }
     return false;
   }

@@ -188,6 +188,47 @@ def test_move_rejected_when_selected_actor_budget_is_exhausted() -> None:
     print("  OK  move_rejected_when_selected_actor_budget_is_exhausted")
 
 
+def test_selection_identifies_one_actor_when_kinds_are_duplicated() -> None:
+    game = _make_game()
+    level = _make_level()
+    level["board"]["layers"]["actors"]["entries"] = [
+        {"position": [0, 0], "kind": "wei"},
+        {"position": [3, 0], "kind": "wei"},
+    ]
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("tap_cell", {"position": [0, 0]})
+    moved = engine.execute_turn("move", {"direction": "right"})
+
+    assert moved.accepted
+    assert engine.state.board.get_entity("actors", Pos(1, 0)).kind == "wei"
+    assert engine.state.board.get_entity("actors", Pos(3, 0)).kind == "wei"
+    print("  OK  selection_identifies_one_actor_when_kinds_are_duplicated")
+
+
+def test_balance_budget_condition_is_inactive_without_configured_budgets() -> None:
+    engine = TurnEngine(_make_game(), _make_balance_budget_level())
+
+    result = engine.execute_turn("tap_cell", {"position": [3, 0]})
+
+    assert result.accepted
+    assert not result.is_lost
+    print("  OK  balance_budget_condition_is_inactive_without_configured_budgets")
+
+
+def test_explicit_empty_actor_to_owner_disables_budget_inference() -> None:
+    game = _make_game({"budgets": {"wei": 0, "shu": 0}})
+    level = _make_balance_budget_level()
+    level["loseConditions"][0]["config"]["actorToOwner"] = {}
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("tap_cell", {"position": [3, 0]})
+
+    assert result.accepted
+    assert not result.is_lost
+    print("  OK  explicit_empty_actor_to_owner_disables_budget_inference")
+
+
 def test_balance_budget_exhausted_loses_when_actor_still_needs_claims() -> None:
     game = _make_game({"budgets": {"wei": 0, "shu": 1}})
     engine = TurnEngine(game, _make_balance_budget_level())
@@ -237,6 +278,9 @@ def run_all() -> bool:
     tests = [
         test_tap_selects_actor_and_move_moves_only_selected_actor,
         test_move_rejected_when_selected_actor_budget_is_exhausted,
+        test_selection_identifies_one_actor_when_kinds_are_duplicated,
+        test_balance_budget_condition_is_inactive_without_configured_budgets,
+        test_explicit_empty_actor_to_owner_disables_budget_inference,
         test_balance_budget_exhausted_loses_when_actor_still_needs_claims,
         test_balance_budget_exhausted_allows_actor_at_target_with_zero_budget,
         test_level_overrides_can_switch_from_coupled_to_individual_movement,

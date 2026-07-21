@@ -286,6 +286,74 @@ void main() {
     );
   });
 
+  test('selection identifies one actor when kinds are duplicated', () {
+    final game = _makeGame();
+    final level = _makeLevel();
+    final entries = (((level['board'] as Map)['layers'] as Map)['actors']
+        as Map)['entries'] as List;
+    entries
+      ..clear()
+      ..addAll(<Map<String, Object>>[
+        {
+          'position': [0, 0],
+          'kind': 'wei',
+        },
+        {
+          'position': [3, 0],
+          'kind': 'wei',
+        },
+      ]);
+    final engine = _engineFor(game, level);
+
+    engine.executeTurn(GameAction('tap_cell', {
+      'position': [0, 0],
+    }));
+    final moved = engine.executeTurn(GameAction('move', {
+      'direction': 'right',
+    }));
+
+    expect(moved.accepted, isTrue);
+    expect(
+      engine.state.board.getEntity('actors', const Position(1, 0))?.kind,
+      'wei',
+    );
+    expect(
+      engine.state.board.getEntity('actors', const Position(3, 0))?.kind,
+      'wei',
+    );
+  });
+
+  test('balance budget condition is inactive without configured budgets', () {
+    final game = _makeGame();
+    final engine = _engineFor(game, _makeBalanceBudgetLevel());
+
+    final result = engine.executeTurn(GameAction('tap_cell', {
+      'position': [3, 0],
+    }));
+
+    expect(result.accepted, isTrue);
+    expect(result.isLost, isFalse);
+  });
+
+  test('explicit empty actorToOwner disables budget inference', () {
+    final game = _makeGame(config: {
+      'budgets': {'wei': 0, 'shu': 0},
+    });
+    final level = _makeBalanceBudgetLevel();
+    ((level['loseConditions'] as List).single as Map)['config'] = {
+      'goalId': 'balance_goal',
+      'actorToOwner': <String, String>{},
+    };
+    final engine = _engineFor(game, level);
+
+    final result = engine.executeTurn(GameAction('tap_cell', {
+      'position': [3, 0],
+    }));
+
+    expect(result.accepted, isTrue);
+    expect(result.isLost, isFalse);
+  });
+
   test('balance budget exhausted loses when actor still needs claims', () {
     final game = _makeGame(config: {
       'budgets': {'wei': 0, 'shu': 1},

@@ -455,7 +455,7 @@ class GoalEvaluator {
   /// more than one ground kind can be owned.
   int _countClaimable(
       Board board, Map<String, dynamic> cfg, GameDefinition game) {
-    final claimableLayerId = cfg['claimableLayer'] as String?;
+    final claimableLayerId = cfg['claimableLayer'] as String? ?? 'ground';
     final layer = board.layers[claimableLayerId];
     if (layer == null) return 0;
     final raw = cfg['claimableKind'];
@@ -493,11 +493,13 @@ class GoalEvaluator {
     final owned = counts.values.fold(0, (a, b) => a + b);
     final equal = counts.values.toSet().length == 1;
     final complete = owned == claimable;
-    final progress = claimable != 0 ? owned / claimable : 1.0;
+    final progress = claimable != 0 ? owned / claimable : 0.0;
 
     final requireEqual = (goal.config['requireEqual'] as bool?) ?? true;
     final requireComplete = (goal.config['requireComplete'] as bool?) ?? true;
-    final done = (equal || !requireEqual) && (complete || !requireComplete);
+    final done = owned > 0 &&
+        (equal || !requireEqual) &&
+        (complete || !requireComplete);
     return (done, progress);
   }
 }

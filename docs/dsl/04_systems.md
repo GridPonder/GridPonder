@@ -485,6 +485,7 @@ Example config:
 | `groundLayer` | string | `"ground"` | Layer checked for wall collisions. |
 | `wallTag` | string | `"solid"` | Tag on `groundLayer` that blocks a mover. |
 | `selectedVariable` | string | `"selectedActorKind"` | Runtime variable storing the currently selected actor kind. |
+| `selectedPositionVariable` | string | `"selectedActorPosition"` | Runtime variable storing the selected actor's current `[x, y]` position, so actors of the same kind remain distinguishable. |
 | `budgets` | object | — | Optional actor kind → successful move count. When configured, a selected actor at 0 remaining moves cannot move. |
 | `budgetVariable` | string | `"actorMovesRemaining"` | Runtime variable storing remaining move budgets. |
 | `claim` | object | — | Optional. Same shape and semantics as `coupled_actors.claim`. |
@@ -504,7 +505,7 @@ Example config:
 ```
 
 **Behavior:**
-1. On `selectAction`, if the tapped cell contains an actor entity, store its kind in `selectedVariable` and emit `actor_selected`. If `budgets` is configured, initialise `budgetVariable` from it the first time an actor is selected.
+1. On `selectAction`, if the tapped cell contains an actor entity, store its kind and position in `selectedVariable` and `selectedPositionVariable`, then emit `actor_selected`. If `budgets` is configured, initialise `budgetVariable` from it the first time an actor is selected.
 2. On `moveAction`, reject with `action_vetoed` if no actor is selected, the selected actor is missing, or its remaining budget is 0.
 3. Compute the selected actor's target cell. If the target is out of bounds, tagged `wallTag` on `groundLayer`, or occupied by another actor, the actor stays and emits `actor_blocked`.
 4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, apply the claim policy to the destination cell (see [Claim overwrite](#214-claim-overwrite)), and decrement that actor's remaining budget when budgets are configured.

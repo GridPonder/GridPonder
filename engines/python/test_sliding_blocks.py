@@ -271,6 +271,27 @@ class SlidingBlocksTest(unittest.TestCase):
             ).accepted
         )
 
+    def test_both_axis_blocks_reject_diagonal_and_unknown_directions(self) -> None:
+        for direction in ("up_right", "sideways"):
+            engine = TurnEngine(
+                _game(),
+                _level(
+                    f"invalid_direction_{direction}",
+                    _single_block_board(axis="both"),
+                ),
+            )
+
+            result = engine.execute_turn(
+                "move",
+                {"position": [0, 0], "direction": direction},
+            )
+
+            self.assertFalse(result.accepted)
+            self.assertEqual(
+                engine.state.board.multi_cell_objects[0].cells,
+                [Pos(0, 0)],
+            )
+
     def test_only_configured_roles_can_leave_through_exit_cells(self) -> None:
         game = _game({"escapeRoles": ["escapee"]})
         exit_ground = [{"position": [1, 0], "kind": "exit_floor"}]

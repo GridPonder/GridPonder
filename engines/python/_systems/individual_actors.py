@@ -40,7 +40,10 @@ class IndividualActorsSystem(GameSystem):
             return [ev.action_vetoed()]
 
         selected_key = config.get("selectedVariable", "selectedActorKind")
+        selected_position_key = config.get(
+            "selectedPositionVariable", "selectedActorPosition")
         state.variables[selected_key] = entity.kind
+        state.variables[selected_position_key] = [pos.x, pos.y]
         self._ensure_budget_state(state, config)
         return [ev.actor_selected(entity.kind, pos)]
 
@@ -51,6 +54,8 @@ class IndividualActorsSystem(GameSystem):
             return []
 
         selected_key = config.get("selectedVariable", "selectedActorKind")
+        selected_position_key = config.get(
+            "selectedPositionVariable", "selectedActorPosition")
         selected_kind = state.variables.get(selected_key)
         if not selected_kind:
             return [ev.action_vetoed()]
@@ -71,14 +76,29 @@ class IndividualActorsSystem(GameSystem):
         if actor_layer is None:
             return [ev.action_vetoed()]
 
+        selected_position = _parse_position(
+            state.variables.get(selected_position_key))
         pos = None
         entity = None
         occupied = set()
         for actor_pos, actor_entity in actor_layer.entries():
             occupied.add(actor_pos)
-            if actor_entity.kind == selected_kind:
+            if (selected_position is not None
+                    and actor_pos == selected_position
+                    and actor_entity.kind == selected_kind):
                 pos = actor_pos
                 entity = actor_entity
+
+        # Backward compatibility for states created before position-based
+        # selection: a kind is sufficient only when it identifies one actor.
+        if selected_position is None:
+            matches = [
+                (actor_pos, actor_entity)
+                for actor_pos, actor_entity in actor_layer.entries()
+                if actor_entity.kind == selected_kind
+            ]
+            if len(matches) == 1:
+                pos, entity = matches[0]
 
         if pos is None or entity is None:
             return [ev.action_vetoed()]
@@ -94,6 +114,7 @@ class IndividualActorsSystem(GameSystem):
 
         board.set_entity(actor_layer_id, pos, None)
         board.set_entity(actor_layer_id, target, entity)
+        state.variables[selected_position_key] = [target.x, target.y]
         events = [
             ev.actor_moved(entity.kind, pos, target, direction),
             ev.actor_entered(entity.kind, target, pos, direction),
@@ -120,3 +141,11 @@ class IndividualActorsSystem(GameSystem):
             current = {kind: int(value) for kind, value in budgets.items()}
             state.variables[key] = current
         return current
+
+
+def _parse_position(raw) -> Pos | None:
+    if isinstance(raw, Pos):
+        return raw
+    if isinstance(raw, (list, tuple)) and len(raw) >= 2:
+        return Pos(int(raw[0]), int(raw[1]))
+    return None

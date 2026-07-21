@@ -316,7 +316,7 @@ def _count_claimable(board: Any, cfg: dict) -> int:
     which declare an explicit `default` on `exactly_one` layers. Follow-up:
     normalize the missing `exactly_one` default in `_models.py` to match Dart.
     """
-    layer = board.layers.get(cfg.get("claimableLayer"))
+    layer = board.layers.get(cfg.get("claimableLayer", "ground"))
     if layer is None:
         return 0
     claimable_kind = cfg.get("claimableKind", layer.default_kind)
@@ -338,8 +338,9 @@ def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
     owned = sum(counts.values())
     equal = len(set(counts.values())) == 1
     complete = owned == claimable
-    progress = owned / claimable if claimable else 1.0
-    done = (equal or not cfg.get("requireEqual", True)) and \
+    progress = owned / claimable if claimable else 0.0
+    done = owned > 0 and \
+           (equal or not cfg.get("requireEqual", True)) and \
            (complete or not cfg.get("requireComplete", True))
     return done, progress
 
@@ -398,6 +399,8 @@ def _claims_are_overwritable(state: GameState, game: GameDef | None) -> bool:
     if game is None:
         return False
     for system in getattr(game, "systems", []):
+        if not system.get("enabled", True):
+            continue
         if system.get("type") not in ("coupled_actors", "individual_actors"):
             continue
         config = system.get("config") or {}
@@ -454,7 +457,11 @@ def _balance_budget_exhausted(
             and not _claims_are_overwritable(state, game)):
         return True
 
-    actor_to_owner = cfg.get("actorToOwner") or _individual_actor_to_owner(game)
+    actor_to_owner = (
+        cfg.get("actorToOwner", {})
+        if "actorToOwner" in cfg
+        else _individual_actor_to_owner(game)
+    )
     if not actor_to_owner:
         return False
 
@@ -462,14 +469,17 @@ def _balance_budget_exhausted(
     remaining = state.variables.get(budget_key)
     if not isinstance(remaining, dict):
         remaining = _individual_budgets(game)
-    if not isinstance(remaining, dict):
+    if not isinstance(remaining, dict) or not remaining:
         return False
 
+    remaining_by_owner = {owner: 0 for owner in owners}
     for actor_kind, owner_kind in actor_to_owner.items():
-        if owner_kind not in owned:
-            continue
-        deficit = target - owned[owner_kind]
-        if deficit > int(remaining.get(actor_kind, 0)):
+        if owner_kind in remaining_by_owner:
+            remaining_by_owner[owner_kind] += int(remaining.get(actor_kind, 0))
+
+    for owner_kind, owner_count in owned.items():
+        deficit = target - owner_count
+        if deficit > remaining_by_owner[owner_kind]:
             return True
     return False
 

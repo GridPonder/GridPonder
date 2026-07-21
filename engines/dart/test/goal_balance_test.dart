@@ -181,7 +181,7 @@ LoseStatus _loseUnreachable(GameDefinition game, LevelState state) =>
 /// A GameDefinition declaring a `tagged` overwrite policy on an actor system.
 /// Whether the guard trips is decided by the BOARD carrying tagged cells, not
 /// by this config.
-GameDefinition _makeGameWithContestedOverwrite() {
+GameDefinition _makeGameWithContestedOverwrite({bool enabled = true}) {
   final data = {
     'id': 'com.gridponder.test_balance_goal',
     'layers': [
@@ -225,6 +225,7 @@ GameDefinition _makeGameWithContestedOverwrite() {
       {
         'id': 'movement',
         'type': 'coupled_actors',
+        'enabled': enabled,
         'config': {
           'claim': {
             'layer': 'territory',
@@ -344,6 +345,74 @@ void main() {
               '-> complete + equal -> done');
       expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
     });
+
+    test('omitted claimableLayer defaults to ground', () {
+      final game = _makeGame();
+      final state = _makeState(
+        game,
+        _territory({'terr_wei': 3, 'terr_shu': 3, 'terr_wu': 3}),
+      );
+      final config = <String, dynamic>{..._goal().config}
+        ..remove('claimableLayer');
+      final goal = GoalDef(
+        id: 'balance_goal',
+        type: 'balance',
+        config: config,
+      );
+
+      final status = _evaluateWith(game, state, goal);
+
+      expect(status.isWon, isTrue);
+      expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
+    });
+
+    test('requireComplete false does not win with zero owned territory', () {
+      final game = _makeGame();
+      final state = _makeState(game, const []);
+      final goal = GoalDef(
+        id: 'balance_goal',
+        type: 'balance',
+        config: {
+          ..._goal().config,
+          'requireComplete': false,
+        },
+      );
+
+      final status = _evaluateWith(game, state, goal);
+
+      expect(status.isWon, isFalse);
+      expect(status.progress['balance_goal'], 0.0);
+    });
+  });
+
+  group('balance budget accounting', () {
+    test('aggregates budgets for actors mapped to the same owner', () {
+      final game = _makeGame();
+      final state = _makeState(
+        game,
+        _territory({'terr_wei': 1, 'terr_shu': 3, 'terr_wu': 3}),
+      );
+      state.variables['actorMovesRemaining'] = {'worker_a': 1, 'worker_b': 1};
+      final status = LoseEvaluator().evaluate(
+        <LoseConditionDef>[
+          LoseConditionDef.fromJson(const {
+            'type': 'balance_budget_exhausted',
+            'config': {
+              'goalId': 'balance_goal',
+              'actorToOwner': {
+                'worker_a': 'terr_wei',
+                'worker_b': 'terr_wei',
+              },
+            },
+          }),
+        ],
+        state,
+        goals: <GoalDef>[_goal()],
+        game: game,
+      );
+
+      expect(status.isLost, isFalse);
+    });
   });
 
   group('balance_unreachable lose condition', () {
@@ -438,6 +507,19 @@ void main() {
           reason: 'no contested cells -> overclaim is still terminal');
       expect(_loseWith(game, state, 'balance_budget_exhausted').isLost, isTrue,
           reason: 'no contested cells -> overclaim is still terminal');
+    });
+
+    test('disabled actor systems do not make claims overwritable', () {
+      final game = _makeGameWithContestedOverwrite(enabled: false);
+      final territory =
+          _territory({'terr_wei': 4, 'terr_shu': 3, 'terr_wu': 2});
+      final state = _makeState(game, territory, contestedCells: const [
+        [0, 0]
+      ]);
+
+      final status = _loseWith(game, state, 'balance_unreachable');
+
+      expect(status.isLost, isTrue);
     });
   });
 }

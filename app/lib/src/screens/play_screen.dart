@@ -8,12 +8,7 @@ import '../services/hint_service.dart';
 import '../services/pack_service.dart';
 import '../services/progress_service.dart';
 import '../services/settings_service.dart';
-import '../widgets/board_renderer.dart'
-    show
-        BoardRenderer,
-        LineOfSightFeedback,
-        TargetBoardRenderer,
-        cellNamedColor;
+import '../widgets/board_renderer.dart' show BoardRenderer, LineOfSightFeedback, TargetBoardRenderer, cellNamedColor;
 import '../widgets/controls_widget.dart';
 
 class PlayScreen extends StatefulWidget {

@@ -7,6 +7,8 @@ import '../models/game_state.dart';
 import '../models/position.dart';
 
 class SlidingBlocksSystem extends GameSystem {
+  static const _cardinalDirections = {'up', 'down', 'left', 'right'};
+
   final Map<String, dynamic>? config;
 
   const SlidingBlocksSystem({required super.id, this.config})
@@ -22,17 +24,20 @@ class SlidingBlocksSystem extends GameSystem {
     final moveAction = effectiveConfig['moveAction'] as String? ?? 'move';
     if (action.actionId != moveAction) return const [];
 
-    final direction = action.direction;
+    final directionName = action.params['direction'];
     final start = _parsePosition(action.params['position']);
-    if (direction == null || start == null) {
+    if (directionName is! String ||
+        !_cardinalDirections.contains(directionName) ||
+        start == null) {
       return [GameEvent.actionVetoed()];
     }
+    final direction = action.direction!;
 
     final block = _blockAt(state, start);
     if (block == null) return [GameEvent.actionVetoed()];
 
     final axis = (block.params['axis'] as String?) ?? 'both';
-    if (!_axisAllows(axis, direction.toJson())) {
+    if (!_axisAllows(axis, directionName)) {
       return [GameEvent.actionVetoed()];
     }
 
@@ -48,7 +53,7 @@ class SlidingBlocksSystem extends GameSystem {
       if (!_canEscape(
         block,
         oldCells,
-        direction.toJson(),
+        directionName,
         state,
         game,
         effectiveConfig,
@@ -65,7 +70,7 @@ class SlidingBlocksSystem extends GameSystem {
         GameEvent('multi_cell_object_exited', {
           'id': block.id,
           'kind': block.kind,
-          'direction': direction.toJson(),
+          'direction': directionName,
         }),
         GameEvent.variableChanged(variable, oldValue, newValue),
       ]);
@@ -92,7 +97,7 @@ class SlidingBlocksSystem extends GameSystem {
         'kind': block.kind,
         'fromCells': oldCells,
         'toCells': newCells,
-        'direction': direction.toJson(),
+        'direction': directionName,
       }),
     );
     return events;
@@ -118,7 +123,7 @@ class SlidingBlocksSystem extends GameSystem {
     return switch (axis) {
       'horizontal' => direction == 'left' || direction == 'right',
       'vertical' => direction == 'up' || direction == 'down',
-      'both' => true,
+      'both' => _cardinalDirections.contains(direction),
       _ => false,
     };
   }

@@ -301,6 +301,31 @@ void main() {
     );
   });
 
+  test('both-axis blocks reject diagonal and unknown directions', () {
+    for (final direction in ['up_right', 'sideways']) {
+      final game = _game();
+      final engine = TurnEngine(
+        game,
+        _level(
+          game,
+          'invalid_direction_$direction',
+          _singleBlockBoard(axis: 'both'),
+        ),
+      );
+
+      final result = engine.executeTurn(GameAction('move', {
+        'position': [0, 0],
+        'direction': direction,
+      }));
+
+      expect(result.accepted, isFalse);
+      expect(
+        engine.state.board.getMultiCellObject('moving')?.cells,
+        [const Position(0, 0)],
+      );
+    }
+  });
+
   test('only configured escape roles can leave through exit cells', () {
     final game = _game(config: {
       'escapeRoles': ['escapee'],

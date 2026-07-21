@@ -344,12 +344,12 @@ A territory layer is divided completely and equally among a fixed set of owners 
 |-------------|------|-------------|
 | `layer` | string | Territory layer to tally ownership on. |
 | `owners` | array of strings | Entity kinds counted as "owned" cells, one per owner. |
-| `claimableLayer` | string | Layer whose cells are eligible to be claimed (usually `ground`). |
+| `claimableLayer` | string | Layer whose cells are eligible to be claimed. Default: `ground`. |
 | `claimableKind` | string or array of strings | Kind(s) that count as claimable. A list is allowed for boards where more than one ground kind can be owned. Default: that layer's declared `default` kind. |
 | `requireComplete` | boolean | Require every claimable cell to be owned (`owned == claimable`). Default: `true`. |
 | `requireEqual` | boolean | Require every owner's count to be identical. Default: `true`. |
 
-**Engine behavior:** Tally each owner's cell count on `layer`. `claimable` = number of `claimableLayer` cells whose kind matches `claimableKind`. The goal is done when (`equal`, or `requireEqual` is `false`) and (`complete`, or `requireComplete` is `false`); progress = owned / claimable (or `1.0` when nothing is claimable).
+**Engine behavior:** Tally each owner's cell count on `layer`. `claimable` = number of `claimableLayer` cells whose kind matches `claimableKind`. At least one cell must be owned. The goal is then done when (`equal`, or `requireEqual` is `false`) and (`complete`, or `requireComplete` is `false`); progress = owned / claimable (or `0.0` when nothing is claimable).
 
 > **Keep `claimableKind` in step with the board.** The balance lose conditions count claimable cells the same way. If a board introduces a second walkable ground kind and `claimableKind` still names only one, `claimable` silently drops — which usually makes it indivisible by the owner count and fails the level as "equal shares impossible" before anything else is evaluated.
 
@@ -378,7 +378,7 @@ Same as the goal type but triggers a loss.
 A specific board condition is detected (e.g., an entity reaches a forbidden cell).
 
 #### `balance_budget_exhausted`
-Pairs with a [`balance`](#balance) goal under [`individual_actors`](04_systems.md#212-individual_actors): fails when equal-share balance can no longer be reached — either some owner has already claimed more than its equal share (`claimable / owners`), or an owner's remaining move budget is smaller than the number of cells it still needs to reach that share. Resolves the balance goal via `config.goalId` (or the first `balance` goal if omitted).
+Pairs with a [`balance`](#balance) goal under [`individual_actors`](04_systems.md#212-individual_actors): fails when equal-share balance can no longer be reached — either some owner has already claimed more than its equal share (`claimable / owners`), or the combined remaining move budget of the actors mapped to an owner is smaller than the number of cells that owner still needs. The condition is inactive when no actor mapping or move budgets are configured. Resolves the balance goal via `config.goalId` (or the first `balance` goal if omitted).
 
 #### `balance_unreachable`
 Pairs with a [`balance`](#balance) goal: fails the moment equal shares become impossible — any owner has claimed strictly more than its equal share (`claimable / owners`), or `claimable` is not divisible by the number of owners. Because a claimed cell can never change owner, an over-target owner can never come back down, so the level is unwinnable and is lost immediately (a "wrong claim" is reported at once instead of only when `max_actions` is reached). Works in both coupled and individual modes and, unlike `balance_budget_exhausted`, needs no actor/budget wiring. Config: `goalId` — the `balance` goal to check (optional; defaults to the first `balance` goal).

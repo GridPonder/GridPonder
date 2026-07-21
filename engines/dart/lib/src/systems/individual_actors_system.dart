@@ -54,7 +54,10 @@ class IndividualActorsSystem extends GameSystem {
 
     final selectedKey =
         config['selectedVariable'] as String? ?? 'selectedActorKind';
+    final selectedPositionKey = config['selectedPositionVariable'] as String? ??
+        'selectedActorPosition';
     state.variables[selectedKey] = entity.kind;
+    state.variables[selectedPositionKey] = [pos.x, pos.y];
     _ensureBudgetState(state, config);
     return [GameEvent.actorSelected(entity.kind, pos)];
   }
@@ -75,6 +78,8 @@ class IndividualActorsSystem extends GameSystem {
 
     final selectedKey =
         config['selectedVariable'] as String? ?? 'selectedActorKind';
+    final selectedPositionKey = config['selectedPositionVariable'] as String? ??
+        'selectedActorPosition';
     final selectedKind = state.variables[selectedKey] as String?;
     if (selectedKind == null) return [GameEvent.actionVetoed()];
 
@@ -95,14 +100,29 @@ class IndividualActorsSystem extends GameSystem {
     final actorLayer = board.layers[actorLayerId];
     if (actorLayer == null) return [GameEvent.actionVetoed()];
 
+    final selectedPosition = _parsePosition(state.variables[selectedPositionKey]);
     Position? pos;
     EntityInstance? entity;
     final occupied = <Position>{};
     for (final entry in actorLayer.entries()) {
       occupied.add(entry.key);
-      if (entry.value.kind == selectedKind) {
+      if (selectedPosition != null &&
+          entry.key == selectedPosition &&
+          entry.value.kind == selectedKind) {
         pos = entry.key;
         entity = entry.value;
+      }
+    }
+
+    // Backward compatibility for states created before position-based
+    // selection: a kind is sufficient only when it identifies one actor.
+    if (selectedPosition == null) {
+      final matches = actorLayer.entries()
+          .where((entry) => entry.value.kind == selectedKind)
+          .toList();
+      if (matches.length == 1) {
+        pos = matches.single.key;
+        entity = matches.single.value;
       }
     }
 
@@ -119,6 +139,7 @@ class IndividualActorsSystem extends GameSystem {
 
     board.setEntity(actorLayerId, pos, null);
     board.setEntity(actorLayerId, target, entity);
+    state.variables[selectedPositionKey] = [target.x, target.y];
     final events = <GameEvent>[
       GameEvent.actorMoved(entity.kind, pos, target, directionStr),
       GameEvent.actorEntered(entity.kind, target, pos, directionStr),
@@ -139,6 +160,14 @@ class IndividualActorsSystem extends GameSystem {
     }
 
     return events;
+  }
+
+  Position? _parsePosition(dynamic raw) {
+    if (raw is Position) return raw;
+    if (raw is List && raw.length >= 2 && raw[0] is int && raw[1] is int) {
+      return Position(raw[0] as int, raw[1] as int);
+    }
+    return null;
   }
 
   Map<String, int>? _ensureBudgetState(

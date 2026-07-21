@@ -200,6 +200,61 @@ def test_claimable_kind_accepts_list() -> None:
     print("  OK  claimable_kind_accepts_list")
 
 
+def test_omitted_claimable_layer_defaults_to_ground() -> None:
+    game = _make_game()
+    state = _make_state(
+        game,
+        _territory({"terr_wei": 3, "terr_shu": 3, "terr_wu": 3}),
+    )
+    goal = {**_GOAL, "config": {**_GOAL["config"]}}
+    del goal["config"]["claimableLayer"]
+
+    done, progress = _evaluate_goal(goal, state, game, [])
+
+    assert done
+    assert abs(progress - 1.0) < 1e-9
+    print("  OK  omitted_claimable_layer_defaults_to_ground")
+
+
+def test_require_complete_false_needs_owned_territory() -> None:
+    game = _make_game()
+    state = _make_state(game, [])
+    goal = {
+        **_GOAL,
+        "config": {**_GOAL["config"], "requireComplete": False},
+    }
+
+    done, progress = _evaluate_goal(goal, state, game, [])
+
+    assert not done
+    assert progress == 0.0
+    print("  OK  require_complete_false_needs_owned_territory")
+
+
+def test_balance_budget_aggregates_actors_for_one_owner() -> None:
+    game = _make_game()
+    state = _make_state(
+        game,
+        _territory({"terr_wei": 1, "terr_shu": 3, "terr_wu": 3}),
+    )
+    state.variables["actorMovesRemaining"] = {"worker_a": 1, "worker_b": 1}
+    lose = [{
+        "type": "balance_budget_exhausted",
+        "config": {
+            "goalId": "balance_goal",
+            "actorToOwner": {
+                "worker_a": "terr_wei",
+                "worker_b": "terr_wei",
+            },
+        },
+    }]
+
+    is_lost, _reason = evaluate_lose(lose, state, [_GOAL], game)
+
+    assert not is_lost
+    print("  OK  balance_budget_aggregates_actors_for_one_owner")
+
+
 # Lose conditions mirroring the balance goal above (resolved via goalId).
 _LOSE_UNREACHABLE = [{"type": "balance_unreachable", "config": {"goalId": "balance_goal"}}]
 _LOSE_BUDGET = [{"type": "balance_budget_exhausted", "config": {"goalId": "balance_goal"}}]
@@ -217,7 +272,7 @@ _GOAL_CONTESTED = {
 }
 
 
-def _with_contested_overwrite(game: GameDef) -> GameDef:
+def _with_contested_overwrite(game: GameDef, *, enabled: bool = True) -> GameDef:
     """Declare a `tagged` overwrite policy on every actor system.
 
     Whether the guard trips is decided by the BOARD carrying tagged cells, not
@@ -226,6 +281,7 @@ def _with_contested_overwrite(game: GameDef) -> GameDef:
     game.systems.append({
         "id": "movement",
         "type": "coupled_actors",
+        "enabled": enabled,
         "config": {
             "claim": {
                 "layer": "territory",
@@ -343,6 +399,19 @@ def test_over_claim_still_fires_when_board_has_no_contested_cells() -> None:
     print("  OK  over_claim_still_fires_when_board_has_no_contested_cells")
 
 
+def test_disabled_actor_system_does_not_make_claims_overwritable() -> None:
+    game = _with_contested_overwrite(_make_game(), enabled=False)
+    territory = _territory({"terr_wei": 4, "terr_shu": 3, "terr_wu": 2})
+    state = _make_state(game, territory, contested_cells=[(0, 0)])
+
+    is_lost, reason = evaluate_lose(
+        _LOSE_UNREACHABLE, state, [_GOAL_CONTESTED], game)
+
+    assert is_lost
+    assert reason == "balance_unreachable"
+    print("  OK  disabled_actor_system_does_not_make_claims_overwritable")
+
+
 def run_all() -> bool:
     tests = [
         test_incomplete_is_not_done,
@@ -350,12 +419,16 @@ def run_all() -> bool:
         test_complete_and_equal_is_done,
         test_omitted_claimable_kind_falls_back_to_layer_default,
         test_claimable_kind_accepts_list,
+        test_omitted_claimable_layer_defaults_to_ground,
+        test_require_complete_false_needs_owned_territory,
+        test_balance_budget_aggregates_actors_for_one_owner,
         test_balance_unreachable_fires_on_overclaim,
         test_balance_unreachable_quiet_on_valid_partial,
         test_balance_unreachable_quiet_on_balanced_state,
         test_balance_unreachable_suppressed_when_board_has_contested_cells,
         test_balance_budget_exhausted_suppressed_when_board_has_contested_cells,
         test_over_claim_still_fires_when_board_has_no_contested_cells,
+        test_disabled_actor_system_does_not_make_claims_overwritable,
     ]
     passed = 0
     failed = 0

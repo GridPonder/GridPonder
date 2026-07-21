@@ -18,6 +18,8 @@ Actions are flattened to strings:
 
   * Actions with a ``direction`` param → ``"{action_id}_{direction}"``
     (e.g. ``"move_up"``, ``"diagonal_swap_up_right"``)
+  * Actions with ``position`` and ``direction`` params →
+    ``"{action_id}_{x}_{y}_{direction}"`` (e.g. ``"move_2_3_left"``)
   * Actions with no params → ``"{action_id}"``
     (e.g. ``"flood_red"``, ``"rotate"``)
 
@@ -122,7 +124,14 @@ def _build_actions(game: GameDef, width: int = 0, height: int = 0) -> list[str]:
     for action_def in game.actions:
         aid = action_def["id"]
         params = action_def.get("params", {})
-        if "direction" in params:
+        if "position" in params and "direction" in params:
+            dirs = params["direction"].get(
+                "values", ["up", "down", "left", "right"])
+            for y in range(height):
+                for x in range(width):
+                    for direction in dirs:
+                        result.append(f"{aid}_{x}_{y}_{direction}")
+        elif "direction" in params:
             dirs = params["direction"].get("values", ["up", "down", "left", "right"])
             for d in dirs:
                 result.append(f"{aid}_{d}")
@@ -140,7 +149,24 @@ def _parse_action(action_str: str, game: GameDef) -> tuple[str, dict]:
     for action_def in game.actions:
         aid = action_def["id"]
         params = action_def.get("params", {})
-        if "direction" in params:
+        if "position" in params and "direction" in params:
+            prefix = f"{aid}_"
+            if not action_str.startswith(prefix):
+                continue
+            rest = action_str[len(prefix):]
+            dirs = params["direction"].get(
+                "values", ["up", "down", "left", "right"])
+            for direction in dirs:
+                suffix = f"_{direction}"
+                if not rest.endswith(suffix):
+                    continue
+                position = rest[:-len(suffix)].split("_")
+                if len(position) == 2:
+                    return aid, {
+                        "position": [int(position[0]), int(position[1])],
+                        "direction": direction,
+                    }
+        elif "direction" in params:
             dirs = params["direction"].get("values", ["up", "down", "left", "right"])
             for d in dirs:
                 if action_str == f"{aid}_{d}":
@@ -233,7 +259,7 @@ def can_prune(
     the heuristic) prune these too.  Returns False for non-balance games.
     """
     cfg = _balance_goal(info)
-    if cfg is None:
+    if cfg is None or not _balance_optimizations_supported(state, info, cfg):
         return False
     owners = cfg.get("owners", [])
     k = len(owners)
@@ -379,6 +405,76 @@ def _individual_system(info: EngineInfo) -> Optional[dict]:
     return None
 
 
+def _coupled_system(info: EngineInfo) -> Optional[dict]:
+    """Return the enabled ``coupled_actors`` system, if this level uses one."""
+    for system in _effective_game(info).systems:
+        if system["type"] == "coupled_actors" and system.get("enabled", True):
+            return system
+    return None
+
+
+def _balance_optimizations_supported(
+    state: EngineState,
+    info: EngineInfo,
+    cfg: dict,
+) -> bool:
+    """Whether the balance pruning assumptions are all explicitly satisfied."""
+    owners = cfg.get("owners", [])
+    if not owners or len(set(owners)) != len(owners):
+        return False
+    if not cfg.get("requireComplete", True) or not cfg.get("requireEqual", True):
+        return False
+
+    claimable_layer = cfg.get("claimableLayer")
+    claimable_kind = cfg.get("claimableKind")
+    if not isinstance(claimable_layer, str) or not isinstance(claimable_kind, str):
+        return False
+
+    individual = _individual_system(info)
+    coupled = _coupled_system(info)
+    if (individual is None) == (coupled is None):
+        return False
+    movement = individual or coupled
+    sys_cfg = movement.get("config", {})
+    claim = sys_cfg.get("claim", {})
+    actor_to_owner = claim.get("map", {})
+    if (
+        not isinstance(actor_to_owner, dict)
+        or set(actor_to_owner.values()) != set(owners)
+        or len(set(actor_to_owner.values())) != len(actor_to_owner)
+    ):
+        return False
+    if (claim.get("overwrite") or {}).get("mode", "never") != "never":
+        return False
+
+    actor_layer_id = sys_cfg.get("actorLayer", "actors")
+    actor_layer = state._state.board.layers.get(actor_layer_id)
+    if actor_layer is None:
+        return False
+    actor_counts = {kind: 0 for kind in actor_to_owner}
+    for _pos, entity in actor_layer.entries():
+        if entity.kind in actor_counts:
+            actor_counts[entity.kind] += 1
+    if any(count != 1 for count in actor_counts.values()):
+        return False
+
+    if individual is not None:
+        budgets = sys_cfg.get("budgets")
+        if not isinstance(budgets, dict) or not budgets:
+            return False
+        if any(kind not in budgets for kind in actor_to_owner):
+            return False
+
+    ground_layer = state._state.board.layers.get(claimable_layer)
+    wall_tag = sys_cfg.get("wallTag", "solid")
+    if ground_layer is None:
+        return False
+    for _pos, entity in ground_layer.entries():
+        if entity.kind != claimable_kind and not info.game.has_tag(entity.kind, wall_tag):
+            return False
+    return True
+
+
 def _actor_budgets_remaining(state: EngineState, sys_cfg: dict) -> dict[str, int]:
     budgets = sys_cfg.get("budgets", {})
     key = sys_cfg.get("budgetVariable", "actorMovesRemaining")
@@ -522,7 +618,7 @@ def heuristic(state: EngineState, info: EngineInfo) -> float:
     more than ``target``: claims are irreversible, so balance can never recover.
     """
     cfg = _balance_goal(info)
-    if cfg is None:
+    if cfg is None or not _balance_optimizations_supported(state, info, cfg):
         return 0.0
     owners = cfg.get("owners", [])
     if not owners:
@@ -559,18 +655,36 @@ def legal_actions(state: EngineState, info: EngineInfo) -> list[str]:
     ground_layer_id = cfg.get("groundLayer", "ground")
     wall_tag = cfg.get("wallTag", "solid")
     selected_key = cfg.get("selectedVariable", "selectedActorKind")
+    selected_position_key = cfg.get(
+        "selectedPositionVariable", "selectedActorPosition")
     selected_kind = state._state.variables.get(selected_key)
+    selected_position_raw = state._state.variables.get(selected_position_key)
+    selected_position = (
+        tuple(selected_position_raw[:2])
+        if isinstance(selected_position_raw, (list, tuple))
+        and len(selected_position_raw) >= 2
+        else None
+    )
     remaining = _actor_budgets_remaining(state, cfg)
+    has_budgets = bool(cfg.get("budgets"))
 
     layer = state._state.board.layers.get(actor_layer_id)
     occupied: set[tuple[int, int]] = set()
-    actor_positions: dict[str, Pos] = {}
+    selected_actor_position: Optional[Pos] = None
     if layer is not None:
+        selected_kind_positions: list[Pos] = []
         for pos, entity in layer.entries():
             occupied.add((pos.x, pos.y))
-            actor_positions[entity.kind] = pos
+            if entity.kind == selected_kind:
+                selected_kind_positions.append(pos)
+            if (
+                entity.kind == selected_kind
+                and selected_position == (pos.x, pos.y)
+            ):
+                selected_actor_position = pos
+        if selected_position is None and len(selected_kind_positions) == 1:
+            selected_actor_position = selected_kind_positions[0]
 
-    deficits_by_actor = _individual_actor_deficits(state, info, cfg)
     board = state._state.board
     select_prefix = f"{select_action}_"
     move_prefix = f"{move_action}_"
@@ -588,19 +702,16 @@ def legal_actions(state: EngineState, info: EngineInfo) -> list[str]:
             if (
                 pos_key in occupied
                 and actor_kind is not None
-                and actor_kind != selected_kind
-                and deficits_by_actor.get(actor_kind, 0) > 0
-                and int(remaining.get(actor_kind, 0)) > 0
+                and pos_key != selected_position
+                and (not has_budgets or int(remaining.get(actor_kind, 0)) > 0)
             ):
                 result.append(action)
         elif action.startswith(move_prefix):
             if not selected_kind:
                 continue
-            if deficits_by_actor.get(selected_kind, 0) <= 0:
+            if has_budgets and int(remaining.get(selected_kind, 0)) <= 0:
                 continue
-            if int(remaining.get(selected_kind, 0)) <= 0:
-                continue
-            pos = actor_positions.get(selected_kind)
+            pos = selected_actor_position
             if pos is None:
                 continue
             action_id, params = _parse_action(action, info.game)
@@ -618,29 +729,6 @@ def legal_actions(state: EngineState, info: EngineInfo) -> list[str]:
     return result
 
 
-def _individual_actor_deficits(state: EngineState, info: EngineInfo, sys_cfg: dict) -> dict[str, int]:
-    cfg = _balance_goal(info)
-    if cfg is None:
-        return {}
-    owners = cfg.get("owners", [])
-    if not owners:
-        return {}
-    claimable = _claimable_count(
-        state, info, cfg.get("claimableLayer", "ground"), cfg.get("claimableKind", "empty")
-    )
-    if claimable % len(owners) != 0:
-        return {}
-    target = claimable // len(owners)
-    owned = _owned_counts(state, cfg.get("layer", "territory"), owners)
-    claim = sys_cfg.get("claim", {})
-    actor_to_owner = claim.get("map", {})
-    result: dict[str, int] = {}
-    for actor_kind, owner_kind in actor_to_owner.items():
-        if owner_kind in owned:
-            result[actor_kind] = target - owned[owner_kind]
-    return result
-
-
 # ---------------------------------------------------------------------------
 # Gold path helpers
 # ---------------------------------------------------------------------------
@@ -649,8 +737,9 @@ def gold_path_actions(level_json: dict) -> list[str]:
     """
     Extract the gold path from a level JSON as flat action strings.
 
-    Works for any game: direction-based entries become ``"{action}_{dir}"``
-    and param-less entries become just ``"{action}"``.
+    Works for any game: position-and-direction entries become
+    ``"{action}_{x}_{y}_{dir}"``, direction-only entries become
+    ``"{action}_{dir}"``, and param-less entries remain ``"{action}"``.
     """
     gold_raw = level_json.get("solution", {}).get("goldPath", [])
     actions: list[str] = []
@@ -662,7 +751,10 @@ def gold_path_actions(level_json: dict) -> list[str]:
             action_id = entry.get("action", "move")
             direction = entry.get("direction")
             position = entry.get("position")
-            if direction:
+            if direction and position:
+                actions.append(
+                    f"{action_id}_{position[0]}_{position[1]}_{direction}")
+            elif direction:
                 actions.append(f"{action_id}_{direction}")
             elif position:
                 actions.append(f"{action_id}_{position[0]}_{position[1]}")
