@@ -110,6 +110,7 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `moveAction` | string | `"move"` | Action id that triggers block movement. |
+| `groundLayer` | string | `"ground"` | Layer checked for valid destination and exit cells. |
 | `validGroundTags` | array of strings | `["walkable"]` | Tags required on the ground cell for every destination cell that remains on the board. |
 | `blockingLayers` | array of strings | `["objects"]` | Ordinary board layers that can block a sliding object. |
 | `blockingTags` | array of strings | `["solid"]` | Tags that block movement on `blockingLayers`. Empty means any entity on those layers blocks. |
@@ -547,7 +548,7 @@ attack, communication, or something else.
 2. Resolve sources from `sourceLayer`, or from `multiCellObjects` when no source layer is configured.
 3. Filter sources and targets by their configured kinds, tags, and roles.
 4. A source and target match only when they share a row or column, differ in position, and every intermediate cell is clear.
-5. Void cells, matching blockers on `blockingLayers`, and optionally other multi-cell objects break the sightline. A target covered by another multi-cell object is not detected.
+5. Void cells and matching blockers on `blockingLayers` break the sightline. When `multiCellObjectsBlock` is `true`, other multi-cell objects also break the sightline and prevent detection of a covered target.
 6. Emit `line_of_sight_detected` without modifying the board or variables. Rules can react with standard effects such as `destroy`, `transform`, `set_variable`, or `increment_variable`.
 
 Example:

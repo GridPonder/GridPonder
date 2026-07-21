@@ -72,11 +72,12 @@ class LineOfSightSystem extends GameSystem {
       _SightSource? matchedSource;
       Position? matchedPosition;
       for (final source in sources) {
-        if (_coveredByOtherMultiCellObject(
-          target,
-          source.multiCellObjectId,
-          state,
-        )) {
+        if (multiCellObjectsBlock &&
+            _coveredByOtherMultiCellObject(
+              target,
+              source.multiCellObjectId,
+              state,
+            )) {
           continue;
         }
         for (final sourcePosition in source.positions) {

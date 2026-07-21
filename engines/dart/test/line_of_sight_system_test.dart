@@ -231,6 +231,78 @@ void main() {
     );
   });
 
+  test('multi-cell object blocking can be disabled', () {
+    final game = _game(visibilityConfig: const {
+      'multiCellObjectsBlock': false,
+    });
+    final engine = TurnEngine(
+      game,
+      _level(
+        game,
+        objects: const [
+          {
+            'position': [1, 0],
+            'kind': 'beacon',
+          },
+        ],
+        extraMultiCellObjects: const [
+          {
+            'id': 'cover',
+            'kind': 'blocker',
+            'cells': [
+              {
+                'position': [1, 0],
+              },
+            ],
+            'params': {'axis': 'vertical'},
+          },
+        ],
+      ),
+    );
+
+    final result = engine.executeTurn(GameAction('move', {
+      'position': [0, 3],
+      'direction': 'right',
+    }));
+
+    expect(
+      result.events.where(
+        (event) => event.type == 'line_of_sight_detected',
+      ),
+      isNotEmpty,
+    );
+  });
+
+  test('missing source role does not match the string None', () {
+    final game = _game(visibilityConfig: const {
+      'sourceRoles': ['None'],
+    });
+    final engine = TurnEngine(
+      game,
+      _level(
+        game,
+        objects: const [
+          {
+            'position': [1, 0],
+            'kind': 'beacon',
+          },
+        ],
+      ),
+    );
+
+    final result = engine.executeTurn(GameAction('move', {
+      'position': [0, 3],
+      'direction': 'right',
+    }));
+
+    expect(
+      result.events.where(
+        (event) => event.type == 'line_of_sight_detected',
+      ),
+      isEmpty,
+    );
+  });
+
   test('supports layer sources, unlimited matches, and trigger filtering', () {
     final visibilityConfig = <String, dynamic>{
       'sourceLayer': 'actors',

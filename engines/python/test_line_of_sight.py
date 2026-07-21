@@ -222,6 +222,46 @@ class LineOfSightTest(unittest.TestCase):
             )
         )
 
+    def test_multi_cell_object_blocking_can_be_disabled(self) -> None:
+        engine = TurnEngine(
+            _game(visibility_config={"multiCellObjectsBlock": False}),
+            _level(
+                objects=[{"position": [1, 0], "kind": "beacon"}],
+                extra_multi_cell_objects=[{
+                    "id": "cover",
+                    "kind": "blocker",
+                    "cells": [{"position": [1, 0]}],
+                    "params": {"axis": "vertical"},
+                }],
+            ),
+        )
+
+        result = engine.execute_turn(
+            "move",
+            {"position": [0, 3], "direction": "right"},
+        )
+
+        self.assertTrue(any(
+            item["type"] == "line_of_sight_detected"
+            for item in result.events
+        ))
+
+    def test_missing_source_role_does_not_match_the_string_none(self) -> None:
+        engine = TurnEngine(
+            _game(visibility_config={"sourceRoles": ["None"]}),
+            _level(objects=[{"position": [1, 0], "kind": "beacon"}]),
+        )
+
+        result = engine.execute_turn(
+            "move",
+            {"position": [0, 3], "direction": "right"},
+        )
+
+        self.assertFalse(any(
+            item["type"] == "line_of_sight_detected"
+            for item in result.events
+        ))
+
     def test_layer_sources_unlimited_matches_and_trigger_filtering(self) -> None:
         visibility_config = {
             "sourceLayer": "actors",

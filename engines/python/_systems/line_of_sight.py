@@ -77,7 +77,7 @@ class LineOfSightSystem(GameSystem):
 
             match: tuple[_SightSource, Pos] | None = None
             for source in sources:
-                if _covered_by_other_multi_cell_object(
+                if multi_cell_objects_block and _covered_by_other_multi_cell_object(
                     target,
                     source.multi_cell_object_id,
                     state,
@@ -153,7 +153,10 @@ def _sources(state: GameState, game: GameDef, config: dict) -> list[_SightSource
         if _matches_kind_and_tags(item.kind, source_kinds, source_tags, game)
         and (
             not source_roles
-            or str(item.params.get("role")) in source_roles
+            or (
+                item.params.get("role") is not None
+                and str(item.params["role"]) in source_roles
+            )
         )
     ]
 

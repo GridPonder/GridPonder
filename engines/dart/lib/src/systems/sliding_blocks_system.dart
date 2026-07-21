@@ -139,7 +139,8 @@ class SlidingBlocksSystem extends GameSystem {
     if (!state.board.isInBounds(pos)) return false;
     if (state.board.isVoid(pos)) return false;
 
-    final ground = state.board.getEntity('ground', pos);
+    final groundLayer = config['groundLayer'] as String? ?? 'ground';
+    final ground = state.board.getEntity(groundLayer, pos);
     final validGroundTags = (config['validGroundTags'] as List? ?? ['walkable'])
         .map((v) => v.toString())
         .toList();
@@ -210,7 +211,8 @@ class SlidingBlocksSystem extends GameSystem {
     };
 
     for (final cell in edgeCells) {
-      final ground = state.board.getEntity('ground', cell);
+      final groundLayer = config['groundLayer'] as String? ?? 'ground';
+      final ground = state.board.getEntity(groundLayer, cell);
       if (ground != null &&
           exitTags.any((tag) => game.hasTag(ground.kind, tag))) {
         return true;

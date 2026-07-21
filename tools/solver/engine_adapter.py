@@ -229,6 +229,12 @@ def apply(
     """
     action_id, params = _parse_action(action_str, info.game)
 
+    # Winning and losing states are terminal. The runtime UI stops dispatching
+    # actions at that point; the generic solver must enforce the same boundary
+    # when it replays states directly through the engine adapter.
+    if state.game_state.is_won or state.game_state.is_lost:
+        return state, state.game_state.is_won, []
+
     # Fast-path: bypass TurnEngine.__init__ (no board re-parsing)
     engine = object.__new__(TurnEngine)
     engine._game = info.game
@@ -391,6 +397,11 @@ def _effective_game(info: EngineInfo) -> GameDef:
     return info.game.with_system_overrides(overrides) if overrides else info.game
 
 
+def _has_reactive_rules(info: EngineInfo) -> bool:
+    """Whether actions can have effects beyond the configured systems."""
+    return bool(info.game.rules or info.level_def.get("rules"))
+
+
 def _individual_system(info: EngineInfo) -> Optional[dict]:
     """Return the enabled ``individual_actors`` system, if this level uses one."""
     for s in _effective_game(info).systems:
@@ -421,6 +432,11 @@ def _balance_optimizations_supported(
     cfg: dict,
 ) -> bool:
     """Whether the balance pruning assumptions are all explicitly satisfied."""
+    # Rules may alter territory, budgets, or actor positions after an event.
+    # In that case the static reachability assumptions below are not sound.
+    if _has_reactive_rules(info):
+        return False
+
     owners = cfg.get("owners", [])
     if not owners or len(set(owners)) != len(owners):
         return False
@@ -648,6 +664,9 @@ def legal_actions(state: EngineState, info: EngineInfo) -> list[str]:
     from ~width×height taps to one-per-actor.  Games without an individual
     system are unaffected (the full ACTIONS list is returned).
     """
+    if state.game_state.is_won or state.game_state.is_lost:
+        return []
+
     indiv = _individual_system(info)
     sliding = _sliding_system(info)
     # Combining two selection models needs game-specific arbitration. Falling
@@ -657,6 +676,11 @@ def legal_actions(state: EngineState, info: EngineInfo) -> list[str]:
     if sliding is not None:
         return _sliding_legal_actions(state, info, sliding)
     if indiv is None:
+        return info.ACTIONS
+    # Re-selecting an actor and attempting a blocked move both emit events.
+    # Rules may intentionally react to those events, so only prune them when
+    # the game has no reactive rules.
+    if _has_reactive_rules(info):
         return info.ACTIONS
 
     cfg = indiv.get("config", {})

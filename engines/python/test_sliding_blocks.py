@@ -18,6 +18,7 @@ def _game(config: dict | None = None) -> GameDef:
         {
             "layers": [
                 {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+                {"id": "terrain", "occupancy": "zero_or_one"},
                 {"id": "objects", "occupancy": "zero_or_one"},
             ],
             "entityKinds": {
@@ -31,6 +32,16 @@ def _game(config: dict | None = None) -> GameDef:
                     "layer": "ground",
                     "tags": ["walkable", "exit"],
                     "symbol": "E",
+                },
+                "terrain_floor": {
+                    "layer": "terrain",
+                    "tags": ["walkable"],
+                    "symbol": ",",
+                },
+                "terrain_exit": {
+                    "layer": "terrain",
+                    "tags": ["walkable", "exit"],
+                    "symbol": "Q",
                 },
                 "slider": {
                     "layer": "structures",
@@ -110,6 +121,7 @@ def _single_block_board(
     start: list[int] | None = None,
     size: list[int] | None = None,
     ground_entries: list[dict] | None = None,
+    terrain_entries: list[dict] | None = None,
     object_entries: list[dict] | None = None,
     extra_blocks: list[dict] | None = None,
 ) -> dict:
@@ -120,6 +132,7 @@ def _single_block_board(
         "size": size or [3, 2],
         "layers": {
             "ground": {"format": "sparse", "entries": ground_entries or []},
+            "terrain": {"format": "sparse", "entries": terrain_entries or []},
             "objects": {"format": "sparse", "entries": object_entries or []},
         },
         "multiCellObjects": [
@@ -333,6 +346,53 @@ class SlidingBlocksTest(unittest.TestCase):
                 {"position": [1, 0], "direction": "right"},
             ).accepted
         )
+
+        missing_role = TurnEngine(
+            _game({"escapeRoles": ["None"]}),
+            _level(
+                "missing_role_exit",
+                _single_block_board(
+                    start=[1, 0],
+                    size=[2, 1],
+                    ground_entries=exit_ground,
+                ),
+            ),
+        )
+        self.assertFalse(
+            missing_role.execute_turn(
+                "move",
+                {"position": [1, 0], "direction": "right"},
+            ).accepted
+        )
+
+    def test_custom_ground_layer_controls_movement_and_escape(self) -> None:
+        engine = TurnEngine(
+            _game({
+                "groundLayer": "terrain",
+                "escapeRoles": ["escapee"],
+            }),
+            _level(
+                "custom_ground_layer",
+                _single_block_board(
+                    role="escapee",
+                    size=[2, 1],
+                    terrain_entries=[
+                        {"position": [0, 0], "kind": "terrain_floor"},
+                        {"position": [1, 0], "kind": "terrain_exit"},
+                    ],
+                ),
+            ),
+        )
+
+        self.assertTrue(engine.execute_turn(
+            "move",
+            {"position": [0, 0], "direction": "right"},
+        ).accepted)
+        self.assertTrue(engine.execute_turn(
+            "move",
+            {"position": [1, 0], "direction": "right"},
+        ).accepted)
+        self.assertEqual(engine.state.board.multi_cell_objects, [])
 
     def test_level_system_overrides_replace_game_constraints(self) -> None:
         engine = TurnEngine(

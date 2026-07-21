@@ -119,7 +119,8 @@ def _is_valid_destination(
     if not state.board.is_in_bounds(pos) or state.board.is_void(pos):
         return False
 
-    ground = state.board.get_entity("ground", pos)
+    ground_layer = str(config.get("groundLayer", "ground"))
+    ground = state.board.get_entity(ground_layer, pos)
     valid_ground_tags = [
         str(tag) for tag in config.get("validGroundTags", ["walkable"])
     ]
@@ -182,7 +183,8 @@ def _can_escape(
     escape_roles = {
         str(role) for role in config.get("escapeRoles", [])
     }
-    if str(block.params.get("role")) not in escape_roles:
+    role = block.params.get("role")
+    if role is None or str(role) not in escape_roles:
         return False
 
     exit_tags = [str(tag) for tag in config.get("exitTags", ["exit"])]
@@ -205,7 +207,8 @@ def _can_escape(
         return False
 
     for cell in edge_cells:
-        ground = state.board.get_entity("ground", cell)
+        ground_layer = str(config.get("groundLayer", "ground"))
+        ground = state.board.get_entity(ground_layer, cell)
         if ground is not None and any(
             game.has_tag(ground.kind, tag) for tag in exit_tags
         ):

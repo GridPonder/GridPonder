@@ -116,6 +116,76 @@ def _sliding_state_and_info() -> tuple[ea.EngineState, ea.EngineInfo]:
     return state, info
 
 
+def _terminal_sliding_state_and_info() -> tuple[ea.EngineState, ea.EngineInfo]:
+    game = ea.GameDef.from_dict({
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+        ],
+        "entityKinds": {
+            "floor": {"layer": "ground", "tags": ["walkable"]},
+            "block": {"layer": "structures", "tags": ["sliding_block"]},
+        },
+        "actions": [{
+            "id": "move",
+            "params": {
+                "position": {"type": "position"},
+                "direction": {
+                    "type": "direction",
+                    "values": ["left", "right"],
+                },
+            },
+        }],
+        "systems": [{
+            "id": "blocks",
+            "type": "sliding_blocks",
+            "config": {},
+        }],
+        "rules": [{
+            "id": "count_moves",
+            "on": "multi_cell_object_moved",
+            "then": [{
+                "increment_variable": {"name": "moves", "amount": 1},
+            }],
+        }],
+        "defaults": {"avatar": {"enabled": False}},
+    })
+    level = {
+        "id": "terminal_solver_smoke",
+        "board": {
+            "size": [3, 1],
+            "layers": {},
+            "multiCellObjects": [{
+                "id": "moving",
+                "kind": "block",
+                "cells": [[0, 0]],
+                "params": {"axis": "horizontal"},
+            }],
+        },
+        "state": {
+            "variables": {"moves": 0},
+            "avatar": {"enabled": False},
+        },
+        "goals": [{
+            "id": "two_moves",
+            "type": "variable_threshold",
+            "config": {"variable": "moves", "target": 2, "comparison": "gte"},
+        }],
+        "loseConditions": [{"type": "max_actions", "config": {"limit": 1}}],
+    }
+    engine = ea.TurnEngine(game, level)
+    state = ea.EngineState(engine.state.copy())
+    info = ea.EngineInfo(
+        game=game,
+        level_def=level,
+        pack_dir=Path("."),
+        ACTIONS=ea._build_actions(game, 3, 1),
+        level_id=level["id"],
+        width=3,
+        height=1,
+    )
+    return state, info
+
+
 class ActorBalanceSolverTests(unittest.TestCase):
     def test_unknown_standard_pack_uses_generic_dsl_solver(self) -> None:
         level_path = FIXTURE_PACK / "levels" / "actor_balance_smoke_01.json"
@@ -209,6 +279,38 @@ class ActorBalanceSolverTests(unittest.TestCase):
         )
         individual["config"]["budgets"] = {}
 
+        self.assertEqual(ea.heuristic(state, info), 0.0)
+        self.assertFalse(ea.can_prune(state, info, depth=0, max_depth=20))
+
+    def test_terminal_states_cannot_be_extended_into_false_solutions(self) -> None:
+        state, info = _terminal_sliding_state_and_info()
+
+        lost_state, won, _events = ea.apply(state, "move_0_0_right", info)
+
+        self.assertFalse(won)
+        self.assertTrue(lost_state.game_state.is_lost)
+        self.assertEqual(ea.legal_actions(lost_state, info), [])
+
+        unchanged, won, events = ea.apply(
+            lost_state,
+            "move_1_0_right",
+            info,
+        )
+        self.assertIs(unchanged, lost_state)
+        self.assertFalse(won)
+        self.assertEqual(events, [])
+        self.assertEqual(unchanged.game_state.variables["moves"], 1)
+
+    def test_reactive_rules_disable_actor_pruning_and_balance_heuristics(self) -> None:
+        level = _level(individual=True)
+        level["rules"] = [{
+            "id": "observe_blocked_move",
+            "on": "actor_blocked",
+            "then": [],
+        }]
+        state, info = ea.load(level, FIXTURE_PACK)
+
+        self.assertEqual(ea.legal_actions(state, info), info.ACTIONS)
         self.assertEqual(ea.heuristic(state, info), 0.0)
         self.assertFalse(ea.can_prune(state, info, depth=0, max_depth=20))
 

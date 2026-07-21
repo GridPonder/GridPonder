@@ -5,6 +5,7 @@ GameDefinition _game({Map<String, dynamic> config = const {}}) {
   return GameDefinition.fromJson({
     'layers': [
       {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'floor'},
+      {'id': 'terrain', 'occupancy': 'zero_or_one'},
       {'id': 'objects', 'occupancy': 'zero_or_one'},
     ],
     'entityKinds': {
@@ -18,6 +19,16 @@ GameDefinition _game({Map<String, dynamic> config = const {}}) {
         'layer': 'ground',
         'tags': ['walkable', 'exit'],
         'symbol': 'E',
+      },
+      'terrain_floor': {
+        'layer': 'terrain',
+        'tags': ['walkable'],
+        'symbol': ',',
+      },
+      'terrain_exit': {
+        'layer': 'terrain',
+        'tags': ['walkable', 'exit'],
+        'symbol': 'Q',
       },
       'slider': {
         'layer': 'structures',
@@ -95,6 +106,7 @@ Map<String, dynamic> _singleBlockBoard({
   List<int> start = const [0, 0],
   List<int> size = const [3, 2],
   List<Map<String, dynamic>> groundEntries = const [],
+  List<Map<String, dynamic>> terrainEntries = const [],
   List<Map<String, dynamic>> objectEntries = const [],
   List<Map<String, dynamic>> extraBlocks = const [],
   String? sprite,
@@ -103,6 +115,7 @@ Map<String, dynamic> _singleBlockBoard({
     'size': size,
     'layers': {
       'ground': {'format': 'sparse', 'entries': groundEntries},
+      'terrain': {'format': 'sparse', 'entries': terrainEntries},
       'objects': {'format': 'sparse', 'entries': objectEntries},
     },
     'multiCellObjects': [
@@ -244,6 +257,84 @@ void main() {
           .accepted,
       isFalse,
     );
+
+    final missingRoleGame = _game(config: {
+      'escapeRoles': ['None'],
+    });
+    final missingRole = TurnEngine(
+      missingRoleGame,
+      _level(
+        missingRoleGame,
+        'missing_role_exit',
+        _singleBlockBoard(
+          start: const [1, 0],
+          size: const [2, 1],
+          groundEntries: const [
+            {
+              'position': [1, 0],
+              'kind': 'exit_floor'
+            },
+          ],
+        ),
+      ),
+    );
+    expect(
+      missingRole
+          .executeTurn(GameAction('move', {
+            'position': [1, 0],
+            'direction': 'right',
+          }))
+          .accepted,
+      isFalse,
+    );
+  });
+
+  test('custom ground layer controls movement and escape', () {
+    final game = _game(config: {
+      'groundLayer': 'terrain',
+      'escapeRoles': ['escapee'],
+    });
+    final engine = TurnEngine(
+      game,
+      _level(
+        game,
+        'custom_ground_layer',
+        _singleBlockBoard(
+          role: 'escapee',
+          size: const [2, 1],
+          terrainEntries: const [
+            {
+              'position': [0, 0],
+              'kind': 'terrain_floor',
+            },
+            {
+              'position': [1, 0],
+              'kind': 'terrain_exit',
+            },
+          ],
+        ),
+      ),
+    );
+
+    expect(
+      engine
+          .executeTurn(GameAction('move', {
+            'position': [0, 0],
+            'direction': 'right',
+          }))
+          .accepted,
+      isTrue,
+    );
+    expect(
+      engine
+          .executeTurn(GameAction('move', {
+            'position': [1, 0],
+            'direction': 'right',
+          }))
+          .accepted,
+      isTrue,
+    );
+    expect(engine.state.board.multiCellObjects, isEmpty);
   });
 
   test('axis restrictions and valid ground are enforced', () {
