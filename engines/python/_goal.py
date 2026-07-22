@@ -322,21 +322,60 @@ def _count_claimable(board: Any, cfg: dict) -> int:
 
 def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
     """Win when a territory layer is divided completely and into exactly-equal
-    shares among the configured owners (or per requireComplete/requireEqual)."""
+    shares among the configured owners (or per requireComplete/requireEqual).
+
+    When ``requireConnected`` is true, every cell owned by a configured owner
+    must be orthogonally connected to that owner's fixed ``connectionSources``
+    position through cells of the same owner.  This models supply lines without
+    coupling the generic balance goal to any game-specific capital entity.
+    """
     layer = state.board.layers.get(cfg.get("layer"))
     counts = {o: 0 for o in cfg.get("owners", [])}
+    positions = {o: set() for o in counts}
     if layer is not None:
-        for _pos, entity in layer.entries():
+        for pos, entity in layer.entries():
             if entity.kind in counts:
                 counts[entity.kind] += 1
+                positions[entity.kind].add(pos)
     claimable = _count_claimable(state.board, cfg)
     owned = sum(counts.values())
     equal = len(set(counts.values())) == 1
     complete = owned == claimable
-    progress = owned / claimable if claimable else 0.0
+    connected = True
+    connected_owned = owned
+    if cfg.get("requireConnected", False):
+        connected_owned = 0
+        raw_sources = cfg.get("connectionSources", {})
+        for owner, cells in positions.items():
+            raw_source = raw_sources.get(owner)
+            if not isinstance(raw_source, (list, tuple)) or len(raw_source) != 2:
+                connected = False
+                continue
+            source = Pos(int(raw_source[0]), int(raw_source[1]))
+            if source not in cells:
+                connected = False
+                continue
+            reached = {source}
+            frontier = [source]
+            while frontier:
+                current = frontier.pop()
+                for neighbor in (
+                    Pos(current.x + 1, current.y),
+                    Pos(current.x - 1, current.y),
+                    Pos(current.x, current.y + 1),
+                    Pos(current.x, current.y - 1),
+                ):
+                    if neighbor in cells and neighbor not in reached:
+                        reached.add(neighbor)
+                        frontier.append(neighbor)
+            connected_owned += len(reached)
+            if len(reached) != len(cells):
+                connected = False
+    progress_numerator = connected_owned if cfg.get("requireConnected", False) else owned
+    progress = progress_numerator / claimable if claimable else 0.0
     done = owned > 0 and \
            (equal or not cfg.get("requireEqual", True)) and \
-           (complete or not cfg.get("requireComplete", True))
+           (complete or not cfg.get("requireComplete", True)) and connected
     return done, progress
 
 

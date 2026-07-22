@@ -304,6 +304,72 @@ void main() {
       expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
     });
 
+    test('connected balance accepts three supplied regions', () {
+      final game = _makeGame();
+      final state = _makeState(game, const [
+        [0, 0, 'terr_wei'],
+        [1, 0, 'terr_wei'],
+        [2, 0, 'terr_wei'],
+        [0, 1, 'terr_shu'],
+        [1, 1, 'terr_shu'],
+        [2, 1, 'terr_shu'],
+        [0, 2, 'terr_wu'],
+        [1, 2, 'terr_wu'],
+        [2, 2, 'terr_wu'],
+      ]);
+      final goal = GoalDef(
+        id: 'balance_goal',
+        type: 'balance',
+        config: {
+          ..._goal().config,
+          'requireConnected': true,
+          'connectionSources': const {
+            'terr_wei': [0, 0],
+            'terr_shu': [0, 1],
+            'terr_wu': [0, 2],
+          },
+        },
+      );
+
+      final status = _evaluateWith(game, state, goal);
+
+      expect(status.isWon, isTrue);
+      expect(status.progress['balance_goal'], closeTo(1.0, 1e-9));
+    });
+
+    test('connected balance rejects an equal but cut-off region', () {
+      final game = _makeGame();
+      final state = _makeState(game, const [
+        [0, 0, 'terr_wei'],
+        [1, 0, 'terr_wei'],
+        [2, 2, 'terr_wei'],
+        [2, 0, 'terr_shu'],
+        [2, 1, 'terr_shu'],
+        [1, 1, 'terr_shu'],
+        [0, 1, 'terr_wu'],
+        [0, 2, 'terr_wu'],
+        [1, 2, 'terr_wu'],
+      ]);
+      final goal = GoalDef(
+        id: 'balance_goal',
+        type: 'balance',
+        config: {
+          ..._goal().config,
+          'requireConnected': true,
+          'connectionSources': const {
+            'terr_wei': [0, 0],
+            'terr_shu': [2, 0],
+            'terr_wu': [0, 2],
+          },
+        },
+      );
+
+      final status = _evaluateWith(game, state, goal);
+
+      expect(status.isWon, isFalse);
+      expect(status.progress['balance_goal'], closeTo(8 / 9, 1e-9));
+    });
+
     test('omitted claimableKind falls back to layer default (empty)', () {
       // Reuses the 3/3/3 complete-and-equal fixture but OMITS `claimableKind`
       // from the goal config, so `_countClaimable` must resolve the claimable
@@ -446,7 +512,10 @@ void main() {
       ];
 
       for (final (state, goal) in cases) {
-        for (final type in ['balance_unreachable', 'balance_budget_exhausted']) {
+        for (final type in [
+          'balance_unreachable',
+          'balance_budget_exhausted'
+        ]) {
           final status = LoseEvaluator().evaluate(
             <LoseConditionDef>[
               LoseConditionDef.fromJson({
