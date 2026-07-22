@@ -13,6 +13,7 @@ import socket
 import sys
 
 SOCK_NAME = ".play.sock"
+DEFAULT_TIMEOUT_SECONDS = 30.0
 
 
 def main() -> int:
@@ -22,29 +23,45 @@ def main() -> int:
         return 2
 
     sock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), SOCK_NAME)
+    timeout = float(os.environ.get("PLAY_SOCKET_TIMEOUT", DEFAULT_TIMEOUT_SECONDS))
+
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
-        sock.connect(sock_path)
+        with sock:
+            sock.connect(sock_path)
+            sock.settimeout(timeout)
+            sock.sendall((json.dumps(argv) + "\n").encode("utf-8"))
+            chunks = []
+            while not chunks or not chunks[-1].endswith(b"\n"):
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except socket.timeout:
+        # socket.timeout is an alias of TimeoutError (itself an OSError); this
+        # clause must stay ahead of the OSError one below or it never fires.
+        print("The puzzle server did not respond in time. Nothing more can be done.",
+              file=sys.stderr)
+        return 2
     except OSError:
         print("The puzzle server is not running. Nothing more can be done.",
               file=sys.stderr)
         return 2
-
-    with sock:
-        sock.sendall((json.dumps(argv) + "\n").encode("utf-8"))
-        chunks = []
-        while not chunks or not chunks[-1].endswith(b"\n"):
-            chunk = sock.recv(65536)
-            if not chunk:
-                break
-            chunks.append(chunk)
 
     raw = b"".join(chunks).strip()
     if not raw:
         print("No response from the puzzle server.", file=sys.stderr)
         return 2
 
-    payload = json.loads(raw.decode("utf-8"))
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        print("The puzzle server sent a malformed response.", file=sys.stderr)
+        return 2
+    if not isinstance(payload, dict):
+        print("The puzzle server sent a malformed response.", file=sys.stderr)
+        return 2
+
     print(payload.get("text", ""))
     return 3 if payload.get("terminal") else 0
 
