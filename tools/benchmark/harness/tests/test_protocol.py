@@ -51,3 +51,8 @@ def test_requests_are_newline_terminated():
 
 def test_verbs_are_exactly_the_four():
     assert protocol.VERBS == frozenset({"state", "move", "history", "give_up"})
+
+
+def test_non_object_response_rejected():
+    with pytest.raises(protocol.ProtocolError):
+        protocol.decode_response(b"[1,2]\n")

@@ -44,4 +44,6 @@ def decode_response(line: bytes) -> tuple[str, bool]:
         payload = json.loads(line.decode("utf-8"))
     except (ValueError, UnicodeDecodeError) as exc:
         raise ProtocolError(f"malformed response: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise ProtocolError("response must be a JSON object")
     return str(payload.get("text", "")), bool(payload.get("terminal", False))
