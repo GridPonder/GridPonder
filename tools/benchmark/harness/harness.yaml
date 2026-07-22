@@ -1,0 +1,28 @@
+# Harness benchmark configuration.
+#
+# The tier-1 thresholds are the budget dial. Tier 2 dominates total cost
+# (repeats x harnesses x a stronger model), so tightening efficiency_trivial_max
+# — which sends fewer levels to tier 2 — is the main lever.
+#
+# The values below are provisional. Replace them once the first tier-1 sweep
+# produces a real efficiency distribution.
+
+thresholds:
+  # A solve wandering more than this multiple of the gold path is "borderline".
+  efficiency_trivial_max: 1.5
+  # This many rejected moves means the agent fought the schema, not the puzzle.
+  rejected_friction_min: 5
+
+tier1:
+  harness: claude
+  model: haiku
+  repeats: 1
+
+tier2:
+  harnesses: [claude, codex]
+  model: opus
+  repeats: 5
+
+# Concurrent agent processes. Kept low deliberately: on a flat subscription the
+# binding constraint is rate limits, and a wide fan-out only trips them sooner.
+concurrency: 3
