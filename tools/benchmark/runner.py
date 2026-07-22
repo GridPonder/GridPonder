@@ -29,7 +29,6 @@ if str(_REPO_ROOT) not in sys.path:
 from engines.python.loader import load_pack
 from engines.python._turn_engine import TurnEngine
 from engines.python.text_renderer import render as render_board
-from engines.python.text_renderer import render as render_board_text
 from engines.python.observation import build_prompt
 from engines.python.goal_renderer import render_goals
 from engines.python.anon import build_anon_kind_to_label, build_anon_reverse_map
@@ -168,17 +167,17 @@ def main() -> None:
             inv = engine.state.avatar.item if engine.state.avatar.enabled else None
             event = {
                 "event": "state",
-                "board_text": render_board_text(
+                "board_text": render_board(
                     engine.state, game_def,
                     kind_symbol_overrides=kind_symbol_overrides,
                 ),
                 "goals": render_goals(
                     level_def, engine.state, game_def,
                     anonymize=anon,
+                    kind_to_label=kind_symbol_overrides,
                 ),
                 "inventory": str(inv) if inv is not None else "",
                 "moves_this_attempt": engine.state.action_count,
-                "actions_this_attempt": engine.state.action_count,
                 "actions_total": total_now,
                 "attempt": attempt_number,
                 "level_id": level_id,
