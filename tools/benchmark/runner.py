@@ -29,7 +29,9 @@ if str(_REPO_ROOT) not in sys.path:
 from engines.python.loader import load_pack
 from engines.python._turn_engine import TurnEngine
 from engines.python.text_renderer import render as render_board
+from engines.python.text_renderer import render as render_board_text
 from engines.python.observation import build_prompt
+from engines.python.goal_renderer import render_goals
 from engines.python.anon import build_anon_kind_to_label, build_anon_reverse_map
 from engines.python.action_enum import enumerate_actions
 from engines.python.gold_path import gold_path_length
@@ -73,6 +75,14 @@ def main() -> None:
     parser.add_argument("--max-n", type=int, default=None)
     parser.add_argument("--anon", action="store_true", default=False)
     parser.add_argument(
+        "--observation",
+        choices=["full", "harness"],
+        default="full",
+        help="Observation payload: 'full' (prompt + valid_actions, used by "
+             "bench.py) or 'harness' (board-only, no legal-move list, no "
+             "gold-path length — used by the agent-harness benchmark).",
+    )
+    parser.add_argument(
         "--input",
         choices=["text", "image", "text+image"],
         default="text",
@@ -90,6 +100,7 @@ def main() -> None:
     step_size: int = args.step_size
     max_n: int | None = args.max_n
     anon: bool = args.anon
+    observation_mode: str = args.observation
     input_mode: str = args.input
     # Anon mode would defeat itself if we shipped a sprite-rendered board, so
     # silently force text-only when both flags are combined.
@@ -152,6 +163,29 @@ def main() -> None:
 
         if anon:
             current_anon_map = build_anon_reverse_map(valid_actions)
+
+        if observation_mode == "harness":
+            inv = engine.state.avatar.item if engine.state.avatar.enabled else None
+            event = {
+                "event": "state",
+                "board_text": render_board_text(
+                    engine.state, game_def,
+                    kind_symbol_overrides=kind_symbol_overrides,
+                ),
+                "goals": render_goals(
+                    level_def, engine.state, game_def,
+                    anonymize=anon,
+                ),
+                "inventory": str(inv) if inv is not None else "",
+                "moves_this_attempt": engine.state.action_count,
+                "actions_this_attempt": engine.state.action_count,
+                "actions_total": total_now,
+                "attempt": attempt_number,
+                "level_id": level_id,
+                "pack_id": pack_id,
+            }
+            _out(event)
+            return
 
         prompt = build_prompt(
             game_def,
