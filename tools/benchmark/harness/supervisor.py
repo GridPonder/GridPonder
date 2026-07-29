@@ -269,12 +269,18 @@ class Session:
     def result(self, thresholds: dict) -> dict:
         term = self.terminal or {}
         solved = term.get("event") == "won"
+        # An agent that times out, crashes, or simply stops leaves no terminal
+        # event. Fall back to the last state rather than defaulting to zero:
+        # reporting actions_total 0 for a run that made moves would read as a
+        # perfectly efficient failure and skew whatever consumes these numbers.
         run = {
             "pack_id": self.pack_dir.name,
             "level_id": self.level_id,
             "anon": self.anon,
             "solved": solved,
-            "actions_total": term.get("actions_total", 0),
+            "actions_total": term.get(
+                "actions_total", self.state.get("actions_total", 0)
+            ),
             "attempts": term.get("attempts", self.state.get("attempt", 1)),
             "gold_path_length": term.get("gold_path_length", len(self.gold_path)),
             "repeated_states": term.get("repeated_states", 0),

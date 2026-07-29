@@ -229,3 +229,24 @@ def test_malformed_position_does_not_kill_the_run(tmp_path, pack, level):
     assert result["reached_terminal"] is True
     assert result["solved"] is True
     assert result["rejected_schema"] == 1
+
+
+# ── runs that never finish ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("pack,level", [("three_kingdoms", "tk_001"),
+                                        ("pincer", "pc_001")])
+def test_unfinished_run_reports_the_actions_it_took(tmp_path, pack, level):
+    """An agent that stops early must not look like it played nothing.
+
+    Reporting actions_total 0 for a run that moved would read as a perfectly
+    efficient failure, which is the opposite of what happened.
+    """
+    packs_dir = _requires(pack)
+    gold = gold_path(packs_dir, pack, level)
+    partial = gold[:2]
+    result = run_session(tmp_path, packs_dir, pack, level, partial)
+
+    assert result["reached_terminal"] is False
+    assert result["solved"] is False
+    assert result["actions_total"] == len(partial)
+    assert result["efficiency"] == len(partial) / len(gold)
