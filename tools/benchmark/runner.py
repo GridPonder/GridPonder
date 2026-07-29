@@ -31,7 +31,12 @@ from engines.python._turn_engine import TurnEngine
 from engines.python.text_renderer import render as render_board
 from engines.python.observation import build_prompt
 from engines.python.goal_renderer import render_goals
-from engines.python.anon import build_anon_kind_to_label, build_anon_reverse_map
+from engines.python.anon import (
+    build_anon_action_shapes,
+    build_anon_kind_to_label,
+    build_anon_reverse_map,
+    resolve_anon_action,
+)
 from engines.python.action_enum import enumerate_actions
 from engines.python.gold_path import gold_path_length
 
@@ -51,6 +56,49 @@ _MAX_CONSECUTIVE_REJECTIONS = 5
 
 def _out(obj: dict) -> None:
     print(json.dumps(obj), flush=True)
+
+
+def _validate_params(game_def, action_id: str, params: dict) -> str | None:
+    """Check one action's params against game.json. Returns an error, or None.
+
+    Without this the engine receives whatever the model typed. A bad value is
+    either swallowed (avatar_navigation reads an unknown direction as a zero
+    delta, so the turn is "accepted" and burns an action) or fatal
+    (individual_actors calls Pos.from_json, which raises on a non-pair and
+    kills the runner process). Catching it here makes both cases a rejection
+    the orchestrator can count, and keeps engine semantics untouched.
+    """
+    spec = next((a for a in game_def.actions if a["id"] == action_id), None)
+    if spec is None:
+        return f"unknown action {action_id!r}"
+    declared: dict = spec.get("params") or {}
+
+    for name in params:
+        if name not in declared:
+            return f"{action_id} takes no parameter {name!r}"
+    for name, pspec in declared.items():
+        if name not in params:
+            return f"{action_id} requires parameter {name!r}"
+        value = params[name]
+        values = pspec.get("values")
+        ptype = pspec.get("type")
+        if values:
+            if value not in values:
+                return f"{name!r} must be one of {list(values)}, got {value!r}"
+        elif ptype == "position":
+            if (
+                not isinstance(value, (list, tuple))
+                or len(value) != 2
+                or not all(isinstance(c, int) and not isinstance(c, bool) for c in value)
+            ):
+                return f"{name!r} must be an [x, y] pair of integers, got {value!r}"
+        elif ptype == "integer":
+            if not isinstance(value, int) or isinstance(value, bool):
+                return f"{name!r} must be an integer, got {value!r}"
+        elif ptype == "string":
+            if not isinstance(value, str):
+                return f"{name!r} must be a string, got {value!r}"
+    return None
 
 
 def _die(msg: str) -> None:
@@ -142,6 +190,22 @@ def main() -> None:
     memory = ""
     consecutive_rejections = 0
 
+    # Rejections are split because they mean opposite things: a schema
+    # rejection says the agent could not express itself (friction, a docs or
+    # level defect), an illegal one says it expressed itself fine and the board
+    # said no (ordinary probing). See harness/metrics.py.
+    rejected_schema = 0
+    rejected_illegal = 0
+
+    # Harness runs anonymise the action *schema* once, up front. The per-state
+    # build_anon_reverse_map labels used by the prompt benchmark cannot serve
+    # here: they enumerate the currently legal moves, and harness mode exists
+    # to withhold that list.
+    harness_anon = anon and observation_mode == "harness"
+    anon_action_table: dict[str, dict] = {}
+    if harness_anon:
+        _anon_shapes, anon_action_table = build_anon_action_shapes(game_def)
+
     # Repeated-state tracking, scoped per attempt (cycles within an attempt
     # signal "model is stuck looping"). The initial state of each attempt
     # is pre-seeded so a turn that lands back on it counts as a repeat.
@@ -165,6 +229,11 @@ def main() -> None:
 
         if observation_mode == "harness":
             inv = engine.state.avatar.item if engine.state.avatar.enabled else None
+            # The inventory holds a kind id. Emitting it raw would print
+            # "torch" next to a board legend that calls the same kind "H",
+            # handing an anonymous run the very name it is meant to hide.
+            if inv is not None and kind_symbol_overrides:
+                inv = kind_symbol_overrides.get(inv, inv)
             event = {
                 "event": "state",
                 "board_text": render_board(
@@ -261,6 +330,8 @@ def main() -> None:
             "attempts": attempt_number,
             "gold_path_length": gold_path_len,
             "repeated_states": repeated_state_count,
+            "rejected_schema": rejected_schema,
+            "rejected_illegal": rejected_illegal,
         }
 
     def lost_event() -> dict:
@@ -271,7 +342,53 @@ def main() -> None:
             "attempts": attempt_number,
             "gold_path_length": gold_path_len,
             "repeated_states": repeated_state_count,
+            "rejected_schema": rejected_schema,
+            "rejected_illegal": rejected_illegal,
         }
+
+    def reject(action_input: dict, reason: str, detail: str) -> None:
+        """Emit one rejection under its counter. `reason` is schema|illegal."""
+        nonlocal rejected_schema, rejected_illegal, consecutive_rejections
+        nonlocal prev_board_text, prev_inventory
+        if reason == "schema":
+            rejected_schema += 1
+        else:
+            rejected_illegal += 1
+        consecutive_rejections += 1
+        prev_board_text = None
+        prev_inventory = None
+        _out({
+            "event": "rejected",
+            "action": action_input,
+            "reason": reason,
+            "detail": detail,
+        })
+
+    def resolve(action_input: dict) -> tuple[dict | None, str | None, dict | None]:
+        """Turn one submitted action into (real_action, schema_error, params).
+
+        Handles both anonymisation schemes and then validates the parameters
+        against game.json, so nothing malformed reaches the engine.
+        """
+        submitted_id = action_input.get("action")
+        if not isinstance(submitted_id, str):
+            return None, f'"action" must be a string, got {submitted_id!r}', None
+        if harness_anon:
+            real = resolve_anon_action(anon_action_table, action_input)
+            if real is None:
+                return None, f"unknown anonymous action or parameter: {action_input!r}", None
+        elif anon:
+            real = current_anon_map.get(submitted_id)
+            if real is None:
+                return None, f"unknown action label {submitted_id!r}", None
+        else:
+            real = {k: v for k, v in action_input.items() if k != "memory"}
+
+        params = {k: v for k, v in real.items() if k != "action"}
+        err = _validate_params(game_def, real["action"], params)
+        if err is not None:
+            return None, err, None
+        return real, None, params
 
     # ── Initial state ─────────────────────────────────────────────────────────
     emit_state()
@@ -315,32 +432,21 @@ def main() -> None:
             )
             prev_inventory = engine.state.avatar.item if engine.state.avatar.enabled else None
 
-            # Anon mode: reverse-map label to real action params.
-            if anon:
-                real = current_anon_map.get(action_id)
-                if real is None:
-                    prev_board_text = None
-                    prev_inventory = None
-                    consecutive_rejections += 1
-                    _out({"event": "rejected", "action": inp})
-                    if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
-                        _out(lost_event())
-                        break
-                    emit_state()
-                    continue
-                game_action_id = real["action"]
-                game_params = {k: v for k, v in real.items() if k != "action"}
-            else:
-                game_action_id = action_id
-                game_params = {k: v for k, v in inp.items() if k not in ("action", "memory")}
+            real, schema_error, game_params = resolve(
+                {k: v for k, v in inp.items() if k != "memory"}
+            )
+            if schema_error is not None:
+                reject(inp, "schema", schema_error)
+                if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
+                    _out(lost_event())
+                    break
+                emit_state()
+                continue
 
-            result = engine.execute_turn(game_action_id, game_params)
+            result = engine.execute_turn(real["action"], game_params)
 
             if not result.accepted:
-                prev_board_text = None
-                prev_inventory = None
-                consecutive_rejections += 1
-                _out({"event": "rejected", "action": inp})
+                reject(inp, "illegal", f"{real['action']} is not legal in this state")
                 if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
                     _out(lost_event())
                     break
@@ -348,7 +454,7 @@ def main() -> None:
                 continue
 
             consecutive_rejections = 0
-            last_action = {k: v for k, v in inp.items() if k != "memory"} if not anon else real
+            last_action = real
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
             record_state()
@@ -405,39 +511,27 @@ def main() -> None:
             )
             prev_inventory = engine.state.avatar.item if engine.state.avatar.enabled else None
 
-            if anon:
-                real = current_anon_map.get(action_id)
-                if real is None:
-                    prev_board_text = None
-                    prev_inventory = None
-                    consecutive_rejections += 1
-                    _out({"event": "rejected", "action": action_input})
-                    if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
-                        _out(lost_event())
-                        outer_break = True
-                    break
-                game_action_id = real["action"]
-                game_params = {k: v for k, v in real.items() if k != "action"}
-            else:
-                game_action_id = action_id
-                game_params = {
-                    k: v for k, v in action_input.items() if k not in ("action", "memory")
-                }
+            real, schema_error, game_params = resolve(
+                {k: v for k, v in action_input.items() if k != "memory"}
+            )
+            if schema_error is not None:
+                reject(action_input, "schema", schema_error)
+                if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
+                    _out(lost_event())
+                    outer_break = True
+                break
 
-            result = engine.execute_turn(game_action_id, game_params)
+            result = engine.execute_turn(real["action"], game_params)
 
             if not result.accepted:
-                prev_board_text = None
-                prev_inventory = None
-                consecutive_rejections += 1
-                _out({"event": "rejected", "action": action_input})
+                reject(action_input, "illegal", f"{real['action']} is not legal in this state")
                 if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
                     _out(lost_event())
                     outer_break = True
                 break
 
             consecutive_rejections = 0
-            last_action = action_input if not anon else real
+            last_action = real
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
             record_state()

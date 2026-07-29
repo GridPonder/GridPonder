@@ -5,7 +5,7 @@ T = {"efficiency_trivial_max": 1.5, "rejected_friction_min": 5}
 
 def _run(**kw) -> dict:
     base = {"solved": True, "actions_total": 10, "gold_path_length": 10,
-            "attempts": 1, "rejected_count": 0}
+            "attempts": 1, "rejected_schema": 0, "rejected_illegal": 0}
     base.update(kw)
     return base
 
@@ -69,15 +69,32 @@ def test_clean_failure_is_hard():
     assert metrics.classify(_run(solved=False), T) == "hard"
 
 
-def test_failure_with_many_rejections_is_friction():
-    assert metrics.classify(_run(solved=False, rejected_count=5), T) == "friction"
+def test_failure_with_many_schema_rejections_is_friction():
+    assert metrics.classify(_run(solved=False, rejected_schema=5), T) == "friction"
 
 
 def test_friction_beats_hard_regardless_of_attempts():
-    run = _run(solved=False, rejected_count=99, attempts=4)
+    run = _run(solved=False, rejected_schema=99, attempts=4)
     assert metrics.classify(run, T) == "friction"
 
 
-def test_successful_run_with_many_rejections_is_not_trivial():
-    """Rejections mean the agent was guessing at the schema — not a clean solve."""
-    assert metrics.classify(_run(rejected_count=5), T) == "friction"
+def test_successful_run_with_many_schema_rejections_is_friction():
+    """Malformed JSON means the agent was guessing at the schema, solve or not."""
+    assert metrics.classify(_run(rejected_schema=5), T) == "friction"
+
+
+# ── the distinction comment 3 asked for ───────────────────────────────────
+
+def test_illegal_moves_never_make_a_solved_run_friction():
+    """Probing walls is how you read a board. It is not a schema defect."""
+    assert metrics.classify(_run(rejected_illegal=99), T) == "trivial"
+
+
+def test_illegal_moves_do_not_hide_a_genuine_failure():
+    assert metrics.classify(_run(solved=False, rejected_illegal=99), T) == "hard"
+
+
+def test_schema_and_illegal_counters_are_independent():
+    """Below the schema threshold, illegal count cannot push a run into friction."""
+    run = _run(solved=False, rejected_schema=4, rejected_illegal=50)
+    assert metrics.classify(run, T) == "hard"

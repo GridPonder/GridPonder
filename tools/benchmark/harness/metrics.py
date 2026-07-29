@@ -10,6 +10,21 @@ lost", but they mean opposite things:
   search   — every move legal, but the agent still could not find the door.
              That is genuine insight-gating, i.e. real difficulty.
 
+Only *schema* rejections separate those two. The runner reports rejections
+under two counters and they mean opposite things:
+
+  rejected_schema  — the JSON did not name a real action or did not match that
+                     action's declared parameters. The agent could not say what
+                     it meant. That is friction.
+  rejected_illegal — a well-formed action the engine refused in this state
+                     (walking into a wall, tapping an unreachable cell). That is
+                     ordinary probing, and a puzzle that invites it is doing its
+                     job. It is reported but never classifies a run.
+
+Collapsing the two would misread both directions at once: a pincer agent
+probing walls would look like a docs defect, and a three_kingdoms agent whose
+malformed JSON is silently swallowed would look clean.
+
 Pure functions. No I/O.
 """
 from __future__ import annotations
@@ -40,8 +55,13 @@ def efficiency(actions_total: int, gold_path_length: int) -> float | None:
 
 
 def classify(run: dict[str, Any], thresholds: dict[str, Any]) -> str:
-    """Sort one tier-1 run into trivial | borderline | hard | friction."""
-    if run["rejected_count"] >= thresholds["rejected_friction_min"]:
+    """Sort one tier-1 run into trivial | borderline | hard | friction.
+
+    Reads `rejected_schema` only. `rejected_illegal` is carried on the run for
+    reporting but deliberately does not feed the friction test — a solved run
+    is never friction just because the agent probed the geometry on its way.
+    """
+    if run["rejected_schema"] >= thresholds["rejected_friction_min"]:
         return "friction"
     if not run["solved"]:
         return "hard"

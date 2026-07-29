@@ -6,11 +6,16 @@
 #
 # The values below are provisional. Replace them once the first tier-1 sweep
 # produces a real efficiency distribution.
+#
+# `thresholds` is the only block supervisor.py reads. tier1/tier2/concurrency
+# describe the sweep that calls it, which does not exist yet.
 
 thresholds:
   # A solve wandering more than this multiple of the gold path is "borderline".
   efficiency_trivial_max: 1.5
-  # This many rejected moves means the agent fought the schema, not the puzzle.
+  # This many *schema* rejections means the agent fought the JSON, not the
+  # puzzle. Illegal-but-well-formed moves are counted separately and never
+  # classify a run: probing walls is how you read an unfamiliar board.
   rejected_friction_min: 5
 
 tier1:
