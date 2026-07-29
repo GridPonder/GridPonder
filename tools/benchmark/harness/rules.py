@@ -6,10 +6,17 @@ from the pack and quietly make packs incomparable.
 Emits action SHAPES (id + parameter names/types), not the set of
 currently-legal action instances, and never anything about the intended
 solution. Handing an agent the legal-move list would replace search with
-menu-filtering, and would make rejected_count meaningless; handing it the
-gold path or its length would make the run meaningless.
+menu-filtering, and would make the rejection counters meaningless; handing it
+the gold path or its length would make the run meaningless.
+
+Anonymous runs pass an anonymised shape list via `actions=` (see
+`engines.python.anon.build_anon_action_shapes`). Those shapes are derived from
+game.json alone, so they stay constant for the whole run and still say nothing
+about which actions are legal right now.
 """
 from __future__ import annotations
+
+import json
 
 _HEADER = """# The Puzzle{title_suffix}
 
@@ -28,8 +35,10 @@ Run these commands. They are the only way to interact with the puzzle.
     ./play history         List the actions you have taken this attempt.
     ./play give_up         Abandon this attempt and restart from the initial board.
 
-An illegal move is rejected and the board does not change. A rejected move
-still costs you nothing but a turn, so think before moving.
+A move that is not a legal action right now is rejected: the board does not
+change and the move does not count against your action budget. A move whose
+JSON does not match the shapes below is rejected the same way. Five rejections
+in a row end the run, so read the reply before trying again.
 
 There is a limit on total actions. When you reach it the run ends.
 
@@ -79,15 +88,24 @@ def _describe_param(name: str, spec: dict) -> str:
     return f"- `{name}` — {gloss}"
 
 
+def _example_json(action: dict) -> str:
+    """The example call for one action, as real JSON.
+
+    json.dumps, not str(dict) with quotes swapped: str() emits Python repr, so
+    a value containing an apostrophe ("O'Reilly") or a Python literal (True,
+    None) produces something the agent cannot paste back.
+    """
+    example = {"action": action["id"]}
+    for name, spec in (action.get("params") or {}).items():
+        example[name] = _example_value(spec)
+    return json.dumps(example)
+
+
 def _action_shape(action: dict) -> str:
     action_id = action["id"]
     params: dict = action.get("params") or {}
 
-    example = {"action": action_id}
-    for name, spec in params.items():
-        example[name] = _example_value(spec)
-
-    lines = [f"### `{action_id}`", "", f"Shape: `{example}`".replace("'", '"')]
+    lines = [f"### `{action_id}`", "", f"Shape: `{_example_json(action)}`"]
     if params:
         lines.append("")
         lines.append("Parameters:")
@@ -100,34 +118,44 @@ def _action_shape(action: dict) -> str:
     return "\n".join(lines)
 
 
-def build_rules(game_def, level_def: dict, *, goals_text: str) -> str:
+def build_rules(
+    game_def,
+    level_def: dict,
+    *,
+    goals_text: str,
+    actions: list[dict] | None = None,
+    anonymized: bool = False,
+) -> str:
     """Return the full RULES.md body for one level.
 
     Pure function: no file I/O, no printing. Uses only pack-wide, static
     information (action shapes, the game's general mechanics blurb, the
     level title) plus the caller-supplied goal text — never board state,
     never the level's gold path or hints.
+
+    `actions` overrides the shape list, which is how anonymous runs document
+    their aliased ids; `anonymized` also drops the game's mechanics blurb,
+    since that prose names real entities.
     """
-    actions: list[dict] = game_def.actions
+    if actions is None:
+        actions = game_def.actions
 
     level_title = level_def.get("title") if isinstance(level_def, dict) else None
-    title_suffix = f": {level_title}" if level_title else ""
+    title_suffix = "" if anonymized else (f": {level_title}" if level_title else "")
 
-    mechanics = ""
-    description = getattr(game_def, "description", "") or ""
-    if description:
-        mechanics = f"\n## Mechanics\n\n{description}\n"
-
-    if actions:
-        example_action = actions[0]
-        example_params = {
-            name: _example_value(spec)
-            for name, spec in (example_action.get("params") or {}).items()
-        }
-        example = {"action": example_action["id"], **example_params}
-        example_json = str(example).replace("'", '"')
+    if anonymized:
+        # Same contract as observation.build_prompt's anonymous branch: the
+        # blurb names entities, so an anonymous run is told to discover the
+        # rules instead of being handed them.
+        mechanics = (
+            "\n## Mechanics\n\n2D grid game. Entities and rules unknown — "
+            "discover by observation and experimentation.\n"
+        )
     else:
-        example_json = '{"action": "..."}'
+        description = getattr(game_def, "description", "") or ""
+        mechanics = f"\n## Mechanics\n\n{description}\n" if description else ""
+
+    example_json = _example_json(actions[0]) if actions else '{"action": "..."}'
 
     action_blocks = "\n".join(_action_shape(action) for action in actions)
 
