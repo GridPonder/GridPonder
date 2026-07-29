@@ -86,7 +86,17 @@ class PhaseRunner {
     }
 
     // Phase 7: Goal evaluation
-    state.actionCount++;
+    //
+    // A turn that only *selects* an actor changes no board state, so it is not
+    // a move: it must not be charged against `max_actions`, nor shown as one in
+    // the UI, which reads this counter. Games that tap to switch between actors
+    // would otherwise pay for the tap as well as the step. `turnCount` still
+    // advances — it is the pipeline's tick, not a move.
+    final selectionOnly = allEvents.isNotEmpty &&
+        allEvents.every((e) => e.type == 'actor_selected');
+    if (!selectionOnly) {
+      state.actionCount++;
+    }
     state.turnCount++;
 
     // Check goals before lose conditions: winning on the last allowed move counts as a win.
@@ -178,12 +188,15 @@ class PhaseRunner {
         if (pos != null && from != null && kind != null) {
           final fromPos = from is Position ? from : Position.fromJson(from);
           final layer = event.payload['layer'] as String? ?? 'objects';
-          final params = (event.payload['params'] as Map?)
-                  ?.cast<String, dynamic>() ??
-              const <String, dynamic>{};
+          final params =
+              (event.payload['params'] as Map?)?.cast<String, dynamic>() ??
+                  const <String, dynamic>{};
           final dur = _motionDurationMs(kind, 'moveDurationMs', 130);
           out.add(AnimationStep.entityMove(
-            fromPos, pos, kind, layer,
+            fromPos,
+            pos,
+            kind,
+            layer,
             durationMs: dur,
             stage: motionStage,
             params: params,
@@ -209,7 +222,12 @@ class PhaseRunner {
           };
           final dur = _motionDurationMs(kind, 'mergeDurationMs', 200);
           out.add(AnimationStep.entityMerge(
-            pos, sources, sourceKinds, sourceParams, kind, resultParams,
+            pos,
+            sources,
+            sourceKinds,
+            sourceParams,
+            kind,
+            resultParams,
             'objects',
             durationMs: dur,
             stage: mergeStage,

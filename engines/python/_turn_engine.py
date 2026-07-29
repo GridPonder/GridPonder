@@ -162,7 +162,16 @@ class TurnEngine:
             all_events.extend(events)
 
         # Phase 7: Goal evaluation
-        state.action_count += 1
+        #
+        # A turn that only *selects* an actor changes no board state, so it is
+        # not a move: it must not be charged against `max_actions`, nor shown
+        # as one in the UI, which reads this counter. Games that tap to switch
+        # between actors would otherwise pay for the tap as well as the step.
+        # `turn_count` still advances — it is the pipeline's tick, not a move.
+        selection_only = bool(all_events) and all(
+            e["type"] == "actor_selected" for e in all_events)
+        if not selection_only:
+            state.action_count += 1
         state.turn_count += 1
 
         goals = self._level.get("goals", []) or []
