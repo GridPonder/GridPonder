@@ -15,6 +15,7 @@ from ._base import GameSystem
 from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
 from .coupled_actors import CoupledActorsSystem
+from .flank_capture import FlankCaptureSystem
 from .flood_fill import FloodFillSystem
 from .follower_npcs import FollowerNpcsSystem
 from .ice_slide import IceSlideSystem
@@ -48,6 +49,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "sided_box": lambda sys_id, _: SidedBoxSystem(sys_id),
     "sliding_blocks": lambda sys_id, config: SlidingBlocksSystem(sys_id, config),
     "line_of_sight": lambda sys_id, config: LineOfSightSystem(sys_id, config),
+    "flank_capture": lambda sys_id, config: FlankCaptureSystem(sys_id, config),
     "follower_npcs": lambda sys_id, _: FollowerNpcsSystem(sys_id),
     "coupled_actors": lambda sys_id, _: CoupledActorsSystem(sys_id),
     "individual_actors": lambda sys_id, _: IndividualActorsSystem(sys_id),

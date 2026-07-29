@@ -3,6 +3,7 @@ import '../models/game_definition.dart';
 import 'anchor_point_system.dart';
 import 'avatar_navigation_system.dart';
 import 'coupled_actors_system.dart';
+import 'flank_capture_system.dart';
 import 'flood_fill_system.dart';
 import 'ice_slide_system.dart';
 import 'individual_actors_system.dart';
@@ -19,7 +20,8 @@ import 'slide_merge_system.dart';
 import 'tile_teleport_system.dart';
 
 /// Creates a GameSystem instance from a SystemDef.
-typedef SystemFactory = GameSystem Function(String id, Map<String, dynamic> config);
+typedef SystemFactory = GameSystem Function(
+    String id, Map<String, dynamic> config);
 
 class SystemRegistry {
   static final Map<String, SystemFactory> _factories = {
@@ -38,6 +40,7 @@ class SystemRegistry {
     'sliding_blocks': (id, config) =>
         SlidingBlocksSystem(id: id, config: config),
     'line_of_sight': (id, config) => LineOfSightSystem(id: id, config: config),
+    'flank_capture': (id, config) => FlankCaptureSystem(id: id, config: config),
     'flood_fill': (id, _) => FloodFillSystem(id: id),
     'tile_teleport': (id, _) => TileTeleportSystem(id: id),
     'ice_slide': (id, _) => IceSlideSystem(id: id),

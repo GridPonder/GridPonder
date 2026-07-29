@@ -607,6 +607,85 @@ Shared by `coupled_actors` and `individual_actors` — both resolve claims ident
 
 ---
 
+### 2.15 `flank_capture`
+
+**Purpose:** Reversi/Othello-style bracket capture, applied after an actor
+moves. A straight run of one piece kind that ends up bracketed between two of
+the opposing kind (or a terminating wall) is flipped to the bracketing kind.
+Two `pairs` entries make the rule cut both ways: an aggressor bracketing a run
+of its victim **captures** it, and a run of that same aggressor bracketed by the
+victim is **flipped back** — the piece that just moved included. The system
+transforms the board directly; it does not require rules.
+
+**Phase:** `cascade_resolution`, event-triggered (like [`line_of_sight`](#213-line_of_sight)).
+
+**Events emitted:** `cell_transformed` (one per flipped cell).
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pieceLayer` | string | `"pieces"` | Layer holding the flippable pieces. |
+| `pairs` | object | — | Aggressor kind → victim kind. `{ "alien": "human", "human": "alien" }` makes aliens capture human runs and human-bracketed alien runs flip back. |
+| `order` | array of strings | keys of `pairs` | Order the aggressor passes run in. With `["alien","human"]` the possess pass runs before the expose pass. |
+| `directions` | array of strings | all 4 cardinals | Which axes are scanned: any of `left`/`right` scans the **row** through the moved cell; any of `up`/`down` scans the **column**. |
+| `wallTerminates` | boolean | `true` | Whether a wall may serve as a bracket terminal. |
+| `wallLayer` | string | `"ground"` | Layer checked for wall terminals. |
+| `wallTag` | string | `"solid"` | Tag that marks a wall terminal on `wallLayer`. |
+| `triggerEvents` | array of strings | `["actor_moved"]` | Events whose `position` (the mover's destination) anchors a capture pass. |
+
+**Behavior (per move):**
+1. Ignore the cascade pass unless one of its pending events matches
+   `triggerEvents`. Collect the destination cell **B** of each matching event.
+2. Take a **single snapshot** of `pieceLayer`. Every pass below reads this
+   pre-flip snapshot.
+3. For each aggressor `K` in `order` (victim `V = pairs[K]`), and each `B`, scan
+   the full row and/or column through `B` (per `directions`). On each line, find
+   every **maximal run of `V`** that is
+   - **bracketed** on both ends by a `K` piece (snapshot) or, when
+     `wallTerminates`, a wall — the **board edge is never a terminal**; and
+   - **anchored to the mover**: `B` lies inside the run, or `B` is one of the
+     two bracketing terminals.
+
+   Flip every cell of such a run to `K` and emit `cell_transformed`.
+4. Because all passes read the one snapshot, a cell never flips twice per move
+   and the passes never observe each other's fresh cells. In particular a victim
+   captured this move still counts as a terminal for a later pass — the elegant,
+   deterministic "single snapshot, possess-then-expose" rule; a solver must
+   mirror it bit-for-bit.
+
+Anchoring keeps captures tied to the move that caused them: a run sitting
+between two walls is not silently flipped the first time an unrelated piece
+happens onto its row. The mover is automatically a **terminal** in the capture
+pass and a **member of the run** in the flip-back pass, so both directions fall
+out of the same rule.
+
+Example config:
+```json
+{
+  "id": "capture",
+  "type": "flank_capture",
+  "config": {
+    "pieceLayer": "pieces",
+    "pairs": { "alien": "human", "human": "alien" },
+    "order": ["alien", "human"],
+    "wallLayer": "ground",
+    "wallTag": "solid"
+  }
+}
+```
+
+Pair with [`individual_actors`](#212-individual_actors) or
+[`coupled_actors`](#211-coupled_actors) (whose moves emit `actor_moved`) and an
+[`all_cleared`](03_levels.md#all_cleared) goal on the victim kind for a
+"convert every opponent" win.
+
+**Reuse:** Any game with two opposing piece kinds that flip on a straight-line
+bracket — Reversi/Othello puzzles, contagion-by-flanking, tug-of-war captures —
+uses it by naming its own `pairs` and `pieceLayer`.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -615,6 +694,7 @@ Shared by `coupled_actors` and `individual_actors` — both resolve claims ident
 | Push Objects | `push_objects` | `movement_resolution` | (automatic on move into pushable) |
 | Sliding Blocks | `sliding_blocks` | `action_resolution` | `move(position, direction)` |
 | Line of Sight | `line_of_sight` | `cascade_resolution` | event-triggered detection |
+| Flank Capture | `flank_capture` | `cascade_resolution` | event-triggered bracket capture |
 | Portals | `portals` | `movement_resolution` | (automatic on portal entry) |
 | Slide Merge | `slide_merge` | `action_resolution` | `move` |
 | Queued Emitters | `queued_emitters` | `cascade_resolution` | (event-triggered) |
