@@ -655,6 +655,21 @@ def test_a_silent_move_is_not_given_someone_elses_reasons(tmp_path):
     assert summary["coverage"] == {"calls": 2, "explained": 1, "ratio": 0.5}
 
 
+def test_wall_clock_falls_back_to_the_sessions_own_timing():
+    """Only a sweep records a clock for the whole matrix.
+
+    A report built from one supervisor result — the usual way a single level
+    gets looked at — has no such field, and reading the absent one printed a
+    confident "0s" beside a run that took twenty minutes.
+    """
+    from tools.benchmark.harness.report import _wall_seconds
+
+    assert _wall_seconds({"wall_seconds": 900}, [{"wall_seconds": 100}]) == 900
+    assert _wall_seconds({}, [{"wall_seconds": 1270.5}]) == 1270.5
+    assert _wall_seconds({"wall_seconds": 0}, [{"wall_seconds": 1270.5}]) == 1270.5
+    assert _wall_seconds({}, []) == 0
+
+
 def test_a_timed_out_agent_still_leaves_its_reasoning(tmp_path):
     """subprocess.run discards what it captured when it kills a child.
 

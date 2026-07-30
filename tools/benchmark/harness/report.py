@@ -305,6 +305,22 @@ def _kv_table(pairs: list[tuple[str, str]]) -> Table:
     return table
 
 
+def _wall_seconds(meta: dict, runs: list[dict]) -> float:
+    """How long this took, from the sweep's clock or the sessions' own.
+
+    Only sweep.py records a wall clock for the whole matrix; a report built
+    from a single supervisor result — the usual way one level gets looked at —
+    has no such field, and reading the absent one rendered a confident "0s"
+    next to a run that took twenty minutes. Summing the sessions is the honest
+    fallback: it is never larger than the truth, and it is never zero for a run
+    that happened.
+    """
+    total = meta.get("wall_seconds")
+    if isinstance(total, (int, float)) and total > 0:
+        return float(total)
+    return sum(float(r.get("wall_seconds") or 0) for r in runs)
+
+
 def _truncate(text: str, limit: int) -> str:
     text = " ".join((text or "").split())
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
@@ -406,7 +422,7 @@ def build(payload: dict, out_path: Path) -> Path:
         ("Total losses", str(sum(r.get("losses", 0) or 0 for r in runs))),
         ("Attempts allowed per run", str(meta.get("max_attempts", "—"))),
         ("Isolation", isolation_mode),
-        ("Wall clock", f"{meta.get('wall_seconds', 0):.0f}s"),
+        ("Wall clock", f"{_wall_seconds(meta, runs):.0f}s"),
         ("Cost", f"${total_cost:.4f}" if total_cost else "—"),
     ]))
     story.append(Spacer(1, 6 * mm))
@@ -710,7 +726,7 @@ def build_html(payload: dict, out_path: Path) -> Path:
         ("Total losses", str(sum(r.get("losses", 0) or 0 for r in runs))),
         ("Attempts allowed", str(meta.get("max_attempts", "—"))),
         ("Isolation", isolation_mode),
-        ("Wall clock", f"{meta.get('wall_seconds', 0):.0f}s"),
+        ("Wall clock", f"{_wall_seconds(meta, runs):.0f}s"),
         ("Cost", f"${total_cost:.4f}" if total_cost else "—"),
     ]
     parts = [
