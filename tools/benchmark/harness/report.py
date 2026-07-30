@@ -70,6 +70,18 @@ TIER_HEX = {k: "#" + v.hexval()[2:] for k, v in TIER_COLOUR.items()}
 
 _OUTCOME_HEX = {"lost": "#b91c1c", "solved": "#15803d", "ended": "#6b7280"}
 
+# Said plainly, because the number reads like an invoice and is not one. The
+# agent CLI derives it from its own token counts at published API prices; a run
+# on a subscription login is metered against rate limits and bills nothing at
+# all. It is still the right figure for comparing runs and for forecasting what
+# a sweep would cost on an API key — it is simply not money already spent.
+_COST_NOTE = (
+    "Token cost is computed by the agent CLI from its token counts at "
+    "published API prices. It is what this run would cost on an API key, not "
+    "necessarily what it was billed: a run on a subscription login is metered "
+    "against rate limits instead."
+)
+
 
 def attempt_outcomes(detail: dict) -> list[str]:
     """What actually became of each attempt.
@@ -423,7 +435,7 @@ def build(payload: dict, out_path: Path) -> Path:
         ("Attempts allowed per run", str(meta.get("max_attempts", "—"))),
         ("Isolation", isolation_mode),
         ("Wall clock", f"{_wall_seconds(meta, runs):.0f}s"),
-        ("Cost", f"${total_cost:.4f}" if total_cost else "—"),
+        ("Token cost (list price)", f"${total_cost:.4f}" if total_cost else "—"),
     ]))
     story.append(Spacer(1, 6 * mm))
 
@@ -433,6 +445,10 @@ def build(payload: dict, out_path: Path) -> Path:
             "The sweep ran without filesystem confinement, so the agent could "
             "read the pack and its gold path directly. Re-run with isolation "
             "before quoting any of this.", st["body"]))
+        story.append(Spacer(1, 5 * mm))
+
+    if total_cost:
+        story.append(Paragraph(_COST_NOTE, st["small"]))
         story.append(Spacer(1, 5 * mm))
 
     story.append(Paragraph("How to read this", st["h2"]))
@@ -727,7 +743,7 @@ def build_html(payload: dict, out_path: Path) -> Path:
         ("Attempts allowed", str(meta.get("max_attempts", "—"))),
         ("Isolation", isolation_mode),
         ("Wall clock", f"{_wall_seconds(meta, runs):.0f}s"),
-        ("Cost", f"${total_cost:.4f}" if total_cost else "—"),
+        ("Token cost (list price)", f"${total_cost:.4f}" if total_cost else "—"),
     ]
     parts = [
         "<main>",
@@ -745,6 +761,9 @@ def build_html(payload: dict, out_path: Path) -> Path:
             '<div class="warn"><b>These numbers are not verified.</b> The sweep '
             "ran without filesystem confinement, so the agent could read the "
             "pack and its gold path directly.</div>")
+
+    if total_cost:
+        parts.append(f'<p class="sub">{html.escape(_COST_NOTE)}</p>')
 
     parts.append("<h2>How to read this</h2><ul class=\"legend\">")
     for tier, meaning in TIER_MEANING.items():

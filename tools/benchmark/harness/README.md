@@ -203,6 +203,13 @@ ends up measuring its own rules text.
 Efficiency is averaged over solved runs only. Including failures would fold in
 runs that stopped at the action budget and make an unsolved level look cheap.
 
+**Token cost is not spend.** The agent CLI derives it from its own token counts
+at published API prices — the figure reproduces to the cent from `usage`, cache
+reads and all. A run on a subscription login is metered against rate limits and
+bills nothing, so the number is a forecast of what a sweep would cost on an API
+key, and a sound basis for comparing runs, but never a receipt. It is labelled
+"Token cost (list price)" for that reason.
+
 ## Known gaps
 
 - `RULES.md` lists every action in `game.json`, including ones no enabled system

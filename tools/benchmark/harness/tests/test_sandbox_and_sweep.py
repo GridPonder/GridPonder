@@ -670,6 +670,25 @@ def test_wall_clock_falls_back_to_the_sessions_own_timing():
     assert _wall_seconds({}, []) == 0
 
 
+def test_cost_is_labelled_as_list_price_not_as_spend():
+    """The figure reads like an invoice and is not one.
+
+    The CLI derives it from its own token counts at published API prices, so a
+    run on a subscription login reports dollars it was never billed. Useful for
+    comparing runs and forecasting an API sweep; misleading unlabelled.
+    """
+    from tools.benchmark.harness import report
+
+    # The note has to make both claims: where the number comes from, and that
+    # it may never have been charged. Either alone still reads as an invoice.
+    assert "token counts" in report._COST_NOTE
+    assert "subscription" in report._COST_NOTE
+    source = Path(report.__file__).read_text()
+    # Both renderers, or the PDF quietly keeps the old claim.
+    assert source.count('("Token cost (list price)"') == 2
+    assert '("Cost", f"${total_cost' not in source
+
+
 def test_a_timed_out_agent_still_leaves_its_reasoning(tmp_path):
     """subprocess.run discards what it captured when it kills a child.
 
