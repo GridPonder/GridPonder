@@ -51,7 +51,14 @@ def _get_renderer():
     return _render_board_png
 
 _PACKS_DIR = _REPO_ROOT / "packs"
-_MAX_CONSECUTIVE_REJECTIONS = 5
+# Two guards, because the two rejection kinds mean opposite things. Five
+# unparseable payloads in a row says the agent cannot express itself and
+# more turns will not help. Five *illegal* moves in a row says nothing of
+# the sort: on a pack that makes you select a piece before moving it,
+# probing for the selectable cell is how the board is read, and killing
+# the run there ends it before the agent has played at all.
+_MAX_CONSECUTIVE_SCHEMA = 5
+_MAX_CONSECUTIVE_ILLEGAL = 25
 
 
 def _out(obj: dict) -> None:
@@ -106,6 +113,23 @@ def _die(msg: str) -> None:
     sys.exit(1)
 
 
+def _level_action_cap(level_def: dict) -> int | None:
+    """The action budget the level itself declares, if it declares one.
+
+    A `max_actions` lose condition is the number a human plays against, so it is
+    the only per-attempt cap with meaning outside the harness. The multiplier
+    caps are a harness convention layered on top, and where the two disagree the
+    engine wins anyway — it ends the attempt without consulting us.
+    """
+    for condition in level_def.get("loseConditions") or []:
+        if condition.get("type") != "max_actions":
+            continue
+        limit = (condition.get("config") or {}).get("limit")
+        if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0:
+            return limit
+    return None
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Python GridPonder benchmark runner")
     parser.add_argument("--pack", "-p", required=True, help="Pack ID")
@@ -113,6 +137,29 @@ def main() -> None:
     parser.add_argument("--packs-dir", default=None, help="Absolute path to packs/ directory")
     parser.add_argument("--attempt-multiplier", type=int, default=2)
     parser.add_argument("--total-multiplier", type=int, default=3)
+    parser.add_argument(
+        "--max-attempts",
+        type=int,
+        default=1,
+        help="How many attempts the agent gets before the run ends. At the "
+             "default of 1 a loss ends the run, which is the historical "
+             "behaviour. Above 1 a lost attempt resets the board and costs "
+             "one attempt instead, so a run can report how many times the "
+             "agent actually lost rather than just whether it failed. The "
+             "total action budget still applies across all attempts.",
+    )
+    parser.add_argument(
+        "--full-attempts",
+        action="store_true",
+        default=False,
+        help="Give every attempt the level's own action budget, and make the "
+             "run's total the sum of them. Without this the total is a "
+             "multiple of the gold path and is *shared*, so attempt 2 inherits "
+             "whatever attempt 1 left behind and a later attempt can be cut "
+             "off mid-solve — which measures budget arithmetic rather than the "
+             "puzzle. Levels that declare no max_actions keep the multiplier "
+             "cap as their per-attempt budget.",
+    )
     parser.add_argument(
         "--mode",
         choices=["single", "fixed-n", "flex-n", "full"],
@@ -143,6 +190,7 @@ def main() -> None:
     packs_dir = Path(args.packs_dir) if args.packs_dir else _PACKS_DIR
     attempt_mul: int = args.attempt_multiplier
     total_mul: int = args.total_multiplier
+    max_attempts: int = max(1, args.max_attempts)
     mode: str = args.mode
     step_size: int = args.step_size
     max_n: int | None = args.max_n
@@ -176,6 +224,9 @@ def main() -> None:
     limit_total = (
         total_mul * gold_path_len if gold_path_len > 0 else max(10, min(total_mul * 10, 100))
     )
+    if args.full_attempts:
+        limit_per_attempt = _level_action_cap(level_def) or limit_per_attempt
+        limit_total = limit_per_attempt * max_attempts
 
     # Anon mode: build stable kind→label map for the whole run.
     kind_symbol_overrides: dict[str, str] | None = (
@@ -187,8 +238,12 @@ def main() -> None:
     attempt_number = 1
     total_game_actions = 0
     give_up_count = 0
+    # Attempts the agent lost outright, as opposed to abandoning or running
+    # out of room in. Only meaningful when max_attempts > 1.
+    losses = 0
     memory = ""
-    consecutive_rejections = 0
+    consecutive_schema = 0
+    consecutive_illegal = 0
 
     # Rejections are split because they mean opposite things: a schema
     # rejection says the agent could not express itself (friction, a docs or
@@ -322,39 +377,52 @@ def main() -> None:
             repeated_state_count += 1
         seen_states.add(key)
 
-    def won_event() -> dict:
+    def _terminal(event: str) -> dict:
         return {
-            "event": "won",
+            "event": event,
             "actions_this_attempt": engine.state.action_count,
             "actions_total": total_game_actions + give_up_count,
             "attempts": attempt_number,
+            "losses": losses,
             "gold_path_length": gold_path_len,
             "repeated_states": repeated_state_count,
             "rejected_schema": rejected_schema,
             "rejected_illegal": rejected_illegal,
         }
 
+    def won_event() -> dict:
+        return _terminal("won")
+
     def lost_event() -> dict:
-        return {
-            "event": "lost",
-            "actions_this_attempt": engine.state.action_count,
-            "actions_total": total_game_actions + give_up_count,
-            "attempts": attempt_number,
-            "gold_path_length": gold_path_len,
-            "repeated_states": repeated_state_count,
-            "rejected_schema": rejected_schema,
-            "rejected_illegal": rejected_illegal,
-        }
+        return _terminal("lost")
+
+    def end_attempt(reason: str) -> bool:
+        """Close the current attempt. True when that ends the whole run.
+
+        A lost attempt used to end the run outright, which made "how often did
+        the agent lose" a yes/no question. With attempts to spare the board
+        resets and the loss is recorded instead, so a run can report "solved on
+        attempt 3 after two losses" rather than only "failed".
+        """
+        nonlocal losses
+        if reason == "lost":
+            losses += 1
+        if attempt_number >= max_attempts:
+            return True
+        do_reset(reason=reason)
+        return False
 
     def reject(action_input: dict, reason: str, detail: str) -> None:
         """Emit one rejection under its counter. `reason` is schema|illegal."""
-        nonlocal rejected_schema, rejected_illegal, consecutive_rejections
+        nonlocal rejected_schema, rejected_illegal
+        nonlocal consecutive_schema, consecutive_illegal
         nonlocal prev_board_text, prev_inventory
         if reason == "schema":
             rejected_schema += 1
+            consecutive_schema += 1
         else:
             rejected_illegal += 1
-        consecutive_rejections += 1
+            consecutive_illegal += 1
         prev_board_text = None
         prev_inventory = None
         _out({
@@ -416,7 +484,7 @@ def main() -> None:
                 continue
 
             if action_id == "give_up":
-                consecutive_rejections = 0
+                consecutive_schema = consecutive_illegal = 0
                 give_up_count += 1
                 total_now = total_game_actions + give_up_count
                 do_reset(reason="voluntary")
@@ -437,7 +505,7 @@ def main() -> None:
             )
             if schema_error is not None:
                 reject(inp, "schema", schema_error)
-                if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
+                if consecutive_schema >= _MAX_CONSECUTIVE_SCHEMA:
                     _out(lost_event())
                     break
                 emit_state()
@@ -447,13 +515,13 @@ def main() -> None:
 
             if not result.accepted:
                 reject(inp, "illegal", f"{real['action']} is not legal in this state")
-                if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
+                if consecutive_illegal >= _MAX_CONSECUTIVE_ILLEGAL:
                     _out(lost_event())
                     break
                 emit_state()
                 continue
 
-            consecutive_rejections = 0
+            consecutive_schema = consecutive_illegal = 0
             last_action = real
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
@@ -463,10 +531,13 @@ def main() -> None:
                 _out(won_event())
                 break
             if engine.is_lost:
-                _out(lost_event())
-                break
-            if engine.state.action_count >= limit_per_attempt:
-                do_reset(reason="limit")
+                if end_attempt("lost"):
+                    _out(lost_event())
+                    break
+            elif engine.state.action_count >= limit_per_attempt:
+                if end_attempt("limit"):
+                    _out(lost_event())
+                    break
             if total_now >= limit_total:
                 _out(lost_event())
                 break
@@ -492,7 +563,7 @@ def main() -> None:
                 continue
 
             if action_id == "give_up":
-                consecutive_rejections = 0
+                consecutive_schema = consecutive_illegal = 0
                 if mode == "full":
                     _out(lost_event())
                     outer_break = True
@@ -516,7 +587,7 @@ def main() -> None:
             )
             if schema_error is not None:
                 reject(action_input, "schema", schema_error)
-                if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
+                if consecutive_schema >= _MAX_CONSECUTIVE_SCHEMA:
                     _out(lost_event())
                     outer_break = True
                 break
@@ -525,12 +596,12 @@ def main() -> None:
 
             if not result.accepted:
                 reject(action_input, "illegal", f"{real['action']} is not legal in this state")
-                if consecutive_rejections >= _MAX_CONSECUTIVE_REJECTIONS:
+                if consecutive_illegal >= _MAX_CONSECUTIVE_ILLEGAL:
                     _out(lost_event())
                     outer_break = True
                 break
 
-            consecutive_rejections = 0
+            consecutive_schema = consecutive_illegal = 0
             last_action = real
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
@@ -541,12 +612,20 @@ def main() -> None:
                 outer_break = True
                 break
             if engine.is_lost:
-                _out(lost_event())
-                outer_break = True
+                if end_attempt("lost"):
+                    _out(lost_event())
+                    outer_break = True
+                    break
+                if total_now >= limit_total:
+                    _out(lost_event())
+                    outer_break = True
                 break
 
             if mode != "full" and engine.state.action_count >= limit_per_attempt:
-                do_reset(reason="limit")
+                if end_attempt("limit"):
+                    _out(lost_event())
+                    outer_break = True
+                    break
                 if total_now >= limit_total:
                     _out(lost_event())
                     outer_break = True
