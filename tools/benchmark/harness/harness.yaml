@@ -6,9 +6,6 @@
 #
 # The values below are provisional. Replace them once the first tier-1 sweep
 # produces a real efficiency distribution.
-#
-# `thresholds` is the only block supervisor.py reads. tier1/tier2/concurrency
-# describe the sweep that calls it, which does not exist yet.
 
 thresholds:
   # A solve wandering more than this multiple of the gold path is "borderline".
@@ -18,10 +15,61 @@ thresholds:
   # classify a run: probing walls is how you read an unfamiliar board.
   rejected_friction_min: 5
 
+run:
+  # Attempts before a run ends. Above 1, a lost attempt resets the board and
+  # costs an attempt instead of ending the run, so "how many times did the
+  # agent lose" becomes a number rather than a yes/no.
+  max_attempts: 3
+  # What each of those attempts is worth. True: every attempt gets the level's
+  # own max_actions budget, and the run total is the sum, so a later attempt is
+  # a real second chance. False: one gold-path multiple shared across all
+  # attempts, which means three attempts are only affordable if the first two
+  # are nearly flawless — that measures budget arithmetic, not the puzzle.
+  full_attempts: true
+  # Ask the agent to write one line of reasoning before each command. The only
+  # way to get a diagnosable transcript out of Claude Code: its stream strips
+  # thinking blocks to an empty string, so whatever the model does not say in
+  # plain text is simply gone. Left alone Sonnet narrated 27 of 62 commands on
+  # tk_008, and the unnarrated moves are the ones worth reading.
+  #
+  # It is a nudge — an agent told to state an expectation is an agent made to
+  # form one — so it is recorded on every run it applies to, and a comparison
+  # between a narrated and an unnarrated run is not apples to apples.
+  narrate: true
+  # Forced thinking budget. Off, and not merely unset: it moves reasoning into
+  # thinking blocks, which the CLI strips, and measurably *destroys* the
+  # transcript (tk_008: 2,349 characters of narration without it, 0 with).
+  # Raise it only to study how a bigger budget plays, never to read along.
+  thinking_tokens: 0
+  # Seconds one level gets before the agent is killed and the run is scored
+  # from wherever it got to.
+  timeout: 900
+  # How the agent is confined. 'bwrap' hides every path but the sandbox, so the
+  # pack and its gold path do not exist for the agent. 'docker' starts from an
+  # image instead, so the host filesystem is absent rather than hidden, and
+  # memory, CPU and network can be capped. 'none' leaves your own filesystem
+  # visible and makes any resulting score unverifiable.
+  isolation: bwrap
+
+# Only read when isolation is 'docker'. Build the image first:
+#     docker build -t gridponder-harness:latest tools/benchmark/harness
+docker:
+  image: gridponder-harness:latest
+  # 'bridge' lets a hosted model reach its API. 'none' cuts egress entirely,
+  # which is right for an agent that runs locally and wrong for one that does
+  # not.
+  network: bridge
+  memory: 2g
+  cpus: "2"
+
 tier1:
   harness: claude
   model: haiku
   repeats: 1
+  # Levels to sweep. `pack: [level, ...]`, or `pack: all` for the whole pack.
+  levels:
+    three_kingdoms: [tk_001, tk_002, tk_003, tk_004, tk_005]
+    pincer: [pc_001, pc_002, pc_003, pc_004, pc_005]
 
 tier2:
   harnesses: [claude, codex]

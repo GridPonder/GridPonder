@@ -35,12 +35,16 @@ Run these commands. They are the only way to interact with the puzzle.
     ./play history         List the actions you have taken this attempt.
     ./play give_up         Abandon this attempt and restart from the initial board.
 
-A move that is not a legal action right now is rejected: the board does not
-change and the move does not count against your action budget. A move whose
-JSON does not match the shapes below is rejected the same way. Five rejections
-in a row end the run, so read the reply before trying again.
+{narration}A move that is not a legal action right now is rejected: the board does not
+change and the move does not count against your action budget. Trying a move to
+find out whether it is legal is a reasonable way to read the board.
 
-There is a limit on total actions. When you reach it the run ends.
+A move whose JSON does not match the shapes below is rejected the same way, but
+it is not the same thing. Five of those in a row end the run, so if a move is
+refused for being malformed, fix the JSON before sending another.
+
+There is a limit on total actions. When you reach it the run ends. Losing does
+not necessarily end the run: the board may reset and let you try again.
 
 ## Actions
 
@@ -52,6 +56,22 @@ action, plus whichever parameters that action takes.
 
 The board is printed as a text grid with a legend naming each symbol. Read the
 legend — symbols differ between puzzles.
+"""
+
+# Documented only when the run asked for narration. It says nothing about the
+# puzzle — it cannot, since it is assembled from the action shapes alone — but
+# it does ask the agent for extra work on every move, and a run where the agent
+# was asked to justify itself is not the same experiment as one where it was
+# not. Kept in the protocol rather than in the launch prompt because a prompt
+# reaches one adapter and RULES.md reaches all of them.
+_NARRATION = """Give every move a second argument: one short line saying why you are making it.
+
+    ./play move '{example}' "only route that does not strand the far side"
+
+It has no effect on the puzzle and costs you nothing. It is recorded with the
+move, so a run can be read back afterwards and understood. Write one every
+time, before you find out whether the move worked.
+
 """
 
 # Human-readable gloss for parameter types that don't carry an explicit
@@ -125,6 +145,7 @@ def build_rules(
     goals_text: str,
     actions: list[dict] | None = None,
     anonymized: bool = False,
+    narrate: bool = False,
 ) -> str:
     """Return the full RULES.md body for one level.
 
@@ -136,6 +157,10 @@ def build_rules(
     `actions` overrides the shape list, which is how anonymous runs document
     their aliased ids; `anonymized` also drops the game's mechanics blurb,
     since that prose names real entities.
+
+    `narrate` documents the optional reason argument on `move`. It tells the
+    agent nothing about the puzzle — only how to leave a record — but it does
+    ask for work, so it is off unless the run asked for it.
     """
     if actions is None:
         actions = game_def.actions
@@ -165,4 +190,5 @@ def build_rules(
         mechanics=mechanics,
         example=example_json,
         actions=action_blocks,
+        narration=_NARRATION.format(example=example_json) if narrate else "",
     )

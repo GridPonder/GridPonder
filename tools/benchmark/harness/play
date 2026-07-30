@@ -15,6 +15,13 @@ import sys
 SOCK_NAME = ".play.sock"
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
+# Substituted by the supervisor when it copies this file into the sandbox.
+# AF_UNIX paths cap at ~108 bytes and a sandbox nested under a project
+# directory overruns that, so the socket cannot always sit next to this
+# script. Left empty the sibling is used, which keeps a hand-built sandbox
+# working with no substitution at all.
+SOCK_PATH = ""
+
 
 def main() -> int:
     argv = sys.argv[1:]
@@ -22,7 +29,9 @@ def main() -> int:
         print("usage: ./play state | move '<json>' | history | give_up")
         return 2
 
-    sock_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), SOCK_NAME)
+    sock_path = SOCK_PATH or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), SOCK_NAME
+    )
     timeout = float(os.environ.get("PLAY_SOCKET_TIMEOUT", DEFAULT_TIMEOUT_SECONDS))
 
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
