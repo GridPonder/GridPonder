@@ -320,16 +320,27 @@ def _count_claimable(board: Any, cfg: dict) -> int:
     return sum(1 for _pos, entity in layer.entries() if entity.kind in kinds)
 
 
-def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
-    """Win when a territory layer is divided completely and into exactly-equal
-    shares among the configured owners (or per requireComplete/requireEqual)."""
+def balance_counts(cfg: dict, state: GameState) -> tuple[dict[str, int], int]:
+    """Cells held by each owner, and how many cells are claimable at all.
+
+    Shared with the goal renderer so the progress an agent is shown and the
+    condition it is scored against are computed the same way. Two copies of
+    this counting would drift, and the drift would be invisible: the agent
+    would be told it was one cell short of a goal it had already met.
+    """
     layer = state.board.layers.get(cfg.get("layer"))
     counts = {o: 0 for o in cfg.get("owners", [])}
     if layer is not None:
         for _pos, entity in layer.entries():
             if entity.kind in counts:
                 counts[entity.kind] += 1
-    claimable = _count_claimable(state.board, cfg)
+    return counts, _count_claimable(state.board, cfg)
+
+
+def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
+    """Win when a territory layer is divided completely and into exactly-equal
+    shares among the configured owners (or per requireComplete/requireEqual)."""
+    counts, claimable = balance_counts(cfg, state)
     owned = sum(counts.values())
     equal = len(set(counts.values())) == 1
     complete = owned == claimable

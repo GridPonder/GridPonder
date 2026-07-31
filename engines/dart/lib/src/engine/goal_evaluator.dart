@@ -28,8 +28,7 @@ class GoalEvaluator {
     bool allDone = true;
 
     for (final goal in goals) {
-      final (done, prog) =
-          _evaluateGoal(goal, state, game, pendingEvents);
+      final (done, prog) = _evaluateGoal(goal, state, game, pendingEvents);
       progress[goal.id] = prog;
       if (!done) allDone = false;
     }
@@ -98,10 +97,8 @@ class GoalEvaluator {
     GameDefinition game,
     List<GameEvent> pendingEvents,
   ) {
-    final sequence = (goal.config['sequence'] as List?)
-            ?.map((e) => e as int)
-            .toList() ??
-        [];
+    final sequence =
+        (goal.config['sequence'] as List?)?.map((e) => e as int).toList() ?? [];
     if (sequence.isEmpty) return (true, 1.0);
 
     final currentIndex = state.sequenceIndices[goal.id] ?? 0;
@@ -143,7 +140,8 @@ class GoalEvaluator {
 
   MapEntry<String, Position>? _findNumberOnBoard(
       Board board, int target, GameDefinition game) {
-    for (final entry in (board.layers['objects']?.entries() ?? const <MapEntry<Position, EntityInstance>>[])) {
+    for (final entry in (board.layers['objects']?.entries() ??
+        const <MapEntry<Position, EntityInstance>>[])) {
       if (entry.value.kind == 'number') {
         final v = entry.value.param('value');
         if (v == target || v?.toString() == target.toString()) {
@@ -158,8 +156,7 @@ class GoalEvaluator {
       GoalDef goal, LevelState state, GameDefinition game) {
     final targetLayers =
         goal.config['targetLayers'] as Map<String, dynamic>? ?? {};
-    final matchMode =
-        (goal.config['matchMode'] as String?) ?? 'exact_non_null';
+    final matchMode = (goal.config['matchMode'] as String?) ?? 'exact_non_null';
 
     int totalCells = 0;
     int matchedCells = 0;
@@ -203,8 +200,7 @@ class GoalEvaluator {
   (bool, double) _variableThreshold(GoalDef goal, LevelState state) {
     final name = goal.config['variable'] as String;
     final target = goal.config['target'] as num;
-    final comparison =
-        (goal.config['comparison'] as String?) ?? 'gte';
+    final comparison = (goal.config['comparison'] as String?) ?? 'gte';
     final current = state.variables[name];
     if (current == null) return (false, 0.0);
     final numCurrent = current as num;
@@ -259,10 +255,10 @@ class GoalEvaluator {
       return 0;
     }
 
-    int rowSum(int y) =>
-        List.generate(w, (x) => cellValue(Position(x, y))).fold(0, (a, b) => a + b);
-    int colSum(int x) =>
-        List.generate(h, (y) => cellValue(Position(x, y))).fold(0, (a, b) => a + b);
+    int rowSum(int y) => List.generate(w, (x) => cellValue(Position(x, y)))
+        .fold(0, (a, b) => a + b);
+    int colSum(int x) => List.generate(h, (y) => cellValue(Position(x, y)))
+        .fold(0, (a, b) => a + b);
 
     bool satisfies(int sum) => switch (comparison) {
           'gte' => sum >= target,
@@ -481,11 +477,18 @@ class GoalEvaluator {
   ///                      layer's declared default kind)
   ///   requireComplete  — require owned == claimable (default true)
   ///   requireEqual     — require every owner's count to match (default true)
-  (bool, double) _balance(GoalDef goal, LevelState state, GameDefinition game) {
-    final owners = (goal.config['owners'] as List?)?.cast<String>() ?? [];
+  /// Cells held by each owner, and how many cells are claimable at all.
+  ///
+  /// Shared with the goal renderer so the progress an agent is shown and the
+  /// condition it is scored against are computed the same way. Two copies of
+  /// this counting would drift, and the drift would be invisible: the agent
+  /// would be told it was one cell short of a goal it had already met.
+  (Map<String, int>, int) balanceCounts(
+      Map<String, dynamic> cfg, LevelState state, GameDefinition game) {
+    final owners = (cfg['owners'] as List?)?.cast<String>() ?? [];
     final counts = <String, int>{for (final o in owners) o: 0};
 
-    final layerId = goal.config['layer'] as String?;
+    final layerId = cfg['layer'] as String?;
     final layer = state.board.layers[layerId];
     if (layer != null) {
       for (final entry in layer.entries()) {
@@ -493,8 +496,11 @@ class GoalEvaluator {
         if (counts.containsKey(kind)) counts[kind] = counts[kind]! + 1;
       }
     }
+    return (counts, _countClaimable(state.board, cfg, game));
+  }
 
-    final claimable = _countClaimable(state.board, goal.config, game);
+  (bool, double) _balance(GoalDef goal, LevelState state, GameDefinition game) {
+    final (counts, claimable) = balanceCounts(goal.config, state, game);
     final owned = counts.values.fold(0, (a, b) => a + b);
     final equal = counts.values.toSet().length == 1;
     final complete = owned == claimable;
@@ -502,9 +508,8 @@ class GoalEvaluator {
 
     final requireEqual = (goal.config['requireEqual'] as bool?) ?? true;
     final requireComplete = (goal.config['requireComplete'] as bool?) ?? true;
-    final done = owned > 0 &&
-        (equal || !requireEqual) &&
-        (complete || !requireComplete);
+    final done =
+        owned > 0 && (equal || !requireEqual) && (complete || !requireComplete);
     return (done, progress);
   }
 }

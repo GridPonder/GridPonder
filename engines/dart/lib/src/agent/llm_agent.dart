@@ -4,8 +4,11 @@ import 'dart:convert';
 import 'package:llm_dart/llm_dart.dart';
 
 import 'agent.dart';
+import '../engine/goal_evaluator.dart';
 import '../models/game_action.dart';
 import '../models/game_definition.dart';
+import '../models/game_state.dart';
+import '../models/level_definition.dart';
 
 /// Available Anthropic model IDs for the LLM agent.
 class AnthropicModel {
@@ -43,10 +46,10 @@ class OpenAIModel {
 
   static String displayName(String modelId) => switch (modelId) {
         gpt4oMini => 'GPT-4o Mini',
-        gpt4o     => 'GPT-4o',
-        o4Mini    => 'o4-mini (reasoning)',
-        o3        => 'o3 (reasoning)',
-        _         => modelId,
+        gpt4o => 'GPT-4o',
+        o4Mini => 'o4-mini (reasoning)',
+        o3 => 'o3 (reasoning)',
+        _ => modelId,
       };
 
   static bool supportsThinking(String modelId) =>
@@ -62,10 +65,10 @@ class GoogleModel {
   static const all = [flash2, flash25, pro25];
 
   static String displayName(String modelId) => switch (modelId) {
-        flash2  => 'Gemini 2.0 Flash',
+        flash2 => 'Gemini 2.0 Flash',
         flash25 => 'Gemini 2.5 Flash (thinking)',
-        pro25   => 'Gemini 2.5 Pro (thinking)',
-        _       => modelId,
+        pro25 => 'Gemini 2.5 Pro (thinking)',
+        _ => modelId,
       };
 
   static bool supportsThinking(String modelId) =>
@@ -83,20 +86,24 @@ class OllamaModel {
   static const gptOss20b = 'gpt-oss:20b';
 
   static const all = [
-    gemma4e2b, gemma4e4b,
-    qwen35_0_8b, qwen35_2b, qwen35_4b, qwen35_9b,
+    gemma4e2b,
+    gemma4e4b,
+    qwen35_0_8b,
+    qwen35_2b,
+    qwen35_4b,
+    qwen35_9b,
     gptOss20b,
   ];
 
   static String displayName(String modelId) => switch (modelId) {
-        gemma4e2b    => 'Gemma 4 E2B',
-        gemma4e4b    => 'Gemma 4 E4B',
-        qwen35_0_8b  => 'Qwen 3.5 0.8B',
-        qwen35_2b    => 'Qwen 3.5 2B',
-        qwen35_4b    => 'Qwen 3.5 4B',
-        qwen35_9b    => 'Qwen 3.5 9B',
-        gptOss20b    => 'GPT-OSS 20B',
-        _            => modelId,
+        gemma4e2b => 'Gemma 4 E2B',
+        gemma4e4b => 'Gemma 4 E4B',
+        qwen35_0_8b => 'Qwen 3.5 0.8B',
+        qwen35_2b => 'Qwen 3.5 2B',
+        qwen35_4b => 'Qwen 3.5 4B',
+        qwen35_9b => 'Qwen 3.5 9B',
+        gptOss20b => 'GPT-OSS 20B',
+        _ => modelId,
       };
 
   static bool supportsThinking(String modelId) =>
@@ -273,11 +280,14 @@ class LlmAgent implements GridPonderAgent {
     }
 
     if (rawList == null || rawList.isEmpty) {
-      return ([
-        obs.validActions.isNotEmpty
-            ? obs.validActions.first
-            : GameAction('noop', {})
-      ], null);
+      return (
+        [
+          obs.validActions.isNotEmpty
+              ? obs.validActions.first
+              : GameAction('noop', {})
+        ],
+        null
+      );
     }
 
     final result = <GameAction>[];
@@ -298,20 +308,24 @@ class LlmAgent implements GridPonderAgent {
       final params = Map<String, dynamic>.from(item as Map<String, dynamic>)
         ..remove('action')
         ..remove('memory');
-      final match = obs.validActions.where((a) =>
-        a.actionId == actionId &&
-        a.params.length == params.length &&
-        params.entries.every((e) => a.params[e.key] == e.value)
-      ).firstOrNull;
+      final match = obs.validActions
+          .where((a) =>
+              a.actionId == actionId &&
+              a.params.length == params.length &&
+              params.entries.every((e) => a.params[e.key] == e.value))
+          .firstOrNull;
       if (match != null) result.add(match);
     }
 
     if (result.isEmpty) {
-      return ([
-        obs.validActions.isNotEmpty
-            ? obs.validActions.first
-            : GameAction('noop', {})
-      ], memoryUpdate);
+      return (
+        [
+          obs.validActions.isNotEmpty
+              ? obs.validActions.first
+              : GameAction('noop', {})
+        ],
+        memoryUpdate
+      );
     }
     return (result, memoryUpdate);
   }
@@ -338,7 +352,8 @@ class LlmAgent implements GridPonderAgent {
     final Map<String, String> actionForward;
     if (anonymize) {
       final sorted = List<GameAction>.from(obs.validActions)
-        ..sort((a, b) => jsonEncode(a.toJson()).compareTo(jsonEncode(b.toJson())));
+        ..sort(
+            (a, b) => jsonEncode(a.toJson()).compareTo(jsonEncode(b.toJson())));
       actionForward = {
         for (int i = 0; i < sorted.length; i++)
           jsonEncode(sorted[i].toJson()): 'a${i + 1}',
@@ -348,75 +363,20 @@ class LlmAgent implements GridPonderAgent {
     }
 
     // ── Goals ─────────────────────────────────────────────────────────────────
-    final goalParts = <String>[];
-    for (final g in obs.level.goals) {
-      // Per-game goal-text override (set in game.json `goalDescriptions`).
-      // Skipped in anonymise mode since the override may name entities.
-      if (!anonymize) {
-        final override = obs.game.goalDescriptions[g.id];
-        if (override != null) {
-          goalParts.add(override);
-          continue;
-        }
-      }
-      switch (g.type) {
-        case 'reach_target':
-          final kindId = g.config['targetKind'] as String?;
-          final tag = g.config['targetTag'] as String?;
-          final name = anonymize
-              ? _resolveEntityNameAnon(obs.game, kindId, tag, kindToLabel)
-              : _resolveEntityName(obs.game, kindId, tag);
-          goalParts.add('Reach the $name');
-        case 'board_match':
-          final targetGrid = _renderTargetGrid(obs.game, g.config,
-              kindToLabel: anonymize ? kindToLabel : null);
-          if (targetGrid != null) {
-            goalParts.add('Arrange tiles to match the target pattern:\n$targetGrid');
-          } else {
-            goalParts.add('Arrange tiles to match the target pattern');
-          }
-        case 'sequence_match':
-          final sequence = (g.config['sequence'] as List?)
-                  ?.map((e) => e as int)
-                  .toList() ??
-              [];
-          final matched = obs.state.sequenceIndices[g.id] ?? 0;
-          final done = sequence.take(matched).map((n) => '✓$n').join(', ');
-          final pending = sequence.skip(matched).map((n) => '$n').join(', ');
-          final progress = [
-            if (done.isNotEmpty) done,
-            if (pending.isNotEmpty) pending
-          ].join(', ');
-          goalParts.add(
-              'Merge numbers in sequence [$progress] ($matched/${sequence.length} done)');
-        case 'all_cleared':
-          final kindId = g.config['kind'] as String?;
-          final tag = g.config['tag'] as String?;
-          final name = anonymize
-              ? _resolveEntityNameAnon(obs.game, kindId, tag, kindToLabel)
-              : _resolveEntityName(obs.game, kindId, tag);
-          goalParts.add('Clear all ${name}s from the board');
-        case 'sum_constraint':
-          goalParts.add(_describeSumConstraint(g.config));
-        case 'count_constraint':
-          goalParts.add(_describeCountConstraint(g.config));
-        case 'param_match':
-          goalParts.add(_describeParamMatch(obs.game, g.config,
-              kindToLabel: anonymize ? kindToLabel : null));
-        default:
-          goalParts.add(g.type);
-      }
-    }
-    final goalDescriptions = goalParts.join('; ');
+    final goalDescriptions = describeGoals(
+      obs.level,
+      obs.state,
+      obs.game,
+      anonymize: anonymize,
+      kindToLabel: kindToLabel,
+    );
 
     // ── Actions desc ──────────────────────────────────────────────────────────
     final actionsDesc = anonymize
-        ? obs.validActions
-            .map((a) {
-              final label = actionForward[jsonEncode(a.toJson())] ?? '?';
-              return '{"action": "$label"}';
-            })
-            .join(', ')
+        ? obs.validActions.map((a) {
+            final label = actionForward[jsonEncode(a.toJson())] ?? '?';
+            return '{"action": "$label"}';
+          }).join(', ')
         : obs.validActions.map((a) => jsonEncode(a.toJson())).join(', ');
 
     // ── Inventory / moves ─────────────────────────────────────────────────────
@@ -427,9 +387,8 @@ class LlmAgent implements GridPonderAgent {
         ? '\nMoves this attempt: ${obs.state.actionCount}'
         : '';
 
-    final memorySection = memory.isNotEmpty
-        ? '\nMEMORY FROM PREVIOUS ACTION:\n$memory\n'
-        : '';
+    final memorySection =
+        memory.isNotEmpty ? '\nMEMORY FROM PREVIOUS ACTION:\n$memory\n' : '';
 
     final prevInventoryLine = obs.previousInventory != null
         ? '\nInventory: ${obs.previousInventory}'
@@ -553,6 +512,141 @@ Examples:
 
 Choose the action most likely to reach the goal in fewest total actions (summed across attempts).''';
     }
+  }
+
+  /// A semicolon-separated description of every goal on the level.
+  ///
+  /// Mirror of `render_goals` in engines/python/goal_renderer.py. Split out of
+  /// [buildPrompt] so the text an agent is given can be tested on its own —
+  /// the `balance` branch below exists because a goal type with no branch
+  /// falls through to the default and renders as its own *type name*.
+  static String describeGoals(
+    LevelDefinition level,
+    LevelState state,
+    GameDefinition game, {
+    bool anonymize = false,
+    Map<String, String> kindToLabel = const {},
+  }) {
+    final goalParts = <String>[];
+    for (final g in level.goals) {
+      // Per-game goal-text override (set in game.json `goalDescriptions`).
+      // Skipped in anonymise mode since the override may name entities.
+      if (!anonymize) {
+        final override = game.goalDescriptions[g.id];
+        if (override != null) {
+          goalParts.add(override);
+          continue;
+        }
+      }
+      switch (g.type) {
+        case 'reach_target':
+          final kindId = g.config['targetKind'] as String?;
+          final tag = g.config['targetTag'] as String?;
+          final name = anonymize
+              ? _resolveEntityNameAnon(game, kindId, tag, kindToLabel)
+              : _resolveEntityName(game, kindId, tag);
+          goalParts.add('Reach the $name');
+        case 'board_match':
+          final targetGrid = _renderTargetGrid(game, g.config,
+              kindToLabel: anonymize ? kindToLabel : null);
+          if (targetGrid != null) {
+            goalParts
+                .add('Arrange tiles to match the target pattern:\n$targetGrid');
+          } else {
+            goalParts.add('Arrange tiles to match the target pattern');
+          }
+        case 'sequence_match':
+          final sequence =
+              (g.config['sequence'] as List?)?.map((e) => e as int).toList() ??
+                  [];
+          final matched = state.sequenceIndices[g.id] ?? 0;
+          final done = sequence.take(matched).map((n) => '✓$n').join(', ');
+          final pending = sequence.skip(matched).map((n) => '$n').join(', ');
+          final progress = [
+            if (done.isNotEmpty) done,
+            if (pending.isNotEmpty) pending
+          ].join(', ');
+          goalParts.add(
+              'Merge numbers in sequence [$progress] ($matched/${sequence.length} done)');
+        case 'all_cleared':
+          final kindId = g.config['kind'] as String?;
+          final tag = g.config['tag'] as String?;
+          final name = anonymize
+              ? _resolveEntityNameAnon(game, kindId, tag, kindToLabel)
+              : _resolveEntityName(game, kindId, tag);
+          goalParts.add('Clear all ${name}s from the board');
+        case 'sum_constraint':
+          goalParts.add(_describeSumConstraint(g.config));
+        case 'count_constraint':
+          goalParts.add(_describeCountConstraint(g.config));
+        case 'balance':
+          goalParts.add(_describeBalance(game, g.config, state,
+              kindToLabel: anonymize ? kindToLabel : null));
+        case 'param_match':
+          goalParts.add(_describeParamMatch(game, g.config,
+              kindToLabel: anonymize ? kindToLabel : null));
+        default:
+          goalParts.add(g.type);
+      }
+    }
+    return goalParts.join('; ');
+  }
+
+  static String _listNames(List<String> names) {
+    if (names.isEmpty) return 'the owners';
+    if (names.length == 1) return names.first;
+    return '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
+  }
+
+  /// Describes a `balance` goal: divide the claimable cells between owners.
+  ///
+  /// Generic over the config rather than written for any one pack — the two
+  /// flags are what the win condition actually reads, so the sentence changes
+  /// with them. In anonymous mode the owners come out as their aliases and the
+  /// layer is never named: `territory` is the pack's own vocabulary, and
+  /// aliasing covers entity kinds, not layer ids.
+  ///
+  /// Progress is included for the same reason `sequence_match` includes it — a
+  /// goal you cannot tell you are close to meeting is a worse goal, not a
+  /// harder one — and is counted by the same function the win condition uses.
+  static String _describeBalance(
+      GameDefinition game, Map<String, dynamic> config, LevelState state,
+      {Map<String, String>? kindToLabel}) {
+    final owners = (config['owners'] as List?)?.cast<String>() ?? [];
+    final names = [
+      for (final owner in owners)
+        kindToLabel != null
+            ? (kindToLabel[owner] ?? owner)
+            : _resolveEntityName(game, owner, null)
+    ];
+
+    final listed = _listNames(names);
+    final requireEqual = (config['requireEqual'] as bool?) ?? true;
+    final requireComplete = (config['requireComplete'] as bool?) ?? true;
+    final String head;
+    if (requireComplete && requireEqual) {
+      head =
+          'Claim every claimable cell, and give $listed an equal number each';
+    } else if (requireEqual) {
+      head = 'Give $listed an equal number of cells each';
+    } else if (requireComplete) {
+      head = 'Claim every claimable cell for $listed';
+    } else {
+      head = 'Claim cells for $listed';
+    }
+
+    final (counts, claimable) =
+        GoalEvaluator().balanceCounts(config, state, game);
+    if (owners.isEmpty) return head;
+    final tally = [
+      for (int i = 0; i < owners.length; i++)
+        '${names[i]} ${counts[owners[i]] ?? 0}'
+    ].join(', ');
+    final owned = counts.values.fold(0, (a, b) => a + b);
+    if (claimable != 0) {
+      return '$head ($tally — $owned of $claimable claimed)';
+    }
+    return '$head ($tally)';
   }
 
   /// Renders the targetLayers config of a board_match goal as an ASCII grid.
@@ -711,8 +805,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
   static String _resolveEntityName(
       GameDefinition game, String? kindId, String? tag) {
     if (kindId != null) {
-      return game.entityKinds[kindId]?.uiName ??
-          kindId.replaceAll('_', ' ');
+      return game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
     }
     if (tag != null) {
       for (final entry in game.entityKinds.entries) {
@@ -727,11 +820,8 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
 
   /// Anonymous version: resolves entity kind (via kindId or tag) then looks up
   /// its label in [kindToLabel]. Falls back to a generic '?' if unresolved.
-  static String _resolveEntityNameAnon(
-      GameDefinition game,
-      String? kindId,
-      String? tag,
-      Map<String, String> kindToLabel) {
+  static String _resolveEntityNameAnon(GameDefinition game, String? kindId,
+      String? tag, Map<String, String> kindToLabel) {
     // Resolve to a kindId first.
     String? resolvedKind = kindId;
     if (resolvedKind == null && tag != null) {
