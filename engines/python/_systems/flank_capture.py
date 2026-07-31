@@ -22,6 +22,12 @@ and expose passes never observe each other's fresh cells.
 Generic: any game with two opposing piece kinds that flip on a straight-line
 bracket names its own ``pairs`` and layer (contagion-by-flanking, tug-of-war
 captures, Reversi puzzles).
+
+An aggressor may name several victim kinds (``"alien": ["human", "splinter"]``).
+Each victim kind is scanned on its own pass, so runs stay homogeneous — a run
+that mixes two victim kinds is not a maximal run of either, and is therefore
+immune. When two aggressors share a victim kind, ``order`` decides: flips dedupe
+first-writer-wins, so the aggressor listed earlier claims a contested cell.
 """
 from __future__ import annotations
 
@@ -98,23 +104,28 @@ class FlankCaptureSystem(GameSystem):
         ordered: list[tuple[int, int]] = []
 
         for aggressor in order:
-            victim = pairs.get(aggressor)
-            if victim is None:
+            raw_victim = pairs.get(aggressor)
+            if raw_victim is None:
                 continue
-            victim = str(victim)
-            for b in dests:
-                for axis, (adx, _ady) in _AXES.items():
-                    if axis not in axes:
-                        continue
-                    if adx:  # horizontal row through b.y
-                        line = [(x, b.y) for x in range(width)]
-                        b_index = b.x
-                    else:    # vertical column through b.x
-                        line = [(b.x, y) for y in range(height)]
-                        b_index = b.y
-                    _scan_line(
-                        line, b_index, aggressor, victim,
-                        piece_at, is_wall, flips, ordered)
+            victims = (
+                [str(v) for v in raw_victim]
+                if isinstance(raw_victim, (list, tuple))
+                else [str(raw_victim)]
+            )
+            for victim in victims:
+                for b in dests:
+                    for axis, (adx, _ady) in _AXES.items():
+                        if axis not in axes:
+                            continue
+                        if adx:  # horizontal row through b.y
+                            line = [(x, b.y) for x in range(width)]
+                            b_index = b.x
+                        else:    # vertical column through b.x
+                            line = [(b.x, y) for y in range(height)]
+                            b_index = b.y
+                        _scan_line(
+                            line, b_index, aggressor, victim,
+                            piece_at, is_wall, flips, ordered)
 
         if not flips:
             return []

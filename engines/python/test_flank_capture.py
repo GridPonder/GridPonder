@@ -18,7 +18,7 @@ from engines.python._models import Pos
 from engines.python._turn_engine import TurnEngine
 
 
-def _game() -> GameDef:
+def _game(pairs=None, order=None) -> GameDef:
     return GameDef.from_dict(
         {
             "layers": [
@@ -29,6 +29,7 @@ def _game() -> GameDef:
                 "empty": {"layer": "ground", "tags": ["walkable"], "symbol": "."},
                 "wall": {"layer": "ground", "tags": ["solid"], "symbol": "#"},
                 "alien": {"layer": "pieces", "tags": ["actor"], "symbol": "A"},
+                "splinter": {"layer": "pieces", "tags": ["actor"], "symbol": "S"},
                 "human": {"layer": "pieces", "tags": [], "symbol": "H"},
             },
             "actions": [
@@ -59,8 +60,8 @@ def _game() -> GameDef:
                     "type": "flank_capture",
                     "config": {
                         "pieceLayer": "pieces",
-                        "pairs": {"alien": "human", "human": "alien"},
-                        "order": ["alien", "human"],
+                        "pairs": pairs or {"alien": "human", "human": "alien"},
+                        "order": order or ["alien", "human"],
                         "wallLayer": "ground",
                         "wallTag": "solid",
                     },
@@ -71,6 +72,15 @@ def _game() -> GameDef:
         },
         id="flank_capture_test",
     )
+
+
+# Three-way capture: every kind is a jaw against every other. Used by the
+# list-victim tests below; the pack (Pincer arc 4) ships this exact shape.
+_THREE_WAY = {
+    "alien": ["human", "splinter"],
+    "splinter": ["human", "alien"],
+    "human": ["alien", "splinter"],
+}
 
 
 def _level(size, pieces, walls=None) -> dict:
@@ -207,6 +217,70 @@ class FlankCaptureTest(unittest.TestCase):
         self.assertTrue(any(e["type"] == "actor_blocked" for e in result.events))
         self.assertFalse(any(e["type"] == "cell_transformed" for e in result.events))
         self.assertEqual(_piece(engine, 1, 0), "human")
+
+    def test_list_victims_capture_each_kind(self) -> None:
+        # A . S A  → the mover becomes the near jaw; the splinter is absorbed.
+        engine = TurnEngine(
+            _game(_THREE_WAY, ["human", "alien", "splinter"]),
+            _level((5, 1), [((0, 0), "alien"), ((2, 0), "splinter"),
+                            ((3, 0), "alien")]),
+        )
+        _select_move(engine, (0, 0), "right")
+        self.assertEqual(_piece(engine, 2, 0), "alien")
+
+        # S . H S  → the same rule read from the splinter side.
+        engine = TurnEngine(
+            _game(_THREE_WAY, ["human", "alien", "splinter"]),
+            _level((5, 1), [((0, 0), "splinter"), ((2, 0), "human"),
+                            ((3, 0), "splinter")]),
+        )
+        _select_move(engine, (0, 0), "right")
+        self.assertEqual(_piece(engine, 2, 0), "splinter")
+
+    def test_mixed_kind_run_is_immune(self) -> None:
+        # Row y=1 becomes H A S H. Runs are homogeneous, so neither the alien
+        # nor the splinter is a bracketed run and nothing flips — interleaving
+        # your own colours is a shield.
+        engine = TurnEngine(
+            _game(_THREE_WAY, ["human", "alien", "splinter"]),
+            _level(
+                (5, 3),
+                [
+                    ((0, 1), "human"),
+                    ((2, 1), "splinter"),
+                    ((3, 1), "human"),
+                    ((1, 0), "alien"),   # the mover, steps down to (1,1)
+                ],
+            ),
+        )
+        result = _select_move(engine, (1, 0), "down")
+        self.assertEqual(_piece(engine, 1, 1), "alien")
+        self.assertEqual(_piece(engine, 2, 1), "splinter")
+        self.assertEqual(_piece(engine, 0, 1), "human")
+        self.assertEqual(_piece(engine, 3, 1), "human")
+        self.assertFalse(
+            any(e["type"] == "cell_transformed" for e in result.events)
+        )
+
+    def test_order_resolves_overlapping_victims(self) -> None:
+        # # S #  — a splinter in a wall-wall gap is a victim of BOTH the alien
+        # pass and the human pass, so `order` decides which one claims it.
+        pieces = [((1, 1), "splinter")]
+        walls = [(0, 0), (2, 0)]
+
+        engine = TurnEngine(
+            _game(_THREE_WAY, ["human", "alien", "splinter"]),
+            _level((3, 2), pieces, walls=walls),
+        )
+        _select_move(engine, (1, 1), "up")
+        self.assertEqual(_piece(engine, 1, 0), "human")  # exposure beats greed
+
+        engine = TurnEngine(
+            _game(_THREE_WAY, ["alien", "human", "splinter"]),
+            _level((3, 2), pieces, walls=walls),
+        )
+        _select_move(engine, (1, 1), "up")
+        self.assertEqual(_piece(engine, 1, 0), "alien")  # first in order wins
 
 
 if __name__ == "__main__":
