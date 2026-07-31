@@ -270,3 +270,32 @@ Games without directional movement (e.g., `slide_merge`-only games) can use simp
   }
 }
 ```
+
+## Cell effects
+
+Optional. Maps an **engine event type** to a sprite-strip animation played at
+that event's position. Purely presentational — the engine never reads this, and
+a client that does not implement effects ignores it.
+
+```json
+"effects": {
+  "cell_transformed": {
+    "sheet": "assets/vfx/capture_burst_sheet.png",
+    "frames": 4,
+    "durationMs": 260,
+    "scale": 1.6
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `sheet` | string | — | Horizontal sprite strip, pack-relative. Frames are equal width, laid out left to right. |
+| `frames` | int | `1` | Number of frames in the strip. |
+| `durationMs` | int | `300` | Total play time for one pass through the strip. |
+| `scale` | number | `1.0` | Draw size relative to one board cell; values above 1 let a burst spill past the tile it fires on. |
+
+Every matching event in a turn plays the effect at its own position
+simultaneously, so a capture that flips five cells flashes all five. Useful
+event types include `cell_transformed` (a cell changed kind), `object_removed`,
+and `cell_claimed`.
