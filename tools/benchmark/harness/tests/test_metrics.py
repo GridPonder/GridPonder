@@ -98,3 +98,67 @@ def test_schema_and_illegal_counters_are_independent():
     """Below the schema threshold, illegal count cannot push a run into friction."""
     run = _run(solved=False, rejected_schema=4, rejected_illegal=50)
     assert metrics.classify(run, T) == "hard"
+
+
+# ── the run that never finished ───────────────────────────────────────────
+#
+# `hard` is a claim about the level. A run we killed, or one whose agent died,
+# supports no such claim, and counting it as difficulty is how a rate-limited
+# sweep turns into a page of hard levels.
+
+def test_unfinished_run_is_incomplete_not_hard():
+    assert metrics.classify(_run(solved=False, reached_terminal=False), T) == "incomplete"
+
+
+def test_a_finished_loss_is_still_hard():
+    """The game itself ending the run is a real result about the level."""
+    assert metrics.classify(_run(solved=False, reached_terminal=True), T) == "hard"
+
+
+def test_a_run_without_the_flag_is_treated_as_finished():
+    """Older results carry no `reached_terminal`; they must not all become incomplete."""
+    assert metrics.classify(_run(solved=False), T) == "hard"
+
+
+def test_a_solve_is_never_incomplete():
+    """Reaching the win is reaching a terminal, whatever the agent did after."""
+    assert metrics.classify(_run(solved=True, reached_terminal=False), T) == "trivial"
+
+
+def test_friction_wins_over_incomplete():
+    """Five malformed payloads is a fact about the rules text either way."""
+    run = _run(solved=False, reached_terminal=False, rejected_schema=5)
+    assert metrics.classify(run, T) == "friction"
+
+
+# ── how the run stopped ───────────────────────────────────────────────────
+
+def test_completion_of_a_solved_run_is_solved():
+    assert metrics.completion(_run(solved=True)) == "solved"
+
+
+def test_completion_says_the_game_ended_a_finished_run():
+    assert metrics.completion(_run(solved=False, reached_terminal=True)) == (
+        "the game ended the run"
+    )
+
+
+def test_completion_names_the_timeout():
+    run = _run(solved=False, reached_terminal=False, agent_exit_code=-1)
+    assert metrics.completion(run) == "the agent was stopped at the timeout"
+
+
+def test_completion_names_a_crashed_agent():
+    run = _run(solved=False, reached_terminal=False, agent_exit_code=2)
+    assert metrics.completion(run) == "the agent exited 2"
+
+
+def test_completion_names_an_agent_that_reported_its_own_error():
+    run = _run(solved=False, reached_terminal=False, agent_exit_code=0,
+               agent_reported_error=True)
+    assert metrics.completion(run) == "the agent reported an error"
+
+
+def test_completion_of_an_agent_that_simply_stopped():
+    run = _run(solved=False, reached_terminal=False, agent_exit_code=0)
+    assert metrics.completion(run) == "the agent stopped without finishing"

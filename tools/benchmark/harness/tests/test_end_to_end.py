@@ -348,3 +348,5 @@ def test_unfinished_run_reports_the_actions_it_took(tmp_path, pack, level):
     assert result["solved"] is False
     assert result["actions_total"] == len(partial)
     assert result["efficiency"] == len(partial) / len(gold)
+    # `hard` would credit the level with beating an agent that stopped playing.
+    assert result["tier"] == "incomplete"
