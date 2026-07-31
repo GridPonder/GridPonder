@@ -7,6 +7,7 @@ rather than trusting the bind list to be right.
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -258,6 +259,183 @@ def test_report_summarizes_repeats_into_one_row_per_level():
     assert row["efficiency"] == 1.0
     # Worst tier wins, so a level that failed once is not averaged into looking fine.
     assert report._dominant_tier(row["tiers"]) == "hard"
+
+
+def test_an_incomplete_run_is_not_counted_as_a_failure_to_solve():
+    """A run we killed is not evidence the agent could not solve the level.
+
+    Leaving it in the denominator reports a level as half-solved on the
+    strength of a session that never finished playing.
+    """
+    from tools.benchmark.harness import report
+
+    runs = [
+        {"pack_id": "p", "level_id": "l1", "solved": True, "efficiency": 1.0,
+         "losses": 0, "attempts": 1, "actions_total": 5, "gold_path_length": 5,
+         "rejected_schema": 0, "rejected_illegal": 0, "tier": "trivial"},
+        {"pack_id": "p", "level_id": "l1", "solved": False, "efficiency": 0.4,
+         "losses": 0, "attempts": 1, "actions_total": 2, "gold_path_length": 5,
+         "rejected_schema": 0, "rejected_illegal": 0, "tier": "incomplete"},
+    ]
+    row = report.summarize(runs)[0]
+    assert row["runs"] == 2, "the session still happened and is still shown"
+    assert row["scored"] == 1
+    assert row["solve_rate"] == 1.0
+
+
+def test_a_level_whose_runs_all_died_has_no_solve_rate():
+    """0/0 is not 0%. Nothing was measured, and the chart must not claim it was."""
+    from tools.benchmark.harness import report
+
+    runs = [
+        {"pack_id": "p", "level_id": "l1", "solved": False, "efficiency": None,
+         "losses": 0, "attempts": 1, "actions_total": 0, "gold_path_length": 5,
+         "rejected_schema": 0, "rejected_illegal": 0, "tier": "incomplete"},
+    ]
+    row = report.summarize(runs)[0]
+    assert row["scored"] == 0
+    assert row["solve_rate"] is None
+
+
+def test_incomplete_does_not_mask_a_level_the_agent_really_failed():
+    """One killed session must not relabel a level nobody solved."""
+    from tools.benchmark.harness import report
+
+    assert report._dominant_tier(["hard", "incomplete"]) == "hard"
+    assert report._dominant_tier(["trivial", "incomplete"]) == "trivial"
+
+
+def test_a_level_whose_every_run_was_killed_reports_incomplete():
+    from tools.benchmark.harness import report
+
+    assert report._dominant_tier(["incomplete", "incomplete"]) == "incomplete"
+
+
+def test_a_session_that_died_before_playing_still_says_why(tmp_path):
+    """A run with no transcript gets no session page, and that is the one run
+    a reader has nothing else to go on for. It has to be accounted for."""
+    from tools.benchmark.harness import report
+
+    payload = {
+        "meta": {"agent": "claude", "isolation": "bwrap", "max_attempts": 3},
+        "runs": [{
+            "pack_id": "three_kingdoms", "level_id": "tk_001", "repeat": 0,
+            "solved": False, "tier": "incomplete", "reached_terminal": False,
+            "agent_exit_code": 2, "efficiency": None, "losses": 0,
+            "attempts": 1, "actions_total": 0, "gold_path_length": 17,
+            "rejected_schema": 0, "rejected_illegal": 0, "timeout": None,
+        }],
+    }
+    out = report.build_html(payload, tmp_path / "r.html")
+    text = out.read_text(encoding="utf-8")
+    assert "the agent exited 2" in text
+    # And the PDF must not fall over on the same payload.
+    report.build(payload, tmp_path / "r.pdf")
+    assert (tmp_path / "r.pdf").is_file()
+
+
+# ── a pack this engine cannot actually play ───────────────────────────────
+
+def _pack_declaring_a_system_the_engine_lacks(tmp_path, packs_dir):
+    """A copy of a real pack with one unimplementable system added.
+
+    Synthesised rather than borrowed from whichever pack currently outruns the
+    engine, so the test keeps saying the same thing once that pack is merged.
+    """
+    src = packs_dir / "three_kingdoms"
+    dst = tmp_path / "packs" / "three_kingdoms"
+    shutil.copytree(src, dst)
+    game = json.loads((dst / "game.json").read_text())
+    game["systems"].append({"id": "ghost", "type": "no_such_system"})
+    (dst / "game.json").write_text(json.dumps(game), encoding="utf-8")
+    return dst.parent
+
+
+def test_missing_systems_are_named_not_dropped():
+    """instantiate_systems drops unknown types silently; this is what notices."""
+    from tools.benchmark.harness.supervisor import missing_systems
+
+    class _Game:
+        systems = [{"id": "a", "type": "individual_actors"},
+                   {"id": "b", "type": "no_such_system"},
+                   {"id": "c", "type": "also_missing", "enabled": False}]
+
+    assert missing_systems(_Game()) == ["no_such_system"]
+
+
+def test_a_pack_the_engine_cannot_play_is_refused_not_scored(tmp_path):
+    """Otherwise the level runs with its central mechanic absent and scores hard.
+
+    That is not a hypothetical: pincer's flank_capture postdates this branch,
+    and harness.yaml sweeps five pincer levels by default.
+    """
+    packs_dir = _requires("three_kingdoms")
+    doctored = _pack_declaring_a_system_the_engine_lacks(tmp_path, packs_dir)
+    result_path = tmp_path / "result.json"
+    proc = subprocess.run([
+        sys.executable, str(SUPERVISOR),
+        "--pack", "three_kingdoms", "--level", "tk_001",
+        "--packs-dir", str(doctored), "--sandbox", str(tmp_path / "sbx"),
+        "--result", str(result_path), "--isolation", "none",
+        "--agent", "baseline",
+    ], capture_output=True, text=True, timeout=300)
+
+    assert proc.returncode != 0, "a pack the engine cannot play must not score"
+    assert "no_such_system" in proc.stderr
+    assert not result_path.exists(), "a refused run must not leave a result behind"
+
+
+# ── what the final attempt cost ───────────────────────────────────────────
+
+def test_a_single_attempt_solve_scores_the_same_either_way(tmp_path):
+    """With one attempt there is nothing to separate, so the two must agree."""
+    packs_dir = _requires("three_kingdoms")
+    gold = gold_path(packs_dir, "three_kingdoms", "tk_006")
+    result_path = tmp_path / "gold.json"
+    scripted = Path(__file__).resolve().parent / "scripted_agent.py"
+    proc = subprocess.run([
+        sys.executable, str(SUPERVISOR),
+        "--pack", "three_kingdoms", "--level", "tk_006",
+        "--packs-dir", str(packs_dir), "--sandbox", str(tmp_path / "gold"),
+        "--result", str(result_path), "--max-attempts", "3",
+        "--isolation", "none",
+        "--agent-cmd", sys.executable, str(scripted), json.dumps(gold),
+    ], capture_output=True, text=True, timeout=300)
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    result = json.loads(result_path.read_text())
+    assert result["attempts"] == 1
+    assert result["efficiency_final_attempt"] == result["efficiency"]
+
+
+def test_the_final_attempts_efficiency_excludes_the_earlier_ones(tmp_path):
+    """Summing attempts made a flawless third attempt read as 3x the gold path.
+
+    tk_006 caps actions at 20, so the baseline agent loses and gets restarted,
+    which is the shape that produced the misleading number.
+    """
+    packs_dir = _requires("three_kingdoms")
+    result = run_supervisor(tmp_path, packs_dir, "three_kingdoms", "tk_006",
+                            max_attempts=3)
+    assert result["attempts"] > 1, "a random agent must trip tk_006's action cap"
+    assert result["actions_final_attempt"] < result["actions_total"]
+    assert result["efficiency_final_attempt"] < result["efficiency"]
+
+
+# ── letting a run take as long as it takes ────────────────────────────────
+
+def test_a_zero_timeout_means_no_limit():
+    """Sonnet needs 800-1300s on a tk level, so a limit has to be optional."""
+    from tools.benchmark.harness.supervisor import resolve_timeout
+
+    assert resolve_timeout(0) is None
+    assert resolve_timeout(None) is None
+    assert resolve_timeout(-1) is None
+
+
+def test_a_positive_timeout_is_kept():
+    from tools.benchmark.harness.supervisor import resolve_timeout
+
+    assert resolve_timeout(900) == 900.0
 
 
 # ── adapters ──────────────────────────────────────────────────────────────

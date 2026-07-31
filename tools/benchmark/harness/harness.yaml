@@ -42,8 +42,15 @@ run:
   # Raise it only to study how a bigger budget plays, never to read along.
   thinking_tokens: 0
   # Seconds one level gets before the agent is killed and the run is scored
-  # from wherever it got to.
-  timeout: 900
+  # from wherever it got to. 0 means no limit, which is the setting here.
+  #
+  # A limit is not free. Sonnet took 807s, 1030s and 1271s on three real
+  # three_kingdoms sessions, so the old 900 would have cut two of them off
+  # mid-think — and a truncated run is still scored. It now classifies as
+  # `incomplete` rather than `hard`, so a limit no longer silently inflates
+  # difficulty, but the run is still lost. Set a number only when a sweep has
+  # to finish inside a known window.
+  timeout: 0
   # How the agent is confined. 'bwrap' hides every path but the sandbox, so the
   # pack and its gold path do not exist for the agent. 'docker' starts from an
   # image instead, so the host filesystem is absent rather than hidden, and

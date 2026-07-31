@@ -30,7 +30,10 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from tools.benchmark.harness import agents, isolation  # noqa: E402
-from tools.benchmark.harness.supervisor import load_config  # noqa: E402
+from tools.benchmark.harness.supervisor import (  # noqa: E402
+    load_config,
+    resolve_timeout,
+)
 
 SUPERVISOR = _HARNESS_DIR / "supervisor.py"
 
@@ -80,11 +83,13 @@ def run_one(job: dict) -> dict:
         argv.append("--anon")
 
     started = time.monotonic()
+    limit = resolve_timeout(job["timeout"])
     proc = subprocess.run(
         argv, capture_output=True, text=True,
         # A supervisor that ignores its own timeout still must not wedge the
-        # sweep, so allow it a margin and then take it out.
-        timeout=job["timeout"] + 120,
+        # sweep, so allow it a margin and then take it out. With no timeout
+        # there is nothing to outlast: the sweep waits as long as the run does.
+        timeout=(limit + 120) if limit else None,
     )
     elapsed = time.monotonic() - started
 
@@ -143,7 +148,7 @@ def main() -> int:
     iso = args.isolation or run_cfg.get("isolation", "bwrap")
     max_attempts = (args.max_attempts if args.max_attempts is not None
                     else int(run_cfg.get("max_attempts", 1)))
-    timeout = args.timeout if args.timeout is not None else float(run_cfg.get("timeout", 900))
+    timeout = args.timeout if args.timeout is not None else float(run_cfg.get("timeout", 0))
 
     packs_dir = Path(args.packs_dir).resolve()
     if args.pack:
@@ -185,7 +190,8 @@ def main() -> int:
 
     print(f"[sweep] {len(jobs)} session(s): {len(pairs)} level(s) x {repeats} "
           f"repeat(s), agent={agent} model={model or '-'} isolation={iso} "
-          f"max_attempts={max_attempts} concurrency={concurrency}")
+          f"max_attempts={max_attempts} concurrency={concurrency} "
+          f"timeout={resolve_timeout(timeout) or 'none'}")
 
     started = time.monotonic()
     runs: list[dict] = []

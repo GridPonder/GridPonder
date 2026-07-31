@@ -71,6 +71,28 @@ Four verbs, and nothing else is accepted:
 
 `./play` exits 0 normally, 3 once the run is over, 2 on a transport failure.
 
+## Packs this engine cannot play
+
+`instantiate_systems` drops a system type it does not recognise, silently. A
+pack whose central mechanic postdates the engine therefore does not fail — it
+runs with that mechanic simply absent, its levels become unwinnable, and every
+one of them scores as unsolved with nothing in the results saying why.
+
+The supervisor now checks the pack's declared systems against the registry
+before it does anything else, and refuses the run. Under a sweep that becomes
+one error row per level naming the missing system, which is the difference
+between a config you can fix and a page of levels that look hard.
+
+## How long a run gets
+
+`run.timeout` is `0`, meaning no limit. A limit is not free: on three real
+`three_kingdoms` sessions Sonnet took 807s, 1030s and 1271s, so the old default
+of 900 would have cut two of them off mid-think — and a truncated run is still
+scored. Set a number only when a sweep has to finish inside a known window.
+
+Whatever the limit, a run that hits it is no longer counted as difficulty; see
+`incomplete` below.
+
 ## Attempts and losses
 
 With `run.max_attempts > 1`, losing resets the board and costs an attempt
@@ -203,6 +225,29 @@ ends up measuring its own rules text.
 Efficiency is averaged over solved runs only. Including failures would fold in
 runs that stopped at the action budget and make an unsolved level look cheap.
 
+It is reported twice. **Eff.** is the whole run's actions over the gold path;
+**Eff.↑** counts only the attempt that solved it. They come apart whenever a run
+lost attempts first, and the gap is not small: on `tk_008` a Sonnet run whose
+per-attempt spend was 21, 17 and 17 actions against a gold path of 18 — at or
+under the intended solution every single time — scored 3.0 by the total, the
+same number the random baseline agent got on the same level. The total is still
+the honest answer to "what did this run cost"; it is just not an answer about
+how well the level was solved. Note that `classify` already counts attempts
+separately, so the total was charging twice for the same fact.
+
+**`incomplete` is not a difficulty.** A run that hit the timeout, whose agent
+crashed, or that was rate-limited into silence never finished playing, so it
+supports no claim about the level. `hard` is reserved for runs the *game*
+ended. Incomplete sessions are still shown — the sweep paid for them — but they
+are left out of the solve rate, they do not colour a level whose other runs
+produced real results, and each one says how it ended: stopped at the timeout,
+exited N, reported an error, or simply stopped. A session that died before its
+first `./play` call leaves no transcript to read, so it gets a line in
+"Sessions with nothing to read" rather than vanishing into a count.
+
+A level whose every run was incomplete has no solve rate at all, and the table
+says `—` rather than 0%. Nothing was measured, and 0/0 is not zero.
+
 **Token cost is not spend.** The agent CLI derives it from its own token counts
 at published API prices — the figure reproduces to the cent from `usage`, cache
 reads and all. A run on a subscription login is metered against rate limits and
@@ -216,9 +261,14 @@ key, and a sound basis for comparing runs, but never a receipt. It is labelled
   handles on that level. On a `coupled_actors` level a documented `tap_cell` is
   accepted as a no-op and silently costs a turn. Fixing this properly needs the
   DSL to say which system owns an action.
-- `render_goals` has no `balance` branch, so an anonymous `three_kingdoms` run
-  is told its goal is the literal word `balance`. Anonymous sweeps of that pack
-  are not meaningful until that is written.
+- A goal's config can carry keys this engine's evaluator does not read, and
+  nothing notices. `three_kingdoms` tk_022-024 set `requireConnected` /
+  `connectionSources`, which postdate this branch: `_balance` ignores both, so
+  those three levels are scored under a weaker win condition than the game
+  actually has. Unlike a missing *system*, which makes levels unwinnable and is
+  caught before the run, a missing goal *flag* makes them easier and is silent.
+  Their gold paths still pass, because the intended solution satisfies the
+  ignored rule anyway.
 - `harness.yaml`'s `tier2` block is still unread; only `thresholds`, `run` and
   the swept tier are used.
 - The Dart runner has no `--observation harness`; harness mode is Python-only.

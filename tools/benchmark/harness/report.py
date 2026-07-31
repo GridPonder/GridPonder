@@ -52,7 +52,7 @@ _REPO_ROOT = _HARNESS_DIR.parents[2]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-from tools.benchmark.harness import timeline  # noqa: E402
+from tools.benchmark.harness import metrics, timeline  # noqa: E402
 
 INK = colors.HexColor("#1a1a1a")
 MUTED = colors.HexColor("#6b7280")
@@ -64,6 +64,7 @@ TIER_COLOUR = {
     "borderline": colors.HexColor("#b45309"),
     "hard": colors.HexColor("#b91c1c"),
     "friction": colors.HexColor("#6d28d9"),
+    "incomplete": colors.HexColor("#0891b2"),
     "error": colors.HexColor("#475569"),
 }
 TIER_HEX = {k: "#" + v.hexval()[2:] for k, v in TIER_COLOUR.items()}
@@ -107,14 +108,41 @@ def attempt_outcomes(detail: dict) -> list[str]:
 TIER_MEANING = {
     "trivial": "solved on the first attempt without wandering",
     "borderline": "solved, but needed more than one attempt or well over the gold path",
-    "hard": "not solved",
+    "hard": "not solved — the game itself ended the run",
     "friction": "the agent's JSON kept being rejected — a rules-text problem, not a difficulty one",
+    "incomplete": ("the session never finished — a timeout or a dead agent. Says "
+                   "nothing about the level, and is left out of the solve rate"),
     "error": "the session failed to run at all",
 }
 
 
 def _mean(values: list[float]) -> float | None:
     return statistics.fmean(values) if values else None
+
+
+def _scored(runs: list[dict]) -> list[dict]:
+    """The sessions that actually produced a result about their level.
+
+    A run that never finished is still shown — dropping it would hide that the
+    sweep cost something — but it does not get a vote on whether the level was
+    solvable.
+    """
+    return [r for r in runs if r.get("tier") not in ("incomplete", "error")]
+
+
+def _timeout_label(runs: list[dict]) -> str:
+    """The wall-clock limit these sessions ran under, as one phrase.
+
+    Worth a line of its own: a row that stopped early cannot be read without
+    knowing whether anything was going to stop it.
+    """
+    if not any("timeout" in r for r in runs):
+        return "—"  # results written before the limit was recorded
+    limits = {r.get("timeout") for r in runs}
+    parts = sorted({f"{v:.0f}s" for v in limits if v})
+    if None in limits:
+        parts.append("none")
+    return ", ".join(parts) or "none"
 
 
 def _fmt(value, spec: str = "", dash: str = "—") -> str:
@@ -131,21 +159,35 @@ def summarize(runs: list[dict]) -> list[dict]:
 
     rows = []
     for (pack, level), group in sorted(by_level.items()):
+        # A session that never finished measured nothing. Leaving it in the
+        # denominator reports a level as half-solved on the strength of a run
+        # that was killed, which is the same mistake as calling it hard.
+        scored = [r for r in group
+                  if r.get("tier") not in ("incomplete", "error")]
         solved = [r for r in group if r.get("solved")]
         effs = [r["efficiency"] for r in solved
                 if isinstance(r.get("efficiency"), (int, float))]
+        final_effs = [r["efficiency_final_attempt"] for r in solved
+                      if isinstance(r.get("efficiency_final_attempt"), (int, float))]
         rows.append({
             "pack": pack,
             "level": level,
             "runs": len(group),
+            "scored": len(scored),
             "solved": len(solved),
-            "solve_rate": len(solved) / len(group) if group else 0.0,
+            # None, not 0.0, when nothing was scored: 0/0 is not a 0% solve
+            # rate, and a chart that draws it as one invents a result.
+            "solve_rate": (len(solved) / len(scored)) if scored else None,
             "gold": next((r.get("gold_path_length") for r in group
                           if r.get("gold_path_length")), None),
             # Averaged over solved runs only. Including failures would mix in
             # runs that stopped at the action budget, making a level the agent
             # never solved look efficient.
             "efficiency": _mean(effs),
+            # The same, counting only the attempt that solved it. The total
+            # charges a run for attempts it already lost, so a clean solve on
+            # the third try scored the same as aimless wandering.
+            "efficiency_final": _mean(final_effs),
             "losses": _mean([r.get("losses", 0) or 0 for r in group]),
             "attempts": _mean([r.get("attempts", 0) or 0 for r in group]),
             "actions": _mean([r.get("actions_total", 0) or 0 for r in group]),
@@ -166,11 +208,33 @@ def _dominant_tier(tiers: list[str]) -> str:
     Worst-case rather than most-common: a level that friction-failed even once
     has a problem worth looking at, and averaging that away is how it stays
     unnoticed.
+
+    `incomplete` is the exception and comes last, because it is not a claim
+    about the level at all. One killed session alongside three real ones must
+    not relabel a level nobody solved; it only wins when there is nothing else
+    left to report.
     """
     for tier in ("error", "friction", "hard", "borderline", "trivial"):
         if tier in tiers:
             return tier
+    if "incomplete" in tiers:
+        return "incomplete"
     return "?"
+
+
+def unreadable_sessions(runs: list[dict], details: list[dict]) -> list[dict]:
+    """Runs that got no session page, because there was no transcript to read.
+
+    A run that died before its first ./play call leaves an empty transcript, so
+    it falls out of `session_details` — and that is precisely the run a reader
+    has no other evidence about. Listed separately with how it ended, rather
+    than appearing only as a number in the summary.
+    """
+    shown = {id(d["run"]) for d in details}
+    return [r for r in runs
+            if id(r) not in shown and not r.get("solved")
+            and (r.get("tier") in ("incomplete", "error")
+                 or not r.get("reached_terminal", True))]
 
 
 def session_details(runs: list[dict]) -> list[dict]:
@@ -205,7 +269,10 @@ def _chart(rows: list[dict]) -> io.BytesIO:
     labels = [r["level"] for r in rows]
     x = range(len(rows))
 
-    axes[0].bar(x, [r["solve_rate"] * 100 for r in rows], width=0.62,
+    # A level with no scored run has no rate to draw. Zero is the honest bar
+    # height for "nothing to show" only because the tier colour beside it says
+    # incomplete; the number itself is absent, not zero.
+    axes[0].bar(x, [(r["solve_rate"] or 0) * 100 for r in rows], width=0.62,
                 color=[TIER_HEX.get(_dominant_tier(r["tiers"]), "#94a3b8")
                        for r in rows])
     axes[0].set_ylabel("solved %")
@@ -424,20 +491,45 @@ def build(payload: dict, out_path: Path) -> Path:
     story.append(Spacer(1, 6 * mm))
 
     solved_runs = sum(1 for r in runs if r.get("solved"))
+    scored_runs = _scored(runs)
+    unfinished = len(runs) - len(scored_runs)
     total_cost = sum(r.get("cost_usd", 0) or 0 for r in runs)
     isolation_mode = meta.get("isolation", "?")
-    story.append(_kv_table([
+    summary = [
         ("Sessions", str(len(runs))),
-        ("Solved", f"{solved_runs}/{len(runs)}"
-                   + (f"  ({solved_runs / len(runs) * 100:.0f}%)" if runs else "")),
-        ("Levels never solved", str(sum(1 for r in rows if r["solved"] == 0))),
+        # Out of the sessions that finished. A run we killed is not a level the
+        # agent failed to solve, and putting it in the denominator reports it
+        # as one.
+        ("Solved", f"{solved_runs}/{len(scored_runs)}"
+                   + (f"  ({solved_runs / len(scored_runs) * 100:.0f}%)"
+                      if scored_runs else "")),
+    ]
+    if unfinished:
+        summary.append((
+            "Sessions that did not finish",
+            f"{unfinished}  (excluded from the rate above)",
+        ))
+    summary += [
+        ("Levels never solved",
+         str(sum(1 for r in rows if r["scored"] and r["solved"] == 0))),
         ("Total losses", str(sum(r.get("losses", 0) or 0 for r in runs))),
         ("Attempts allowed per run", str(meta.get("max_attempts", "—"))),
+        ("Time limit per run", _timeout_label(runs)),
         ("Isolation", isolation_mode),
         ("Wall clock", f"{_wall_seconds(meta, runs):.0f}s"),
         ("Token cost (list price)", f"${total_cost:.4f}" if total_cost else "—"),
-    ]))
+    ]
+    story.append(_kv_table(summary))
     story.append(Spacer(1, 6 * mm))
+
+    if unfinished:
+        story.append(Paragraph(
+            f"<font color=\"{TIER_HEX['incomplete']}\"><b>{unfinished} of "
+            f"{len(runs)} session(s) never finished.</b></font> They were cut "
+            "off at a timeout or their agent stopped, so they measure nothing "
+            "about the levels they ran on and are excluded from the solve rate. "
+            "Each one says how it ended in its own section below.", st["body"]))
+        story.append(Spacer(1, 5 * mm))
 
     if isolation_mode == "none":
         story.append(Paragraph(
@@ -475,15 +567,16 @@ def build(payload: dict, out_path: Path) -> Path:
 
     story.append(PageBreak())
     story.append(Paragraph("Results", st["h1"]))
-    header = ["Level", "Tier", "Solved", "Gold", "Actions", "Eff.",
+    header = ["Level", "Tier", "Solved", "Gold", "Actions", "Eff.", "Eff.↑",
               "Att.", "Loss", "Schema", "Illegal", "Sec"]
     data = [header]
     for row in rows:
         data.append([
             row["level"], _dominant_tier(row["tiers"]),
-            f"{row['solved']}/{row['runs']}",
+            f"{row['solved']}/{row['scored']}",
             _fmt(row["gold"]), _fmt(row["actions"], ".0f"),
-            _fmt(row["efficiency"], ".2f"), _fmt(row["attempts"], ".1f"),
+            _fmt(row["efficiency"], ".2f"),
+            _fmt(row["efficiency_final"], ".2f"), _fmt(row["attempts"], ".1f"),
             _fmt(row["losses"], ".1f"), _fmt(row["schema"], ".1f"),
             _fmt(row["illegal"], ".1f"), _fmt(row["seconds"], ".0f"),
         ])
@@ -506,6 +599,14 @@ def build(payload: dict, out_path: Path) -> Path:
             style.append(("BACKGROUND", (0, i), (-1, i), BAND))
     results.setStyle(TableStyle(style))
     story.append(results)
+    story.append(Spacer(1, 2.5 * mm))
+    story.append(Paragraph(
+        "<b>Solved</b> counts only the sessions that finished. <b>Eff.</b> is "
+        "the whole run's actions over the gold path; <b>Eff.↑</b> counts only "
+        "the attempt that solved it. They differ when a run lost attempts "
+        "first — a clean solve on the third try spends three budgets, and "
+        "charging it for all three describes the retries, not the solving.",
+        st["small"]))
 
     for detail in details:
         run = detail["run"]
@@ -516,6 +617,15 @@ def build(payload: dict, out_path: Path) -> Path:
             f"{detail['turns']} ./play calls — {detail['moves']} moves, "
             f"{detail['looks']} looks at the board — over "
             f"{run.get('wall_seconds', 0):.0f}s", st["sub"]))
+        # How the run stopped, said plainly. Without it a session that was
+        # killed at the timeout and one the level genuinely beat read the same.
+        ended = metrics.completion(run)
+        story.append(Paragraph(
+            f"Ended: <font color=\"{TIER_HEX.get(run.get('tier'), '#475569')}\">"
+            f"<b>{html.escape(ended)}</b></font>"
+            + ("" if run.get("solved") or run.get("reached_terminal", True) else
+               " — nothing here measures the level, only the session"),
+            st["body"]))
         story.append(Spacer(1, 4 * mm))
 
         attempt_data = [["Attempt", "Actions", "Schema", "Illegal", "Outcome"]]
@@ -619,6 +729,24 @@ def build(payload: dict, out_path: Path) -> Path:
                         html.escape(line) for line in reply), st["mono"]))
             flow.append(Spacer(1, 3 * mm))
             story.append(KeepTogether(flow))
+
+    silent = unreadable_sessions(runs, details)
+    if silent:
+        story.append(PageBreak())
+        story.append(Paragraph("Sessions with nothing to read", st["h1"]))
+        story.append(Paragraph(
+            "These stopped before, or without, leaving a usable transcript, so "
+            "they have no section above. How each one ended is all there is to "
+            "say about it — and none of it is evidence about the level.",
+            st["small"]))
+        story.append(Spacer(1, 3 * mm))
+        for run in silent[:20]:
+            story.append(Paragraph(
+                f"<b>{run.get('pack_id', '?')}/{run.get('level_id', '?')}</b> "
+                f"— {html.escape(metrics.completion(run))}, after "
+                f"{run.get('actions_total', 0)} action(s) and "
+                f"{run.get('wall_seconds', 0):.0f}s", st["body"]))
+        story.append(Spacer(1, 4 * mm))
 
     errors = [(r, e) for r in rows for e in r["errors"]]
     if errors:
@@ -735,12 +863,20 @@ def build_html(payload: dict, out_path: Path) -> Path:
     if meta.get("model"):
         agent_label += f" · {meta['model']}"
 
+    scored_runs = _scored(runs)
+    unfinished = len(runs) - len(scored_runs)
     facts = [
         ("Sessions", str(len(runs))),
-        ("Solved", f"{solved_runs}/{len(runs)}"),
-        ("Never solved", str(sum(1 for r in rows if r["solved"] == 0))),
+        ("Solved", f"{solved_runs}/{len(scored_runs)}"),
+    ]
+    if unfinished:
+        facts.append(("Did not finish", str(unfinished)))
+    facts += [
+        ("Never solved",
+         str(sum(1 for r in rows if r["scored"] and r["solved"] == 0))),
         ("Total losses", str(sum(r.get("losses", 0) or 0 for r in runs))),
         ("Attempts allowed", str(meta.get("max_attempts", "—"))),
+        ("Time limit", _timeout_label(runs)),
         ("Isolation", isolation_mode),
         ("Wall clock", f"{_wall_seconds(meta, runs):.0f}s"),
         ("Token cost (list price)", f"${total_cost:.4f}" if total_cost else "—"),
@@ -761,6 +897,14 @@ def build_html(payload: dict, out_path: Path) -> Path:
             '<div class="warn"><b>These numbers are not verified.</b> The sweep '
             "ran without filesystem confinement, so the agent could read the "
             "pack and its gold path directly.</div>")
+
+    if unfinished:
+        parts.append(
+            f'<div class="warn"><b>{unfinished} of {len(runs)} session(s) '
+            f"never finished.</b> They were cut off at a timeout or their agent "
+            f"stopped, so they measure nothing about the levels they ran on and "
+            f"are excluded from the solve rate. Each one says how it ended in "
+            f"its own section below.</div>")
 
     if total_cost:
         parts.append(f'<p class="sub">{html.escape(_COST_NOTE)}</p>')
@@ -785,14 +929,22 @@ def build_html(payload: dict, out_path: Path) -> Path:
 
     parts.append("<h2>Results</h2>")
     parts.append(_html_table(
-        ["Level", "Tier", "Solved", "Gold", "Actions", "Eff.", "Att.", "Loss",
-         "Schema", "Illegal", "Sec"],
-        [[r["level"], _dominant_tier(r["tiers"]), f"{r['solved']}/{r['runs']}",
+        ["Level", "Tier", "Solved", "Gold", "Actions", "Eff.", "Eff.↑", "Att.",
+         "Loss", "Schema", "Illegal", "Sec"],
+        [[r["level"], _dominant_tier(r["tiers"]), f"{r['solved']}/{r['scored']}",
           _fmt(r["gold"]), _fmt(r["actions"], ".0f"), _fmt(r["efficiency"], ".2f"),
+          _fmt(r["efficiency_final"], ".2f"),
           _fmt(r["attempts"], ".1f"), _fmt(r["losses"], ".1f"),
           _fmt(r["schema"], ".1f"), _fmt(r["illegal"], ".1f"),
           _fmt(r["seconds"], ".0f")] for r in rows],
         tier_col=1))
+    parts.append(
+        "<p class=\"sub\"><b>Solved</b> counts only the sessions that finished. "
+        "<b>Eff.</b> is the whole run's actions over the gold path; "
+        "<b>Eff.↑</b> counts only the attempt that solved it. They differ when "
+        "a run lost attempts first — a clean solve on the third try spends "
+        "three budgets, and charging it for all three describes the retries, "
+        "not the solving.</p>")
 
     for detail in details:
         run = detail["run"]
@@ -802,6 +954,14 @@ def build_html(payload: dict, out_path: Path) -> Path:
             f'<p class="sub">{detail["turns"]} ./play calls — '
             f'{detail["moves"]} moves, {detail["looks"]} looks at the board — '
             f'over {run.get("wall_seconds", 0):.0f}s</p>')
+        ended = metrics.completion(run)
+        parts.append(
+            f'<p>Ended: <b style="color:'
+            f'{TIER_HEX.get(run.get("tier"), "#475569")}">'
+            f"{html.escape(ended)}</b>"
+            + ("" if run.get("solved") or run.get("reached_terminal", True) else
+               " — nothing here measures the level, only the session")
+            + "</p>")
         attempt_rows = [
             [str(a["attempt"]), outcome, str(a["actions"]),
              str(a["rejected_schema"]), str(a["rejected_illegal"])]
@@ -883,6 +1043,22 @@ def build_html(payload: dict, out_path: Path) -> Path:
             parts.append(f'<code>./play {html.escape(entry["call"])}</code>')
             for line in _reply_lines(entry, turn):
                 parts.append(f'<code class="reply">{html.escape(line)}</code>')
+
+    silent = unreadable_sessions(runs, details)
+    if silent:
+        parts.append("<h2>Sessions with nothing to read</h2>")
+        parts.append('<p class="sub">These stopped before, or without, leaving '
+                     "a usable transcript, so they have no section above. How "
+                     "each one ended is all there is to say about it — and none "
+                     "of it is evidence about the level.</p>")
+        for run in silent[:20]:
+            parts.append(
+                f'<div class="ob"><div class="when"><b>'
+                f'{html.escape(str(run.get("pack_id", "?")))}/'
+                f'{html.escape(str(run.get("level_id", "?")))}</b></div>'
+                f'<p>{html.escape(metrics.completion(run))}, after '
+                f'{run.get("actions_total", 0)} action(s) and '
+                f'{run.get("wall_seconds", 0):.0f}s</p></div>')
 
     errors = [(r, e) for r in rows for e in r["errors"]]
     if errors:

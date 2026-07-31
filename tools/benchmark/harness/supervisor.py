@@ -42,6 +42,7 @@ if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
 from engines.python.loader import load_pack  # noqa: E402
+from engines.python._systems import _REGISTRY as _SYSTEM_REGISTRY  # noqa: E402
 from engines.python.anon import (  # noqa: E402
     build_anon_action_shapes,
     build_anon_kind_to_label,
@@ -72,6 +73,32 @@ _RESET_TEXT = {
 }
 
 
+def missing_systems(game_def) -> list[str]:
+    """Enabled system types this engine has no implementation for.
+
+    `instantiate_systems` drops an unknown type silently, so a pack whose
+    central mechanic postdates the engine does not fail — it runs with that
+    mechanic simply absent, and its levels become unwinnable. Scored, that is
+    a whole pack reported as `hard`, with nothing in the results saying why.
+    """
+    return sorted({
+        s["type"] for s in game_def.systems
+        if s.get("enabled", True) and s["type"] not in _SYSTEM_REGISTRY
+    })
+
+
+def resolve_timeout(value: float | int | None) -> float | None:
+    """A run's wall-clock limit in seconds, or None for no limit.
+
+    0 and below mean no limit. A hosted model takes 800-1300 seconds on a real
+    level, so a limit that fires mid-think does not measure the puzzle, it
+    truncates the run — and a truncated run is scored, not discarded.
+    """
+    if value is None or value <= 0:
+        return None
+    return float(value)
+
+
 class Session:
     """One level, one agent. Owns the runner subprocess and the run's counters."""
 
@@ -90,6 +117,17 @@ class Session:
         self.narrate = narrate
 
         self.game_def, levels = load_pack(str(pack_dir))
+        # Before anything else, and loudly. A pack the engine cannot fully play
+        # produces a plausible-looking run whose central mechanic never fired,
+        # and there is no way to tell that from the result afterwards.
+        absent = missing_systems(self.game_def)
+        if absent:
+            raise SystemExit(
+                f'pack "{pack_dir.name}" declares system(s) this engine does '
+                f'not implement: {", ".join(absent)}. Its levels would run '
+                f"with that mechanic absent and score as unsolved. Refusing "
+                f"to run rather than record a number that means nothing."
+            )
         if level_id not in levels:
             raise SystemExit(f'level "{level_id}" not found in {pack_dir}')
         self.level_def = levels[level_id]
@@ -481,8 +519,21 @@ class Session:
             "rejected_illegal": self.rejected_illegal,
             "reached_terminal": self.terminal is not None,
         }
+        # What the last attempt cost on its own. `actions_total` sums every
+        # attempt, so a *flawless* third attempt on a level whose first two
+        # were lost reads as three times the gold path — and `classify`
+        # already counts attempts separately, so the total was charging twice
+        # for the same fact. Kept alongside rather than replacing it: the sum
+        # is still the honest answer to "what did this run cost".
+        actions_final = term.get(
+            "actions_this_attempt", self.state.get("moves_this_attempt", 0)
+        )
+        run["actions_final_attempt"] = actions_final
         run["efficiency"] = metrics.efficiency(
             run["actions_total"], run["gold_path_length"]
+        )
+        run["efficiency_final_attempt"] = metrics.efficiency(
+            actions_final, run["gold_path_length"]
         )
         run["first_divergence"] = metrics.first_divergence(
             self.first_attempt_moves, self.gold_path
@@ -716,7 +767,11 @@ def main() -> int:
         "--agent-cmd", nargs=argparse.REMAINDER, default=None,
         help="Command to run inside the sandbox. Everything after this flag.",
     )
-    parser.add_argument("--timeout", type=float, default=900.0)
+    parser.add_argument(
+        "--timeout", type=float, default=None,
+        help="Seconds before the agent is killed and the run scored from "
+             "wherever it got to. 0 means no limit. Defaults to run.timeout.",
+    )
     parser.add_argument(
         "--trace", action="store_true", default=False,
         help="Print each move to stderr as it happens. A hosted model can think for minutes between moves, and without this a live run looks identical to a hung one.",
@@ -744,6 +799,9 @@ def main() -> int:
     narrate = (
         args.narrate if args.narrate is not None
         else bool(run_config.get("narrate", False))
+    )
+    timeout = resolve_timeout(
+        args.timeout if args.timeout is not None else run_config.get("timeout", 0)
     )
 
     docker_cfg = config.get("docker", {})
@@ -838,7 +896,7 @@ def main() -> int:
         stdout_text = ""
         try:
             proc = subprocess.run(
-                argv, cwd=str(sandbox), env=env, timeout=args.timeout,
+                argv, cwd=str(sandbox), env=env, timeout=timeout,
                 stdout=(stream_file or subprocess.PIPE),
                 stderr=subprocess.PIPE, text=True,
             )
@@ -879,6 +937,10 @@ def main() -> int:
     result["agent"] = args.agent or ("custom" if args.agent_cmd else None)
     result["model"] = args.model if (spec is None or spec.uses_model) else None
     result["isolation"] = args.isolation
+    # None when the run was allowed to take as long as it needed. Recorded
+    # because a row that stopped early cannot be read without knowing whether
+    # anything was going to stop it.
+    result["timeout"] = timeout
     # Both of these change how the agent plays, not just what we record of it,
     # so they belong on the run rather than in the config alone. A narrated run
     # and a silent one are not directly comparable.
