@@ -181,6 +181,22 @@ def actor_entered(kind: str, pos: Pos, from_pos: Pos, direction: str) -> dict:
     }
 
 
+def actor_reacted(kind: str, from_pos: Pos, to_pos: Pos, direction: str) -> dict:
+    """A reactive (non-player) actor answered the player's move.
+
+    Deliberately distinct from ``actor_moved`` so move counters and budgets
+    keyed on player movement are unaffected; systems that should treat a rival
+    landing as an anchor name this event explicitly.
+    """
+    return {
+        "type": "actor_reacted",
+        "kind": kind,
+        "fromPosition": from_pos,
+        "position": to_pos,
+        "direction": direction,
+    }
+
+
 def actor_blocked(kind: str, pos: Pos) -> dict:
     return {"type": "actor_blocked", "kind": kind, "position": pos}
 

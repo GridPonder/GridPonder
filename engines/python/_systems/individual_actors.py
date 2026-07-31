@@ -7,10 +7,19 @@ successful-move budgets.
 from __future__ import annotations
 
 from .._game_def import GameDef
-from .._models import CARDINALS, GameState, Pos, dir_delta
+from .._models import (
+    CARDINALS, Entity, GameState, Pos, dir_delta, transform_delta)
 from .. import _events as ev
 from ._base import GameSystem
 from ._claim import apply_claim
+
+# up, down, left, right — the canonical bucket order shared with coupled_actors.
+_CANONICAL_BUCKETS = ((0, -1), (0, 1), (-1, 0), (1, 0))
+_DELTA_DIRS = {(0, -1): "up", (0, 1): "down", (-1, 0): "left", (1, 0): "right"}
+
+
+def _delta_dir(dx: int, dy: int) -> str:
+    return _DELTA_DIRS.get((dx, dy), "")
 
 
 class IndividualActorsSystem(GameSystem):
@@ -128,6 +137,73 @@ class IndividualActorsSystem(GameSystem):
         if remaining is not None:
             remaining[entity.kind] = int(remaining.get(entity.kind, 0)) - 1
 
+        events += self._react(
+            state, game, config, (dx, dy), actor_layer_id, ground_layer_id, wall_tag)
+
+        return events
+
+    def _react(self, state: GameState, game: GameDef, config: dict,
+               delta: tuple[int, int], actor_layer_id: str,
+               ground_layer_id: str, wall_tag: str) -> list[dict]:
+        """Move every reactive-kind actor in response to a successful player move.
+
+        Rivals answer the *player's* direction through their own transform, so
+        the move the player makes is also the move the opposition makes. Runs
+        only after a real step — a blocked attempt gives the rivals nothing.
+        Resolution mirrors ``coupled_actors``: bucket by effective direction in
+        canonical order, front-first within a bucket, with a live ``occupied``
+        set, so the outcome is fully deterministic.
+
+        Emits ``actor_reacted`` rather than ``actor_moved`` so that move
+        counters and budgets keyed on player movement stay honest; a level that
+        wants rival landings to anchor captures names ``actor_reacted`` in the
+        capture system's ``triggerEvents``.
+        """
+        reactive = config.get("reactiveKinds") or {}
+        if not reactive:
+            return []
+
+        board = state.board
+        actor_layer = board.layers.get(actor_layer_id)
+        if actor_layer is None:
+            return []
+
+        occupied = {pos for pos, _ in actor_layer.entries()}
+        triples = [
+            (pos, entity, transform_delta(delta, reactive.get(entity.kind)))
+            for pos, entity in actor_layer.entries()
+            if entity.kind in reactive
+        ]
+
+        ordered: list[tuple[Pos, Entity, tuple[int, int]]] = []
+        for bucket in _CANONICAL_BUCKETS:
+            bdx, bdy = bucket
+            members = [t for t in triples if t[2] == bucket]
+            members.sort(key=lambda t: (
+                -(t[0].x * bdx + t[0].y * bdy),
+                t[0].x * abs(bdy) + t[0].y * abs(bdx),
+                t[1].kind,
+            ))
+            ordered.extend(members)
+
+        events: list[dict] = []
+        for pos, entity, (rdx, rdy) in ordered:
+            if (rdx, rdy) == (0, 0):
+                continue
+            target = Pos(pos.x + rdx, pos.y + rdy)
+            blocked = (
+                not board.is_in_bounds(target)
+                or board.has_tag_at(ground_layer_id, target, wall_tag, game.entity_kinds)
+                or target in occupied
+            )
+            if blocked:
+                continue
+            board.set_entity(actor_layer_id, pos, None)
+            board.set_entity(actor_layer_id, target, entity)
+            occupied.discard(pos)
+            occupied.add(target)
+            events.append(ev.actor_reacted(
+                entity.kind, pos, target, _delta_dir(rdx, rdy)))
         return events
 
     def _ensure_budget_state(self, state: GameState, config: dict) -> dict | None:

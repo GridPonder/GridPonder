@@ -472,7 +472,7 @@ Example config:
 
 **Phase:** `action_resolution`
 
-**Events emitted:** `actor_selected`, `actor_moved`, `actor_entered`, `actor_blocked`, `cell_claimed` (only when `claim` is configured), `action_vetoed` (when selection/movement is invalid)
+**Events emitted:** `actor_selected`, `actor_moved`, `actor_entered`, `actor_blocked`, `actor_reacted` (only when `reactiveKinds` is configured), `cell_claimed` (only when `claim` is configured), `action_vetoed` (when selection/movement is invalid)
 
 **Config:**
 
@@ -490,6 +490,7 @@ Example config:
 | `budgets` | object | — | Optional actor kind → successful move count. When configured, a selected actor at 0 remaining moves cannot move. |
 | `budgetVariable` | string | `"actorMovesRemaining"` | Runtime variable storing remaining move budgets. |
 | `claim` | object | — | Optional. Same shape and semantics as `coupled_actors.claim`. |
+| `reactiveKinds` | object | `{}` | Optional. Actor kind → direction transform, using the same vocabulary as `coupled_actors.directionTransforms` (`identity`, `invert`, `mirror_x`, `mirror_y`). Actors of these kinds are **not** driven by the player: after each successful player move they take one step of their own, derived from the player's direction. See [Reactive actors](#reactive-actors). |
 
 Example config:
 ```json
@@ -511,7 +512,32 @@ Example config:
 3. Compute the selected actor's target cell. If the target is out of bounds, tagged `wallTag` on `groundLayer`, or occupied by another actor, the actor stays and emits `actor_blocked`.
 4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, apply the claim policy to the destination cell (see [Claim overwrite](#214-claim-overwrite)), and decrement that actor's remaining budget when budgets are configured.
 
-**Reuse:** Game-agnostic — any game with multiple layer-entity actors can use it for tap-to-select movement, squad puzzles, or budgeted routing.
+<a name="reactive-actors"></a>
+**Reactive actors (opposition).** `reactiveKinds` turns named kinds into an
+*opposition* that answers the player rather than obeying them. After a player
+move resolves successfully, each reactive actor computes its own direction by
+applying its transform to the **player's** direction — `invert` makes it mirror
+the player, so moving left drives it right — and takes one step. Rules:
+
+1. Reactive actors move **only after a successful player step**. A blocked
+   attempt costs the player the action but gives the opposition nothing.
+2. Resolution matches `coupled_actors`: bucket by effective direction in the
+   canonical order `up, down, left, right`, front-first within a bucket, with a
+   live `occupied` set. Fully deterministic — the whole turn stays a pure
+   function of the player's move, so a solver's branching factor does not grow.
+3. A blocked reactive actor simply holds position and emits nothing.
+4. Reactive movement emits **`actor_reacted`**, never `actor_moved`. This keeps
+   move counters, budgets and rules keyed on player movement unaffected by the
+   opposition. A system that should treat a rival's landing as an anchor names
+   the event explicitly — e.g. `flank_capture` with
+   `"triggerEvents": ["actor_moved", "actor_reacted"]`, which lets the rival
+   capture with the same bracket rule the player uses.
+5. Reactive actors ignore `budgets`; only the player spends a pool.
+
+**Reuse:** Game-agnostic — any game with multiple layer-entity actors can use it
+for tap-to-select movement, squad puzzles, or budgeted routing; `reactiveKinds`
+adds deterministic opposition (mirror-chasers, pursuit puzzles, adversarial
+capture games) without any per-game engine code.
 
 ---
 

@@ -274,8 +274,96 @@ def test_level_overrides_can_switch_from_coupled_to_individual_movement() -> Non
     print("  OK  level_overrides_can_switch_from_coupled_to_individual_movement")
 
 
+def _make_reactive_level() -> dict:
+    return {
+        "id": "test_reactive_level",
+        "board": {
+            "size": [7, 1],
+            "layers": {
+                "ground": {"format": "sparse", "entries": []},
+                "actors": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [1, 0], "kind": "wei"},
+                        {"position": [5, 0], "kind": "shu"},
+                    ],
+                },
+                "territory": {"format": "sparse", "entries": []},
+            },
+        },
+        "state": {},
+        "goals": [],
+        "loseConditions": [],
+    }
+
+
+def test_reactive_kinds_mirror_the_movers_direction() -> None:
+    # wei is the player's piece; shu is reactive with `invert`, so a move right
+    # sends shu left. The rival's step emits `actor_reacted`, never
+    # `actor_moved`, so move counters keyed on player movement stay honest.
+    game = _make_game({"reactiveKinds": {"shu": "invert"}})
+    engine = TurnEngine(game, _make_reactive_level())
+
+    engine.execute_turn("tap_cell", {"position": [1, 0]})
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert result.accepted
+    assert _actor_pos(engine, "wei") == Pos(2, 0)
+    assert _actor_pos(engine, "shu") == Pos(4, 0)
+    reacted = [e for e in result.events if e["type"] == "actor_reacted"]
+    assert len(reacted) == 1, reacted
+    assert reacted[0]["kind"] == "shu"
+    assert reacted[0]["direction"] == "left"
+    moved_kinds = {e["kind"] for e in result.events if e["type"] == "actor_moved"}
+    assert moved_kinds == {"wei"}, moved_kinds
+    print("  OK  reactive_kinds_mirror_the_movers_direction")
+
+
+def test_reactive_actor_stays_put_when_blocked() -> None:
+    # shu inverts into the wall at (6,0)'s side: a move LEFT sends shu right,
+    # off the board, so it holds position and no `actor_reacted` is emitted.
+    game = _make_game({"reactiveKinds": {"shu": "invert"}})
+    level = _make_reactive_level()
+    level["board"]["layers"]["actors"]["entries"] = [
+        {"position": [1, 0], "kind": "wei"},
+        {"position": [6, 0], "kind": "shu"},
+    ]
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("tap_cell", {"position": [1, 0]})
+    result = engine.execute_turn("move", {"direction": "left"})
+
+    assert _actor_pos(engine, "wei") == Pos(0, 0)
+    assert _actor_pos(engine, "shu") == Pos(6, 0)
+    assert not [e for e in result.events if e["type"] == "actor_reacted"]
+    print("  OK  reactive_actor_stays_put_when_blocked")
+
+
+def test_reactive_actors_do_not_move_on_a_blocked_player_move() -> None:
+    # The player walks into the board edge: no successful step, so the rival
+    # does not get a free move out of a wasted attempt.
+    game = _make_game({"reactiveKinds": {"shu": "invert"}})
+    level = _make_reactive_level()
+    level["board"]["layers"]["actors"]["entries"] = [
+        {"position": [0, 0], "kind": "wei"},
+        {"position": [5, 0], "kind": "shu"},
+    ]
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("tap_cell", {"position": [0, 0]})
+    result = engine.execute_turn("move", {"direction": "left"})
+
+    assert _actor_pos(engine, "shu") == Pos(5, 0)
+    assert not [e for e in result.events if e["type"] == "actor_reacted"]
+    assert [e for e in result.events if e["type"] == "actor_blocked"]
+    print("  OK  reactive_actors_do_not_move_on_a_blocked_player_move")
+
+
 def run_all() -> bool:
     tests = [
+        test_reactive_kinds_mirror_the_movers_direction,
+        test_reactive_actor_stays_put_when_blocked,
+        test_reactive_actors_do_not_move_on_a_blocked_player_move,
         test_tap_selects_actor_and_move_moves_only_selected_actor,
         test_move_rejected_when_selected_actor_budget_is_exhausted,
         test_selection_identifies_one_actor_when_kinds_are_duplicated,
