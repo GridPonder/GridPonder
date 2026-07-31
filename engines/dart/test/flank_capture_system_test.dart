@@ -5,7 +5,18 @@ import 'package:test/test.dart';
 // pack wiring: ground empty/wall + a `pieces` layer of alien/human driven by
 // individual_actors + flank_capture.
 
-GameDefinition _game() {
+// Three-way capture: every kind is a jaw against every other. Used by the
+// list-victim tests below; the Pincer arc-4 pack ships this exact shape.
+const _threeWay = {
+  'alien': ['human', 'splinter'],
+  'splinter': ['human', 'alien'],
+  'human': ['alien', 'splinter'],
+};
+
+GameDefinition _game({
+  Map<String, dynamic>? pairs,
+  List<String>? order,
+}) {
   return GameDefinition.fromJson({
     'layers': [
       {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
@@ -26,6 +37,11 @@ GameDefinition _game() {
         'layer': 'pieces',
         'tags': ['actor'],
         'symbol': 'A',
+      },
+      'splinter': {
+        'layer': 'pieces',
+        'tags': ['actor'],
+        'symbol': 'S',
       },
       'human': {
         'layer': 'pieces',
@@ -66,8 +82,8 @@ GameDefinition _game() {
         'type': 'flank_capture',
         'config': {
           'pieceLayer': 'pieces',
-          'pairs': {'alien': 'human', 'human': 'alien'},
-          'order': ['alien', 'human'],
+          'pairs': pairs ?? {'alien': 'human', 'human': 'alien'},
+          'order': order ?? ['alien', 'human'],
           'wallLayer': 'ground',
           'wallTag': 'solid',
         },
@@ -329,5 +345,107 @@ void main() {
     expect(result.events.any((e) => e.type == 'actor_blocked'), isTrue);
     expect(result.events.any((e) => e.type == 'cell_transformed'), isFalse);
     expect(_piece(engine, 1, 0), 'human');
+  });
+
+  test('list victims capture each named kind', () {
+    final game =
+        _game(pairs: _threeWay, order: const ['human', 'alien', 'splinter']);
+    final engine = TurnEngine(
+      game,
+      // The parked human at (4,1) sits on neither line through the mover's
+      // landing cell; it is there only to keep `all_cleared` unsatisfied, so
+      // the level is not already won before the move is made.
+      _level(game, size: [
+        5,
+        2
+      ], pieces: const [
+        {
+          'position': [0, 0],
+          'kind': 'alien'
+        },
+        {
+          'position': [2, 0],
+          'kind': 'splinter'
+        },
+        {
+          'position': [3, 0],
+          'kind': 'alien'
+        },
+        {
+          'position': [4, 1],
+          'kind': 'human'
+        },
+      ]),
+    );
+
+    _selectMove(engine, [0, 0], 'right');
+    expect(_piece(engine, 2, 0), 'alien');
+  });
+
+  test('a run mixing two victim kinds is immune', () {
+    final game =
+        _game(pairs: _threeWay, order: const ['human', 'alien', 'splinter']);
+    final engine = TurnEngine(
+      game,
+      _level(game, size: [
+        5,
+        3
+      ], pieces: const [
+        {
+          'position': [0, 1],
+          'kind': 'human'
+        },
+        {
+          'position': [2, 1],
+          'kind': 'splinter'
+        },
+        {
+          'position': [3, 1],
+          'kind': 'human'
+        },
+        {
+          'position': [1, 0],
+          'kind': 'alien'
+        },
+      ]),
+    );
+
+    final result = _selectMove(engine, [1, 0], 'down');
+    expect(_piece(engine, 1, 1), 'alien');
+    expect(_piece(engine, 2, 1), 'splinter');
+    expect(result.events.any((e) => e.type == 'cell_transformed'), isFalse);
+  });
+
+  test('order resolves a cell both aggressors want', () {
+    // The human at (0,2) is parked off both lines through the landing cell, so
+    // the level is not already won when the move is made.
+    const pieces = [
+      {
+        'position': [1, 1],
+        'kind': 'splinter'
+      },
+      {
+        'position': [0, 2],
+        'kind': 'human'
+      },
+    ];
+    const walls = [
+      [0, 0],
+      [2, 0]
+    ];
+
+    final exposeFirst =
+        _game(pairs: _threeWay, order: const ['human', 'alien', 'splinter']);
+    final a = TurnEngine(exposeFirst,
+        _level(exposeFirst, size: [3, 3], pieces: pieces, walls: walls));
+    _selectMove(a, [1, 1], 'up');
+    expect(_piece(a, 1, 0), 'human'); // exposure beats greed
+
+    final possessFirst =
+        _game(pairs: _threeWay, order: const ['alien', 'human', 'splinter']);
+    final b = TurnEngine(possessFirst,
+        _level(possessFirst, size: [3, 3], pieces: pieces, walls: walls));
+    _selectMove(b, [1, 1], 'up');
+    expect(_piece(b, 1, 0), 'alien'); // first in order wins
   });
 }

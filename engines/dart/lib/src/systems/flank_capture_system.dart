@@ -22,6 +22,13 @@ import '../models/position.dart';
 ///
 /// Generic: any game with two opposing piece kinds that flip on a straight-line
 /// bracket names its own [pairs] and layer.
+///
+/// An aggressor may name several victim kinds (`"alien": ["human", "splinter"]`).
+/// Each victim kind is scanned on its own pass, so runs stay homogeneous — a run
+/// that mixes two victim kinds is not a maximal run of either, and is therefore
+/// immune. When two aggressors share a victim kind, `order` decides: flips
+/// dedupe first-writer-wins, so the aggressor listed earlier claims a contested
+/// cell.
 class FlankCaptureSystem extends GameSystem {
   final Map<String, dynamic>? config;
 
@@ -54,9 +61,15 @@ class FlankCaptureSystem extends GameSystem {
     final layer = state.board.layers[pieceLayerId];
     if (layer == null) return const [];
 
-    final pairs = (effectiveConfig['pairs'] as Map?)
-            ?.map((k, v) => MapEntry(k.toString(), v.toString())) ??
-        const <String, String>{};
+    final pairs = (effectiveConfig['pairs'] as Map?)?.map(
+          (k, v) => MapEntry(
+            k.toString(),
+            v is List
+                ? v.map((e) => e.toString()).toList()
+                : <String>[v.toString()],
+          ),
+        ) ??
+        const <String, List<String>>{};
     if (pairs.isEmpty) return const [];
     final order = (effectiveConfig['order'] as List?)
             ?.map((value) => value.toString())
@@ -131,24 +144,26 @@ class FlankCaptureSystem extends GameSystem {
     }
 
     for (final aggressor in order) {
-      final victim = pairs[aggressor];
-      if (victim == null) continue;
-      for (final b in dests) {
-        if (horizontal) {
-          scanLine(
-            [for (var x = 0; x < width; x++) Position(x, b.y)],
-            b.x,
-            aggressor,
-            victim,
-          );
-        }
-        if (vertical) {
-          scanLine(
-            [for (var y = 0; y < height; y++) Position(b.x, y)],
-            b.y,
-            aggressor,
-            victim,
-          );
+      final victims = pairs[aggressor];
+      if (victims == null) continue;
+      for (final victim in victims) {
+        for (final b in dests) {
+          if (horizontal) {
+            scanLine(
+              [for (var x = 0; x < width; x++) Position(x, b.y)],
+              b.x,
+              aggressor,
+              victim,
+            );
+          }
+          if (vertical) {
+            scanLine(
+              [for (var y = 0; y < height; y++) Position(b.x, y)],
+              b.y,
+              aggressor,
+              victim,
+            );
+          }
         }
       }
     }

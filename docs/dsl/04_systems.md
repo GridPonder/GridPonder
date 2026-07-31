@@ -626,8 +626,8 @@ transforms the board directly; it does not require rules.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `pieceLayer` | string | `"pieces"` | Layer holding the flippable pieces. |
-| `pairs` | object | — | Aggressor kind → victim kind. `{ "alien": "human", "human": "alien" }` makes aliens capture human runs and human-bracketed alien runs flip back. |
-| `order` | array of strings | keys of `pairs` | Order the aggressor passes run in. With `["alien","human"]` the possess pass runs before the expose pass. |
+| `pairs` | object | — | Aggressor kind → victim kind, **or an array of victim kinds**. `{ "alien": "human", "human": "alien" }` makes aliens capture human runs and human-bracketed alien runs flip back; `{ "alien": ["human", "splinter"] }` lets alien terminals capture runs of either kind. |
+| `order` | array of strings | keys of `pairs` | Order the aggressor passes run in. With `["alien","human"]` the possess pass runs before the expose pass. Observable only when two aggressors share a victim kind — see **Multiple victim kinds** below. |
 | `directions` | array of strings | all 4 cardinals | Which axes are scanned: any of `left`/`right` scans the **row** through the moved cell; any of `up`/`down` scans the **column**. |
 | `wallTerminates` | boolean | `true` | Whether a wall may serve as a bracket terminal. |
 | `wallLayer` | string | `"ground"` | Layer checked for wall terminals. |
@@ -659,6 +659,17 @@ between two walls is not silently flipped the first time an unrelated piece
 happens onto its row. The mover is automatically a **terminal** in the capture
 pass and a **member of the run** in the flip-back pass, so both directions fall
 out of the same rule.
+
+**Multiple victim kinds.** An aggressor may name a list of victim kinds. Each
+victim kind is scanned on its own pass, so victim runs are always
+**homogeneous**: a run that mixes two victim kinds is not a maximal run of
+either, and is therefore immune. Two aggressors may name the same victim kind —
+with `{"alien": ["human", "splinter"], "human": ["alien", "splinter"]}` a
+`splinter` cell can be claimed by either pass. Flips dedupe **first-writer-wins**
+in `order`, so the aggressor listed earlier claims a contested cell; with a
+single victim kind per aggressor the victim sets are disjoint and `order` has no
+observable effect. Three-way configurations are how a pack builds rival factions
+that are each other's jaws (Pincer's arc 4).
 
 Example config:
 ```json

@@ -220,10 +220,13 @@ class FlankCaptureTest(unittest.TestCase):
 
     def test_list_victims_capture_each_kind(self) -> None:
         # A . S A  → the mover becomes the near jaw; the splinter is absorbed.
+        # The parked human at (4,1) sits on neither line through the mover's
+        # landing cell; it is there only to keep `all_cleared` unsatisfied, so
+        # the level is not already won before the move.
         engine = TurnEngine(
             _game(_THREE_WAY, ["human", "alien", "splinter"]),
-            _level((5, 1), [((0, 0), "alien"), ((2, 0), "splinter"),
-                            ((3, 0), "alien")]),
+            _level((5, 2), [((0, 0), "alien"), ((2, 0), "splinter"),
+                            ((3, 0), "alien"), ((4, 1), "human")]),
         )
         _select_move(engine, (0, 0), "right")
         self.assertEqual(_piece(engine, 2, 0), "alien")
@@ -265,19 +268,21 @@ class FlankCaptureTest(unittest.TestCase):
     def test_order_resolves_overlapping_victims(self) -> None:
         # # S #  — a splinter in a wall-wall gap is a victim of BOTH the alien
         # pass and the human pass, so `order` decides which one claims it.
-        pieces = [((1, 1), "splinter")]
+        # The human at (0,2) is parked off both lines through the landing cell,
+        # so the level is not already won when the move is made.
+        pieces = [((1, 1), "splinter"), ((0, 2), "human")]
         walls = [(0, 0), (2, 0)]
 
         engine = TurnEngine(
             _game(_THREE_WAY, ["human", "alien", "splinter"]),
-            _level((3, 2), pieces, walls=walls),
+            _level((3, 3), pieces, walls=walls),
         )
         _select_move(engine, (1, 1), "up")
         self.assertEqual(_piece(engine, 1, 0), "human")  # exposure beats greed
 
         engine = TurnEngine(
             _game(_THREE_WAY, ["alien", "human", "splinter"]),
-            _level((3, 2), pieces, walls=walls),
+            _level((3, 3), pieces, walls=walls),
         )
         _select_move(engine, (1, 1), "up")
         self.assertEqual(_piece(engine, 1, 0), "alien")  # first in order wins
