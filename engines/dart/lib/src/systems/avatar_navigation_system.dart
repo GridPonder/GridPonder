@@ -43,6 +43,19 @@ class AvatarNavigationSystem extends GameSystem {
     if (!board.isInBounds(target)) return const [];
     if (board.isVoid(target)) return const [];
 
+    // Optional stricter ground test: the destination's ground cell must carry
+    // one of these tags. Empty (the default) keeps the void-only check, so
+    // every pack that omits the field behaves exactly as before.
+    final validGroundTags = (config['validGroundTags'] as List? ?? const [])
+        .map((value) => value.toString())
+        .toList();
+    if (validGroundTags.isNotEmpty) {
+      final groundLayer = config['groundLayer'] as String? ?? 'ground';
+      final walkable = validGroundTags.any(
+          (tag) => board.hasTagAt(groundLayer, target, tag, game.entityKinds));
+      if (!walkable) return const [];
+    }
+
     final solidHandling = config['solidHandling'] as String? ?? 'block';
 
     final objectsLayer = board.layers['objects'];
