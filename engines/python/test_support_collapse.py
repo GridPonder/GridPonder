@@ -224,6 +224,25 @@ class SupportCollapseTest(unittest.TestCase):
             engine.state.board.get_entity("ground", Pos(1, 0)).kind, "anchor"
         )
 
+    def test_sever_target_can_be_named_by_position(self):
+        game = _game()
+        engine = TurnEngine(game, _level(entries=_HANGING, avatar=[1, 0]))
+
+        engine.execute_turn("cut", {"position": [1, 1]})
+
+        board = engine.state.board
+        self.assertEqual(board.get_entity("ground", Pos(1, 1)).kind, "void")
+        self.assertEqual(board.get_entity("ground", Pos(1, 4)).kind, "pod_settled")
+
+    def test_severing_a_non_adjacent_position_is_vetoed(self):
+        game = _game()
+        engine = TurnEngine(game, _level(entries=_HANGING, avatar=[1, 0]))
+
+        result = engine.execute_turn("cut", {"position": [1, 2]})
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(engine.state.board.get_entity("ground", Pos(1, 2)).kind, "pod")
+
     def test_cutting_empty_air_is_vetoed(self):
         game = _game()
         engine = TurnEngine(game, _level(entries=_HANGING, avatar=[0, 0]))

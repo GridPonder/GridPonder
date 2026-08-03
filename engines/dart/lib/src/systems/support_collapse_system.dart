@@ -86,15 +86,6 @@ class SupportCollapseSystem extends GameSystem {
     final severAction = cfg['severAction'] as String?;
     if (severAction == null || action.actionId != severAction) return const [];
 
-    final dirStr = action.directionStr;
-    if (dirStr == null) return [GameEvent.actionVetoed()];
-    final Direction dir;
-    try {
-      dir = Direction.fromJson(dirStr);
-    } on FormatException {
-      return [GameEvent.actionVetoed()];
-    }
-
     final avatar = state.avatar;
     if (!avatar.enabled || avatar.position == null) {
       return [GameEvent.actionVetoed()];
@@ -104,7 +95,28 @@ class SupportCollapseSystem extends GameSystem {
     final layer = state.board.layers[layerId];
     if (layer == null) return [GameEvent.actionVetoed()];
 
-    final target = avatar.position! + dir.offset;
+    // The target may be named either way, so a pack can bind the verb to a
+    // directional swipe or to tapping the cell itself. Both resolve to a single
+    // cell adjacent to the actor.
+    final Position target;
+    final rawPosition = action.params['position'];
+    if (rawPosition != null) {
+      target = Position.fromJson(rawPosition);
+      final dx = (target.x - avatar.position!.x).abs();
+      final dy = (target.y - avatar.position!.y).abs();
+      if (dx + dy != 1) return [GameEvent.actionVetoed()]; // not adjacent
+    } else {
+      final dirStr = action.directionStr;
+      if (dirStr == null) return [GameEvent.actionVetoed()];
+      final Direction dir;
+      try {
+        dir = Direction.fromJson(dirStr);
+      } on FormatException {
+        return [GameEvent.actionVetoed()];
+      }
+      target = avatar.position! + dir.offset;
+    }
+
     if (!state.board.isInBounds(target)) return [GameEvent.actionVetoed()];
 
     final entity = layer.getAt(target);

@@ -60,10 +60,6 @@ class SupportCollapseSystem(GameSystem):
         if not sever_action or action.get("actionId") != sever_action:
             return []
 
-        dir_str = action.get("params", {}).get("direction")
-        if not dir_str:
-            return [ev.action_vetoed()]
-
         avatar = state.avatar
         if not avatar.enabled or avatar.position is None:
             return [ev.action_vetoed()]
@@ -73,10 +69,26 @@ class SupportCollapseSystem(GameSystem):
         if layer is None:
             return [ev.action_vetoed()]
 
-        dx, dy = dir_delta(dir_str)
-        if dx == 0 and dy == 0:
-            return [ev.action_vetoed()]
-        target = Pos(avatar.position.x + dx, avatar.position.y + dy)
+        # The target may be named either way, so a pack can bind the verb to a
+        # directional swipe or to tapping the cell itself. Both resolve to a
+        # single cell adjacent to the actor.
+        params = action.get("params", {})
+        raw_position = params.get("position")
+        if raw_position is not None:
+            target = Pos.from_json(raw_position)
+            if abs(target.x - avatar.position.x) + abs(
+                target.y - avatar.position.y
+            ) != 1:
+                return [ev.action_vetoed()]  # not adjacent
+        else:
+            dir_str = params.get("direction")
+            if not dir_str:
+                return [ev.action_vetoed()]
+            dx, dy = dir_delta(dir_str)
+            if dx == 0 and dy == 0:
+                return [ev.action_vetoed()]
+            target = Pos(avatar.position.x + dx, avatar.position.y + dy)
+
         if not state.board.is_in_bounds(target):
             return [ev.action_vetoed()]
 

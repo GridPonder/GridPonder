@@ -308,6 +308,35 @@ void main() {
         'anchor');
   });
 
+  test('sever target can be named by position', () {
+    final game = _game();
+    final engine =
+        TurnEngine(game, _level(game, entries: _hanging, avatar: [1, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [1, 1]
+    }));
+
+    final board = engine.state.board;
+    expect(board.getEntity('ground', const Position(1, 1))?.kind, 'void');
+    expect(
+        board.getEntity('ground', const Position(1, 4))?.kind, 'pod_settled');
+  });
+
+  test('severing a non-adjacent position is vetoed', () {
+    final game = _game();
+    final engine =
+        TurnEngine(game, _level(game, entries: _hanging, avatar: [1, 0]));
+
+    final result = engine.executeTurn(GameAction('cut', {
+      'position': [1, 2]
+    }));
+
+    expect(result.accepted, isFalse);
+    expect(engine.state.board.getEntity('ground', const Position(1, 2))?.kind,
+        'pod');
+  });
+
   test('cutting empty air is vetoed', () {
     final game = _game();
     final engine =
