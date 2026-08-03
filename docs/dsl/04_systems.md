@@ -54,16 +54,19 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `directions` | array of strings | `["up","down","left","right"]` | Allowed movement directions. |
 | `solidHandling` | string | `"block"` | What happens when moving into a solid cell: `"block"` (reject move) or `"delegate"` (let later systems handle, e.g. push or consume). |
 | `moveAction` | string | `"move"` | Which action id triggers navigation. |
+| `validGroundTags` | array of strings | `[]` | When non-empty, the target's ground cell must carry one of these tags. Empty keeps the void-only check, so packs that omit the field are unaffected. |
+| `groundLayer` | string | `"ground"` | Layer checked by `validGroundTags`. |
 
 **Behavior:**
 1. Compute target position from direction.
 2. Check bounds — reject if out of grid.
 3. Check ground layer — reject if `void`.
-4. Check `solid` tag on objects layer:
+4. If `validGroundTags` is non-empty, reject unless the `groundLayer` cell at the target carries one of those tags. This is how a game makes some non-void terrain unwalkable — landed debris, deep water, a roof you may stand beside but not on.
+5. Check `solid` tag on objects layer:
    - `"block"`: reject move.
    - `"delegate"`: mark the move as pending. Emit `move_blocked` with the target position and blocker kind. Later phases (push) or rules (`resolve_move` effect) may complete or reject the pending move.
-5. If not blocked, move avatar to target. Emit `avatar_exited` for old position, `avatar_entered` for new position.
-6. Update `avatar.facing` to the movement direction.
+6. If not blocked, move avatar to target. Emit `avatar_exited` for old position, `avatar_entered` for new position.
+7. Update `avatar.facing` to the movement direction.
 
 ---
 
@@ -723,6 +726,96 @@ uses it by naming its own `pairs` and `pieceLayer`.
 
 ---
 
+### 2.16 `support_collapse`
+
+**Purpose:** Cells that lose their connection to a support root fall as rigid
+components. A structure is held up by cells tagged as roots; after any cell is
+removed, every maximal group of member cells that can no longer reach a root is
+an orphan and falls, keeping its exact shape.
+
+**Phase:** `action_resolution` (the sever verb) and `cascade_resolution`
+(event-driven recompute)
+
+**Events emitted:** `cell_cleared`, `object_settled`, `variable_changed`,
+`action_vetoed`
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `layer` | string | `"ground"` | Layer holding the structure. |
+| `severAction` | string | — | Action id that removes a cell adjacent to the avatar. Omit for a purely event-driven collapse. |
+| `severableTags` | array of strings | `["severable"]` | Tags a cell must carry to be removable by the sever action. |
+| `rootTags` | array of strings | `["support_root"]` | Cells that are always supported. |
+| `memberTags` | array of strings | `["supported"]` | Cells that participate in the support graph. |
+| `connectivity` | string | `"orthogonal"` | `"orthogonal"` or `"diagonal"`. |
+| `direction` | string | `"down"` | Direction orphaned components fall. |
+| `restLayers` | array of strings | `[layer]` | Layers checked for what stops a falling component. |
+| `restTags` | array of strings | `["solid"]` | Tags on `restLayers` that stop a falling component. |
+| `settleTransform` | object | `{}` | Kind→kind map applied to each cell when its component comes to rest. |
+| `carryAvatar` | boolean | `true` | Whether the avatar rides the component it is standing on. |
+| `avatarFellVariable` | string | — | Variable incremented when the avatar rides a component down. Pair with a [`variable_threshold`](03_levels.md#variable_threshold) lose condition. |
+| `triggerEvents` | array of strings | `[]` | Event types that trigger a cascade-phase recompute. Empty disables the cascade path. |
+
+**Behavior:**
+1. On the sever action, resolve the target cell. The action may name it either
+   as a `position` param (a tapped cell, which must be orthogonally adjacent to
+   the actor) or as a `direction` param (one step from the actor). Reject with
+   `action_vetoed` if the target is out of bounds, holds nothing on `layer`, or
+   carries no `severableTags` tag. A vetoed action does not count as a move.
+2. Remove the target cell and emit `cell_cleared`.
+3. BFS the supported set from every `rootTags` cell through `memberTags` cells
+   using `connectivity`.
+4. Every maximal connected group of member cells outside the supported set is an
+   orphan component.
+5. Lift every orphan cell off the board, then step all orphans one cell in
+   `direction` simultaneously, freezing any that cannot move, until none move.
+   Lifting first is what stops a component being blocked by the hole it is
+   falling out of, or by another orphan falling alongside it. Simultaneous
+   stepping is order-independent, so stacked orphans resolve deterministically
+   without a tie-break rule.
+   - A component is blocked when a destination cell holds an entity carrying a
+     `restTags` tag on a `restLayers` layer.
+   - Leaving the board does **not** block. A component whose cells have all left
+     the board is destroyed.
+6. Apply `settleTransform` to each landed cell and emit `object_settled` per
+   cell.
+7. If `carryAvatar` and the avatar stood on an orphan, move it with the
+   component and increment `avatarFellVariable`.
+
+**Clearing on an `exactly_one` layer** writes that layer's declared `default`
+kind, not an empty cell.
+
+Example:
+
+```json
+{
+  "id": "collapse",
+  "type": "support_collapse",
+  "config": {
+    "layer": "ground",
+    "severAction": "cut",
+    "severableTags": ["severable"],
+    "rootTags": ["support_root"],
+    "memberTags": ["supported"],
+    "direction": "down",
+    "restLayers": ["ground"],
+    "restTags": ["solid"],
+    "settleTransform": { "hull": "wreck", "pod": "pod_settled" },
+    "carryAvatar": true,
+    "avatarFellVariable": "wrecked"
+  }
+}
+```
+
+**Reuse:** `severAction` is optional, so the collapse half stands alone for any
+game where rules or other systems remove cells. Suits hanging structures,
+crumbling bridges, calving ice shelves, mining a ceiling, or any "cut the
+support" mechanic. Note that gravity is a straight translation, so with
+`direction: "down"` a cell's column never changes — only how far it falls.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -732,6 +825,7 @@ uses it by naming its own `pairs` and `pieceLayer`.
 | Sliding Blocks | `sliding_blocks` | `action_resolution` | `move(position, direction)` |
 | Line of Sight | `line_of_sight` | `cascade_resolution` | event-triggered detection |
 | Flank Capture | `flank_capture` | `cascade_resolution` | event-triggered bracket capture |
+| Support Collapse | `support_collapse` | `action_resolution` + `cascade_resolution` | configurable sever verb (`position` or `direction`) |
 | Portals | `portals` | `movement_resolution` | (automatic on portal entry) |
 | Slide Merge | `slide_merge` | `action_resolution` | `move` |
 | Queued Emitters | `queued_emitters` | `cascade_resolution` | (event-triggered) |
