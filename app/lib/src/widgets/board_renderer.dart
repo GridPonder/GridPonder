@@ -1137,7 +1137,9 @@ class _TargetCell extends StatelessWidget {
   Widget build(BuildContext context) {
     String? kind;
     bool matched = false;
-    for (final layerId in ['objects', 'markers']) {
+    // Read whichever layers the goal actually declares — a pack may target
+    // `ground` (terrain-shaping goals) just as well as `objects`.
+    for (final layerId in targetLayers.keys) {
       final k = _kindAt(layerId);
       if (k != null) {
         kind = k;
@@ -1192,6 +1194,12 @@ class _TargetCell extends StatelessWidget {
 
   Color _cellColor(String kind) {
     if (kind.startsWith('cell_')) return _namedColor(kind.substring(5));
+    // A pack may colour a goal swatch by naming the entity kind in its palette.
+    final fromPalette = palette?[kind];
+    if (fromPalette != null) {
+      final parsed = _parsePaletteHex(fromPalette);
+      if (parsed != null) return parsed;
+    }
     return switch (kind) {
       'empty' => const Color(0xFFF5F0E8),
       'rock' => const Color(0xFF9E9E9E),
