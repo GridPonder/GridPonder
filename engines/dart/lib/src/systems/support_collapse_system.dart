@@ -128,7 +128,7 @@ class SupportCollapseSystem extends GameSystem {
     final previousKind = entity.kind;
     layer.setAt(target, _empty(game, layerId));
     return [
-      GameEvent.cellCleared(target, previousKind),
+      GameEvent.cellCleared(target, previousKind, layer: layerId),
       ..._collapse(state, game, cfg),
     ];
   }
@@ -310,7 +310,8 @@ class SupportCollapseSystem extends GameSystem {
         if (entity == null) continue;
         final newKind = settle[entity.kind] ?? entity.kind;
         layer.setAt(dst, entity.copyWith(kind: newKind));
-        events.add(GameEvent.objectSettled(newKind, dst, src));
+        events.add(GameEvent.objectSettled(newKind, dst, src,
+            layer: layerId, fromKind: entity.kind));
       }
     }
 

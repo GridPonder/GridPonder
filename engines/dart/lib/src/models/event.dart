@@ -65,8 +65,10 @@ class GameEvent {
       GameEvent('object_removed',
           {'position': pos, 'kind': kind, 'animation': animationName});
 
-  static GameEvent cellCleared(Position pos, String previousKind) => GameEvent(
-      'cell_cleared', {'position': pos, 'previousKind': previousKind});
+  static GameEvent cellCleared(Position pos, String previousKind,
+          {String layer = 'objects'}) =>
+      GameEvent('cell_cleared',
+          {'position': pos, 'previousKind': previousKind, 'layer': layer});
 
   static GameEvent cellTransformed(
           Position pos, String fromKind, String toKind, String layer) =>
@@ -128,11 +130,22 @@ class GameEvent {
         'params': params,
       });
 
-  static GameEvent objectSettled(String kind, Position pos, Position from) =>
+  /// [layer] lets a UI animate the travel from [from] to [pos] with the right
+  /// sprite. Gravity-style effects that only ever move the `objects` layer keep
+  /// the default.
+  ///
+  /// [fromKind] is what the entity looked like on the way — [kind] is what it
+  /// became on arrival, which for a system with a settle transform is not the
+  /// same thing. A UI that animates the travel should draw [fromKind], or the
+  /// entity appears to transform before it has landed.
+  static GameEvent objectSettled(String kind, Position pos, Position from,
+          {String layer = 'objects', String? fromKind}) =>
       GameEvent('object_settled', {
         'kind': kind,
         'position': pos,
         'fromPosition': from,
+        'layer': layer,
+        'fromKind': fromKind ?? kind,
       });
 
   static GameEvent npcMoved(String npcId, Position from, Position to) =>

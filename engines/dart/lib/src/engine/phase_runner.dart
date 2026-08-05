@@ -202,6 +202,33 @@ class PhaseRunner {
             params: params,
           ));
         }
+      } else if (event.type == 'object_settled') {
+        // An entity that travelled to rest under gravity or a collapse. Cells
+        // of one rigid component all settle in the same batch, so giving them
+        // a shared stage animates the piece falling as a unit — which is the
+        // only way the player can see what actually travelled together.
+        final pos = event.position;
+        final from = event.payload['fromPosition'];
+        final kind = event.payload['kind'] as String?;
+        if (pos != null && from != null && kind != null) {
+          final fromPos = from is Position ? from : Position.fromJson(from);
+          if (fromPos != pos) {
+            final layer = event.payload['layer'] as String? ?? 'objects';
+            // Animate what was travelling, not what it turned into on impact.
+            final travellingKind = event.payload['fromKind'] as String? ?? kind;
+            // Per-cell pacing, like the ice-slide convention — a long fall
+            // should read as fast, not as one slow glide.
+            final dur = _motionDurationMs(travellingKind, 'fallDurationMs', 80);
+            out.add(AnimationStep.entityMove(
+              fromPos,
+              pos,
+              travellingKind,
+              layer,
+              durationMs: dur,
+              stage: motionStage,
+            ));
+          }
+        }
       } else if (event.type == 'tiles_merged') {
         final pos = event.position;
         final sourcesRaw = event.payload['sources'];

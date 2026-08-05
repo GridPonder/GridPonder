@@ -101,7 +101,7 @@ class SupportCollapseSystem(GameSystem):
 
         previous_kind = entity.kind
         layer.set(target, self._empty(game, layer_id))
-        events = [ev.cell_cleared(target, previous_kind)]
+        events = [ev.cell_cleared(target, previous_kind, layer_id)]
         events.extend(self._collapse(state, game, cfg))
         return events
 
@@ -247,7 +247,11 @@ class SupportCollapseSystem(GameSystem):
                 entity = kinds[idx][src]
                 new_kind = settle.get(entity.kind, entity.kind)
                 layer.set(dst, Entity(new_kind, dict(entity.params)))
-                events.append(ev.object_settled(new_kind, dst, src))
+                events.append(
+                    ev.object_settled(
+                        new_kind, dst, src, layer_id, from_kind=entity.kind
+                    )
+                )
 
         # 6. The avatar rides its component down.
         if avatar_component is not None and cfg.get("carryAvatar", True):
