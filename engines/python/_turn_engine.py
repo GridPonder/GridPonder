@@ -200,6 +200,24 @@ class TurnEngine:
             goal_progress=goal_progress,
         )
 
+    def preview_turn(
+        self, action_id: str, params: Optional[dict] = None
+    ) -> TurnResult:
+        """Dry-run an action without committing it.
+
+        Returns the TurnResult the action *would* produce, leaving this
+        engine's state, history and win/loss flags untouched, so a UI can
+        answer "what would this do?" — which cells a destructive verb would
+        remove, what would move and where it would come to rest — before the
+        player commits.  Generic: any pack whose actions have consequences
+        that cannot be read off a static board can offer the same preview.
+        """
+        saved = self._state
+        try:
+            return self.execute_turn(action_id, params, save_history=False)
+        finally:
+            self._state = saved
+
     def undo(self) -> bool:
         """Restore previous state. Returns False if nothing to undo."""
         if not self._history:
