@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' show max, sin, sqrt, pi;
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -13,9 +14,21 @@ import '../widgets/board_renderer.dart'
         BoardRenderer,
         CellEffectPlayback,
         LineOfSightFeedback,
+        MovingSprite,
         TargetBoardRenderer,
         cellNamedColor;
 import '../widgets/controls_widget.dart';
+
+/// One entity travelling from [from] to [to] during a turn's animation.
+typedef _Mover = ({
+  Position from,
+  Position to,
+  EntityInstance entity,
+  String layer,
+  String? direction,
+  double distance,
+  bool falling,
+});
 
 class PlayScreen extends StatefulWidget {
   final PackService packService;
@@ -35,7 +48,7 @@ class PlayScreen extends StatefulWidget {
   State<PlayScreen> createState() => _PlayScreenState();
 }
 
-class _PlayScreenState extends State<PlayScreen> {
+class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   late List<SequenceEntry> _sequence;
   late int _seqIndex;
   late List<String> _levelIds;
@@ -81,6 +94,11 @@ class _PlayScreenState extends State<PlayScreen> {
   List<CellEffectPlayback> _cellEffects = const [];
   bool _animating = false;
 
+  /// Entities in flight, updated at frame rate while motion plays. Kept off
+  /// [setState] so a fall repaints the sprites alone rather than the screen.
+  final ValueNotifier<List<MovingSprite>> _movingSprites = ValueNotifier(
+    const [],
+  );
   Map<String, String> _actorFacingByKind = {};
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
@@ -129,6 +147,7 @@ class _PlayScreenState extends State<PlayScreen> {
   void dispose() {
     _hintRefreshTimer?.cancel();
     _agentSub?.cancel();
+    _movingSprites.dispose();
     super.dispose();
   }
 
@@ -148,6 +167,7 @@ class _PlayScreenState extends State<PlayScreen> {
     _wonHandled = false;
     _selectedMultiCellObjectId = null;
     _lineOfSightFeedbacks = const [];
+    _movingSprites.value = const [];
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -423,14 +443,19 @@ class _PlayScreenState extends State<PlayScreen> {
     });
   }
 
-  /// Animates `entity_move` steps (tiles sliding across cells) in parallel.
-  /// Each frame is a fresh board snapshot with the moving entities relocated
-  /// to their current path position, so the existing cell renderer handles
-  /// both sprite-backed and procedurally-drawn entities (e.g. number tiles).
+  /// Animates `entity_move` steps as real motion: each entity is lifted out of
+  /// the board and drawn as a sprite between cells, interpolated every frame,
+  /// rather than stamped into one cell after the next.
+  ///
+  /// Downward moves are read as falls and share one acceleration, scaled so the
+  /// longest drop in the group lands exactly as travel ends. That is what makes
+  /// a collapse legible: everything leaves together, the short drops land
+  /// first, and the piece that travelled furthest arrives fastest. Lateral
+  /// travel (an ice slide, a pushed block) keeps its constant per-cell pace.
   ///
   /// [clearedCells] are cells the turn removed outright (`cell_cleared`). They
-  /// are wiped from every animation frame, so a piece that falls *because* a
-  /// cell was cut is not drawn still hanging from it.
+  /// are gone for the whole animation, so a piece that falls *because* a cell
+  /// was cut is not drawn still hanging from it.
   Future<void> _playSlideMotion(
     LevelState preState,
     List<AnimationStep> moves, {
@@ -438,99 +463,150 @@ class _PlayScreenState extends State<PlayScreen> {
   }) async {
     if (moves.isEmpty) return;
 
-    final paths = <List<Position>>[];
-    final entities = <EntityInstance>[];
-    final layers = <String>[];
-    final directions = <String?>[];
-
+    final movers = <_Mover>[];
     for (final step in moves) {
       final fromRaw = step.extra['from'];
       if (fromRaw is! List) continue;
       final from = Position(fromRaw[0] as int, fromRaw[1] as int);
       final to = step.position;
+      if (from == to) continue;
 
-      // Cardinal-direction path; sign() handles non-cardinal degenerate cases.
-      final dx = (to.x - from.x).sign;
-      final dy = (to.y - from.y).sign;
-      final path = <Position>[from];
-      var p = from;
-      while (p != to && path.length < 64) {
-        p = Position(p.x + dx, p.y + dy);
-        path.add(p);
-      }
-
-      final layer = step.extra['layer'] as String? ?? 'objects';
       final paramsRaw = step.extra['params'];
       final params = (paramsRaw is Map)
           ? paramsRaw.cast<String, dynamic>()
           : const <String, dynamic>{};
-      final entity = EntityInstance(step.entityKind ?? '', params);
-
-      paths.add(path);
-      entities.add(entity);
-      layers.add(layer);
-      directions.add(_directionBetween(from, to));
+      final dx = to.x - from.x;
+      final dy = to.y - from.y;
+      movers.add((
+        from: from,
+        to: to,
+        entity: EntityInstance(step.entityKind ?? '', params),
+        layer: step.extra['layer'] as String? ?? 'objects',
+        direction: _directionBetween(from, to),
+        distance: (dx.abs() > dy.abs() ? dx.abs() : dy.abs()).toDouble(),
+        // Straight down and nothing else is a fall; anything else is carried.
+        falling: dx == 0 && dy > 0,
+      ));
     }
+    if (movers.isEmpty) return;
 
-    if (paths.isEmpty) return;
-
-    // Per-cell pacing — engine's `moveDurationMs` is per-cell, matching the
-    // ice-slide convention. Falls back to 130ms when not provided.
-    final frameMs = moves.first.durationMs > 0
+    final span = movers.map((m) => m.distance).reduce(max);
+    final falls = movers.any((m) => m.falling);
+    // Per-cell pacing for carried travel — the engine's `moveDurationMs`
+    // convention. A fall instead takes the time gravity would take, which
+    // grows with the square root of the drop, not with the drop.
+    final perCellMs = moves.first.durationMs > 0
         ? moves.first.durationMs.clamp(40, 400)
         : 130;
+    final travelMs = falls
+        ? (_fallCellMs * sqrt(span)).round()
+        : (perCellMs * span).round();
+    final totalMs = travelMs + (falls ? _impactMs : 0);
 
-    final maxLen = paths.map((p) => p.length).reduce((a, b) => a > b ? a : b);
-    // Iterate every path cell including the destination so single-cell moves
-    // (pipe shifts, exit-to-spawn) are visible. The trailing post-loop snap
-    // shows the same final state, so there is no visual discontinuity.
-    for (int frame = 0; frame < maxLen; frame++) {
-      if (!mounted) return;
-      final animState = preState.copy();
-      // Clear all source positions in the moving entity's layer.
-      for (int i = 0; i < paths.length; i++) {
-        animState.board.setEntity(layers[i], paths[i].first, null);
-      }
-      // Cells the turn removed outright are gone for the whole animation.
-      for (final cleared in clearedCells) {
-        animState.board.setEntity(cleared.layer, cleared.position, null);
-      }
-      // Place each entity at its current frame position, but never overwrite
-      // an existing entity (merge target sits at the path's end).
-      for (int i = 0; i < paths.length; i++) {
-        final path = paths[i];
-        final pos = path[frame.clamp(0, path.length - 1)];
-        if (animState.board.getEntity(layers[i], pos) == null) {
-          final direction = directions[i];
-          final entity = direction == null
-              ? entities[i]
-              : EntityInstance(entities[i].kind, {
-                  ...entities[i].params,
-                  '_motionDirection': direction,
-                  '_motionFrame': frame,
-                });
-          animState.board.setEntity(layers[i], pos, entity);
-        }
-      }
-      setState(() {
-        _preAnimState = animState;
-        _animOverlays = null;
-      });
-      await Future.delayed(Duration(milliseconds: frameMs));
+    // Hold the pre-turn board with the movers lifted out of it: for the length
+    // of the animation the only copy of each is the sprite in flight.
+    final animState = preState.copy();
+    for (final m in movers) {
+      animState.board.setEntity(m.layer, m.from, null);
+    }
+    for (final cleared in clearedCells) {
+      animState.board.setEntity(cleared.layer, cleared.position, null);
+    }
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = animState;
+      _animOverlays = null;
+    });
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: totalMs),
+    );
+    void emit() {
+      final elapsedMs = controller.value * totalMs;
+      _movingSprites.value = [
+        for (final m in movers) _spriteInFlight(m, elapsedMs, travelMs, span),
+      ];
     }
 
-    final facingUpdates = <String, String>{};
-    for (int i = 0; i < entities.length; i++) {
-      final direction = directions[i];
-      if (layers[i] == 'actors' && direction != null) {
-        facingUpdates[entities[i].kind] = direction;
+    controller.addListener(emit);
+    emit();
+    try {
+      await controller.forward();
+    } finally {
+      controller.dispose();
+    }
+
+    // Land the movers into the held board and drop the sprites in the same
+    // frame, so nothing blinks between the last frame of flight and rest.
+    final postState = animState.copy();
+    for (final m in movers) {
+      if (postState.board.getEntity(m.layer, m.to) == null) {
+        postState.board.setEntity(m.layer, m.to, m.entity);
       }
     }
-    if (facingUpdates.isNotEmpty && mounted) {
-      setState(() {
+    if (!mounted) {
+      _movingSprites.value = const [];
+      return;
+    }
+    final facingUpdates = <String, String>{
+      for (final m in movers)
+        if (m.layer == 'actors' && m.direction != null)
+          m.entity.kind: m.direction!,
+    };
+    setState(() {
+      _preAnimState = postState;
+      if (facingUpdates.isNotEmpty) {
         _actorFacingByKind = {..._actorFacingByKind, ...facingUpdates};
-      });
+      }
+    });
+    _movingSprites.value = const [];
+  }
+
+  /// A one-cell drop, in milliseconds. Longer drops scale as its square root,
+  /// which is how far gravity actually gets in a given time.
+  static const _fallCellMs = 190;
+
+  /// How long the squash on landing lasts.
+  static const _impactMs = 140;
+
+  /// Where [m] is at [elapsedMs], and how compressed.
+  ///
+  /// Distance travelled under a shared acceleration `span * t²` (falls) or a
+  /// shared speed `span * t` (everything else), clamped at the mover's own
+  /// distance — so each one stops on arrival while the rest keep going.
+  MovingSprite _spriteInFlight(
+    _Mover m,
+    double elapsedMs,
+    int travelMs,
+    double span,
+  ) {
+    final t = (elapsedMs / travelMs).clamp(0.0, 1.0);
+    final reach = m.falling ? span * t * t : span * t;
+    final travelled = reach < m.distance ? reach : m.distance;
+
+    // Squash on impact, easing in and back out, so the piece arrives with a
+    // weight rather than simply stopping.
+    var squash = 1.0;
+    if (m.falling) {
+      final landedAtMs = travelMs * sqrt(m.distance / span);
+      final since = (elapsedMs - landedAtMs) / _impactMs;
+      if (since >= 0 && since <= 1) squash = 1 - 0.18 * sin(pi * since);
     }
+
+    final entity = m.direction == null
+        ? m.entity
+        : EntityInstance(m.entity.kind, {
+            ...m.entity.params,
+            '_motionDirection': m.direction,
+            '_motionFrame': travelled.floor(),
+          });
+    return MovingSprite(
+      entity: entity,
+      x: m.from.x + (m.to.x - m.from.x).sign * travelled,
+      y: m.from.y + (m.to.y - m.from.y).sign * travelled,
+      squash: squash,
+    );
   }
 
   String? _directionBetween(Position from, Position to) {
@@ -1571,6 +1647,7 @@ class _PlayScreenState extends State<PlayScreen> {
                             ? _actionPreviews
                             : const {},
                         hoveredPreviewTarget: _hoveredPreviewTarget,
+                        movingSprites: _movingSprites,
                         onCellHover: (x, y) {
                           final pos = x == null || y == null
                               ? null

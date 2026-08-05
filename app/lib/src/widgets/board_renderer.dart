@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
 import '../services/pack_service.dart';
@@ -62,6 +63,26 @@ class CellEffectPlayback {
     required this.position,
     required this.def,
     required this.frameIndex,
+  });
+}
+
+/// One entity in flight, positioned in *fractional* cells so travel between
+/// cells can be interpolated instead of snapped from one cell to the next.
+///
+/// [squash] scales the sprite about its base — 1.0 is at rest, less than 1.0
+/// compresses it, which is how a landing reads as an impact rather than a
+/// stop. Volume is roughly preserved by widening as it flattens.
+class MovingSprite {
+  final EntityInstance entity;
+  final double x;
+  final double y;
+  final double squash;
+
+  const MovingSprite({
+    required this.entity,
+    required this.x,
+    required this.y,
+    this.squash = 1.0,
   });
 }
 
@@ -176,6 +197,11 @@ class BoardRenderer extends StatelessWidget {
   /// common case needs no pointer at all.
   final Position? hoveredPreviewTarget;
 
+  /// Entities currently in flight, drawn above the board at fractional cell
+  /// positions. A listenable rather than a plain list so motion can be driven
+  /// at frame rate without rebuilding the board underneath it.
+  final ValueListenable<List<MovingSprite>>? movingSprites;
+
   /// Last known facing direction per actor kind. Used to render idle actor
   /// sprites after movement animation has finished.
   final Map<String, String> actorFacingByKind;
@@ -219,6 +245,7 @@ class BoardRenderer extends StatelessWidget {
     this.onCellHover,
     this.actionPreviews = const {},
     this.hoveredPreviewTarget,
+    this.movingSprites,
   });
 
   /// Wraps a cell so pointer movement over it can drive the action preview.
@@ -229,6 +256,40 @@ class BoardRenderer extends StatelessWidget {
       onEnter: (_) => onCellHover!(x, y),
       onExit: (_) => onCellHover!(null, null),
       child: child,
+    );
+  }
+
+  /// Draws one in-flight entity at its current sub-cell position. Reuses the
+  /// cell renderer so sprite-backed and procedurally-drawn entities travel the
+  /// same way, and squashes about the base so a landing lands.
+  Widget _buildMovingSprite(MovingSprite sprite, double cellSize) {
+    final tile = _Cell(
+      x: 0,
+      y: 0,
+      state: state,
+      game: game,
+      packService: packService,
+      cellSize: cellSize,
+      entityOverride: sprite.entity,
+      actorFacingByKind: actorFacingByKind,
+      floodedColorOverride: floodedColorOverride,
+    );
+    return Positioned(
+      left: sprite.x * cellSize,
+      top: sprite.y * cellSize,
+      width: cellSize,
+      height: cellSize,
+      child: sprite.squash == 1.0
+          ? tile
+          : Transform(
+              alignment: Alignment.bottomCenter,
+              transform: Matrix4.diagonal3Values(
+                2 - sprite.squash,
+                sprite.squash,
+                1,
+              ),
+              child: tile,
+            ),
     );
   }
 
@@ -329,6 +390,23 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               ),
+              // Entities in flight. Rebuilt on their own listenable so a fall
+              // can be driven at frame rate without rebuilding every cell
+              // underneath it.
+              if (movingSprites case final sprites?)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ValueListenableBuilder<List<MovingSprite>>(
+                      valueListenable: sprites,
+                      builder: (context, inFlight, _) => Stack(
+                        children: [
+                          for (final s in inFlight)
+                            _buildMovingSprite(s, cellSize),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               // What the player's available actions would do, drawn above the
               // board but below the avatar so it never hides who is standing
               // where.
@@ -912,6 +990,10 @@ class _Cell extends StatelessWidget {
   final Map<String, String> actorFacingByKind;
   final Color? floodedColorOverride;
 
+  /// When set, the cell draws this entity alone and ignores the board — used
+  /// for entities in flight, which sit between cells and so belong to no cell.
+  final EntityInstance? entityOverride;
+
   const _Cell({
     required this.x,
     required this.y,
@@ -922,10 +1004,12 @@ class _Cell extends StatelessWidget {
     this.skipGround = false,
     this.actorFacingByKind = const {},
     this.floodedColorOverride,
+    this.entityOverride,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (entityOverride case final entity?) return _entity(entity, null);
     final pos = Position(x, y);
     final groundEntity = state.board.getEntity('ground', pos);
     if (groundEntity?.kind == 'void' && !skipGround) {
@@ -998,6 +1082,10 @@ class _Cell extends StatelessWidget {
   Widget _layer(String layerId, Position pos) {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
+    return _entity(entity, layerId);
+  }
+
+  Widget _entity(EntityInstance entity, String? layerId) {
     final kindDef = game.entityKinds[entity.kind];
     final facingDirection = layerId == 'actors'
         ? actorFacingByKind[entity.kind]
