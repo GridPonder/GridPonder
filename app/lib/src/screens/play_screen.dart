@@ -43,6 +43,15 @@ class _PlayScreenState extends State<PlayScreen> {
   late TurnEngine _engine;
   late HintService _hintService;
 
+  /// Dry-run results for the actions available from where the avatar stands,
+  /// memoised against the board position they describe. See
+  /// [_computeActionPreviews].
+  Map<Position, Set<Position>> _actionPreviews = const {};
+  String? _actionPreviewKey;
+
+  /// Which preview the pointer is over, when there is a pointer to speak of.
+  Position? _hoveredPreviewTarget;
+
   SequenceEntry get _currentEntry => _sequence[_seqIndex];
   bool get _isShowingStory => _currentEntry.type == 'story';
 
@@ -71,6 +80,7 @@ class _PlayScreenState extends State<PlayScreen> {
   List<LineOfSightFeedback> _lineOfSightFeedbacks = const [];
   List<CellEffectPlayback> _cellEffects = const [];
   bool _animating = false;
+
   Map<String, String> _actorFacingByKind = {};
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
@@ -234,6 +244,19 @@ class _PlayScreenState extends State<PlayScreen> {
             .toList()
           ..sort((a, b) => a.stage.compareTo(b.stage));
 
+    // Cells this turn removed outright. A collapse animation replays from the
+    // pre-turn board, so without this the cut cell would stay on screen while
+    // the piece it was holding falls away from it.
+    final clearedCells = result.events
+        .where((e) => e.type == 'cell_cleared' && e.position != null)
+        .map(
+          (e) => (
+            layer: e.payload['layer'] as String? ?? 'objects',
+            position: e.position!,
+          ),
+        )
+        .toList();
+
     int? currentStage;
     final stageBuf = <AnimationStep>[];
     Future<void> flushStage() async {
@@ -243,7 +266,7 @@ class _PlayScreenState extends State<PlayScreen> {
           .where((s) => s.type == 'entity_animation')
           .toList();
       if (moves.isNotEmpty) {
-        await _playSlideMotion(preState, moves);
+        await _playSlideMotion(preState, moves, clearedCells: clearedCells);
       }
       for (final step in anims) {
         if (!mounted) return;
@@ -404,10 +427,15 @@ class _PlayScreenState extends State<PlayScreen> {
   /// Each frame is a fresh board snapshot with the moving entities relocated
   /// to their current path position, so the existing cell renderer handles
   /// both sprite-backed and procedurally-drawn entities (e.g. number tiles).
+  ///
+  /// [clearedCells] are cells the turn removed outright (`cell_cleared`). They
+  /// are wiped from every animation frame, so a piece that falls *because* a
+  /// cell was cut is not drawn still hanging from it.
   Future<void> _playSlideMotion(
     LevelState preState,
-    List<AnimationStep> moves,
-  ) async {
+    List<AnimationStep> moves, {
+    List<({String layer, Position position})> clearedCells = const [],
+  }) async {
     if (moves.isEmpty) return;
 
     final paths = <List<Position>>[];
@@ -462,6 +490,10 @@ class _PlayScreenState extends State<PlayScreen> {
       // Clear all source positions in the moving entity's layer.
       for (int i = 0; i < paths.length; i++) {
         animState.board.setEntity(layers[i], paths[i].first, null);
+      }
+      // Cells the turn removed outright are gone for the whole animation.
+      for (final cleared in clearedCells) {
+        animState.board.setEntity(cleared.layer, cleared.position, null);
       }
       // Place each entity at its current frame position, but never overwrite
       // an existing entity (merge target sits at the path's end).
@@ -538,6 +570,68 @@ class _PlayScreenState extends State<PlayScreen> {
       });
       await Future.delayed(Duration(milliseconds: frameMs));
     }
+  }
+
+  /// What each action the player could take right now would set in motion,
+  /// keyed by the cell that action targets. An entry with an empty set means
+  /// the action is legal but moves nothing — which is the single hardest thing
+  /// to read off a static board in a game about load-bearing structure.
+  ///
+  /// Only cells adjacent to the avatar are probed, which is the reach of a
+  /// tap-to-act verb, and only packs that bind `tap_cell` get previews at all.
+  /// Packs whose tap does not move anything produce empty sets and render
+  /// nothing, so this costs them a handful of dry runs and no pixels.
+  Map<Position, Set<Position>> _computeActionPreviews() {
+    final gestureMap = widget.packService.theme?.controls?.gestureMap;
+    final avatar = _engine.state.avatar;
+    final origin = avatar.position;
+    if (gestureMap == null ||
+        !avatar.enabled ||
+        origin == null ||
+        _engine.isWon ||
+        _engine.isLost) {
+      return const {};
+    }
+    // Named via inference: the engine's binding type shares a name with
+    // Flutter's own GestureBinding.
+    final tapBindings = gestureMap.where((b) => b.gesture == 'tap_cell');
+    if (tapBindings.isEmpty) return const {};
+    final binding = tapBindings.first;
+
+    const neighbours = [
+      Position(0, -1),
+      Position(0, 1),
+      Position(-1, 0),
+      Position(1, 0),
+    ];
+    final previews = <Position, Set<Position>>{};
+    for (final delta in neighbours) {
+      final target = Position(origin.x + delta.x, origin.y + delta.y);
+      if (!_engine.state.board.isInBounds(target)) continue;
+
+      final params = <String, dynamic>{};
+      binding.paramMapping?.forEach((key, value) {
+        params[key] = value == 'tap_position' ? [target.x, target.y] : value;
+      });
+      if (binding.params != null) params.addAll(binding.params!);
+
+      final result = _engine.previewTurn(GameAction(binding.action, params));
+      if (!result.accepted) continue;
+
+      // Report the cells in the places they occupy *now*, so the outline sits
+      // on the structure the player is looking at rather than on the floor.
+      final moving = <Position>{};
+      for (final event in result.events) {
+        if (event.type != 'object_settled') continue;
+        final from = event.payload['fromPosition'];
+        final to = event.position;
+        if (from == null || to == null) continue;
+        final fromPos = from is Position ? from : Position.fromJson(from);
+        if (fromPos != to) moving.add(fromPos);
+      }
+      previews[target] = moving;
+    }
+    return previews;
   }
 
   void _onUndo() {
@@ -1312,6 +1406,22 @@ class _PlayScreenState extends State<PlayScreen> {
     final state = _preAnimState ?? _engine.state;
     final levelId = _currentEntry.ref!;
 
+    // Refresh the previews whenever the board or the avatar has actually
+    // moved. Dry runs are cheap, but there is no reason to repeat them for
+    // every rebuild, and none of them mean anything mid-animation.
+    final showPreviews = _preAnimState == null && !_animating && !_aiRunning;
+    if (showPreviews) {
+      final avatarPos = _engine.state.avatar.position;
+      final key =
+          '$levelId:${_engine.state.turnCount}:'
+          '${avatarPos?.x},${avatarPos?.y}';
+      if (key != _actionPreviewKey) {
+        _actionPreviewKey = key;
+        _actionPreviews = _computeActionPreviews();
+        _hoveredPreviewTarget = null;
+      }
+    }
+
     // Record win the first time it is detected (post-frame to avoid
     // calling async work inside a synchronous build call).
     if (state.isWon && !_wonHandled && widget.progress != null) {
@@ -1457,6 +1567,23 @@ class _PlayScreenState extends State<PlayScreen> {
                         cellEffects: _cellEffects,
                         floodedColorOverride: _lastFloodColor,
                         avatarPositionOverride: _avatarSlidePos,
+                        actionPreviews: showPreviews
+                            ? _actionPreviews
+                            : const {},
+                        hoveredPreviewTarget: _hoveredPreviewTarget,
+                        onCellHover: (x, y) {
+                          final pos = x == null || y == null
+                              ? null
+                              : Position(x, y);
+                          if (pos == _hoveredPreviewTarget) return;
+                          if (pos != null &&
+                              !_actionPreviews.containsKey(pos)) {
+                            if (_hoveredPreviewTarget == null) return;
+                            setState(() => _hoveredPreviewTarget = null);
+                            return;
+                          }
+                          setState(() => _hoveredPreviewTarget = pos);
+                        },
                       ),
                     ),
                   ),

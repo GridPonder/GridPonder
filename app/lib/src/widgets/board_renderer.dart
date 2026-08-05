@@ -157,6 +157,25 @@ class BoardRenderer extends StatelessWidget {
   /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
   final void Function(int x, int y)? onCellTap;
 
+  /// Called with the cell the pointer entered, or `(null, null)` when it
+  /// leaves the board. Only wired up where a pointer exists.
+  final void Function(int? x, int? y)? onCellHover;
+
+  /// What each action available to the player would set in motion, keyed by
+  /// the cell that action targets: the cells that would move if it were taken,
+  /// in the positions they occupy now. An entry mapped to an empty set is an
+  /// action that is legal but moves nothing.
+  ///
+  /// Drawn as a marker on each target plus, for the target under the pointer,
+  /// an outline around what it would release — so a destructive verb can be
+  /// read before it is committed rather than inferred after.
+  final Map<Position, Set<Position>> actionPreviews;
+
+  /// Which entry of [actionPreviews] the pointer is over. When null, a single
+  /// target that would actually move something is outlined on its own, so the
+  /// common case needs no pointer at all.
+  final Position? hoveredPreviewTarget;
+
   /// Last known facing direction per actor kind. Used to render idle actor
   /// sprites after movement animation has finished.
   final Map<String, String> actorFacingByKind;
@@ -197,7 +216,30 @@ class BoardRenderer extends StatelessWidget {
     this.selectedActorPosition,
     this.lineOfSightFeedbacks = const [],
     this.cellEffects = const [],
+    this.onCellHover,
+    this.actionPreviews = const {},
+    this.hoveredPreviewTarget,
   });
+
+  /// Wraps a cell so pointer movement over it can drive the action preview.
+  /// A no-op wherever nothing is listening — touch input included.
+  Widget _hoverable(int x, int y, Widget child) {
+    if (onCellHover == null) return child;
+    return MouseRegion(
+      onEnter: (_) => onCellHover!(x, y),
+      onExit: (_) => onCellHover!(null, null),
+      child: child,
+    );
+  }
+
+  Widget _tappable(int x, int y, Widget child) {
+    if (onCellTap == null) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => onCellTap!(x, y),
+      child: child,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -248,37 +290,27 @@ class BoardRenderer extends StatelessWidget {
                     top: y * cellSize,
                     width: cellSize,
                     height: cellSize,
-                    child: onCellTap != null
-                        ? GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => onCellTap!(x, y),
-                            child: _Cell(
-                              x: x,
-                              y: y,
-                              state: state,
-                              game: game,
-                              packService: packService,
-                              cellSize: cellSize,
-                              skipGround: backgroundMcoPosSet.contains(
-                                Position(x, y),
-                              ),
-                              actorFacingByKind: actorFacingByKind,
-                              floodedColorOverride: floodedColorOverride,
-                            ),
-                          )
-                        : _Cell(
-                            x: x,
-                            y: y,
-                            state: state,
-                            game: game,
-                            packService: packService,
-                            cellSize: cellSize,
-                            skipGround: backgroundMcoPosSet.contains(
-                              Position(x, y),
-                            ),
-                            actorFacingByKind: actorFacingByKind,
-                            floodedColorOverride: floodedColorOverride,
+                    child: _hoverable(
+                      x,
+                      y,
+                      _tappable(
+                        x,
+                        y,
+                        _Cell(
+                          x: x,
+                          y: y,
+                          state: state,
+                          game: game,
+                          packService: packService,
+                          cellSize: cellSize,
+                          skipGround: backgroundMcoPosSet.contains(
+                            Position(x, y),
                           ),
+                          actorFacingByKind: actorFacingByKind,
+                          floodedColorOverride: floodedColorOverride,
+                        ),
+                      ),
+                    ),
                   ),
               for (final mco in foregroundMcos)
                 ..._buildMcoCells(
@@ -297,6 +329,21 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               ),
+              // What the player's available actions would do, drawn above the
+              // board but below the avatar so it never hides who is standing
+              // where.
+              if (actionPreviews.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _ActionPreviewPainter(
+                        actionPreviews,
+                        hoveredPreviewTarget,
+                        cellSize,
+                      ),
+                    ),
+                  ),
+                ),
               if (selectedActorPosition case final selectedPos?)
                 _buildSelectedActorRing(selectedPos, cellSize),
               if (animationOverlays != null)
@@ -761,6 +808,100 @@ class _LineOfSightFeedbackPainter extends CustomPainter {
   }
 }
 
+/// Draws what the player's available actions would do, before they commit:
+/// a marker on every cell they can act on, and an outline around the cells the
+/// pointed-at action would set in motion.
+///
+/// The outline strokes only the boundary of the moving group, so it reads as
+/// one piece — which is how it will actually behave when it goes.
+class _ActionPreviewPainter extends CustomPainter {
+  final Map<Position, Set<Position>> previews;
+  final Position? hovered;
+  final double cellSize;
+
+  const _ActionPreviewPainter(this.previews, this.hovered, this.cellSize);
+
+  static const _live = Color(0xFFFFB74D);
+  static const _inert = Color(0xFF7C8DA6);
+
+  /// The group to outline: whatever is pointed at, or — when nothing is, and
+  /// exactly one available action would move anything — that one, so the
+  /// common case is legible without a pointer at all. Ambiguity is left to
+  /// the player to resolve by pointing.
+  Set<Position>? get _focus {
+    if (hovered != null) return previews[hovered];
+    Set<Position>? only;
+    for (final entry in previews.entries) {
+      if (entry.value.isEmpty) continue;
+      if (only != null) return null;
+      only = entry.value;
+    }
+    return only;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final focus = _focus;
+    if (focus != null && focus.isNotEmpty) {
+      final fill = Paint()..color = _live.withValues(alpha: 0.15);
+      final stroke = Paint()
+        ..color = _live
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.square;
+      for (final p in focus) {
+        final l = p.x * cellSize;
+        final t = p.y * cellSize;
+        canvas.drawRect(Rect.fromLTWH(l, t, cellSize, cellSize), fill);
+        if (!focus.contains(Position(p.x, p.y - 1))) {
+          canvas.drawLine(Offset(l, t), Offset(l + cellSize, t), stroke);
+        }
+        if (!focus.contains(Position(p.x, p.y + 1))) {
+          canvas.drawLine(
+            Offset(l, t + cellSize),
+            Offset(l + cellSize, t + cellSize),
+            stroke,
+          );
+        }
+        if (!focus.contains(Position(p.x - 1, p.y))) {
+          canvas.drawLine(Offset(l, t), Offset(l, t + cellSize), stroke);
+        }
+        if (!focus.contains(Position(p.x + 1, p.y))) {
+          canvas.drawLine(
+            Offset(l + cellSize, t),
+            Offset(l + cellSize, t + cellSize),
+            stroke,
+          );
+        }
+      }
+    }
+
+    // Filled where the action would release something, hollow where it would
+    // only remove the cell itself and leave the structure standing.
+    final radius = (cellSize * 0.11).clamp(2.0, 7.0);
+    for (final entry in previews.entries) {
+      final moves = entry.value.isNotEmpty;
+      canvas.drawCircle(
+        Offset(
+          entry.key.x * cellSize + cellSize / 2,
+          entry.key.y * cellSize + cellSize / 2,
+        ),
+        radius,
+        Paint()
+          ..color = moves ? _live : _inert
+          ..style = moves ? PaintingStyle.fill : PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ActionPreviewPainter oldDelegate) =>
+      oldDelegate.previews != previews ||
+      oldDelegate.hovered != hovered ||
+      oldDelegate.cellSize != cellSize;
+}
+
 class _Cell extends StatelessWidget {
   final int x, y;
   final LevelState state;
@@ -788,35 +929,21 @@ class _Cell extends StatelessWidget {
     final pos = Position(x, y);
     final groundEntity = state.board.getEntity('ground', pos);
     if (groundEntity?.kind == 'void' && !skipGround) {
-      final kindDef = game.entityKinds['void'];
-      final spritePath = resolveEntitySpritePath(kindDef, groundEntity!);
-      if (spritePath != null) {
-        return Image(
-          image: packService.resolvePackImage(spritePath),
-          width: cellSize,
-          height: cellSize,
-          fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => Image.asset(
-            packService.resolveSprite(spritePath),
-            width: cellSize,
-            height: cellSize,
-            fit: BoxFit.cover,
-          ),
-        );
-      }
-      // Procedural fallback only when the game itself uses procedural
-      // rendering for normal cells (no sprite on `empty`). Sprite-backed
-      // packs (e.g. twinseed: empty=grass.png) frame voids naturally via the
-      // surrounding tiles, so we leave them transparent.
-      final emptySprite = game.entityKinds['empty']?.sprite;
-      if (emptySprite == null) {
-        return Container(
-          width: cellSize,
-          height: cellSize,
-          color: const Color(0xFFB0B0B0),
-        );
-      }
-      return const SizedBox.shrink();
+      final background = _voidBackground(groundEntity!);
+      // Open air can still carry something worth seeing — a target marker
+      // painted on the floor below, an actor crossing a gap. Keep the void
+      // backdrop and stack those on top rather than hiding them.
+      final overlays = _overlayLayers
+          .where((id) => state.board.getEntity(id, pos) != null)
+          .toList();
+      if (overlays.isEmpty) return background;
+      return SizedBox(
+        width: cellSize,
+        height: cellSize,
+        child: Stack(
+          children: [background, for (final id in overlays) _layer(id, pos)],
+        ),
+      );
     }
     return Container(
       decoration: BoxDecoration(
@@ -829,6 +956,43 @@ class _Cell extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  /// Everything drawn above `ground`, in the order the pack declares it.
+  Iterable<String> get _overlayLayers =>
+      resolveBoardLayerOrder(game).where((id) => id != 'ground');
+
+  /// How an open-air cell is drawn when nothing else occupies it.
+  Widget _voidBackground(EntityInstance groundEntity) {
+    final kindDef = game.entityKinds['void'];
+    final spritePath = resolveEntitySpritePath(kindDef, groundEntity);
+    if (spritePath != null) {
+      return Image(
+        image: packService.resolvePackImage(spritePath),
+        width: cellSize,
+        height: cellSize,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Image.asset(
+          packService.resolveSprite(spritePath),
+          width: cellSize,
+          height: cellSize,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+    // Procedural fallback only when the game itself uses procedural
+    // rendering for normal cells (no sprite on `empty`). Sprite-backed
+    // packs (e.g. twinseed: empty=grass.png) frame voids naturally via the
+    // surrounding tiles, so we leave them transparent.
+    final emptySprite = game.entityKinds['empty']?.sprite;
+    if (emptySprite == null) {
+      return Container(
+        width: cellSize,
+        height: cellSize,
+        color: const Color(0xFFB0B0B0),
+      );
+    }
+    return const SizedBox.shrink();
   }
 
   Widget _layer(String layerId, Position pos) {
