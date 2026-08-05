@@ -661,6 +661,7 @@ transforms the board directly; it does not require rules.
 | `wallTerminates` | boolean | `true` | Whether a wall may serve as a bracket terminal. |
 | `wallLayer` | string | `"ground"` | Layer checked for wall terminals. |
 | `wallTag` | string | `"solid"` | Tag that marks a wall terminal on `wallLayer`. |
+| `terminalKinds` | object | `{}` | Aggressor kind → extra `pieceLayer` kinds that may close a bracket **for that aggressor only**. Gives a game asymmetric terrain: `{"human": ["insulator"]}` lets a neutral pylon bracket runs on the `human` pass while never closing one for any other aggressor. |
 | `triggerEvents` | array of strings | `["actor_moved"]` | Events whose `position` (the mover's destination) anchors a capture pass. |
 
 **Behavior (per move):**

@@ -86,6 +86,16 @@ class FlankCaptureSystem extends GameSystem {
     final wallTerminates = effectiveConfig['wallTerminates'] as bool? ?? true;
     final wallLayer = effectiveConfig['wallLayer'] as String? ?? 'ground';
     final wallTag = effectiveConfig['wallTag'] as String? ?? 'solid';
+    // Extra bracket terminals per aggressor: kinds that close a run for that
+    // aggressor without being it (asymmetric terrain, neutral anchors).
+    final terminalKinds = <String, Set<String>>{
+      for (final entry in (effectiveConfig['terminalKinds'] as Map? ??
+              const <String, dynamic>{})
+          .entries)
+        entry.key.toString(): entry.value is List
+            ? (entry.value as List).map((e) => e.toString()).toSet()
+            : <String>{entry.value.toString()},
+    };
 
     // Single pre-flip snapshot: "x,y" -> piece kind for every occupied cell.
     final snapshot = <String, String>{};
@@ -107,11 +117,13 @@ class FlankCaptureSystem extends GameSystem {
     void scanLine(
         List<Position> line, int bIndex, String aggressor, String victim) {
       final n = line.length;
+      final extra = terminalKinds[aggressor] ?? const <String>{};
       bool terminal(int idx) {
         if (idx < 0 || idx >= n) return false; // board edge is not a terminal
         final c = line[idx];
         if (isWall(c.x, c.y)) return true;
-        return pieceAt(c.x, c.y) == aggressor;
+        final kind = pieceAt(c.x, c.y);
+        return kind == aggressor || (kind != null && extra.contains(kind));
       }
 
       var i = 0;

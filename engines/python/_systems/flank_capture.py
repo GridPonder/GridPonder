@@ -82,6 +82,7 @@ class FlankCaptureSystem(GameSystem):
         wall_terminates = bool(config.get("wallTerminates", True))
         wall_layer = str(config.get("wallLayer", "ground"))
         wall_tag = str(config.get("wallTag", "solid"))
+        terminal_kinds_cfg = config.get("terminalKinds") or {}
 
         # Single pre-flip snapshot: (x, y) -> piece kind for every occupied cell.
         snapshot: dict[tuple[int, int], str] = {
@@ -107,6 +108,9 @@ class FlankCaptureSystem(GameSystem):
             raw_victim = pairs.get(aggressor)
             if raw_victim is None:
                 continue
+            extra_terminals = {
+                str(k) for k in (terminal_kinds_cfg.get(aggressor) or [])
+            }
             victims = (
                 [str(v) for v in raw_victim]
                 if isinstance(raw_victim, (list, tuple))
@@ -125,7 +129,7 @@ class FlankCaptureSystem(GameSystem):
                             b_index = b.y
                         _scan_line(
                             line, b_index, aggressor, victim,
-                            piece_at, is_wall, flips, ordered)
+                            piece_at, is_wall, flips, ordered, extra_terminals)
 
         if not flips:
             return []
@@ -179,13 +183,16 @@ def _scan_line(
     is_wall,
     flips: dict[tuple[int, int], str],
     ordered: list[tuple[int, int]],
+    extra_terminals: set[str] | None = None,
 ) -> None:
     """Flip every maximal victim-run on ``line`` that is bracketed by an
     aggressor/wall terminal on both ends *and* is anchored to the moved cell at
     ``b_index`` (the mover is a bracketing terminal, or lies inside the run).
-    The board edge is never a terminal — only a wall or an aggressor piece is.
+    The board edge is never a terminal — only a wall, an aggressor piece, or a
+    piece whose kind this aggressor lists in ``terminalKinds``.
     """
     n = len(line)
+    extra = extra_terminals or set()
 
     def terminal(idx: int) -> bool:
         if idx < 0 or idx >= n:
@@ -193,7 +200,8 @@ def _scan_line(
         x, y = line[idx]
         if is_wall(x, y):
             return True
-        return piece_at(x, y) == aggressor
+        kind = piece_at(x, y)
+        return kind == aggressor or (kind is not None and kind in extra)
 
     i = 0
     while i < n:
