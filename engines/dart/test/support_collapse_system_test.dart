@@ -214,7 +214,46 @@ final _noDeck = <Map<String, dynamic>>[
   },
 ];
 
+// Two orphans in one column. Cutting (1,1) orphans the hull at (1,2) AND the
+// pod at (1,4), which has no path to a root of its own. The pod is blocked by
+// the deck immediately; the hull must come to rest on top of it, not through it.
+final _stackedOrphans = <Map<String, dynamic>>[
+  {
+    'position': [1, 0],
+    'kind': 'anchor'
+  },
+  {
+    'position': [1, 1],
+    'kind': 'hull'
+  },
+  {
+    'position': [1, 2],
+    'kind': 'hull'
+  },
+  {
+    'position': [1, 4],
+    'kind': 'pod'
+  },
+  ..._deck,
+];
+
 void main() {
+  test('a falling component rests on one that landed first', () {
+    final game = _game();
+    final engine = TurnEngine(
+        game, _level(game, entries: _stackedOrphans, avatar: [1, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [1, 1]
+    }));
+
+    final board = engine.state.board;
+    // The pod stops on the deck; the hull stops on the pod. Neither is lost.
+    expect(
+        board.getEntity('ground', const Position(1, 4))?.kind, 'pod_settled');
+    expect(board.getEntity('ground', const Position(1, 3))?.kind, 'wreck');
+  });
+
   test('severing the keystone drops the limb rigidly', () {
     final game = _game();
     final engine =

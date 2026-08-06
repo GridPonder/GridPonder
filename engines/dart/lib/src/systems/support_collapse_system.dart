@@ -247,60 +247,68 @@ class SupportCollapseSystem extends GameSystem {
     final step = fallDir.offset;
     final restLayers = _stringList(cfg['restLayers'], [layerId]);
     final restTags = _stringList(cfg['restTags'], const ['solid']);
+    final settleRaw = cfg['settleTransform'] as Map? ?? const {};
+    final settle =
+        settleRaw.map((k, v) => MapEntry(k.toString(), v.toString()));
 
-    bool blocked(List<Position> cells) {
+    /// Kinds blocking a step by [d]. An empty list means the step is free.
+    List<String> obstacles(List<Position> cells, Position d) {
+      final out = <String>[];
       for (final c in cells) {
-        final next = c + step;
+        final next = c + d;
         if (!board.isInBounds(next)) continue; // leaving the board never blocks
         for (final rl in restLayers) {
           final rlayer = board.layers[rl];
           if (rlayer == null) continue;
           final e = rlayer.getAt(next);
-          if (e != null && _hasAnyTag(game, e.kind, restTags)) return true;
+          if (e != null && _hasAnyTag(game, e.kind, restTags)) out.add(e.kind);
         }
       }
-      return false;
+      return out;
     }
 
-    // 4. Step every unfrozen component one cell at a time until none move.
-    final positions =
-        components.map((comp) => List<Position>.from(comp)).toList();
-    final frozen = <int>{};
-    final maxSteps = board.width + board.height + 1;
-    for (var pass = 0; pass < maxSteps; pass++) {
-      var movedAny = false;
-      for (var idx = 0; idx < positions.length; idx++) {
-        if (frozen.contains(idx)) continue;
-        final cells = positions[idx];
-        if (!cells.any(board.isInBounds)) {
-          frozen.add(idx);
-          continue;
-        }
-        if (blocked(cells)) {
-          frozen.add(idx);
-          continue;
-        }
-        positions[idx] = cells.map((c) => c + step).toList();
-        movedAny = true;
-      }
-      if (!movedAny) break;
-    }
+    // 4. Resolve components one at a time, the one furthest along the fall
+    //    direction first, writing each back to the board as it lands. Every
+    //    component that could block another has therefore already come to rest
+    //    by the time the other is resolved. Sorting is what makes this
+    //    deterministic; stepping them in lockstep is not, because a lifted
+    //    component is invisible to the others and they pass through it.
+    int reachOf(List<Position> cells) => cells
+        .map((c) => c.x * step.x + c.y * step.y)
+        .reduce((a, b) => a > b ? a : b);
+    int minXOf(List<Position> cells) =>
+        cells.map((c) => c.x).reduce((a, b) => a < b ? a : b);
+    int minYOf(List<Position> cells) =>
+        cells.map((c) => c.y).reduce((a, b) => a < b ? a : b);
 
-    // 5. Write the landed cells back, applying settleTransform.
-    final settleRaw = cfg['settleTransform'] as Map? ?? const {};
-    final settle =
-        settleRaw.map((k, v) => MapEntry(k.toString(), v.toString()));
+    final order = List<int>.generate(components.length, (i) => i)
+      ..sort((a, b) {
+        final byReach =
+            reachOf(components[b]).compareTo(reachOf(components[a]));
+        if (byReach != 0) return byReach;
+        final byX = minXOf(components[a]).compareTo(minXOf(components[b]));
+        if (byX != 0) return byX;
+        return minYOf(components[a]).compareTo(minYOf(components[b]));
+      });
+
     final events = <GameEvent>[];
     final avatarPos = state.avatar.enabled ? state.avatar.position : null;
     int? avatarComponent;
     Position? avatarDestination;
+    final maxSteps = 2 * (board.width + board.height) + 1;
 
-    for (var idx = 0; idx < components.length; idx++) {
+    for (final idx in order) {
+      var cells = List<Position>.from(components[idx]);
+      for (var pass = 0; pass < maxSteps; pass++) {
+        if (!cells.any(board.isInBounds)) break;
+        if (obstacles(cells, step).isNotEmpty) break;
+        cells = cells.map((c) => c + step).toList();
+      }
+
       final comp = components[idx];
-      final landed = positions[idx];
       for (var i = 0; i < comp.length; i++) {
         final src = comp[i];
-        final dst = landed[i];
+        final dst = cells[i];
         if (avatarPos != null && src == avatarPos) {
           avatarComponent = idx;
           avatarDestination = dst;
