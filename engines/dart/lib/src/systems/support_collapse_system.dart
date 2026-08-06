@@ -250,6 +250,9 @@ class SupportCollapseSystem extends GameSystem {
     final settleRaw = cfg['settleTransform'] as Map? ?? const {};
     final settle =
         settleRaw.map((k, v) => MapEntry(k.toString(), v.toString()));
+    final deflectRaw = cfg['deflect'] as Map? ?? const {};
+    final deflect =
+        deflectRaw.map((k, v) => MapEntry(k.toString(), v.toString()));
 
     /// Kinds blocking a step by [d]. An empty list means the step is free.
     List<String> obstacles(List<Position> cells, Position d) {
@@ -265,6 +268,29 @@ class SupportCollapseSystem extends GameSystem {
         }
       }
       return out;
+    }
+
+    /// The one agreed slide direction, or null if the component rests.
+    ///
+    /// A flat blocker holds the whole component, and ramps pulling opposite
+    /// ways cancel — both fall back to resting, so the result never depends on
+    /// which cell of the component is inspected first.
+    Position? deflection(List<String> blocking) {
+      if (deflect.isEmpty) return null;
+      final directions = <String>{};
+      for (final kind in blocking) {
+        String? match;
+        for (final entry in deflect.entries) {
+          if (_hasAnyTag(game, kind, [entry.key])) {
+            match = entry.value;
+            break;
+          }
+        }
+        if (match == null) return null;
+        directions.add(match);
+      }
+      if (directions.length != 1) return null;
+      return Direction.fromJson(directions.first).offset;
     }
 
     // 4. Resolve components one at a time, the one furthest along the fall
@@ -299,10 +325,26 @@ class SupportCollapseSystem extends GameSystem {
 
     for (final idx in order) {
       var cells = List<Position>.from(components[idx]);
+      int? slidAt;
       for (var pass = 0; pass < maxSteps; pass++) {
         if (!cells.any(board.isInBounds)) break;
-        if (obstacles(cells, step).isNotEmpty) break;
-        cells = cells.map((c) => c + step).toList();
+        final blocking = obstacles(cells, step);
+        if (blocking.isEmpty) {
+          cells = cells.map((c) => c + step).toList();
+          continue;
+        }
+        final slide = deflection(blocking);
+        if (slide == null) break;
+        // A component may slide at most once per lane, or two facing ramps
+        // would trade it back and forth forever. It must travel one cell along
+        // the fall direction to earn another slide.
+        final lane = step.y != 0 ? minYOf(cells) : minXOf(cells);
+        if (slidAt == lane || obstacles(cells, slide).isNotEmpty) break;
+        if (cells.any((c) => !board.isInBounds(c + slide))) {
+          break; // sideways motion never leaves the board
+        }
+        cells = cells.map((c) => c + slide).toList();
+        slidAt = lane;
       }
 
       final comp = components[idx];

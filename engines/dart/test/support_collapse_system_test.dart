@@ -38,6 +38,16 @@ GameDefinition _game({Map<String, dynamic> collapseConfig = const {}}) {
         'tags': ['solid'],
         'symbol': '=',
       },
+      'ramp_right': {
+        'layer': 'ground',
+        'tags': ['solid', 'slope_right'],
+        'symbol': '/',
+      },
+      'ramp_left': {
+        'layer': 'ground',
+        'tags': ['solid', 'slope_left'],
+        'symbol': r'\',
+      },
     },
     'actions': [
       {
@@ -237,7 +247,234 @@ final _stackedOrphans = <Map<String, dynamic>>[
   ..._deck,
 ];
 
+const _deflect = <String, dynamic>{
+  'deflect': {'slope_left': 'left', 'slope_right': 'right'},
+};
+
+final _oneRamp = <Map<String, dynamic>>[
+  {
+    'position': [1, 0],
+    'kind': 'anchor'
+  },
+  {
+    'position': [1, 1],
+    'kind': 'hull'
+  },
+  {
+    'position': [1, 2],
+    'kind': 'pod'
+  },
+  {
+    'position': [1, 4],
+    'kind': 'ramp_right'
+  },
+  ..._deck,
+];
+
+final _cloggedRamp = <Map<String, dynamic>>[
+  ..._oneRamp,
+  {
+    'position': [2, 3],
+    'kind': 'wreck'
+  },
+];
+
+final _straddle = <Map<String, dynamic>>[
+  {
+    'position': [1, 0],
+    'kind': 'anchor'
+  },
+  {
+    'position': [1, 1],
+    'kind': 'hull'
+  },
+  {
+    'position': [1, 2],
+    'kind': 'hull'
+  },
+  {
+    'position': [2, 2],
+    'kind': 'hull'
+  },
+  {
+    'position': [1, 4],
+    'kind': 'ramp_right'
+  },
+  {
+    'position': [2, 4],
+    'kind': 'wreck'
+  },
+  ..._deck,
+];
+
+final _opposingRamps = <Map<String, dynamic>>[
+  {
+    'position': [1, 0],
+    'kind': 'anchor'
+  },
+  {
+    'position': [1, 1],
+    'kind': 'hull'
+  },
+  {
+    'position': [1, 2],
+    'kind': 'hull'
+  },
+  {
+    'position': [2, 2],
+    'kind': 'hull'
+  },
+  {
+    'position': [1, 4],
+    'kind': 'ramp_right'
+  },
+  {
+    'position': [2, 4],
+    'kind': 'ramp_left'
+  },
+  ..._deck,
+];
+
+final _facingRamps = <Map<String, dynamic>>[
+  {
+    'position': [1, 0],
+    'kind': 'anchor'
+  },
+  {
+    'position': [1, 1],
+    'kind': 'hull'
+  },
+  {
+    'position': [1, 2],
+    'kind': 'pod'
+  },
+  {
+    'position': [1, 4],
+    'kind': 'ramp_right'
+  },
+  {
+    'position': [2, 4],
+    'kind': 'ramp_left'
+  },
+  ..._deck,
+];
+
+final _edgeRamp = <Map<String, dynamic>>[
+  {
+    'position': [4, 0],
+    'kind': 'anchor'
+  },
+  {
+    'position': [4, 1],
+    'kind': 'hull'
+  },
+  {
+    'position': [4, 2],
+    'kind': 'pod'
+  },
+  {
+    'position': [4, 4],
+    'kind': 'ramp_right'
+  },
+  ..._deck,
+];
+
 void main() {
+  test('a blocked component slides off a ramp and keeps falling', () {
+    final game = _game(collapseConfig: _deflect);
+    final engine =
+        TurnEngine(game, _level(game, entries: _oneRamp, avatar: [1, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [1, 1]
+    }));
+
+    final board = engine.state.board;
+    expect(
+        board.getEntity('ground', const Position(2, 4))?.kind, 'pod_settled');
+    expect(board.getEntity('ground', const Position(1, 3))?.kind, 'void');
+  });
+
+  test('a ramp with no runoff clogs and the component rests on it', () {
+    final game = _game(collapseConfig: _deflect);
+    final engine =
+        TurnEngine(game, _level(game, entries: _cloggedRamp, avatar: [1, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [1, 1]
+    }));
+
+    expect(engine.state.board.getEntity('ground', const Position(1, 3))?.kind,
+        'pod_settled');
+  });
+
+  test('a component blocked by ramp and flat ground rests', () {
+    final game = _game(collapseConfig: _deflect);
+    final engine =
+        TurnEngine(game, _level(game, entries: _straddle, avatar: [1, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [1, 1]
+    }));
+
+    final board = engine.state.board;
+    expect(board.getEntity('ground', const Position(1, 3))?.kind, 'wreck');
+    expect(board.getEntity('ground', const Position(2, 3))?.kind, 'wreck');
+  });
+
+  test('ramps pulling opposite ways cancel', () {
+    final game = _game(collapseConfig: _deflect);
+    final engine =
+        TurnEngine(game, _level(game, entries: _opposingRamps, avatar: [1, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [1, 1]
+    }));
+
+    final board = engine.state.board;
+    expect(board.getEntity('ground', const Position(1, 3))?.kind, 'wreck');
+    expect(board.getEntity('ground', const Position(2, 3))?.kind, 'wreck');
+  });
+
+  test('facing ramps do not oscillate', () {
+    final game = _game(collapseConfig: _deflect);
+    final engine =
+        TurnEngine(game, _level(game, entries: _facingRamps, avatar: [1, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [1, 1]
+    }));
+
+    expect(engine.state.board.getEntity('ground', const Position(2, 3))?.kind,
+        'pod_settled');
+  });
+
+  test('a sideways step never leaves the board', () {
+    final game = _game(collapseConfig: _deflect);
+    final engine =
+        TurnEngine(game, _level(game, entries: _edgeRamp, avatar: [4, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [4, 1]
+    }));
+
+    expect(engine.state.board.getEntity('ground', const Position(4, 3))?.kind,
+        'pod_settled');
+  });
+
+  test('deflect defaults to off', () {
+    final game = _game();
+    final engine =
+        TurnEngine(game, _level(game, entries: _oneRamp, avatar: [1, 0]));
+
+    engine.executeTurn(GameAction('cut', {
+      'position': [1, 1]
+    }));
+
+    expect(engine.state.board.getEntity('ground', const Position(1, 3))?.kind,
+        'pod_settled');
+  });
+
   test('a falling component rests on one that landed first', () {
     final game = _game();
     final engine = TurnEngine(
