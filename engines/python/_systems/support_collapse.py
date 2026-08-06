@@ -192,12 +192,16 @@ class SupportCollapseSystem(GameSystem):
                 layer.set(p, self._empty(game, layer_id))
 
         dx, dy = dir_delta(cfg.get("direction", "down"))
+        step = Pos(dx, dy)
         rest_layers = cfg.get("restLayers", [layer_id])
         rest_tags = cfg.get("restTags", ["solid"])
+        settle = {k: str(v) for k, v in cfg.get("settleTransform", {}).items()}
 
-        def blocked(cells: list[Pos]) -> bool:
+        def obstacles(cells: list[Pos], d: Pos) -> list[str]:
+            """Kinds blocking a step by `d`. An empty list means the step is free."""
+            out: list[str] = []
             for c in cells:
-                nxt = Pos(c.x + dx, c.y + dy)
+                nxt = Pos(c.x + d.x, c.y + d.y)
                 if not board.is_in_bounds(nxt):
                     continue  # leaving the board never blocks
                 for rl in rest_layers:
@@ -208,37 +212,36 @@ class SupportCollapseSystem(GameSystem):
                     if e is not None and any(
                         game.has_tag(e.kind, t) for t in rest_tags
                     ):
-                        return True
-            return False
+                        out.append(e.kind)
+            return out
 
-        # 4. Step every unfrozen component one cell at a time until none move.
-        positions = [list(comp) for comp in components]
-        frozen: set[int] = set()
-        for _ in range(board.width + board.height + 1):
-            moved_any = False
-            for idx, cells in enumerate(positions):
-                if idx in frozen:
-                    continue
-                if not any(board.is_in_bounds(c) for c in cells):
-                    frozen.add(idx)
-                    continue
-                if blocked(cells):
-                    frozen.add(idx)
-                    continue
-                positions[idx] = [Pos(c.x + dx, c.y + dy) for c in cells]
-                moved_any = True
-            if not moved_any:
-                break
+        # 4. Resolve components one at a time, the one furthest along the fall
+        #    direction first, writing each back to the board as it lands. Every
+        #    component that could block another has therefore already come to
+        #    rest by the time the other is resolved. Sorting is what makes this
+        #    deterministic; stepping them in lockstep is not, because a lifted
+        #    component is invisible to the others and they pass through it.
+        def fall_order(idx: int) -> tuple:
+            cells = components[idx]
+            reach = max(c.x * step.x + c.y * step.y for c in cells)
+            return (-reach, min(c.x for c in cells), min(c.y for c in cells))
 
-        # 5. Write the landed cells back, applying settleTransform.
-        settle = {k: str(v) for k, v in cfg.get("settleTransform", {}).items()}
         events: list[dict] = []
         avatar_pos = state.avatar.position if state.avatar.enabled else None
         avatar_component: Optional[int] = None
         avatar_destination: Optional[Pos] = None
+        max_steps = 2 * (board.width + board.height) + 1
 
-        for idx, comp in enumerate(components):
-            for src, dst in zip(comp, positions[idx]):
+        for idx in sorted(range(len(components)), key=fall_order):
+            cells = list(components[idx])
+            for _ in range(max_steps):
+                if not any(board.is_in_bounds(c) for c in cells):
+                    break
+                if obstacles(cells, step):
+                    break
+                cells = [Pos(c.x + step.x, c.y + step.y) for c in cells]
+
+            for src, dst in zip(components[idx], cells):
                 if avatar_pos is not None and src == avatar_pos:
                     avatar_component = idx
                     avatar_destination = dst

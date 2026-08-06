@@ -143,6 +143,16 @@ _NO_DECK = [
     {"position": [3, 2], "kind": "pod"},
 ]
 
+# Two orphans in one column. Cutting (1,1) orphans the hull at (1,2) AND the
+# pod at (1,4), which has no path to a root of its own. The pod is blocked by
+# the deck immediately; the hull must come to rest on top of it, not through it.
+_STACKED_ORPHANS = [
+    {"position": [1, 0], "kind": "anchor"},
+    {"position": [1, 1], "kind": "hull"},
+    {"position": [1, 2], "kind": "hull"},
+    {"position": [1, 4], "kind": "pod"},
+] + _DECK
+
 
 class SupportCollapseTest(unittest.TestCase):
     def test_severing_the_keystone_drops_the_limb_rigidly(self):
@@ -178,6 +188,17 @@ class SupportCollapseTest(unittest.TestCase):
 
         board = engine.state.board
         self.assertEqual(board.get_entity("ground", Pos(1, 3)).kind, "pod_settled")
+
+    def test_a_falling_component_rests_on_one_that_landed_first(self):
+        game = _game()
+        engine = TurnEngine(game, _level(entries=_STACKED_ORPHANS, avatar=[1, 0]))
+
+        engine.execute_turn("cut", {"position": [1, 1]})
+
+        board = engine.state.board
+        # The pod stops on the deck; the hull stops on the pod. Neither is lost.
+        self.assertEqual(board.get_entity("ground", Pos(1, 4)).kind, "pod_settled")
+        self.assertEqual(board.get_entity("ground", Pos(1, 3)).kind, "wreck")
 
     def test_cells_still_connected_to_a_root_do_not_fall(self):
         game = _game()
