@@ -754,6 +754,7 @@ an orphan and falls, keeping its exact shape.
 | `restLayers` | array of strings | `[layer]` | Layers checked for what stops a falling component. |
 | `restTags` | array of strings | `["solid"]` | Tags on `restLayers` that stop a falling component. |
 | `settleTransform` | object | `{}` | Kind→kind map applied to each cell when its component comes to rest. |
+| `deflect` | object | `{}` | Map of tag → direction. A component blocked by cells carrying one of these tags steps one cell in the mapped direction instead of resting, then carries on falling. Empty disables deflection. |
 | `carryAvatar` | boolean | `true` | Whether the avatar rides the component it is standing on. |
 | `avatarFellVariable` | string | — | Variable incremented when the avatar rides a component down. Pair with a [`variable_threshold`](03_levels.md#variable_threshold) lose condition. |
 | `triggerEvents` | array of strings | `[]` | Event types that trigger a cascade-phase recompute. Empty disables the cascade path. |
@@ -769,19 +770,31 @@ an orphan and falls, keeping its exact shape.
    using `connectivity`.
 4. Every maximal connected group of member cells outside the supported set is an
    orphan component.
-5. Lift every orphan cell off the board, then step all orphans one cell in
-   `direction` simultaneously, freezing any that cannot move, until none move.
-   Lifting first is what stops a component being blocked by the hole it is
-   falling out of, or by another orphan falling alongside it. Simultaneous
-   stepping is order-independent, so stacked orphans resolve deterministically
-   without a tie-break rule.
-   - A component is blocked when a destination cell holds an entity carrying a
-     `restTags` tag on a `restLayers` layer.
+5. Lift every orphan cell off the board, so a component is never blocked by the
+   hole it is falling out of, nor by a component that has not fallen yet.
+6. Resolve components one at a time, the one furthest along `direction` first
+   (ties broken by lowest `x`, then lowest `y`), writing each back to the board
+   as soon as it comes to rest. Ordering them this way is what makes the result
+   deterministic: every component that could block another has already landed
+   by the time the other is resolved.
+   - A component steps in `direction` while nothing blocks it. It is blocked
+     when a destination cell holds an entity carrying a `restTags` tag on a
+     `restLayers` layer.
    - Leaving the board does **not** block. A component whose cells have all left
      the board is destroyed.
-6. Apply `settleTransform` to each landed cell and emit `object_settled` per
+   - **Deflection.** When `deflect` is non-empty and the component is blocked,
+     the blocking kinds decide what happens next. If every blocker carries a
+     `deflect` tag and they all map to the same direction, the component steps
+     one cell that way and carries on falling. If any blocker carries no
+     `deflect` tag, or the blockers disagree, the component rests. The sideways
+     step is refused — and the component rests — when a destination cell is out
+     of bounds or holds a `restTags` entity.
+   - A component may deflect **at most once per lane**, and must travel one cell
+     along `direction` before it may deflect again. Without this, two ramps
+     facing each other would trade a component back and forth forever.
+7. Apply `settleTransform` to each landed cell and emit `object_settled` per
    cell.
-7. If `carryAvatar` and the avatar stood on an orphan, move it with the
+8. If `carryAvatar` and the avatar stood on an orphan, move it with the
    component and increment `avatarFellVariable`.
 
 **Clearing on an `exactly_one` layer** writes that layer's declared `default`
@@ -803,6 +816,7 @@ Example:
     "restLayers": ["ground"],
     "restTags": ["solid"],
     "settleTransform": { "hull": "wreck", "pod": "pod_settled" },
+    "deflect": { "slope_left": "left", "slope_right": "right" },
     "carryAvatar": true,
     "avatarFellVariable": "wrecked"
   }
@@ -812,8 +826,10 @@ Example:
 **Reuse:** `severAction` is optional, so the collapse half stands alone for any
 game where rules or other systems remove cells. Suits hanging structures,
 crumbling bridges, calving ice shelves, mining a ceiling, or any "cut the
-support" mechanic. Note that gravity is a straight translation, so with
-`direction: "down"` a cell's column never changes — only how far it falls.
+support" mechanic. Without `deflect`, gravity is a straight translation: with
+`direction: "down"` a cell's column never changes, only how far it falls.
+`deflect` relaxes exactly that, and only at obstructions — a component never
+changes lane in free fall.
 
 ---
 
