@@ -196,6 +196,7 @@ class SupportCollapseSystem(GameSystem):
         rest_layers = cfg.get("restLayers", [layer_id])
         rest_tags = cfg.get("restTags", ["solid"])
         settle = {k: str(v) for k, v in cfg.get("settleTransform", {}).items()}
+        deflect = {str(k): str(v) for k, v in (cfg.get("deflect") or {}).items()}
 
         def obstacles(cells: list[Pos], d: Pos) -> list[str]:
             """Kinds blocking a step by `d`. An empty list means the step is free."""
@@ -214,6 +215,30 @@ class SupportCollapseSystem(GameSystem):
                     ):
                         out.append(e.kind)
             return out
+
+        def deflection(blocking: list[str]) -> Optional[Pos]:
+            """The one agreed slide direction, or None if the component rests.
+
+            A flat blocker holds the whole component, and ramps pulling opposite
+            ways cancel — both cases fall back to resting, so the result never
+            depends on which cell of the component is inspected first.
+            """
+            if not deflect:
+                return None
+            directions = set()
+            for kind in blocking:
+                match = None
+                for tag, direction in deflect.items():
+                    if game.has_tag(kind, tag):
+                        match = direction
+                        break
+                if match is None:
+                    return None
+                directions.add(match)
+            if len(directions) != 1:
+                return None
+            sdx, sdy = dir_delta(directions.pop())
+            return Pos(sdx, sdy)
 
         # 4. Resolve components one at a time, the one furthest along the fall
         #    direction first, writing each back to the board as it lands. Every
@@ -234,12 +259,30 @@ class SupportCollapseSystem(GameSystem):
 
         for idx in sorted(range(len(components)), key=fall_order):
             cells = list(components[idx])
+            slid_at: Optional[int] = None
             for _ in range(max_steps):
                 if not any(board.is_in_bounds(c) for c in cells):
                     break
-                if obstacles(cells, step):
+                blocking = obstacles(cells, step)
+                if not blocking:
+                    cells = [Pos(c.x + step.x, c.y + step.y) for c in cells]
+                    continue
+                slide = deflection(blocking)
+                if slide is None:
                     break
-                cells = [Pos(c.x + step.x, c.y + step.y) for c in cells]
+                # A component may slide at most once per lane, or two facing
+                # ramps would trade it back and forth forever. It must travel
+                # one cell along the fall direction to earn another slide.
+                lane = min(c.y for c in cells) if step.y else min(c.x for c in cells)
+                if slid_at == lane or obstacles(cells, slide):
+                    break
+                if any(
+                    not board.is_in_bounds(Pos(c.x + slide.x, c.y + slide.y))
+                    for c in cells
+                ):
+                    break  # sideways motion never leaves the board
+                cells = [Pos(c.x + slide.x, c.y + slide.y) for c in cells]
+                slid_at = lane
 
             for src, dst in zip(components[idx], cells):
                 if avatar_pos is not None and src == avatar_pos:

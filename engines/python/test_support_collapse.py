@@ -13,6 +13,14 @@ from engines.python._models import Pos
 from engines.python._turn_engine import TurnEngine
 
 
+# Ramp kinds for the deflect tests. Solid like the deck, so they stop a
+# component; tagged so `deflect` can turn that stop into a sideways step.
+_RAMP_KINDS = {
+    "ramp_right": {"layer": "ground", "tags": ["solid", "slope_right"], "symbol": "/"},
+    "ramp_left": {"layer": "ground", "tags": ["solid", "slope_left"], "symbol": "\\"},
+}
+
+
 def _game(*, collapse_config: dict | None = None) -> GameDef:
     return GameDef.from_dict(
         {
@@ -43,6 +51,7 @@ def _game(*, collapse_config: dict | None = None) -> GameDef:
                     "symbol": "p",
                 },
                 "deck": {"layer": "ground", "tags": ["solid"], "symbol": "="},
+                **_RAMP_KINDS,
             },
             "actions": [
                 {
@@ -153,6 +162,67 @@ _STACKED_ORPHANS = [
     {"position": [1, 4], "kind": "pod"},
 ] + _DECK
 
+_DEFLECT = {"deflect": {"slope_left": "left", "slope_right": "right"}}
+
+#   y=0:  . A . . .
+#   y=1:  . H . . .
+#   y=2:  . P . . .
+#   y=4:  . / . . .   ramp_right under column 1
+#   y=5:  = = = = =
+_ONE_RAMP = [
+    {"position": [1, 0], "kind": "anchor"},
+    {"position": [1, 1], "kind": "hull"},
+    {"position": [1, 2], "kind": "pod"},
+    {"position": [1, 4], "kind": "ramp_right"},
+] + _DECK
+
+# Same ramp, but column 2 already holds debris at the row the pod would slide
+# into, so the sideways step is refused and the pod clogs the ramp.
+_CLOGGED_RAMP = _ONE_RAMP + [{"position": [2, 3], "kind": "wreck"}]
+
+# A 2-wide component whose left cell meets a ramp and whose right cell meets
+# flat debris. The blockers disagree, so it rests instead of sliding.
+#   y=2:  . H H . .
+#   y=4:  . / w . .
+_STRADDLE = [
+    {"position": [1, 0], "kind": "anchor"},
+    {"position": [1, 1], "kind": "hull"},
+    {"position": [1, 2], "kind": "hull"},
+    {"position": [2, 2], "kind": "hull"},
+    {"position": [1, 4], "kind": "ramp_right"},
+    {"position": [2, 4], "kind": "wreck"},
+] + _DECK
+
+# The same 2-wide component over two ramps pulling opposite ways. They cancel.
+#   y=2:  . H H . .
+#   y=4:  . / \ . .
+_OPPOSING_RAMPS = [
+    {"position": [1, 0], "kind": "anchor"},
+    {"position": [1, 1], "kind": "hull"},
+    {"position": [1, 2], "kind": "hull"},
+    {"position": [2, 2], "kind": "hull"},
+    {"position": [1, 4], "kind": "ramp_right"},
+    {"position": [2, 4], "kind": "ramp_left"},
+] + _DECK
+
+# Facing ramps under a 1-wide component: it slides once, then the guard stops
+# it. Without the guard it would trade back and forth forever.
+_FACING_RAMPS = [
+    {"position": [1, 0], "kind": "anchor"},
+    {"position": [1, 1], "kind": "hull"},
+    {"position": [1, 2], "kind": "pod"},
+    {"position": [1, 4], "kind": "ramp_right"},
+    {"position": [2, 4], "kind": "ramp_left"},
+] + _DECK
+
+# A ramp at the board edge pointing off it.
+_EDGE_RAMP = [
+    {"position": [4, 0], "kind": "anchor"},
+    {"position": [4, 1], "kind": "hull"},
+    {"position": [4, 2], "kind": "pod"},
+    {"position": [4, 4], "kind": "ramp_right"},
+] + _DECK
+
 
 class SupportCollapseTest(unittest.TestCase):
     def test_severing_the_keystone_drops_the_limb_rigidly(self):
@@ -232,6 +302,84 @@ class SupportCollapseTest(unittest.TestCase):
                 board.get_entity("ground", Pos(3, y)).kind,
                 "anchor" if y == 0 else "void",
             )
+
+    def test_a_blocked_component_slides_off_a_ramp_and_keeps_falling(self):
+        game = _game(collapse_config=_DEFLECT)
+        engine = TurnEngine(game, _level(entries=_ONE_RAMP, avatar=[1, 0]))
+
+        engine.execute_turn("cut", {"position": [1, 1]})
+
+        board = engine.state.board
+        # Blocked by the ramp at (1,4), the pod steps right to column 2 and
+        # then falls on to the deck.
+        self.assertEqual(board.get_entity("ground", Pos(2, 4)).kind, "pod_settled")
+        self.assertEqual(board.get_entity("ground", Pos(1, 3)).kind, "void")
+
+    def test_a_ramp_with_no_runoff_clogs_and_the_component_rests_on_it(self):
+        game = _game(collapse_config=_DEFLECT)
+        engine = TurnEngine(game, _level(entries=_CLOGGED_RAMP, avatar=[1, 0]))
+
+        engine.execute_turn("cut", {"position": [1, 1]})
+
+        board = engine.state.board
+        # The sideways step into (2,3) is occupied, so the pod rests in the
+        # cell above the ramp.
+        self.assertEqual(board.get_entity("ground", Pos(1, 3)).kind, "pod_settled")
+
+    def test_a_component_blocked_by_ramp_and_flat_ground_rests(self):
+        game = _game(collapse_config=_DEFLECT)
+        engine = TurnEngine(game, _level(entries=_STRADDLE, avatar=[1, 0]))
+
+        engine.execute_turn("cut", {"position": [1, 1]})
+
+        board = engine.state.board
+        # The piece falls to row 3, where the ramp blocks column 1 and the
+        # debris blocks column 2. The debris carries no slope tag, so it holds
+        # the whole component and nothing slides.
+        self.assertEqual(board.get_entity("ground", Pos(1, 3)).kind, "wreck")
+        self.assertEqual(board.get_entity("ground", Pos(2, 3)).kind, "wreck")
+
+    def test_ramps_pulling_opposite_ways_cancel(self):
+        game = _game(collapse_config=_DEFLECT)
+        engine = TurnEngine(game, _level(entries=_OPPOSING_RAMPS, avatar=[1, 0]))
+
+        engine.execute_turn("cut", {"position": [1, 1]})
+
+        board = engine.state.board
+        # One blocker says left, the other says right, so the component rests.
+        self.assertEqual(board.get_entity("ground", Pos(1, 3)).kind, "wreck")
+        self.assertEqual(board.get_entity("ground", Pos(2, 3)).kind, "wreck")
+
+    def test_facing_ramps_do_not_oscillate(self):
+        game = _game(collapse_config=_DEFLECT)
+        engine = TurnEngine(game, _level(entries=_FACING_RAMPS, avatar=[1, 0]))
+
+        engine.execute_turn("cut", {"position": [1, 1]})
+
+        board = engine.state.board
+        # One slide right on to the left-pointing ramp, then the one-slide-
+        # per-row guard stops it: it rests above the second ramp.
+        self.assertEqual(board.get_entity("ground", Pos(2, 3)).kind, "pod_settled")
+
+    def test_a_sideways_step_never_leaves_the_board(self):
+        game = _game(collapse_config=_DEFLECT)
+        engine = TurnEngine(game, _level(entries=_EDGE_RAMP, avatar=[4, 0]))
+
+        engine.execute_turn("cut", {"position": [4, 1]})
+
+        board = engine.state.board
+        # Sliding right would leave the board, so the pod rests on the ramp.
+        self.assertEqual(board.get_entity("ground", Pos(4, 3)).kind, "pod_settled")
+
+    def test_deflect_defaults_to_off(self):
+        game = _game()  # no deflect config at all
+        engine = TurnEngine(game, _level(entries=_ONE_RAMP, avatar=[1, 0]))
+
+        engine.execute_turn("cut", {"position": [1, 1]})
+
+        board = engine.state.board
+        # The ramp is just solid ground: the pod stops on top of it.
+        self.assertEqual(board.get_entity("ground", Pos(1, 3)).kind, "pod_settled")
 
     def test_cutting_a_non_severable_cell_is_vetoed(self):
         game = _game()
