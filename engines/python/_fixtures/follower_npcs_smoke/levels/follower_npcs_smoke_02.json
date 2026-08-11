@@ -1,0 +1,41 @@
+{
+  "id": "follower_npcs_smoke_02",
+  "title": "Follower NPCs Branch Coverage",
+  "board": {
+    "size": [5, 3],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 1], "kind": "flag"}
+        ]
+      },
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [4, 0], "kind": "orbiter", "behavior": "orbit"},
+          {"position": [2, 1], "kind": "chaser", "behavior": "chase"},
+          {"position": [0, 2], "kind": "plodder", "behavior": "slow_sweep", "facing": "right"},
+          {"position": [3, 2], "kind": "seeker", "behavior": "seek_goal"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [1, 0]}
+  },
+  "goals": [
+    {
+      "id": "reach_flag",
+      "type": "reach_target",
+      "config": {"targetKind": "flag"}
+    }
+  ],
+  "loseConditions": [],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "left"}
+    ]
+  }
+}

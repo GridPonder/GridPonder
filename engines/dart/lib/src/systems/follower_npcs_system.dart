@@ -59,10 +59,12 @@ class FollowerNpcsSystem extends GameSystem {
       final behaviorType = behaviorDef['type'] as String?;
       if (behaviorType == null) continue;
 
-      // Frequency check
+      // Frequency check. The turn counter lives on the state, not in the
+      // variables map, and is incremented in the goal-evaluation phase after
+      // this one — so the first turn sees 0 and a frequency of N acts on turn 1,
+      // then every Nth turn after it.
       final frequency = behaviorDef['frequency'] as int? ?? 1;
-      final turnCount = state.variables['turnCount'] as int? ?? 0;
-      if (frequency > 1 && turnCount % frequency != 0) continue;
+      if (frequency > 1 && state.turnCount % frequency != 0) continue;
 
       final solidBlocking = behaviorDef['solidBlocking'] as bool? ?? true;
 

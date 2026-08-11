@@ -1,0 +1,10 @@
+{
+  "dslVersion": "0.8",
+  "packVersion": 1,
+  "gameId": "follower_npcs_smoke",
+  "title": "Follower NPCs Smoke Fixture",
+  "shortDescription": "Throwaway fixture exercising follower_npcs for engine parity tests.",
+  "description": "Not a real pack. One toward_avatar chaser tracks the avatar across the board while one patrol NPC oscillates between a void cell and the board edge, so both the distance tie-break and the facing-reversal path are covered.",
+  "version": "1.0.0",
+  "minEngineVersion": "0.8.0"
+}

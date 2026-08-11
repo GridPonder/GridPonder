@@ -238,6 +238,15 @@ def region_transformed(op_type: str) -> dict:
     return {"type": "region_transformed", "opType": op_type}
 
 
+def npc_moved(npc_id: str, from_pos: Pos, to_pos: Pos) -> dict:
+    return {
+        "type": "npc_moved",
+        "npcId": npc_id,
+        "fromPosition": from_pos,
+        "toPosition": to_pos,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Accessor helpers
 # ---------------------------------------------------------------------------
