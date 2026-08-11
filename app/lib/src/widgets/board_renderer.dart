@@ -90,9 +90,15 @@ resolveAvatarSpriteChoice(AvatarThemeDef? theme, String direction) {
   return (visible: true, path: path, mirrorHorizontally: mirrorHorizontally);
 }
 
-List<String> resolveBoardLayerOrder(GameDefinition game) => [
-  for (final layer in game.layers) layer.id,
-];
+/// Layer ids in the order the pack declares them (first = bottom), per the
+/// DSL spec. Cached per [GameDefinition]: this is read once per cell per
+/// frame, and the layer stack never changes for a loaded game.
+final Expando<List<String>> _boardLayerOrderCache = Expando<List<String>>();
+
+List<String> resolveBoardLayerOrder(GameDefinition game) =>
+    _boardLayerOrderCache[game] ??= List<String>.unmodifiable([
+      for (final layer in game.layers) layer.id,
+    ]);
 
 String? _motionSpritePath(
   Map<String, dynamic> motion,
