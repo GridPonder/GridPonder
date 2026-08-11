@@ -238,6 +238,15 @@ def region_transformed(op_type: str) -> dict:
     return {"type": "region_transformed", "opType": op_type}
 
 
+def avatar_caught(pos: Pos, npc_kind: str, npc_id: str) -> dict:
+    return {
+        "type": "avatar_caught",
+        "position": pos,
+        "npcKind": npc_kind,
+        "npcId": npc_id,
+    }
+
+
 def npc_moved(npc_id: str, from_pos: Pos, to_pos: Pos) -> dict:
     return {
         "type": "npc_moved",

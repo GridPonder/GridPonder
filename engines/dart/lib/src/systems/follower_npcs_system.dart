@@ -23,6 +23,9 @@ class FollowerNpcsSystem extends GameSystem {
     final behaviorsConfig =
         config['behaviors'] as Map<String, dynamic>? ?? {};
 
+    final contactVariable =
+        config['contactVariable'] as String? ?? 'caught';
+
     final board = state.board;
     final actorsLayer = board.layers['actors'];
     if (actorsLayer == null) return const [];
@@ -81,6 +84,8 @@ class FollowerNpcsSystem extends GameSystem {
 
       if (nextPos == null || nextPos == npcPos) continue;
 
+      final caught = state.avatar.position == nextPos;
+
       // Remove from occupied set (old position) and add new
       occupiedAfterMove.remove(npcPos);
       occupiedAfterMove.add(nextPos);
@@ -91,6 +96,15 @@ class FollowerNpcsSystem extends GameSystem {
 
       final npcId = 'spirit_${npcPos.x}_${npcPos.y}';
       events.add(GameEvent.npcMoved(npcId, npcPos, nextPos));
+
+      if (caught) {
+        // Goal and lose evaluation both run in the phase after this one, so
+        // bumping the counter here is enough for a variable_threshold lose
+        // condition to fire on the same turn.
+        final current = (state.variables[contactVariable] as num?) ?? 0;
+        state.variables[contactVariable] = current.toInt() + 1;
+        events.add(GameEvent.avatarCaught(nextPos, npcEntity.kind, npcId));
+      }
     }
 
     return events;
@@ -176,12 +190,14 @@ class FollowerNpcsSystem extends GameSystem {
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
     required LevelState state,
+    bool blockAvatar = true,
   }) {
     if (!board.isInBounds(pos)) return false;
     if (board.isVoid(pos)) return false;
 
-    // Can't overlap with avatar
-    if (state.avatar.position == pos) return false;
+    // Can't overlap with the avatar unless the behavior treats contact as
+    // lethal, in which case stepping onto the avatar is the point.
+    if (blockAvatar && state.avatar.position == pos) return false;
 
     // Can't overlap with other NPCs
     if (occupiedAfterMove.contains(pos)) return false;
@@ -218,6 +234,7 @@ class FollowerNpcsSystem extends GameSystem {
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
     required LevelState state,
+    bool blockAvatar = true,
   }) {
     final cardinalDirs = [
       Direction.up,
@@ -245,6 +262,7 @@ class FollowerNpcsSystem extends GameSystem {
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
           state: state,
+          blockAvatar: blockAvatar,
         )) {
           bestDist = dist;
           best = candidate;
@@ -315,6 +333,8 @@ class FollowerNpcsSystem extends GameSystem {
     final avatarPos = state.avatar.position;
     if (avatarPos == null) return null;
 
+    final lethalContact = behaviorDef['lethalContact'] as bool? ?? false;
+
     if (behaviorDef['requiresLineOfSight'] as bool? ?? false) {
       final blockingLayers =
           (behaviorDef['blockingLayers'] as List<dynamic>? ?? ['objects'])
@@ -344,6 +364,7 @@ class FollowerNpcsSystem extends GameSystem {
       solidBlocking: solidBlocking,
       occupiedAfterMove: occupiedAfterMove,
       state: state,
+      blockAvatar: !lethalContact,
     );
   }
 

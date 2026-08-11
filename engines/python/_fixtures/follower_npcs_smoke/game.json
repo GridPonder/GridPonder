@@ -43,6 +43,11 @@
           "seek_goal": { "type": "toward_tag", "targetTag": "goal" },
           "seek_blue": { "type": "toward_color", "targetColor": "blue" },
           "stalk": { "type": "toward_avatar", "requiresLineOfSight": true },
+          "hunt": {
+            "type": "toward_avatar",
+            "requiresLineOfSight": true,
+            "lethalContact": true
+          },
           "stalk_shielded": {
             "type": "toward_avatar",
             "requiresLineOfSight": true,

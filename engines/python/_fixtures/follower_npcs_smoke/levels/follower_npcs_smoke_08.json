@@ -1,0 +1,34 @@
+{
+  "id": "follower_npcs_smoke_08",
+  "title": "Follower NPCs Lethal Contact",
+  "board": {
+    "size": [5, 3],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 2], "kind": "flag"}
+        ]
+      },
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 1], "kind": "watcher", "behavior": "hunt"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [1, 1]}
+  },
+  "goals": [
+    {
+      "id": "reach_flag",
+      "type": "reach_target",
+      "config": {"targetKind": "flag"}
+    }
+  ],
+  "loseConditions": [
+    {"type": "variable_threshold", "config": {"variable": "caught", "target": 1, "comparison": "gte"}}
+  ]
+}
