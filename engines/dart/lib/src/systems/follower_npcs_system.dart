@@ -112,6 +112,7 @@ class FollowerNpcsSystem extends GameSystem {
       case 'toward_avatar':
         return _behaviorTowardAvatar(
           npcPos: npcPos,
+          behaviorDef: behaviorDef,
           state: state,
           board: board,
           game: game,
@@ -258,8 +259,53 @@ class FollowerNpcsSystem extends GameSystem {
     return (a.x - b.x).abs() + (a.y - b.y).abs();
   }
 
+  /// The same relation the line_of_sight system detects.
+  ///
+  /// Source and target must share a row or column, differ in position, and
+  /// every strictly-intermediate cell must be clear. Void ground breaks the
+  /// line, as does any entity on a blocking layer carrying a blocking tag — an
+  /// empty tag list means every entity on those layers blocks.
+  bool _hasLineOfSight({
+    required Position from,
+    required Position to,
+    required Board board,
+    required GameDefinition game,
+    required List<String> blockingLayers,
+    required List<String> blockingTags,
+  }) {
+    if (from == to) return false;
+    if (from.x != to.x && from.y != to.y) return false;
+
+    final between = <Position>[];
+    if (from.x == to.x) {
+      final step = to.y > from.y ? 1 : -1;
+      for (var y = from.y + step; y != to.y; y += step) {
+        between.add(Position(from.x, y));
+      }
+    } else {
+      final step = to.x > from.x ? 1 : -1;
+      for (var x = from.x + step; x != to.x; x += step) {
+        between.add(Position(x, from.y));
+      }
+    }
+
+    for (final pos in between) {
+      if (board.isVoid(pos)) return false;
+      for (final layerName in blockingLayers) {
+        final entity = board.layers[layerName]?.getAt(pos);
+        if (entity == null) continue;
+        if (blockingTags.isEmpty ||
+            blockingTags.any((tag) => game.hasTag(entity.kind, tag))) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
   Position? _behaviorTowardAvatar({
     required Position npcPos,
+    required Map<String, dynamic> behaviorDef,
     required LevelState state,
     required Board board,
     required GameDefinition game,
@@ -268,6 +314,27 @@ class FollowerNpcsSystem extends GameSystem {
   }) {
     final avatarPos = state.avatar.position;
     if (avatarPos == null) return null;
+
+    if (behaviorDef['requiresLineOfSight'] as bool? ?? false) {
+      final blockingLayers =
+          (behaviorDef['blockingLayers'] as List<dynamic>? ?? ['objects'])
+              .map((l) => l.toString())
+              .toList();
+      final blockingTags =
+          (behaviorDef['blockingTags'] as List<dynamic>? ?? ['solid'])
+              .map((t) => t.toString())
+              .toList();
+      if (!_hasLineOfSight(
+        from: npcPos,
+        to: avatarPos,
+        board: board,
+        game: game,
+        blockingLayers: blockingLayers,
+        blockingTags: blockingTags,
+      )) {
+        return null;
+      }
+    }
 
     return _stepToward(
       npcPos: npcPos,

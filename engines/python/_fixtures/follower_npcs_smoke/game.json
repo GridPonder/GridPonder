@@ -9,6 +9,9 @@
     "void": { "layer": "ground", "tags": [], "symbol": "#" },
     "flag": { "layer": "objects", "tags": ["goal"], "symbol": "F" },
     "beacon": { "layer": "objects", "tags": [], "symbol": "B" },
+    "crate": { "layer": "objects", "tags": ["solid"], "symbol": "X" },
+    "watcher": { "layer": "actors", "tags": ["npc"], "symbol": "W" },
+    "statue": { "layer": "actors", "tags": ["solid"], "symbol": "M" },
     "chaser": { "layer": "actors", "tags": ["npc"], "symbol": "C" },
     "patroller": { "layer": "actors", "tags": ["npc"], "symbol": "P" },
     "orbiter": { "layer": "actors", "tags": ["npc"], "symbol": "K" },
@@ -38,7 +41,13 @@
           "orbit": { "type": "clockwise" },
           "slow_sweep": { "type": "patrol", "frequency": 2 },
           "seek_goal": { "type": "toward_tag", "targetTag": "goal" },
-          "seek_blue": { "type": "toward_color", "targetColor": "blue" }
+          "seek_blue": { "type": "toward_color", "targetColor": "blue" },
+          "stalk": { "type": "toward_avatar", "requiresLineOfSight": true },
+          "stalk_shielded": {
+            "type": "toward_avatar",
+            "requiresLineOfSight": true,
+            "blockingLayers": ["objects", "actors"]
+          }
         }
       }
     }
