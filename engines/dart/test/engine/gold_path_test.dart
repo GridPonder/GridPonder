@@ -130,6 +130,7 @@ void main() {
       'follower_npcs_smoke_04',
       'follower_npcs_smoke_05',
       'follower_npcs_smoke_06',
+      'follower_npcs_smoke_07',
     ]) {
       test(
         levelId,

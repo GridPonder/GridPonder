@@ -52,6 +52,7 @@ class FollowerNpcsSystem(GameSystem):
         config = game.system_config(self.id)
         npc_tags = [str(t) for t in config.get("npcTags", ["npc"])]
         behaviors = config.get("behaviors", {}) or {}
+        contact_variable = config.get("contactVariable", "caught")
 
         board = state.board
         actors = board.layers.get("actors")
@@ -106,6 +107,8 @@ class FollowerNpcsSystem(GameSystem):
             if next_pos is None or next_pos == npc_pos:
                 continue
 
+            caught = state.avatar.position == next_pos
+
             occupied_after_move.discard(npc_pos)
             occupied_after_move.add(next_pos)
 
@@ -114,6 +117,16 @@ class FollowerNpcsSystem(GameSystem):
 
             npc_id = f"spirit_{npc_pos.x}_{npc_pos.y}"
             events.append(ev.npc_moved(npc_id, npc_pos, next_pos))
+
+            if caught:
+                # Goal and lose evaluation both run in the phase after this one,
+                # so bumping the counter here is enough for a variable_threshold
+                # lose condition to fire on the same turn.
+                current = state.variables.get(contact_variable, 0)
+                state.variables[contact_variable] = int(current) + 1
+                events.append(
+                    ev.avatar_caught(next_pos, npc_entity.kind, npc_id)
+                )
 
         return events
 
@@ -134,6 +147,7 @@ class FollowerNpcsSystem(GameSystem):
             avatar_pos = state.avatar.position
             if avatar_pos is None:
                 return None
+            lethal_contact = behavior_def.get("lethalContact", False)
             if behavior_def.get("requiresLineOfSight", False):
                 blocking_layers = [
                     str(l) for l in behavior_def.get("blockingLayers", ["objects"])
@@ -145,8 +159,9 @@ class FollowerNpcsSystem(GameSystem):
                     npc_pos, avatar_pos, state, game, blocking_layers, blocking_tags,
                 ):
                     return None
-            return self._step_toward(
-                npc_pos, avatar_pos, state, game, solid_blocking, occupied_after_move,
+            return self._ranked_step(
+                npc_pos, avatar_pos, state, game, solid_blocking,
+                occupied_after_move, block_avatar=not lethal_contact,
             )
 
         if behavior_type == "toward_tag":
@@ -308,14 +323,6 @@ class FollowerNpcsSystem(GameSystem):
                 best = candidate
 
         return best
-
-    def _step_toward(
-        self, npc_pos, target, state, game, solid_blocking, occupied_after_move,
-    ) -> Optional[Pos]:
-        return self._ranked_step(
-            npc_pos, target, state, game, solid_blocking, occupied_after_move,
-            block_avatar=True,
-        )
 
     def _step_toward_unguarded(
         self, npc_pos, target, state, game, solid_blocking, occupied_after_move,

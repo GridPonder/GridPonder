@@ -58,13 +58,22 @@ class AvatarNavigationSystem extends GameSystem {
 
     final solidHandling = config['solidHandling'] as String? ?? 'block';
 
-    final objectsLayer = board.layers['objects'];
+    // Layers checked for a `solid` blocker, in order. Defaults to objects only,
+    // so packs that place blockers on other layers (NPCs on `actors`, for
+    // instance) have to opt in.
+    final solidLayers = (config['solidLayers'] as List<dynamic>? ?? ['objects'])
+        .map((l) => l.toString())
+        .toList();
     EntityInstance? entityAtTarget;
-    if (objectsLayer != null) {
-      entityAtTarget = objectsLayer.getAt(target);
+    for (final layerName in solidLayers) {
+      final candidate = board.layers[layerName]?.getAt(target);
+      if (candidate != null && game.hasTag(candidate.kind, 'solid')) {
+        entityAtTarget = candidate;
+        break;
+      }
     }
 
-    if (entityAtTarget != null && game.hasTag(entityAtTarget.kind, 'solid')) {
+    if (entityAtTarget != null) {
       if (solidHandling == 'block') {
         return const [];
       } else if (solidHandling == 'delegate') {

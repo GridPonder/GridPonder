@@ -1,0 +1,193 @@
+"""
+Tests for the `follower_npcs` system that a gold path cannot express.
+
+The escape and sight-gate cases live in the follower_npcs_smoke fixture and are
+covered by test_gold_paths.py. The cases here end in a loss or assert on
+internal state, so they need to drive TurnEngine directly.
+
+Run from the repo root:  python3 engines/python/test_follower_npcs.py
+"""
+from __future__ import annotations
+import sys
+from pathlib import Path
+
+# Make engines/ importable
+ROOT = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(ROOT))
+
+from engines.python._game_def import GameDef
+from engines.python._turn_engine import TurnEngine
+
+
+def _make_game(behavior: dict, extra_nav_config: dict | None = None) -> GameDef:
+    data = {
+        "id": "com.gridponder.test_follower_npcs",
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            {"id": "objects", "occupancy": "zero_or_one"},
+            {"id": "actors", "occupancy": "zero_or_one"},
+        ],
+        "entityKinds": {
+            "empty": {"layer": "ground", "tags": ["walkable"]},
+            "flag": {"layer": "objects", "tags": ["goal"]},
+            "watcher": {"layer": "actors", "tags": ["npc", "solid"]},
+        },
+        "actions": [
+            {"id": "move", "params": {"direction": {"type": "direction", "values": ["up", "down", "left", "right"]}}},
+        ],
+        "systems": [
+            {"id": "navigation", "type": "avatar_navigation", "config": extra_nav_config or {}},
+            {"id": "npcs", "type": "follower_npcs", "config": {"behaviors": {"hunt": behavior}}},
+        ],
+    }
+    return GameDef.from_dict(data, id="test_follower_npcs")
+
+
+def _make_level(avatar: tuple[int, int], watcher: tuple[int, int], width: int = 5) -> dict:
+    return {
+        "id": "test_level",
+        "board": {
+            "size": [width, 3],
+            "layers": {
+                "actors": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": list(watcher), "kind": "watcher", "behavior": "hunt"},
+                    ],
+                },
+            },
+        },
+        "state": {"avatar": {"enabled": True, "position": list(avatar)}},
+        "goals": [],
+        "loseConditions": [
+            {"type": "variable_threshold",
+             "config": {"variable": "caught", "target": 1, "comparison": "gte"}},
+        ],
+    }
+
+
+def test_lethal_contact_loses_the_level():
+    game = _make_game({"type": "toward_avatar", "requiresLineOfSight": True, "lethalContact": True})
+    engine = TurnEngine(game, _make_level(avatar=(1, 1), watcher=(3, 1)))
+
+    # Avatar steps to (2,1), adjacent to the watcher on a clear row. The watcher
+    # then steps onto the avatar's cell instead of refusing the move.
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    caught_events = [e for e in result.events if e["type"] == "avatar_caught"]
+    assert len(caught_events) == 1, f"expected one avatar_caught event, got {result.events}"
+    assert caught_events[0]["npcKind"] == "watcher"
+    assert engine.state.variables["caught"] == 1, engine.state.variables
+    assert result.is_lost, "level should be lost once the contact counter trips"
+    assert result.lose_reason == "variable_threshold:caught", result.lose_reason
+
+
+def test_contact_is_refused_without_lethal_contact():
+    game = _make_game({"type": "toward_avatar", "requiresLineOfSight": True})
+    engine = TurnEngine(game, _make_level(avatar=(1, 1), watcher=(3, 1)))
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert not any(e["type"] == "avatar_caught" for e in result.events)
+    assert not any(e["type"] == "npc_moved" for e in result.events), (
+        "the watcher's only distance-reducing step is the avatar's cell, so it "
+        f"should not move at all: {result.events}"
+    )
+    assert "caught" not in engine.state.variables
+    assert not result.is_lost
+
+
+def test_contact_variable_name_is_configurable():
+    game = _make_game({"type": "toward_avatar", "lethalContact": True})
+    game.systems[1]["config"]["contactVariable"] = "doom"
+    level = _make_level(avatar=(1, 1), watcher=(3, 1))
+    level["loseConditions"] = [
+        {"type": "variable_threshold",
+         "config": {"variable": "doom", "target": 1, "comparison": "gte"}},
+    ]
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.variables["doom"] == 1, engine.state.variables
+    assert result.lose_reason == "variable_threshold:doom", result.lose_reason
+
+
+def test_npc_blocks_the_avatar_when_actors_layer_is_solid():
+    game = _make_game(
+        {"type": "toward_avatar", "requiresLineOfSight": True},
+        extra_nav_config={"solidLayers": ["objects", "actors"]},
+    )
+    engine = TurnEngine(game, _make_level(avatar=(1, 1), watcher=(2, 1)))
+
+    # The watcher sits directly to the right; walking into it must not move the
+    # avatar. Note the turn is still spent — `accepted` only goes False for an
+    # unknown action or an explicit veto, not for a blocked move.
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.avatar.position.x == 1, engine.state.avatar.position
+    assert not any(e["type"] == "avatar_entered" for e in result.events), result.events
+
+
+def test_npc_does_not_block_the_avatar_by_default():
+    game = _make_game({"type": "toward_avatar", "requiresLineOfSight": True})
+    engine = TurnEngine(game, _make_level(avatar=(1, 1), watcher=(2, 1)))
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert result.accepted, "default solidLayers only covers objects"
+    assert engine.state.avatar.position.x == 2, engine.state.avatar.position
+
+
+def test_a_blocked_move_still_advances_the_turn():
+    """A move into a wall is not free: NPCs still act.
+
+    This is load-bearing for level design — it means walking into an obstacle is
+    a usable wait action, so a level cannot force the player to stall by moving.
+    """
+    game = _make_game({"type": "toward_avatar", "requiresLineOfSight": True})
+    # Avatar at the left edge, watcher three cells away on the same clear row.
+    engine = TurnEngine(game, _make_level(avatar=(0, 1), watcher=(3, 1)))
+
+    result = engine.execute_turn("move", {"direction": "left"})  # into the edge
+
+    assert engine.state.avatar.position.x == 0, "the avatar should not have moved"
+    moves = [e for e in result.events if e["type"] == "npc_moved"]
+    assert len(moves) == 1, f"the watcher should still have acted: {result.events}"
+    assert engine.state.turn_count == 1, engine.state.turn_count
+
+
+TESTS = [
+    test_lethal_contact_loses_the_level,
+    test_contact_is_refused_without_lethal_contact,
+    test_contact_variable_name_is_configurable,
+    test_npc_blocks_the_avatar_when_actors_layer_is_solid,
+    test_npc_does_not_block_the_avatar_by_default,
+    test_a_blocked_move_still_advances_the_turn,
+]
+
+
+def run_all() -> bool:
+    print("follower_npcs tests")
+    passed = failed = 0
+    for t in TESTS:
+        try:
+            t()
+            passed += 1
+            print(f"  ✓ {t.__name__}")
+        except AssertionError as exc:
+            print(f"  FAIL {t.__name__}: {exc}")
+            failed += 1
+        except Exception as exc:
+            import traceback
+            print(f"  ERROR {t.__name__}: {exc}")
+            traceback.print_exc()
+            failed += 1
+
+    print(f"\n{'='*50}")
+    print(f"Results: {passed} passed, {failed} failed")
+    return failed == 0
+
+
+if __name__ == "__main__":
+    sys.exit(0 if run_all() else 1)

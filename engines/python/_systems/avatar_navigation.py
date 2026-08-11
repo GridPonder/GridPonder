@@ -53,9 +53,18 @@ class AvatarNavigationSystem(GameSystem):
                 return []
 
         solid_handling = config.get("solidHandling", "block")
-        entity_at_target = board.get_entity("objects", target)
+        # Layers checked for a `solid` blocker, in order. Defaults to objects
+        # only, so packs that place blockers on other layers (NPCs on `actors`,
+        # for instance) have to opt in.
+        solid_layers = config.get("solidLayers", ["objects"])
+        entity_at_target = None
+        for layer_id in solid_layers:
+            candidate = board.get_entity(str(layer_id), target)
+            if candidate is not None and game.has_tag(candidate.kind, "solid"):
+                entity_at_target = candidate
+                break
 
-        if entity_at_target is not None and game.has_tag(entity_at_target.kind, "solid"):
+        if entity_at_target is not None:
             if solid_handling == "block":
                 return []
             elif solid_handling == "delegate":
