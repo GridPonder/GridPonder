@@ -134,6 +134,17 @@ class FollowerNpcsSystem(GameSystem):
             avatar_pos = state.avatar.position
             if avatar_pos is None:
                 return None
+            if behavior_def.get("requiresLineOfSight", False):
+                blocking_layers = [
+                    str(l) for l in behavior_def.get("blockingLayers", ["objects"])
+                ]
+                blocking_tags = [
+                    str(t) for t in behavior_def.get("blockingTags", ["solid"])
+                ]
+                if not self._has_line_of_sight(
+                    npc_pos, avatar_pos, state, game, blocking_layers, blocking_tags,
+                ):
+                    return None
             return self._step_toward(
                 npc_pos, avatar_pos, state, game, solid_blocking, occupied_after_move,
             )
@@ -207,6 +218,56 @@ class FollowerNpcsSystem(GameSystem):
             return False
         if solid_blocking and not self._no_solid_object(state, game, pos):
             return False
+        return True
+
+    # -- sight --------------------------------------------------------------
+
+    def _has_line_of_sight(
+        self,
+        from_pos: Pos,
+        to_pos: Pos,
+        state: GameState,
+        game: GameDef,
+        blocking_layers: list,
+        blocking_tags: list,
+    ) -> bool:
+        """Same relation the line_of_sight system detects.
+
+        Source and target must share a row or column, differ in position, and
+        every strictly-intermediate cell must be clear. Void ground breaks the
+        line, as does any entity on a blocking layer carrying a blocking tag —
+        an empty tag list means every entity on those layers blocks.
+        """
+        if from_pos == to_pos:
+            return False
+        if from_pos.x != to_pos.x and from_pos.y != to_pos.y:
+            return False
+
+        if from_pos.x == to_pos.x:
+            step = 1 if to_pos.y > from_pos.y else -1
+            between = [
+                Pos(from_pos.x, y)
+                for y in range(from_pos.y + step, to_pos.y, step)
+            ]
+        else:
+            step = 1 if to_pos.x > from_pos.x else -1
+            between = [
+                Pos(x, from_pos.y)
+                for x in range(from_pos.x + step, to_pos.x, step)
+            ]
+
+        board = state.board
+        for pos in between:
+            if board.is_void(pos):
+                return False
+            for layer_id in blocking_layers:
+                entity = board.get_entity(layer_id, pos)
+                if entity is None:
+                    continue
+                if not blocking_tags or any(
+                    game.has_tag(entity.kind, tag) for tag in blocking_tags
+                ):
+                    return False
         return True
 
     # -- stepping -----------------------------------------------------------
