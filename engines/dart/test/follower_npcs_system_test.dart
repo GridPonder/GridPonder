@@ -207,6 +207,80 @@ void main() {
     });
   });
 
+  test('the gaze param tracks sight', () {
+    // A render hint, but it must be exact: it names the direction of the avatar
+    // while the NPC can see it, and 'rest' the moment sight is lost.
+    final game = _makeGame({
+      'type': 'toward_avatar',
+      'requiresLineOfSight': true,
+      'gazeParam': 'gaze',
+    });
+    final engine = _engineFor(
+      game,
+      _levelJson(avatar: [0, 1], watcher: [3, 1]),
+    );
+
+    String? watcherGaze() {
+      for (final entry in engine.state.board.layers['actors']!.entries()) {
+        if (entry.value.kind == 'watcher') {
+          return entry.value.param('gaze') as String?;
+        }
+      }
+      return null;
+    }
+
+    engine.executeTurn(_move('right')); // avatar to (1,1)
+    expect(watcherGaze(), 'left');
+
+    engine.executeTurn(_move('up')); // leaves row 1
+    expect(watcherGaze(), 'rest');
+
+    engine.executeTurn(_move('down')); // back onto row 1
+    expect(watcherGaze(), 'left');
+  });
+
+  test('rules receive npc events', () {
+    // `npc_moved` is documented as rule-triggerable, so a rule must see it.
+    final game = _makeGame({
+      'type': 'toward_avatar',
+      'requiresLineOfSight': true,
+    });
+    final levelJson = _levelJson(avatar: [0, 1], watcher: [3, 1]);
+    (levelJson['board'] as Map<String, dynamic>)['layers'] = {
+      ...(levelJson['board'] as Map<String, dynamic>)['layers']
+          as Map<String, dynamic>,
+      'objects': {
+        'format': 'sparse',
+        'entries': [
+          {'position': [4, 2], 'kind': 'flag'},
+        ],
+      },
+    };
+    levelJson['rules'] = [
+      {
+        'id': 'clear_flag_when_watcher_walks',
+        'on': 'npc_moved',
+        'then': [
+          {
+            'destroy': {'position': [4, 2], 'layer': 'objects'},
+          },
+        ],
+      },
+    ];
+    final engine = _engineFor(game, levelJson);
+
+    expect(engine.state.board.getEntity('objects', Position(4, 2)), isNotNull);
+
+    final result = engine.executeTurn(_move('right'));
+
+    expect(result.events.any((e) => e.type == 'npc_moved'), isTrue);
+    expect(
+      engine.state.board.getEntity('objects', Position(4, 2)),
+      isNull,
+      reason: 'the rule never fired, so NPC events are still invisible to rules',
+    );
+  });
+
   test('a blocked move still advances the turn', () {
     // Load-bearing for level design: walking into an obstacle is a usable wait
     // action, so a level cannot force the player to stall by moving.

@@ -62,6 +62,26 @@ class FollowerNpcsSystem extends GameSystem {
       final behaviorType = behaviorDef['type'] as String?;
       if (behaviorType == null) continue;
 
+      // Gaze is about seeing, not moving, so it is refreshed before the
+      // frequency gate and regardless of whether a step happens.
+      bool? sight;
+      if (behaviorType == 'toward_avatar') {
+        sight = _avatarInSight(
+          npcPos: npcPos,
+          behaviorDef: behaviorDef,
+          state: state,
+          board: board,
+          game: game,
+        );
+        final gazeParam = behaviorDef['gazeParam'] as String?;
+        if (gazeParam != null) {
+          final avatarPos = state.avatar.position;
+          npcEntity.params[gazeParam] = (sight && avatarPos != null)
+              ? _cardinalTowardTarget(npcPos, avatarPos).toJson()
+              : 'rest';
+        }
+      }
+
       // Frequency check. The turn counter lives on the state, not in the
       // variables map, and is incremented in the goal-evaluation phase after
       // this one — so the first turn sees 0 and a frequency of N acts on turn 1,
@@ -80,6 +100,7 @@ class FollowerNpcsSystem extends GameSystem {
         game: game,
         solidBlocking: solidBlocking,
         occupiedAfterMove: occupiedAfterMove,
+        sight: sight,
       );
 
       if (nextPos == null || nextPos == npcPos) continue;
@@ -119,6 +140,7 @@ class FollowerNpcsSystem extends GameSystem {
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    bool? sight,
   }) {
     final board = state.board;
 
@@ -132,6 +154,7 @@ class FollowerNpcsSystem extends GameSystem {
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          sight: sight,
         );
 
       case 'toward_tag':
@@ -321,6 +344,38 @@ class FollowerNpcsSystem extends GameSystem {
     return true;
   }
 
+  /// Whether this behavior currently considers the avatar visible. A behavior
+  /// without `requiresLineOfSight` chases unconditionally, so it always counts
+  /// as seeing the avatar.
+  bool _avatarInSight({
+    required Position npcPos,
+    required Map<String, dynamic> behaviorDef,
+    required LevelState state,
+    required Board board,
+    required GameDefinition game,
+  }) {
+    final avatarPos = state.avatar.position;
+    if (avatarPos == null) return false;
+    if (!(behaviorDef['requiresLineOfSight'] as bool? ?? false)) return true;
+
+    final blockingLayers =
+        (behaviorDef['blockingLayers'] as List<dynamic>? ?? ['objects'])
+            .map((l) => l.toString())
+            .toList();
+    final blockingTags =
+        (behaviorDef['blockingTags'] as List<dynamic>? ?? ['solid'])
+            .map((t) => t.toString())
+            .toList();
+    return _hasLineOfSight(
+      from: npcPos,
+      to: avatarPos,
+      board: board,
+      game: game,
+      blockingLayers: blockingLayers,
+      blockingTags: blockingTags,
+    );
+  }
+
   Position? _behaviorTowardAvatar({
     required Position npcPos,
     required Map<String, dynamic> behaviorDef,
@@ -329,32 +384,22 @@ class FollowerNpcsSystem extends GameSystem {
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    bool? sight,
   }) {
     final avatarPos = state.avatar.position;
     if (avatarPos == null) return null;
 
     final lethalContact = behaviorDef['lethalContact'] as bool? ?? false;
 
-    if (behaviorDef['requiresLineOfSight'] as bool? ?? false) {
-      final blockingLayers =
-          (behaviorDef['blockingLayers'] as List<dynamic>? ?? ['objects'])
-              .map((l) => l.toString())
-              .toList();
-      final blockingTags =
-          (behaviorDef['blockingTags'] as List<dynamic>? ?? ['solid'])
-              .map((t) => t.toString())
-              .toList();
-      if (!_hasLineOfSight(
-        from: npcPos,
-        to: avatarPos,
-        board: board,
-        game: game,
-        blockingLayers: blockingLayers,
-        blockingTags: blockingTags,
-      )) {
-        return null;
-      }
-    }
+    final visible = sight ??
+        _avatarInSight(
+          npcPos: npcPos,
+          behaviorDef: behaviorDef,
+          state: state,
+          board: board,
+          game: game,
+        );
+    if (!visible) return null;
 
     return _stepToward(
       npcPos: npcPos,

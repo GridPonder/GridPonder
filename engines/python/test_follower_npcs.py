@@ -157,6 +157,64 @@ def test_a_blocked_move_still_advances_the_turn():
     assert engine.state.turn_count == 1, engine.state.turn_count
 
 
+def test_gaze_param_tracks_sight():
+    """The gaze param is a render hint, but it must be exact.
+
+    It names the direction of the avatar while the NPC can see it, and `rest`
+    the moment sight is lost — that is what drives the eye sprite.
+    """
+    game = _make_game({
+        "type": "toward_avatar",
+        "requiresLineOfSight": True,
+        "gazeParam": "gaze",
+    })
+    # Avatar left of the watcher on a clear row, three cells apart.
+    engine = TurnEngine(game, _make_level(avatar=(0, 1), watcher=(3, 1)))
+
+    def watcher_gaze():
+        for _, entity in engine.state.board.layers["actors"].entries():
+            if entity.kind == "watcher":
+                return entity.param("gaze")
+        return None
+
+    engine.execute_turn("move", {"direction": "right"})  # avatar to (1,1)
+    assert watcher_gaze() == "left", watcher_gaze()
+
+    engine.execute_turn("move", {"direction": "up"})  # leaves row 1
+    assert watcher_gaze() == "rest", watcher_gaze()
+
+    engine.execute_turn("move", {"direction": "down"})  # back onto row 1
+    assert watcher_gaze() == "left", watcher_gaze()
+
+
+def test_rules_receive_npc_events():
+    """`npc_moved` is documented as rule-triggerable, so a rule must see it."""
+    game = _make_game({"type": "toward_avatar", "requiresLineOfSight": True})
+    level = _make_level(avatar=(0, 1), watcher=(3, 1))
+    level["board"]["layers"]["objects"] = {
+        "format": "sparse",
+        "entries": [{"position": [4, 2], "kind": "flag"}],
+    }
+    level["rules"] = [
+        {
+            "id": "clear_flag_when_watcher_walks",
+            "on": "npc_moved",
+            "then": [{"destroy": {"position": [4, 2], "layer": "objects"}}],
+        },
+    ]
+    engine = TurnEngine(game, level)
+
+    from engines.python._models import Pos
+    assert engine.state.board.get_entity("objects", Pos(4, 2)) is not None
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert any(e["type"] == "npc_moved" for e in result.events), result.events
+    assert engine.state.board.get_entity("objects", Pos(4, 2)) is None, (
+        "the rule never fired, so NPC events are still invisible to rules"
+    )
+
+
 TESTS = [
     test_lethal_contact_loses_the_level,
     test_contact_is_refused_without_lethal_contact,
@@ -164,6 +222,8 @@ TESTS = [
     test_npc_blocks_the_avatar_when_actors_layer_is_solid,
     test_npc_does_not_block_the_avatar_by_default,
     test_a_blocked_move_still_advances_the_turn,
+    test_gaze_param_tracks_sight,
+    test_rules_receive_npc_events,
 ]
 
 
