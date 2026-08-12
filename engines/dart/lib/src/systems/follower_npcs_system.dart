@@ -144,6 +144,12 @@ class FollowerNpcsSystem extends GameSystem {
   }) {
     final board = state.board;
 
+    // One flag governs every behavior: without it the avatar's cell is
+    // impassable, so an NPC with no other option stands still or, for the
+    // circuit behaviors, turns around.
+    final lethalContact = behaviorDef['lethalContact'] as bool? ?? false;
+    final blockAvatar = !lethalContact;
+
     switch (behaviorType) {
       case 'toward_avatar':
         return _behaviorTowardAvatar(
@@ -163,10 +169,12 @@ class FollowerNpcsSystem extends GameSystem {
         return _behaviorTowardTag(
           npcPos: npcPos,
           targetTag: targetTag,
+          state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          blockAvatar: blockAvatar,
         );
 
       case 'toward_color':
@@ -175,30 +183,36 @@ class FollowerNpcsSystem extends GameSystem {
         return _behaviorTowardColor(
           npcPos: npcPos,
           targetColor: targetColor,
+          state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          blockAvatar: blockAvatar,
         );
 
       case 'clockwise':
         return _behaviorClockwise(
           npcPos: npcPos,
           npcEntity: npcEntity,
+          state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          blockAvatar: blockAvatar,
         );
 
       case 'patrol':
         return _behaviorPatrol(
           npcPos: npcPos,
           npcEntity: npcEntity,
+          state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          blockAvatar: blockAvatar,
         );
 
       default:
@@ -416,10 +430,12 @@ class FollowerNpcsSystem extends GameSystem {
   Position? _behaviorTowardTag({
     required Position npcPos,
     required String targetTag,
+    required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    required bool blockAvatar,
   }) {
     // Find nearest entity with targetTag in objects/markers layers
     Position? nearestTarget;
@@ -441,9 +457,6 @@ class FollowerNpcsSystem extends GameSystem {
 
     if (nearestTarget == null) return null;
 
-    // Create a dummy state-like object isn't possible, so we pass a minimal check
-    // We need a LevelState to call _canMoveTo, but we only have board here.
-    // Use a direct inline check instead.
     final cardinalDirs = [
       Direction.up,
       Direction.down,
@@ -463,17 +476,16 @@ class FollowerNpcsSystem extends GameSystem {
     for (final dir in ordered) {
       final candidate = npcPos.moved(dir);
       final dist = _manhattan(candidate, nearestTarget);
-      if (dist < bestDist) {
-        if (!board.isInBounds(candidate)) continue;
-        if (board.isVoid(candidate)) continue;
-        if (occupiedAfterMove.contains(candidate)) continue;
-        if (solidBlocking) {
-          final objectsLayer = board.layers['objects'];
-          if (objectsLayer != null) {
-            final entity = objectsLayer.getAt(candidate);
-            if (entity != null && game.hasTag(entity.kind, 'solid')) continue;
-          }
-        }
+      if (dist < bestDist &&
+          _canMoveTo(
+            pos: candidate,
+            board: board,
+            game: game,
+            solidBlocking: solidBlocking,
+            occupiedAfterMove: occupiedAfterMove,
+            state: state,
+            blockAvatar: blockAvatar,
+          )) {
         bestDist = dist;
         best = candidate;
       }
@@ -485,10 +497,12 @@ class FollowerNpcsSystem extends GameSystem {
   Position? _behaviorTowardColor({
     required Position npcPos,
     required String targetColor,
+    required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    required bool blockAvatar,
   }) {
     // Find nearest entity in objects/actors layers where param("color") == targetColor
     Position? nearestTarget;
@@ -530,17 +544,16 @@ class FollowerNpcsSystem extends GameSystem {
     for (final dir in ordered) {
       final candidate = npcPos.moved(dir);
       final dist = _manhattan(candidate, nearestTarget);
-      if (dist < bestDist) {
-        if (!board.isInBounds(candidate)) continue;
-        if (board.isVoid(candidate)) continue;
-        if (occupiedAfterMove.contains(candidate)) continue;
-        if (solidBlocking) {
-          final objectsLayer = board.layers['objects'];
-          if (objectsLayer != null) {
-            final entity = objectsLayer.getAt(candidate);
-            if (entity != null && game.hasTag(entity.kind, 'solid')) continue;
-          }
-        }
+      if (dist < bestDist &&
+          _canMoveTo(
+            pos: candidate,
+            board: board,
+            game: game,
+            solidBlocking: solidBlocking,
+            occupiedAfterMove: occupiedAfterMove,
+            state: state,
+            blockAvatar: blockAvatar,
+          )) {
         bestDist = dist;
         best = candidate;
       }
@@ -566,10 +579,12 @@ class FollowerNpcsSystem extends GameSystem {
   Position? _behaviorClockwise({
     required Position npcPos,
     required EntityInstance npcEntity,
+    required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    required bool blockAvatar,
   }) {
     final facingStr = npcEntity.param('facing')?.toString() ?? 'right';
     Direction facing;
@@ -582,10 +597,15 @@ class FollowerNpcsSystem extends GameSystem {
     // Try current facing first, then rotate clockwise until a valid move is found
     for (var i = 0; i < _clockwiseOrder.length; i++) {
       final candidate = npcPos.moved(facing);
-      final isValid = board.isInBounds(candidate) &&
-          !board.isVoid(candidate) &&
-          !occupiedAfterMove.contains(candidate) &&
-          (!solidBlocking || _noSolidObject(board, game, candidate));
+      final isValid = _canMoveTo(
+        pos: candidate,
+        board: board,
+        game: game,
+        solidBlocking: solidBlocking,
+        occupiedAfterMove: occupiedAfterMove,
+        state: state,
+        blockAvatar: blockAvatar,
+      );
       if (isValid) {
         // Update NPC facing param (mutate params map directly)
         npcEntity.params['facing'] = facing.toJson();
@@ -600,10 +620,12 @@ class FollowerNpcsSystem extends GameSystem {
   Position? _behaviorPatrol({
     required Position npcPos,
     required EntityInstance npcEntity,
+    required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    required bool blockAvatar,
   }) {
     final facingStr = npcEntity.param('facing')?.toString() ?? 'right';
     Direction facing;
@@ -614,22 +636,30 @@ class FollowerNpcsSystem extends GameSystem {
     }
 
     final candidate = npcPos.moved(facing);
-    final isValid = board.isInBounds(candidate) &&
-        !board.isVoid(candidate) &&
-        !occupiedAfterMove.contains(candidate) &&
-        (!solidBlocking || _noSolidObject(board, game, candidate));
-
-    if (isValid) {
+    if (_canMoveTo(
+      pos: candidate,
+      board: board,
+      game: game,
+      solidBlocking: solidBlocking,
+      occupiedAfterMove: occupiedAfterMove,
+      state: state,
+      blockAvatar: blockAvatar,
+    )) {
       return candidate;
     }
 
     // Reverse direction on obstacle
     final reversed = _reverseDirection(facing);
     final reversedCandidate = npcPos.moved(reversed);
-    final reversedValid = board.isInBounds(reversedCandidate) &&
-        !board.isVoid(reversedCandidate) &&
-        !occupiedAfterMove.contains(reversedCandidate) &&
-        (!solidBlocking || _noSolidObject(board, game, reversedCandidate));
+    final reversedValid = _canMoveTo(
+      pos: reversedCandidate,
+      board: board,
+      game: game,
+      solidBlocking: solidBlocking,
+      occupiedAfterMove: occupiedAfterMove,
+      state: state,
+      blockAvatar: blockAvatar,
+    );
 
     if (reversedValid) {
       npcEntity.params['facing'] = reversed.toJson();
@@ -637,14 +667,6 @@ class FollowerNpcsSystem extends GameSystem {
     }
 
     return null;
-  }
-
-  bool _noSolidObject(Board board, GameDefinition game, Position pos) {
-    final objectsLayer = board.layers['objects'];
-    if (objectsLayer == null) return true;
-    final entity = objectsLayer.getAt(pos);
-    if (entity == null) return true;
-    return !game.hasTag(entity.kind, 'solid');
   }
 
   Direction _reverseDirection(Direction dir) {
