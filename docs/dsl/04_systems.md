@@ -64,7 +64,11 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
    - `"block"`: reject move.
    - `"delegate"`: mark the move as pending. Emit `move_blocked` with the target position and blocker kind. Later phases (push) or rules (`resolve_move` effect) may complete or reject the pending move.
 5. If not blocked, move avatar to target. Emit `avatar_exited` for old position, `avatar_entered` for new position.
-6. Update `avatar.facing` to the movement direction.
+6. Update `avatar.facing` to the attempted direction **whether or not the step
+   succeeded**. A blocked move still spends the turn, so turning is the only
+   feedback that anything happened — which matters wherever leaning on an
+   obstacle is a deliberate way to let a turn pass. Note `facing` participates in
+   state identity, so a blocked move is not a true no-op.
 
 ---
 

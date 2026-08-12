@@ -526,9 +526,35 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
+  /// Path declared by the pack's theme for this avatar state and direction, or
+  /// null when the pack declares no avatar art and the shared base sprites
+  /// should be used instead. Mirror entries resolve to the path they point at;
+  /// [mirrored] reports whether the caller must flip it horizontally.
+  ({String path, bool mirrored})? _themeAvatarSprite(String facing) {
+    final avatarTheme = packService.theme?.avatar;
+    if (avatarTheme == null) return null;
+
+    ({String path, bool mirrored})? pathOf(String direction, bool mirrored) {
+      final entry = avatarTheme.resolve('idle', direction);
+      if (entry == null) return null;
+      if (entry.isStatic) return (path: entry.staticPath!, mirrored: mirrored);
+      // Animated entries render their first frame; nothing drives a per-frame
+      // ticker for the avatar yet.
+      if (entry.isAnimated && entry.frames!.isNotEmpty) {
+        return (path: entry.frames!.first, mirrored: mirrored);
+      }
+      // A mirror of a mirror would loop, so only one hop is followed.
+      if (entry.isMirror && !mirrored) return pathOf(entry.mirror!, true);
+      return null;
+    }
+
+    return pathOf(facing, false);
+  }
+
   Widget _buildAvatar(AvatarState avatar, double cellSize) {
-    final assetPath =
-        packService.resolveAvatarSprite(_avatarSpriteFile(avatar.facing.toJson()));
+    final facing = avatar.facing.toJson();
+    final themeSprite = _themeAvatarSprite(facing);
+    final assetPath = packService.resolveAvatarSprite(_avatarSpriteFile(facing));
     final slot = avatar.inventory.slot;
 
     // When an overlay exists, center the avatar at the overlay's midpoint.
@@ -552,17 +578,30 @@ class BoardRenderer extends StatelessWidget {
       height: size,
       child: Stack(
         children: [
-          Image.asset(
-            assetPath,
-            fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => Container(
-              decoration: BoxDecoration(
-                color: Colors.pink.shade200,
-                shape: BoxShape.circle,
+          if (themeSprite != null)
+            Transform.scale(
+              scaleX: themeSprite.mirrored ? -1 : 1,
+              child: Image(
+                image: packService.resolvePackImage(themeSprite.path),
+                fit: BoxFit.contain,
+                errorBuilder: (_, __, ___) => Image.asset(
+                  packService.resolveSprite(themeSprite.path),
+                  fit: BoxFit.contain,
+                ),
               ),
-              child: Icon(Icons.pets, size: size * 0.6, color: Colors.white),
+            )
+          else
+            Image.asset(
+              assetPath,
+              fit: BoxFit.contain,
+              errorBuilder: (_, __, ___) => Container(
+                decoration: BoxDecoration(
+                  color: Colors.pink.shade200,
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.pets, size: size * 0.6, color: Colors.white),
+              ),
             ),
-          ),
           if (slot != null) _buildInventoryBadge(slot, size),
         ],
       ),

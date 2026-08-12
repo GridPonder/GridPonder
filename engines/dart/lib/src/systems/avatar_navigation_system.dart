@@ -40,6 +40,12 @@ class AvatarNavigationSystem extends GameSystem {
     final board = state.board;
     final target = pos.moved(direction);
 
+    // Turn to face the attempted direction even when the step is refused. A
+    // blocked move still spends the turn, so without this the player gets no
+    // signal that anything happened — and leaning on an obstacle is a
+    // deliberate way to let a turn pass.
+    state.avatar = state.avatar.copyWith(facing: direction);
+
     if (!board.isInBounds(target)) return const [];
     if (board.isVoid(target)) return const [];
 

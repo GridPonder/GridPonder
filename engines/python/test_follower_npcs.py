@@ -127,6 +127,8 @@ def test_npc_blocks_the_avatar_when_actors_layer_is_solid():
 
     assert engine.state.avatar.position.x == 1, engine.state.avatar.position
     assert not any(e["type"] == "avatar_entered" for e in result.events), result.events
+    # Facing still turns, so the player can see the blocked move registered.
+    assert engine.state.avatar.facing == "right", engine.state.avatar.facing
 
 
 def test_npc_does_not_block_the_avatar_by_default():

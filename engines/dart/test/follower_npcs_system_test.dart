@@ -188,6 +188,8 @@ void main() {
 
       expect(engine.state.avatar.position!.x, 1);
       expect(result.events.any((e) => e.type == 'avatar_entered'), isFalse);
+      // Facing still turns, so the player can see the blocked move registered.
+      expect(engine.state.avatar.facing.toJson(), 'right');
     });
 
     test('an NPC does not block the avatar by default', () {
