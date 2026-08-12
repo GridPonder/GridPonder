@@ -1482,8 +1482,11 @@ class _PlayScreenState extends State<PlayScreen> {
       }
     }
     // Fallback: show goal type as text
-    final goalType = _levelDef.goals.first.type.replaceAll('_', ' ');
-    return Text(goalType, style: const TextStyle(fontSize: 12));
+    final goal = _levelDef.goals.first;
+    final goalText =
+        widget.packService.game.goalDescriptions[goal.id] ??
+        goal.type.replaceAll('_', ' ');
+    return Text(goalText, style: const TextStyle(fontSize: 12));
   }
 
   Widget _buildSequenceGoal(List<int> sequence, int matched) {
