@@ -79,10 +79,22 @@ class PhaseRunner {
 
     // Phase 6: NPC resolution
     baseStage = advanceBase();
+    final npcEvents = <GameEvent>[];
     for (final sys in systems) {
       final events = sys.executeNpcResolution(state, effectiveGame);
+      npcEvents.addAll(events);
       allEvents.addAll(events);
       _collectAnimations(events, state, animations, baseStage);
+    }
+
+    // Rules get a pass over the NPC events too. Without this, `npc_moved` and
+    // `avatar_caught` are documented as rule-triggerable events that no rule can
+    // ever see, because the cascade above runs before this phase.
+    if (npcEvents.isNotEmpty) {
+      final npcCascade = rulesEngine.evaluate(
+          npcEvents, state, effectiveGame, maxDepth, systems);
+      allEvents.addAll(npcCascade);
+      _collectAnimationsFromList(npcCascade, state, animations, baseStage);
     }
 
     // Phase 7: Goal evaluation

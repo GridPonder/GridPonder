@@ -157,9 +157,18 @@ class TurnEngine:
         all_events.extend(cascade_events)
 
         # Phase 6: NPC resolution
+        npc_events: list[dict] = []
         for sys in systems:
-            events = sys.execute_npc_resolution(state, effective_game)
-            all_events.extend(events)
+            npc_events.extend(sys.execute_npc_resolution(state, effective_game))
+        all_events.extend(npc_events)
+
+        # Rules get a pass over the NPC events too. Without this, `npc_moved`
+        # and `avatar_caught` are documented as rule-triggerable events that no
+        # rule can ever see, because the cascade above runs before this phase.
+        if npc_events:
+            all_events.extend(rules_engine.evaluate(
+                npc_events, state, effective_game, max_depth, systems,
+            ))
 
         # Phase 7: Goal evaluation
         state.action_count += 1

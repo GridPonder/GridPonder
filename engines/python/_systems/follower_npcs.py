@@ -83,6 +83,22 @@ class FollowerNpcsSystem(GameSystem):
             if behavior_type is None:
                 continue
 
+            # Gaze is about seeing, not moving, so it is refreshed before the
+            # frequency gate and regardless of whether a step happens.
+            sight = None
+            if behavior_type == "toward_avatar":
+                sight = self._avatar_in_sight(
+                    npc_pos, behavior_def, state, game,
+                )
+                gaze_param = behavior_def.get("gazeParam")
+                if gaze_param:
+                    avatar_pos = state.avatar.position
+                    npc_entity.params[str(gaze_param)] = (
+                        _cardinal_toward(npc_pos, avatar_pos)
+                        if sight and avatar_pos is not None
+                        else "rest"
+                    )
+
             # The turn counter lives on the state, not in the variables map, and
             # is incremented in the goal-evaluation phase after this one — so the
             # first turn sees 0 and a frequency of N acts on turn 1, then every
@@ -102,6 +118,7 @@ class FollowerNpcsSystem(GameSystem):
                 game=game,
                 solid_blocking=solid_blocking,
                 occupied_after_move=occupied_after_move,
+                sight=sight,
             )
 
             if next_pos is None or next_pos == npc_pos:
@@ -142,23 +159,17 @@ class FollowerNpcsSystem(GameSystem):
         game: GameDef,
         solid_blocking: bool,
         occupied_after_move: set,
+        sight: Optional[bool] = None,
     ) -> Optional[Pos]:
         if behavior_type == "toward_avatar":
             avatar_pos = state.avatar.position
             if avatar_pos is None:
                 return None
             lethal_contact = behavior_def.get("lethalContact", False)
-            if behavior_def.get("requiresLineOfSight", False):
-                blocking_layers = [
-                    str(l) for l in behavior_def.get("blockingLayers", ["objects"])
-                ]
-                blocking_tags = [
-                    str(t) for t in behavior_def.get("blockingTags", ["solid"])
-                ]
-                if not self._has_line_of_sight(
-                    npc_pos, avatar_pos, state, game, blocking_layers, blocking_tags,
-                ):
-                    return None
+            if sight is None:
+                sight = self._avatar_in_sight(npc_pos, behavior_def, state, game)
+            if not sight:
+                return None
             return self._ranked_step(
                 npc_pos, avatar_pos, state, game, solid_blocking,
                 occupied_after_move, block_avatar=not lethal_contact,
@@ -236,6 +247,29 @@ class FollowerNpcsSystem(GameSystem):
         return True
 
     # -- sight --------------------------------------------------------------
+
+    def _avatar_in_sight(
+        self, npc_pos: Pos, behavior_def: dict, state: GameState, game: GameDef,
+    ) -> bool:
+        """Whether this behavior currently considers the avatar visible.
+
+        A behavior without `requiresLineOfSight` chases unconditionally, so it
+        always counts as seeing the avatar.
+        """
+        avatar_pos = state.avatar.position
+        if avatar_pos is None:
+            return False
+        if not behavior_def.get("requiresLineOfSight", False):
+            return True
+        blocking_layers = [
+            str(l) for l in behavior_def.get("blockingLayers", ["objects"])
+        ]
+        blocking_tags = [
+            str(t) for t in behavior_def.get("blockingTags", ["solid"])
+        ]
+        return self._has_line_of_sight(
+            npc_pos, avatar_pos, state, game, blocking_layers, blocking_tags,
+        )
 
     def _has_line_of_sight(
         self,

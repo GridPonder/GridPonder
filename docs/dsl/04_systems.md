@@ -607,6 +607,7 @@ settled, before goal evaluation)
 | `blockingLayers` | array of strings | `["objects"]` | `requiresLineOfSight` only: layers checked for sight blockers. |
 | `blockingTags` | array of strings | `["solid"]` | `requiresLineOfSight` only: tags that break the sightline. Empty means every entity on those layers blocks. |
 | `lethalContact` | boolean | `false` | `toward_avatar` only: allow the NPC to step onto the avatar. On contact it increments `contactVariable` and emits `avatar_caught`. When `false` the avatar's cell is impassable, so an NPC with no other distance-reducing step stands still. |
+| `gazeParam` | string | — | `toward_avatar` only: entity param to write each turn with the cardinal direction of the avatar while the NPC can see it, or `rest` when it cannot. Pair it with [`spriteParam`](02_game.md#entity-kinds) to give the NPC a per-direction look. Refreshed before the `frequency` gate and whether or not a step happens, since gaze is about seeing rather than moving. A behavior without `requiresLineOfSight` always counts as seeing the avatar, so it never rests. Levels should seed the param to match their opening geometry — the system only writes it during a turn, so the first frame shows whatever the level authored. |
 
 **Behavior:**
 1. Collect NPCs from the `actors` layer in row-major order. The board is

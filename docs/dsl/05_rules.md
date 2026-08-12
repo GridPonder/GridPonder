@@ -211,12 +211,14 @@ An entity settled after gravity/motion.
 | `position` | `[x, y]` | Final position. |
 | `fromPosition` | `[x, y]` | Position before settling. |
 
-> **Not yet rule-triggerable.** `npc_resolution` (phase 6) runs *after* the rules
-> engine's cascade pass (phase 5), so `avatar_caught` and `npc_moved` are
-> reported in the turn's event list but never offered to rules. Anything that
-> must react to an NPC move has to go through state the later phases read —
-> which is why `follower_npcs` writes `contactVariable` itself instead of relying
-> on a rule. Giving rules a pass over NPC events is outstanding platform work.
+> **Resolved after the NPC phase.** `npc_resolution` (phase 6) runs after the
+> cascade pass in phase 5, so the engine gives rules a second pass over the NPC
+> events once that phase completes. Rules on `npc_moved` and `avatar_caught`
+> therefore fire in the same turn the NPC acted, before goal and lose
+> evaluation — which is how a level can, for example, unseal a door the moment an
+> NPC steps onto a plate. `follower_npcs` still writes `contactVariable` itself
+> rather than depending on a rule, so a lose condition works with no rules at
+> all.
 
 ### `avatar_caught`
 
