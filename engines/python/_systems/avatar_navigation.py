@@ -35,6 +35,12 @@ class AvatarNavigationSystem(GameSystem):
         dx, dy = dir_delta(dir_str)
         target = Pos(pos.x + dx, pos.y + dy)
 
+        # Turn to face the attempted direction even when the step is refused.
+        # A blocked move still spends the turn, so without this the player gets
+        # no signal that anything happened — and leaning on an obstacle is a
+        # deliberate way to let a turn pass.
+        state.avatar.facing = dir_str
+
         if not board.is_in_bounds(target):
             return []
         if board.is_void(target):
