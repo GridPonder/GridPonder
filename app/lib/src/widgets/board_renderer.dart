@@ -72,6 +72,34 @@ String? resolveEntitySpritePath(
   return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
 }
 
+({bool visible, String? path, bool mirrorHorizontally})
+resolveAvatarSpriteChoice(AvatarThemeDef? theme, String direction) {
+  if (theme?.visible == false) {
+    return (visible: false, path: null, mirrorHorizontally: false);
+  }
+
+  var entry = theme?.resolve('idle', direction);
+  var mirrorHorizontally = false;
+  if (entry?.mirror case final mirrorDirection?) {
+    entry = theme?.resolve('idle', mirrorDirection);
+    mirrorHorizontally = true;
+  }
+  final path =
+      entry?.staticPath ??
+      (entry?.frames?.isNotEmpty == true ? entry!.frames!.first : null);
+  return (visible: true, path: path, mirrorHorizontally: mirrorHorizontally);
+}
+
+/// Layer ids in the order the pack declares them (first = bottom), per the
+/// DSL spec. Cached per [GameDefinition]: this is read once per cell per
+/// frame, and the layer stack never changes for a loaded game.
+final Expando<List<String>> _boardLayerOrderCache = Expando<List<String>>();
+
+List<String> resolveBoardLayerOrder(GameDefinition game) =>
+    _boardLayerOrderCache[game] ??= List<String>.unmodifiable([
+      for (final layer in game.layers) layer.id,
+    ]);
+
 String? _motionSpritePath(
   Map<String, dynamic> motion,
   EntityInstance entity, {
@@ -527,8 +555,16 @@ class BoardRenderer extends StatelessWidget {
   }
 
   Widget _buildAvatar(AvatarState avatar, double cellSize) {
-    final assetPath =
-        packService.resolveAvatarSprite(_avatarSpriteFile(avatar.facing.toJson()));
+    final direction = avatar.facing.toJson();
+    final themed = resolveAvatarSpriteChoice(
+      packService.theme?.avatar,
+      direction,
+    );
+    if (!themed.visible) return const SizedBox.shrink();
+
+    final fallbackAssetPath = packService.resolveAvatarSprite(
+      _avatarSpriteFile(direction),
+    );
     final slot = avatar.inventory.slot;
 
     // When an overlay exists, center the avatar at the overlay's midpoint.
@@ -552,19 +588,33 @@ class BoardRenderer extends StatelessWidget {
       height: size,
       child: Stack(
         children: [
-          Image.asset(
-            assetPath,
-            fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => Container(
-              decoration: BoxDecoration(
-                color: Colors.pink.shade200,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.pets, size: size * 0.6, color: Colors.white),
-            ),
+          Transform.flip(
+            flipX: themed.mirrorHorizontally,
+            child: themed.path != null
+                ? Image(
+                    image: packService.resolvePackImage(themed.path!),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) =>
+                        _buildFallbackAvatar(fallbackAssetPath, size),
+                  )
+                : _buildFallbackAvatar(fallbackAssetPath, size),
           ),
           if (slot != null) _buildInventoryBadge(slot, size),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFallbackAvatar(String assetPath, double size) {
+    return Image.asset(
+      assetPath,
+      fit: BoxFit.contain,
+      errorBuilder: (_, __, ___) => Container(
+        decoration: BoxDecoration(
+          color: Colors.pink.shade200,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.pets, size: size * 0.6, color: Colors.white),
       ),
     );
   }
@@ -670,11 +720,17 @@ class _Cell extends StatelessWidget {
       final kindDef = game.entityKinds['void'];
       final spritePath = resolveEntitySpritePath(kindDef, groundEntity!);
       if (spritePath != null) {
-        return Image.asset(
-          packService.resolveSprite(spritePath),
+        return Image(
+          image: packService.resolvePackImage(spritePath),
           width: cellSize,
           height: cellSize,
           fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Image.asset(
+            packService.resolveSprite(spritePath),
+            width: cellSize,
+            height: cellSize,
+            fit: BoxFit.cover,
+          ),
         );
       }
       // Procedural fallback only when the game itself uses procedural
@@ -696,13 +752,8 @@ class _Cell extends StatelessWidget {
           BoxDecoration(border: Border.all(color: Colors.black12, width: 0.5)),
       child: Stack(
         children: [
-          if (!skipGround) _layer('ground', pos),
-          _layer('territory', pos),
-          _layer('portals', pos),
-          _layer('objects', pos),
-          _layer('clone', pos),
-          _layer('markers', pos),
-          _layer('actors', pos),
+          for (final layerId in resolveBoardLayerOrder(game))
+            if (!skipGround || layerId != 'ground') _layer(layerId, pos),
         ],
       ),
     );
