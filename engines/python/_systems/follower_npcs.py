@@ -161,18 +161,23 @@ class FollowerNpcsSystem(GameSystem):
         occupied_after_move: set,
         sight: Optional[bool] = None,
     ) -> Optional[Pos]:
+        # One flag governs every behavior: without it the avatar's cell is
+        # impassable, so an NPC with no other option stands still or, for the
+        # circuit behaviors, turns around.
+        lethal_contact = behavior_def.get("lethalContact", False)
+        block_avatar = not lethal_contact
+
         if behavior_type == "toward_avatar":
             avatar_pos = state.avatar.position
             if avatar_pos is None:
                 return None
-            lethal_contact = behavior_def.get("lethalContact", False)
             if sight is None:
                 sight = self._avatar_in_sight(npc_pos, behavior_def, state, game)
             if not sight:
                 return None
             return self._ranked_step(
                 npc_pos, avatar_pos, state, game, solid_blocking,
-                occupied_after_move, block_avatar=not lethal_contact,
+                occupied_after_move, block_avatar=block_avatar,
             )
 
         if behavior_type == "toward_tag":
@@ -184,8 +189,9 @@ class FollowerNpcsSystem(GameSystem):
             )
             if target is None:
                 return None
-            return self._step_toward_unguarded(
-                npc_pos, target, state, game, solid_blocking, occupied_after_move,
+            return self._ranked_step(
+                npc_pos, target, state, game, solid_blocking,
+                occupied_after_move, block_avatar=block_avatar,
             )
 
         if behavior_type == "toward_color":
@@ -197,18 +203,21 @@ class FollowerNpcsSystem(GameSystem):
             )
             if target is None:
                 return None
-            return self._step_toward_unguarded(
-                npc_pos, target, state, game, solid_blocking, occupied_after_move,
+            return self._ranked_step(
+                npc_pos, target, state, game, solid_blocking,
+                occupied_after_move, block_avatar=block_avatar,
             )
 
         if behavior_type == "clockwise":
             return self._behavior_clockwise(
-                npc_pos, npc_entity, state, game, solid_blocking, occupied_after_move,
+                npc_pos, npc_entity, state, game, solid_blocking,
+                occupied_after_move, block_avatar,
             )
 
         if behavior_type == "patrol":
             return self._behavior_patrol(
-                npc_pos, npc_entity, state, game, solid_blocking, occupied_after_move,
+                npc_pos, npc_entity, state, game, solid_blocking,
+                occupied_after_move, block_avatar,
             )
 
         return None
@@ -358,14 +367,6 @@ class FollowerNpcsSystem(GameSystem):
 
         return best
 
-    def _step_toward_unguarded(
-        self, npc_pos, target, state, game, solid_blocking, occupied_after_move,
-    ) -> Optional[Pos]:
-        return self._ranked_step(
-            npc_pos, target, state, game, solid_blocking, occupied_after_move,
-            block_avatar=False,
-        )
-
     # -- target search ------------------------------------------------------
 
     def _nearest_tagged(
@@ -412,14 +413,15 @@ class FollowerNpcsSystem(GameSystem):
         return facing if facing in _DIR_KEYS else "right"
 
     def _behavior_clockwise(
-        self, npc_pos, npc_entity, state, game, solid_blocking, occupied_after_move,
+        self, npc_pos, npc_entity, state, game, solid_blocking,
+        occupied_after_move, block_avatar=True,
     ) -> Optional[Pos]:
         facing = self._facing_of(npc_entity)
         for _ in range(len(_CLOCKWISE_ORDER)):
             candidate = npc_pos.moved(facing)
             if self._can_move_to(
                 candidate, state, game, solid_blocking, occupied_after_move,
-                block_avatar=False,
+                block_avatar=block_avatar,
             ):
                 npc_entity.params["facing"] = facing
                 return candidate
@@ -427,14 +429,15 @@ class FollowerNpcsSystem(GameSystem):
         return None
 
     def _behavior_patrol(
-        self, npc_pos, npc_entity, state, game, solid_blocking, occupied_after_move,
+        self, npc_pos, npc_entity, state, game, solid_blocking,
+        occupied_after_move, block_avatar=True,
     ) -> Optional[Pos]:
         facing = self._facing_of(npc_entity)
 
         candidate = npc_pos.moved(facing)
         if self._can_move_to(
             candidate, state, game, solid_blocking, occupied_after_move,
-            block_avatar=False,
+            block_avatar=block_avatar,
         ):
             return candidate
 
@@ -442,7 +445,7 @@ class FollowerNpcsSystem(GameSystem):
         reversed_candidate = npc_pos.moved(reversed_facing)
         if self._can_move_to(
             reversed_candidate, state, game, solid_blocking, occupied_after_move,
-            block_avatar=False,
+            block_avatar=block_avatar,
         ):
             npc_entity.params["facing"] = reversed_facing
             return reversed_candidate

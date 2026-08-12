@@ -215,6 +215,93 @@ def test_rules_receive_npc_events():
     )
 
 
+def _patrol_game(lethal: bool) -> GameDef:
+    data = {
+        "id": "com.gridponder.test_follower_npcs_patrol",
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            {"id": "actors", "occupancy": "zero_or_one"},
+        ],
+        "entityKinds": {
+            "empty": {"layer": "ground", "tags": ["walkable"]},
+            "sentry": {"layer": "actors", "tags": ["npc"]},
+        },
+        "actions": [
+            {"id": "move", "params": {"direction": {"type": "direction", "values": ["up", "down", "left", "right"]}}},
+        ],
+        "systems": [
+            {"id": "navigation", "type": "avatar_navigation", "config": {}},
+            {"id": "npcs", "type": "follower_npcs", "config": {"behaviors": {
+                "march": {"type": "patrol", "lethalContact": lethal},
+            }}},
+        ],
+    }
+    return GameDef.from_dict(data, id="test_follower_npcs_patrol")
+
+
+def _patrol_level() -> dict:
+    """Sentry two cells right of the avatar on a 1-row board, marching left."""
+    return {
+        "id": "test_level",
+        "board": {
+            "size": [5, 1],
+            "layers": {
+                "actors": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [2, 0], "kind": "sentry", "behavior": "march", "facing": "left"},
+                    ],
+                },
+            },
+        },
+        "state": {"avatar": {"enabled": True, "position": [0, 0]}},
+        "goals": [],
+        "loseConditions": [
+            {"type": "variable_threshold",
+             "config": {"variable": "caught", "target": 1, "comparison": "gte"}},
+        ],
+    }
+
+
+def _sentry_pos(engine: TurnEngine):
+    for pos, entity in engine.state.board.layers["actors"].entries():
+        if entity.kind == "sentry":
+            return pos
+    return None
+
+
+def test_lethal_contact_governs_patrol_too():
+    """A patrolling sentry kills on contact only when it opts in.
+
+    The flag used to be read on the avatar-seeking path only, which left every
+    other behavior lethal with no way to say so or to turn it off.
+    """
+    engine = TurnEngine(_patrol_game(lethal=True), _patrol_level())
+
+    engine.execute_turn("move", {"direction": "up"})  # blocked; avatar holds (0,0)
+    assert _sentry_pos(engine).x == 1, _sentry_pos(engine)
+
+    result = engine.execute_turn("move", {"direction": "up"})
+
+    assert any(e["type"] == "avatar_caught" for e in result.events), result.events
+    assert result.is_lost
+    assert result.lose_reason == "variable_threshold:caught", result.lose_reason
+
+
+def test_a_harmless_patrol_bounces_off_the_avatar():
+    engine = TurnEngine(_patrol_game(lethal=False), _patrol_level())
+
+    engine.execute_turn("move", {"direction": "up"})  # sentry marches to (1,0)
+    assert _sentry_pos(engine).x == 1
+
+    result = engine.execute_turn("move", {"direction": "up"})
+
+    assert not result.is_lost, "a non-lethal sentry must not end the level"
+    assert not any(e["type"] == "avatar_caught" for e in result.events)
+    # The avatar blocks it, so patrol reverses instead of walking through.
+    assert _sentry_pos(engine).x == 2, _sentry_pos(engine)
+
+
 TESTS = [
     test_lethal_contact_loses_the_level,
     test_contact_is_refused_without_lethal_contact,
@@ -224,6 +311,8 @@ TESTS = [
     test_a_blocked_move_still_advances_the_turn,
     test_gaze_param_tracks_sight,
     test_rules_receive_npc_events,
+    test_lethal_contact_governs_patrol_too,
+    test_a_harmless_patrol_bounces_off_the_avatar,
 ]
 
 

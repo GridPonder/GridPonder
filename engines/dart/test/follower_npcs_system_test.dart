@@ -281,6 +281,122 @@ void main() {
     );
   });
 
+  group('lethalContact governs every behavior', () {
+    GameDefinition patrolGame({required bool lethal}) {
+      final data = {
+        'id': 'com.gridponder.test_follower_npcs_patrol',
+        'layers': [
+          {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+          {'id': 'actors', 'occupancy': 'zero_or_one'},
+        ],
+        'entityKinds': {
+          'empty': {
+            'layer': 'ground',
+            'tags': ['walkable'],
+            'symbol': '.',
+          },
+          'sentry': {
+            'layer': 'actors',
+            'tags': ['npc'],
+            'symbol': 'S',
+          },
+        },
+        'actions': [
+          {
+            'id': 'move',
+            'params': {
+              'direction': {
+                'type': 'direction',
+                'values': ['up', 'down', 'left', 'right'],
+              },
+            },
+          },
+        ],
+        'systems': [
+          {'id': 'navigation', 'type': 'avatar_navigation', 'config': {}},
+          {
+            'id': 'npcs',
+            'type': 'follower_npcs',
+            'config': {
+              'behaviors': {
+                'march': {'type': 'patrol', 'lethalContact': lethal},
+              },
+            },
+          },
+        ],
+      };
+      return GameDefinition.fromJson(data, id: 'test_follower_npcs_patrol');
+    }
+
+    Map<String, dynamic> patrolLevel() => {
+          'id': 'test_level',
+          'board': {
+            'size': [5, 1],
+            'layers': {
+              'actors': {
+                'format': 'sparse',
+                'entries': [
+                  {
+                    'position': [2, 0],
+                    'kind': 'sentry',
+                    'behavior': 'march',
+                    'facing': 'left',
+                  },
+                ],
+              },
+            },
+          },
+          'state': {
+            'avatar': {'enabled': true, 'position': [0, 0]},
+          },
+          'goals': <dynamic>[],
+          'loseConditions': [
+            {
+              'type': 'variable_threshold',
+              'config': {
+                'variable': 'caught',
+                'target': 1,
+                'comparison': 'gte',
+              },
+            },
+          ],
+        };
+
+    int? sentryX(TurnEngine engine) {
+      for (final entry in engine.state.board.layers['actors']!.entries()) {
+        if (entry.value.kind == 'sentry') return entry.key.x;
+      }
+      return null;
+    }
+
+    test('a patrol kills on contact when it opts in', () {
+      final engine = _engineFor(patrolGame(lethal: true), patrolLevel());
+
+      engine.executeTurn(_move('up')); // blocked; avatar holds (0,0)
+      expect(sentryX(engine), 1);
+
+      final result = engine.executeTurn(_move('up'));
+
+      expect(result.events.any((e) => e.type == 'avatar_caught'), isTrue);
+      expect(result.isLost, isTrue);
+      expect(result.loseReason, 'variable_threshold:caught');
+    });
+
+    test('a harmless patrol bounces off the avatar', () {
+      final engine = _engineFor(patrolGame(lethal: false), patrolLevel());
+
+      engine.executeTurn(_move('up'));
+      expect(sentryX(engine), 1);
+
+      final result = engine.executeTurn(_move('up'));
+
+      expect(result.isLost, isFalse);
+      expect(result.events.any((e) => e.type == 'avatar_caught'), isFalse);
+      // The avatar blocks it, so patrol reverses instead of walking through.
+      expect(sentryX(engine), 2);
+    });
+  });
+
   test('a blocked move still advances the turn', () {
     // Load-bearing for level design: walking into an obstacle is a usable wait
     // action, so a level cannot force the player to stall by moving.
