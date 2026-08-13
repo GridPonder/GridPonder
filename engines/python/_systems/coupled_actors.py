@@ -16,6 +16,13 @@ new cell also claims that cell in the named territory layer — but only if the
 cell is currently empty there; an already-owned territory cell is never
 overwritten. Claiming applies only to cells reached by a move this turn, not
 to blocked/staying actors or to actors' initial cells.
+
+Optionally, a ``tape`` config block (``{"program": [...], "cycle": bool,
+"indexVariable": str}``) drives the system from a stored programme instead of
+from the action's direction. The index lives in ``state.variables``, so it is
+part of the state key and undo, preview and solver dedup all work unchanged.
+With ``cycle`` false the world stops stepping once the programme is exhausted;
+with ``cycle`` true it repeats forever and the index stays bounded.
 """
 from __future__ import annotations
 
@@ -30,18 +37,48 @@ from ._claim import apply_claim
 _CANONICAL_BUCKETS = ((0, -1), (0, 1), (-1, 0), (1, 0))  # up, down, left, right
 
 
+def _tape_direction(tape: dict, state: GameState) -> str | None:
+    """Next instruction from the tape, advancing the stored index.
+
+    Returns None when a non-cycling programme is exhausted, which stops the
+    world stepping. A cycling programme wraps, so its index stays bounded by
+    the programme length — that keeps the joint state space finite for a
+    domain solver.
+    """
+    program = tape.get("program") or []
+    if not program:
+        return None
+    idx_var = tape.get("indexVariable", "tapeIndex")
+    idx = int(state.variables.get(idx_var, 0))
+    if idx >= len(program):
+        if not tape.get("cycle", False):
+            return None
+        idx %= len(program)
+    state.variables[idx_var] = idx + 1
+    return program[idx]
+
+
 class CoupledActorsSystem(GameSystem):
     def __init__(self, sys_id: str):
         super().__init__(sys_id, "coupled_actors")
 
     def execute_action_resolution(self, action: dict, state: GameState, game: GameDef) -> list[dict]:
         config = game.system_config(self.id)
-        move_action = config.get("moveAction", "move")
-        if action.get("actionId") != move_action:
-            return []
+        tape = config.get("tape")
+
+        if tape is None:
+            move_action = config.get("moveAction", "move")
+            if action.get("actionId") != move_action:
+                return []
+            direction = action.get("params", {}).get("direction")
+        else:
+            # Tape-driven: the direction comes from the programme, so *any*
+            # accepted action steps the world. A vetoed turn cannot leak the
+            # advanced index, because the turn engine runs the whole turn on a
+            # working copy and discards it on veto.
+            direction = _tape_direction(tape, state)
 
         allowed = config.get("directions", list(CARDINALS))
-        direction = action.get("params", {}).get("direction")
         if not direction or direction not in allowed:
             return []
 

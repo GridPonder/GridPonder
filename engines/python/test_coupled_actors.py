@@ -64,6 +64,32 @@ def _make_level(actors: list[tuple[int, int, str]], walls: list[tuple[int, int]]
     }
 
 
+def _make_taped_game(program: list[str], cycle: bool = False) -> GameDef:
+    """A coupled_actors game whose direction comes from a tape, not the action."""
+    data = {
+        "id": "com.gridponder.test_coupled_actors_tape",
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            {"id": "actors", "occupancy": "zero_or_one"},
+        ],
+        "entityKinds": {
+            "empty": {"layer": "ground", "tags": ["walkable"]},
+            "wall":  {"layer": "ground", "tags": ["solid"]},
+            "wei":   {"layer": "actors", "tags": ["actor"]},
+            "shu":   {"layer": "actors", "tags": ["actor"]},
+        },
+        "actions": [
+            {"id": "move", "params": {"direction": {"type": "direction", "values": ["up", "down", "left", "right"]}}},
+            {"id": "step", "params": {}},
+        ],
+        "systems": [
+            {"id": "movement", "type": "coupled_actors",
+             "config": {"tape": {"program": program, "cycle": cycle}}},
+        ],
+    }
+    return GameDef.from_dict(data, id="test_coupled_actors_tape")
+
+
 def _actor_pos(engine: TurnEngine, kind: str) -> Pos | None:
     for pos, entity in engine.state.board.layers["actors"].entries():
         if entity.kind == kind:
@@ -298,6 +324,50 @@ def test_claim_not_applied_to_blocked_actor() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Tape tests — tape-driven movement
+# ---------------------------------------------------------------------------
+
+def test_tape_overrides_the_action_direction():
+    game = _make_taped_game(["right"])
+    engine = TurnEngine(game, _make_level([(0, 0, "wei")], []))
+    engine.execute_turn("move", {"direction": "left"})
+    assert engine.state.board.get_entity("actors", Pos(1, 0)) is not None, \
+        "the tape's direction must win over the action's direction"
+    assert engine.state.variables["tapeIndex"] == 1
+
+
+def test_tape_advances_on_a_param_less_action():
+    game = _make_taped_game(["right", "right"])
+    engine = TurnEngine(game, _make_level([(0, 0, "wei")], []))
+    engine.execute_turn("step")
+    engine.execute_turn("step")
+    assert engine.state.board.get_entity("actors", Pos(2, 0)) is not None, \
+        "a tape steps the world on any accepted action, not just `move`"
+    assert engine.state.variables["tapeIndex"] == 2
+
+
+def test_finite_tape_stops_when_exhausted():
+    game = _make_taped_game(["right"], cycle=False)
+    engine = TurnEngine(game, _make_level([(0, 0, "wei")], []))
+    engine.execute_turn("step")
+    engine.execute_turn("step")
+    assert engine.state.board.get_entity("actors", Pos(1, 0)) is not None, \
+        "an exhausted finite tape must not keep stepping"
+    assert engine.state.variables["tapeIndex"] == 1
+
+
+def test_cyclic_tape_wraps_and_keeps_the_index_bounded():
+    game = _make_taped_game(["right", "left"], cycle=True)
+    engine = TurnEngine(game, _make_level([(0, 0, "wei")], []))
+    for _ in range(5):
+        engine.execute_turn("step")
+    # right, left, right, left, right -> one cell along
+    assert engine.state.board.get_entity("actors", Pos(1, 0)) is not None
+    assert engine.state.variables["tapeIndex"] == 1, \
+        "a cyclic index must stay bounded by the programme length"
+
+
+# ---------------------------------------------------------------------------
 # directionTransforms (DSL 0.8) — per-actor direction mapping
 # ---------------------------------------------------------------------------
 
@@ -383,6 +453,10 @@ def run_all() -> bool:
         test_claim_marks_fresh_destination_cells_for_each_mover,
         test_claim_does_not_overwrite_already_owned_cell,
         test_claim_not_applied_to_blocked_actor,
+        test_tape_overrides_the_action_direction,
+        test_tape_advances_on_a_param_less_action,
+        test_finite_tape_stops_when_exhausted,
+        test_cyclic_tape_wraps_and_keeps_the_index_bounded,
         test_identity_transforms_match_legacy_order,
         test_invert_moves_actor_opposite,
         test_inverted_actors_swapping_cells_both_block,
