@@ -32,6 +32,7 @@ import termios
 import threading
 import time
 import tty
+import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
@@ -42,6 +43,8 @@ from dotenv import load_dotenv
 from tqdm import tqdm
 
 from agent_client import call_llm, extract_action, extract_actions_list
+from connector_api import estimate_cost
+from run_manifest import source_snapshot
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -73,10 +76,10 @@ def load_suite() -> dict[str, list[str]]:
         return yaml.safe_load(f)["levels"]
 
 
-def all_pack_levels() -> dict[str, list[str]]:
+def all_pack_levels(packs_dir: Path = PACKS_DIR) -> dict[str, list[str]]:
     """Discover all levels for all packs by reading game.json files."""
     result: dict[str, list[str]] = {}
-    for pack_dir in sorted(PACKS_DIR.iterdir()):
+    for pack_dir in sorted(packs_dir.iterdir()):
         if not pack_dir.is_dir():
             continue
         game_json = pack_dir / "game.json"
@@ -132,6 +135,7 @@ def run_level(
     anon: bool = False,
     runner: str = "auto",
     input_mode: str = "text",
+    packs_dir: Path = PACKS_DIR,
 ) -> dict[str, Any]:
     """Run one level with one model variant. Returns a result dict.
 
@@ -176,7 +180,7 @@ def run_level(
         *runner_cmd,
         "--pack", pack_id,
         "--level", level_id,
-        "--packs-dir", str(PACKS_DIR),
+        "--packs-dir", str(packs_dir),
         "--attempt-multiplier", str(attempt_multiplier),
         "--total-multiplier", str(total_multiplier),
         "--mode", mode,
@@ -190,14 +194,22 @@ def run_level(
     if input_mode != "text":
         cmd += ["--input", input_mode]
 
-    litellm_model: str = model["litellm_model"]
+    connector = model.get("connector", "litellm")
+    connector_model = model.get("model") or model.get("litellm_model")
+    if not connector_model:
+        raise ValueError(
+            f"Model {model.get('id', '<unknown>')!r} has neither model nor litellm_model"
+        )
     extra_params: dict = dict(variant.get("params") or {})
     full_model_id = f"{model['id']}{variant.get('suffix', '')}"
 
     latencies: list[float] = []
+    input_tokens_total = 0
     thinking_tokens_total = 0
     output_tokens_total = 0
     cost_total = 0.0
+    cost_complete = True
+    cost_sources: set[str] = set()
     resets = 0
     voluntary_resets = 0
     llm_calls = 0
@@ -239,11 +251,20 @@ def run_level(
                 llm_ok = False
                 for _retry in range(3):
                     try:
-                        response_text, latency_ms, think_tok, out_tok, call_cost, reasoning_text = call_llm(
-                            prompt, litellm_model, extra_params,
+                        (
+                            response_text,
+                            latency_ms,
+                            in_tok,
+                            think_tok,
+                            out_tok,
+                            call_cost,
+                            reasoning_text,
+                        ) = call_llm(
+                            prompt, connector_model, extra_params,
                             max_tokens=max_tokens,
                             request_timeout=action_timeout,
                             image_b64=image_b64,
+                            connector=connector,
                         )
                         llm_ok = True
                         break
@@ -261,15 +282,36 @@ def run_level(
 
                 consecutive_timeouts = 0
                 latencies.append(latency_ms)
+                input_tokens_total += in_tok
                 thinking_tokens_total += think_tok
                 output_tokens_total += out_tok
-                cost_total += call_cost
+                cost_source = "connector"
+                if call_cost is None:
+                    call_cost = estimate_cost(
+                        in_tok,
+                        out_tok,
+                        model.get("pricing"),
+                    )
+                    cost_source = (
+                        "configured_estimate"
+                        if call_cost is not None
+                        else "unavailable"
+                    )
+                if call_cost is None:
+                    cost_complete = False
+                else:
+                    cost_total += call_cost
+                cost_sources.add(cost_source)
                 llm_calls += 1
                 llm_entry: dict[str, Any] = {
                     "latency_ms": round(latency_ms),
+                    "input_tokens": in_tok,
                     "output_tokens": out_tok,
                     "thinking_tokens": think_tok,
-                    "cost_usd": round(call_cost, 6),
+                    "cost_usd": (
+                        round(call_cost, 6) if call_cost is not None else None
+                    ),
+                    "cost_source": cost_source,
                     "response": response_text,
                 }
                 if reasoning_text:
@@ -390,9 +432,11 @@ def run_level(
             "p95": sorted_lat[int(n * 0.95)] if n else 0,
             "total": sum(sorted_lat),
         },
+        "input_tokens_total": input_tokens_total,
         "thinking_tokens_total": thinking_tokens_total,
         "output_tokens_total": output_tokens_total,
-        "cost_usd": round(cost_total, 6),
+        "cost_usd": round(cost_total, 6) if cost_complete else None,
+        "cost_sources": sorted(cost_sources),
         "llm_log": llm_log,
     }
 
@@ -571,8 +615,15 @@ def main() -> None:
                              "Used by the parallel launcher.")
     parser.add_argument("--no-caffeinate", action="store_true",
                         help="Don't spawn caffeinate (launcher handles it)")
+    parser.add_argument(
+        "--packs-dir",
+        type=Path,
+        default=PACKS_DIR,
+        help=f"Pack root to benchmark (default: {PACKS_DIR})",
+    )
 
     args = parser.parse_args()
+    run_id = str(uuid.uuid4())
 
     # Prevent macOS from sleeping during a long benchmark run.
     _caffeinate = None
@@ -588,14 +639,14 @@ def main() -> None:
         pack_id, level_id = args.level
         levels_by_pack: dict[str, list[str]] = {pack_id: [level_id]}
     elif args.pack:
-        all_levels = all_pack_levels()
+        all_levels = all_pack_levels(args.packs_dir)
         if args.pack not in all_levels:
             sys.exit(f"Pack not found: {args.pack}")
         levels_by_pack = {args.pack: all_levels[args.pack]}
     elif args.suite == "curated":
         levels_by_pack = load_suite()
     elif args.all:
-        levels_by_pack = all_pack_levels()
+        levels_by_pack = all_pack_levels(args.packs_dir)
     else:
         parser.print_help()
         sys.exit(0)
@@ -655,6 +706,8 @@ def main() -> None:
     # Write meta capturing CLI args. When using --run-dir (parallel mode),
     # each worker writes its own meta file to avoid races.
     run_config = {
+        "schema_version": 2,
+        "run_id": run_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "suite": args.suite,
         "pack": args.pack,
@@ -669,8 +722,10 @@ def main() -> None:
         "max_n": args.max_n if args.mode == "flex-n" else None,
         "flex_penalty": args.flex_penalty if args.mode == "flex-n" else None,
         "input_mode": args.input,
+        "packs_dir": str(args.packs_dir.resolve()),
         "levels_by_pack": {p: lvls for p, lvls in levels_by_pack.items()},
         "total_work_items": total,
+        "source": source_snapshot(SCRIPT_DIR.parent.parent, args.packs_dir),
     }
     # File-name suffix that uniquely identifies this (mode, anon, input) bucket.
     _input_tag = "" if args.input == "text" else f"_{args.input.replace('+', '-')}"
@@ -717,7 +772,12 @@ def main() -> None:
             "type": "run_meta",
             "model_id": full_id,
             "display_name": model_cfg["display_name"],
-            "litellm_model": model_cfg["litellm_model"],
+            "litellm_model": model_cfg.get("litellm_model"),
+            "connector": model_cfg.get("connector", "litellm"),
+            "model": model_cfg.get("model", model_cfg.get("litellm_model")),
+            "concurrency_group": model_cfg.get("concurrency_group", "default"),
+            "model_params": variant_cfg.get("params") or {},
+            "pricing": model_cfg.get("pricing"),
             "local": model_cfg.get("local", True),
             "reasoning": variant_cfg.get("reasoning", False),
             "inference_mode": args.mode,
@@ -727,6 +787,7 @@ def main() -> None:
             "total_multiplier": args.total_multiplier,
             "runs_per_level": args.runs,
             "action_timeout": args.action_timeout,
+            "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
         if args.mode == "fixed-n":
@@ -754,6 +815,7 @@ def main() -> None:
                         anon=args.anon,
                         runner=args.runner,
                         input_mode=args.input,
+                        packs_dir=args.packs_dir,
                     )
                 except Exception as exc:
                     result = {

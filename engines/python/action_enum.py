@@ -3,11 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 
-def enumerate_actions(game_def, state) -> list[dict[str, Any]]:
-    """Return list of all valid action dicts for the current state.
+def enumerate_actions(game_def, state, engine=None) -> list[dict[str, Any]]:
+    """Return action dictionaries available in the current state.
 
     Each dict has at least an 'action' key plus any param keys.
     Actions whose required entity kind is absent from the board are skipped.
+    When ``engine`` is supplied, syntactic candidates are transactionally
+    probed and vetoed/no-effect actions are removed.
     """
     present_kinds: set[str] = set()
     for layer in state.board.layers.values():
@@ -24,7 +26,9 @@ def enumerate_actions(game_def, state) -> list[dict[str, Any]]:
             actions.append({"action": action_def["id"]})
         else:
             _enumerate(action_def["id"], list(params_def.items()), {}, actions, state)
-    return actions
+    if engine is None:
+        return actions
+    return [action for action in actions if _is_effectful(engine, action)]
 
 
 def _enumerate(
@@ -50,3 +54,20 @@ def _enumerate(
 
     for value in values:
         _enumerate(action_id, rest, {**current, name: value}, out, state)
+
+
+def _is_effectful(engine, action: dict[str, Any]) -> bool:
+    before = engine.state_key()
+    action_id = action["action"]
+    params = {key: value for key, value in action.items() if key != "action"}
+    result = engine.execute_turn(action_id, params)
+    if not result.accepted:
+        return False
+    after = engine.state_key()
+    meaningful_event = any(
+        event.get("type") != "turn_ended" for event in result.events
+    )
+    restored = engine.undo()
+    if not restored:
+        raise RuntimeError(f"Action probe could not restore state for {action!r}")
+    return before != after or meaningful_event or result.is_won or result.is_lost

@@ -148,7 +148,7 @@ def main() -> None:
     def emit_state() -> None:
         nonlocal current_anon_map
         total_now = total_game_actions + give_up_count
-        valid_actions = enumerate_actions(game_def, engine.state)
+        valid_actions = enumerate_actions(game_def, engine.state, engine=engine)
 
         if anon:
             current_anon_map = build_anon_reverse_map(valid_actions)
@@ -170,6 +170,7 @@ def main() -> None:
             memory=memory,
             text_board=(input_mode != "image"),
             attach_image=include_image,
+            valid_actions=valid_actions,
         )
 
         event: dict = {

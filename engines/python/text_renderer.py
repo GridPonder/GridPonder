@@ -7,6 +7,7 @@ from ._models import GameState, Pos
 
 _AVATAR_SYMBOL = "@"
 _LAYER_ORDER = ["actors", "markers", "objects", "territory", "ground"]
+_VISIBLE_SPACE = "·"
 
 
 def render(
@@ -57,7 +58,7 @@ def render(
             object_symbol: str | None = None
             ground_symbol: str | None = None
             mco_symbol = mco_symbols.get(pos)
-            for layer_id in _LAYER_ORDER:
+            for layer_id in _ordered_layers(state):
                 entity = board.get_entity(layer_id, pos)
                 if entity is None:
                     continue
@@ -90,6 +91,12 @@ def render(
     if stacked_block:
         parts.append(stacked_block)
 
+    entity_state_block = _build_entity_state_block(
+        state, game_def, kind_symbol_overrides
+    )
+    if entity_state_block:
+        parts.append(entity_state_block)
+
     mco_block = _build_mco_block(state, game_def, kind_symbol_overrides)
     if mco_block:
         parts.append(mco_block)
@@ -102,10 +109,29 @@ def _get_symbol(entity, kind_def: dict | None, kind_symbol_overrides: dict | Non
         return entity.kind[0].upper()
     if kind_def.get("symbolParam") is not None:
         param_val = entity.params.get(kind_def["symbolParam"])
-        return "N" if param_val is not None else kind_def["symbol"]
+        symbol = "N" if param_val is not None else kind_def["symbol"]
+        return _VISIBLE_SPACE if symbol.isspace() else symbol
     if kind_symbol_overrides and entity.kind in kind_symbol_overrides:
         return kind_symbol_overrides[entity.kind]
-    return kind_def["symbol"]
+    symbol = kind_def["symbol"]
+    return _VISIBLE_SPACE if symbol.isspace() else symbol
+
+
+def _ordered_layers(state: GameState) -> list[str]:
+    known = [
+        layer
+        for layer in _LAYER_ORDER
+        if layer != "ground" and layer in state.board.layers
+    ]
+    remaining = [
+        layer for layer in state.board.layers
+        if layer not in _LAYER_ORDER and layer != "ground"
+    ]
+    return [
+        *known,
+        *remaining,
+        *(["ground"] if "ground" in state.board.layers else []),
+    ]
 
 
 def _is_legend_redundant(sym: str, label: str) -> bool:
@@ -147,6 +173,8 @@ def _build_legend(state: GameState, game_def, has_avatar: bool, kind_symbol_over
                 label = "?"
             else:
                 sym = kind_def["symbol"]
+                if sym.isspace():
+                    sym = _VISIBLE_SPACE
                 desc = kind_def.get("description")
                 name = kind_def.get("uiName") or entity.kind.replace("_", " ")
                 label = f"{name} ({desc})" if desc else name
@@ -182,7 +210,7 @@ def _build_overlay_block(state: GameState, game_def, kind_symbol_overrides) -> s
         for dx in range(overlay.width):
             x, y = x1 + dx, y1 + dy
             sym = "."
-            for layer_id in _LAYER_ORDER:
+            for layer_id in _ordered_layers(state):
                 entity = state.board.get_entity(layer_id, Pos(x, y))
                 if entity is None:
                     continue
@@ -210,7 +238,7 @@ def _build_stacked_block(
         for x in range(state.board.width):
             pos = Pos(x, y)
             symbols: list[str] = []
-            for layer_id in _LAYER_ORDER:
+            for layer_id in _ordered_layers(state):
                 entity = state.board.get_entity(layer_id, pos)
                 if entity is None:
                     continue
@@ -229,10 +257,12 @@ def _build_stacked_block(
                     label = "?"
                 else:
                     sym = kind_def["symbol"]
+                    if sym.isspace():
+                        sym = _VISIBLE_SPACE
                     label = kind_def.get("uiName") or entity.kind.replace("_", " ")
 
                 original_sym = kind_def["symbol"] if kind_def else sym
-                if sym in (".", " ") or original_sym in (".", " "):
+                if sym == "." or original_sym == ".":
                     continue
                 symbols.append(f"{sym}({label})")
 
@@ -252,7 +282,7 @@ def _build_numbers_block(state: GameState, game_def) -> str:
     for y in range(state.board.height):
         for x in range(state.board.width):
             pos = Pos(x, y)
-            for layer_id in _LAYER_ORDER:
+            for layer_id in _ordered_layers(state):
                 entity = state.board.get_entity(layer_id, pos)
                 if entity is None:
                     continue
@@ -267,6 +297,50 @@ def _build_numbers_block(state: GameState, game_def) -> str:
     if not entries_list:
         return ""
     return "Number values: " + "  ".join(entries_list)
+
+
+def _build_entity_state_block(
+    state: GameState,
+    game_def,
+    kind_symbol_overrides: dict[str, str] | None,
+) -> str:
+    """Expose per-entity state that cannot be encoded in one grid symbol."""
+    entries: list[str] = []
+    for layer_id in _ordered_layers(state):
+        layer = state.board.layers.get(layer_id)
+        if layer is None:
+            continue
+        for pos, entity in layer.entries():
+            if not entity.params:
+                continue
+            kind_def = game_def.entity_kinds.get(entity.kind, {})
+            symbol_param = kind_def.get("symbolParam")
+            details = {
+                key: value
+                for key, value in entity.params.items()
+                if key != symbol_param
+            }
+            if not details:
+                continue
+            if kind_symbol_overrides is not None:
+                name = kind_symbol_overrides.get(entity.kind, "?")
+            else:
+                name = kind_def.get("uiName") or entity.kind.replace("_", " ")
+            rendered = ", ".join(
+                f"{key}={value}" for key, value in sorted(details.items())
+            )
+            entries.append(f"  ({pos.x},{pos.y}) {name}: {rendered}")
+
+    avatar = state.avatar
+    if avatar.enabled and avatar.position is not None:
+        entries.append(
+            f"  ({avatar.position.x},{avatar.position.y}) avatar: "
+            f"facing={avatar.facing}"
+        )
+
+    if not entries:
+        return ""
+    return "Entity state:\n" + "\n".join(entries)
 
 
 def _build_mco_block(state: GameState, game_def, kind_symbol_overrides) -> str:
