@@ -491,10 +491,7 @@ working copy and discards it on veto. The index advances before the
 `directions` check runs, so a filtered-out instruction still consumes its slot
 and produces no movement — the machine ticks regardless.
 
-**Reuse:** metronomes, patrols, conveyors and scripted opposition — any pack
-where the world should step on a script rather than on input.
-
-**Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals).
+**Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals); the optional `tape` block turns the same system into a metronome, patrol, conveyor, or scripted opposition — any pack where the world should step on a script rather than on input.
 
 ---
 
@@ -926,8 +923,9 @@ marks a cell.
 | Region Transform | `region_transform` | `action_resolution` | `rotate`, `flip`, `diagonal_swap` |
 | Flood Fill | `flood_fill` | `action_resolution` | `flood` |
 | Anchor Point | `anchor_point` | `action_resolution` | configurable |
-| Coupled Actors | `coupled_actors` | `action_resolution` | `move` (configurable via `moveAction`) |
+| Coupled Actors | `coupled_actors` | `action_resolution` | `move` (configurable via `moveAction`; any accepted action when `tape` is set) |
 | Individual Actors | `individual_actors` | `action_resolution` | `tap_cell` + `move` (configurable) |
+| Terrain Edit | `terrain_edit` | `action_resolution` | `place` (configurable via `action`) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 
