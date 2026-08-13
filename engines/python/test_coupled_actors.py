@@ -64,8 +64,16 @@ def _make_level(actors: list[tuple[int, int, str]], walls: list[tuple[int, int]]
     }
 
 
-def _make_taped_game(program: list[str], cycle: bool = False) -> GameDef:
-    """A coupled_actors game whose direction comes from a tape, not the action."""
+def _make_taped_game(program: list[str], cycle=False, index_var: str | None = None) -> GameDef:
+    """A coupled_actors game whose direction comes from a tape, not the action.
+
+    ``cycle`` is intentionally left untyped as `bool` at the call sites that
+    probe non-boolean values (e.g. ``cycle=1``) — the tape config is JSON, so
+    the engine must tolerate whatever a level author actually writes there.
+    """
+    tape: dict = {"program": program, "cycle": cycle}
+    if index_var is not None:
+        tape["indexVariable"] = index_var
     data = {
         "id": "com.gridponder.test_coupled_actors_tape",
         "layers": [
@@ -84,7 +92,7 @@ def _make_taped_game(program: list[str], cycle: bool = False) -> GameDef:
         ],
         "systems": [
             {"id": "movement", "type": "coupled_actors",
-             "config": {"tape": {"program": program, "cycle": cycle}}},
+             "config": {"tape": tape}},
         ],
     }
     return GameDef.from_dict(data, id="test_coupled_actors_tape")
@@ -367,6 +375,55 @@ def test_cyclic_tape_wraps_and_keeps_the_index_bounded():
         "a cyclic index must stay bounded by the programme length"
 
 
+def test_negative_tape_index_clamps_to_zero():
+    """A negative stored index (e.g. left behind by a rewind rule using
+    `increment_variable` with a negative amount) must clamp to 0, not wrap
+    via Python's negative indexing (program[-1]) — Dart has no such wrap and
+    would otherwise crash with a RangeError, so both engines must agree on
+    clamping."""
+    game = _make_taped_game(["right", "down", "left"])
+    engine = TurnEngine(game, _make_level([(2, 0, "wei")], []))
+    engine.state.variables["tapeIndex"] = -1
+    engine.execute_turn("step")
+    assert _actor_pos(engine, "wei") == Pos(3, 0), (
+        "a negative stored index must clamp to 0 (program[0] == 'right'), "
+        f"got {_actor_pos(engine, 'wei')}"
+    )
+    assert engine.state.variables["tapeIndex"] == 1
+
+
+def test_non_boolean_cycle_value_does_not_cycle():
+    """`"cycle": 1` is an ordinary JSON typo for `true`, not the real thing —
+    the tape must treat only the boolean `True` as cycling, mirroring Dart's
+    identity comparison, so a truthy-but-not-`True` value halts the tape
+    exactly like `cycle: false` would."""
+    game = _make_taped_game(["right"], cycle=1)
+    engine = TurnEngine(game, _make_level([(0, 0, "wei")], []))
+    engine.execute_turn("step")
+    engine.execute_turn("step")
+    assert engine.state.board.get_entity("actors", Pos(1, 0)) is not None, (
+        "a non-boolean cycle value must not cycle — the tape should have "
+        "stopped after the first step"
+    )
+    assert engine.state.variables["tapeIndex"] == 1
+
+
+def test_tape_honours_a_custom_index_variable_name():
+    """Multi-machine packs need a distinct `indexVariable` per tape; the
+    default `"tapeIndex"` name must not be hardcoded anywhere on the read or
+    write path."""
+    game = _make_taped_game(["right", "right"], index_var="beltIndex")
+    engine = TurnEngine(game, _make_level([(0, 0, "wei")], []))
+    engine.execute_turn("step")
+    assert "tapeIndex" not in engine.state.variables, (
+        "a custom indexVariable must not also write the default name"
+    )
+    assert engine.state.variables["beltIndex"] == 1
+    engine.execute_turn("step")
+    assert _actor_pos(engine, "wei") == Pos(2, 0)
+    assert engine.state.variables["beltIndex"] == 2
+
+
 # ---------------------------------------------------------------------------
 # directionTransforms (DSL 0.8) — per-actor direction mapping
 # ---------------------------------------------------------------------------
@@ -457,6 +514,9 @@ def run_all() -> bool:
         test_tape_advances_on_a_param_less_action,
         test_finite_tape_stops_when_exhausted,
         test_cyclic_tape_wraps_and_keeps_the_index_bounded,
+        test_negative_tape_index_clamps_to_zero,
+        test_non_boolean_cycle_value_does_not_cycle,
+        test_tape_honours_a_custom_index_variable_name,
         test_identity_transforms_match_legacy_order,
         test_invert_moves_actor_opposite,
         test_inverted_actors_swapping_cells_both_block,

@@ -59,6 +59,34 @@ def _kind_at(engine, x, y):
     return None if e is None else e.kind
 
 
+def _make_zero_or_one_game() -> GameDef:
+    """A second layer with `zero_or_one` occupancy and no `default`, so an
+    untouched cell's `get_entity` returns None rather than an "empty" entity
+    — unlike `ground` in `_make_game`, which is `exactly_one`."""
+    data = {
+        "id": "com.gridponder.test_terrain_edit_zero_or_one",
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            {"id": "markers", "occupancy": "zero_or_one"},
+        ],
+        "entityKinds": {
+            "empty": {"layer": "ground", "tags": ["walkable"]},
+            "marker": {"layer": "markers", "tags": []},
+        },
+        "actions": [
+            {"id": "place_marker", "params": {"position": {"type": "position"}}},
+        ],
+        "systems": [
+            {"id": "edit", "type": "terrain_edit", "config": {
+                "action": "place_marker",
+                "layer": "markers",
+                "kind": "marker",
+            }},
+        ],
+    }
+    return GameDef.from_dict(data, id="test_terrain_edit_zero_or_one")
+
+
 def test_places_a_wall_and_spends_budget():
     engine = TurnEngine(_make_game(), _make_level(budget=1))
     result = engine.execute_turn("place_wall", {"position": [2, 0]})
@@ -120,6 +148,21 @@ def test_refuses_malformed_position():
         "one-element position list must not spend budget"
 
 
+def test_from_kind_payload_is_empty_string_for_a_previously_empty_cell():
+    """On a `zero_or_one` layer, `get_entity` returns None for an untouched
+    cell — not an "empty" entity. The emitted `cell_transformed` event must
+    still carry "" (not None) as `fromKind`, so the payload stays comparable
+    to Dart's non-nullable `fromKind` field."""
+    engine = TurnEngine(_make_zero_or_one_game(), _make_level(budget=1))
+    result = engine.execute_turn("place_marker", {"position": [2, 0]})
+    transformed = [e for e in result.events if e["type"] == "cell_transformed"]
+    assert len(transformed) == 1, f"expected exactly one cell_transformed event, got {transformed}"
+    assert transformed[0]["fromKind"] == "", (
+        f"expected fromKind '' for a previously-empty zero_or_one cell, got {transformed[0]['fromKind']!r}"
+    )
+    assert transformed[0]["toKind"] == "marker"
+
+
 def test_refuses_non_finite_position():
     engine = TurnEngine(_make_game(), _make_level(budget=1))
     engine.execute_turn("place_wall", {"position": [float("inf"), 0]})
@@ -138,6 +181,7 @@ def run_all() -> bool:
         test_ignores_other_actions,
         test_refuses_non_numeric_position,
         test_refuses_malformed_position,
+        test_from_kind_payload_is_empty_string_for_a_previously_empty_cell,
         test_refuses_non_finite_position,
     ]
     passed = 0

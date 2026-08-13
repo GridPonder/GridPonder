@@ -470,12 +470,15 @@ Example config:
 **Tape-driven stepping.** With a `tape` block the system ignores the action's
 `direction` and takes each step from a stored programme, so the world advances
 on *any* accepted action — the player's turns drive a machine they do not
-steer.
+steer. This overrides both **Behavior** step 1 above (any accepted action can
+trigger a step, not only `moveAction`) and the **Mirrored actors** note above
+(`actor_moved` / `actor_entered` report the *tape's* chosen direction, not the
+triggering action's own direction).
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `program` | array of direction strings | — | The instruction word. Directions outside `directions` are ignored. |
-| `cycle` | boolean | `false` | When `true` the programme repeats forever; when `false` the world stops stepping once it is exhausted. |
+| `cycle` | boolean | `false` | When `true` the programme repeats forever; when `false` the world stops stepping once it is exhausted. Read strictly: only the boolean `true` cycles, so a non-boolean value (e.g. `"cycle": 1`, a JSON typo) behaves as `false` rather than being coerced. |
 | `indexVariable` | string | `"tapeIndex"` | Runtime variable holding the next instruction index. |
 
 ```json
@@ -489,9 +492,16 @@ which keeps the joint state space finite for a domain solver. A vetoed turn
 cannot leak an advanced index, because the turn engine runs the whole turn on a
 working copy and discards it on veto. The index advances before the
 `directions` check runs, so a filtered-out instruction still consumes its slot
-and produces no movement — the machine ticks regardless.
+and produces no movement — the machine ticks regardless. A negative stored
+index (for instance from a rule that decrements it) is clamped to 0 rather
+than wrapping, so a rewind-past-the-start is inert.
 
-**Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals); the optional `tape` block turns the same system into a metronome, patrol, conveyor, or scripted opposition — any pack where the world should step on a script rather than on input.
+Two taped `coupled_actors` systems both left at the default `indexVariable`
+(`"tapeIndex"`) share one counter and each advances it once per turn — give
+independent machines their own `actorLayer` **and** their own `indexVariable`,
+or they will silently desynchronise from their own programmes.
+
+**Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals); the optional `tape` block turns the same system into a scripted lock-step mover — a metronome or patrol driven by a stored programme rather than by input. Because the tape drives every actor on the layer identically, it cannot move only the entities on particular cells (that would be a conveyor, which this is not).
 
 ---
 

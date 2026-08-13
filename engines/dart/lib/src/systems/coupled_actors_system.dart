@@ -8,6 +8,7 @@ import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
 import 'claim_policy.dart';
+import 'runtime_variable.dart';
 
 /// One actor resolved for this turn, with the effective direction it travels
 /// in after its `directionTransforms` entry is applied.
@@ -21,10 +22,15 @@ class _Mover {
 
 /// Next instruction from the tape, advancing the stored index.
 ///
+/// A negative stored index (e.g. from a rewind rule using
+/// `increment_variable` with a negative amount) is clamped to 0 rather than
+/// wrapping — a rewind-past-the-start is inert, not surprising.
+///
 /// Returns null when a non-cycling programme is exhausted, which stops the
 /// world stepping. A cycling programme wraps, so its index stays bounded by
 /// the programme length — that keeps the joint state space finite for a
-/// domain solver.
+/// domain solver. `cycle` is compared with `!= true` (not truthy) so a typo
+/// like `"cycle": 1` behaves as non-cycling rather than cycling.
 String? _tapeDirection(Map<String, dynamic> tape, LevelState state) {
   final program = (tape['program'] as List<dynamic>? ?? const [])
       .map((d) => d.toString())
@@ -32,7 +38,8 @@ String? _tapeDirection(Map<String, dynamic> tape, LevelState state) {
   if (program.isEmpty) return null;
 
   final idxVar = tape['indexVariable'] as String? ?? 'tapeIndex';
-  var idx = (state.variables[idxVar] as num?)?.toInt() ?? 0;
+  var idx = readIntVariable(state, idxVar);
+  if (idx < 0) idx = 0;
   if (idx >= program.length) {
     if (tape['cycle'] != true) return null;
     idx %= program.length;
@@ -67,7 +74,9 @@ String? _tapeDirection(Map<String, dynamic> tape, LevelState state) {
 /// `state.variables`, so it is part of the state key and undo, preview and
 /// solver dedup all work unchanged. With `cycle` false the world stops
 /// stepping once the programme is exhausted; with `cycle` true it repeats
-/// forever and the index stays bounded.
+/// forever and the index stays bounded. `cycle` is read strictly — only the
+/// boolean `true` cycles, so a non-boolean value (e.g. `"cycle": 1`) behaves
+/// as `false`.
 class CoupledActorsSystem extends GameSystem {
   const CoupledActorsSystem({required super.id})
       : super(type: 'coupled_actors');
@@ -112,8 +121,13 @@ class CoupledActorsSystem extends GameSystem {
       return const [];
     }
 
-    // Safe: `allowed` only ever holds parseable direction names, and
-    // Direction.fromJson throws on anything else.
+    // Not a safety guarantee: `allowed` is pack-authored (`directions`
+    // config, and — under a `tape` — the tape's own `program`), so a pack
+    // that lists an unparseable name in both throws `FormatException` here.
+    // That matches the pre-tape `action.direction` path, which threw
+    // identically; Python's `dir_delta` instead returns `(0, 0)` for the
+    // same input and refuses silently, so a bogus direction name is not
+    // symmetric across engines today.
     final delta = Direction.fromJson(directionStr).offset;
     if (delta.x == 0 && delta.y == 0) return const [];
 

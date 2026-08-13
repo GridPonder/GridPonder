@@ -208,10 +208,19 @@ List<GameEvent> _claimEvents(TurnResult result) =>
 GameAction _moveRight() => GameAction('move', {'direction': 'right'});
 
 // ---------------------------------------------------------------------------
-// tape-driven stepping (DSL 0.5+)
+// tape-driven stepping
 // ---------------------------------------------------------------------------
 
-GameDefinition _makeTapedGame(List<String> program, {bool cycle = false}) {
+/// [cycle] is intentionally `dynamic`, not `bool`: the tape config is JSON,
+/// so tests probing a non-boolean value (e.g. `cycle: 1`, a JSON typo) need
+/// to be able to pass one through unchanged.
+GameDefinition _makeTapedGame(
+  List<String> program, {
+  dynamic cycle = false,
+  String? indexVariable,
+}) {
+  final tape = <String, dynamic>{'program': program, 'cycle': cycle};
+  if (indexVariable != null) tape['indexVariable'] = indexVariable;
   final data = {
     'id': 'com.gridponder.test_coupled_actors_tape',
     'layers': [
@@ -257,7 +266,7 @@ GameDefinition _makeTapedGame(List<String> program, {bool cycle = false}) {
         'id': 'movement',
         'type': 'coupled_actors',
         'config': {
-          'tape': {'program': program, 'cycle': cycle},
+          'tape': tape,
         },
       },
     ],
@@ -317,6 +326,65 @@ void _tapeTests() {
       }
       expect(_actorPos(engine, 'wei'), const Position(1, 0));
       expect(engine.state.variables['tapeIndex'], 1);
+    });
+
+    test('a negative tape index clamps to zero', () {
+      // A negative stored index (e.g. left behind by a rewind rule using
+      // increment_variable with a negative amount) must clamp to 0 rather
+      // than reaching `program[-1]`, which throws a RangeError in Dart —
+      // Python's negative indexing would otherwise silently wrap instead, so
+      // both engines must agree on clamping.
+      final engine = _engineFor(
+        _makeTapedGame(['right', 'down', 'left']),
+        _makeLevel(actors: [
+          [2, 0, 'wei']
+        ]),
+      );
+      engine.state.variables['tapeIndex'] = -1;
+      engine.executeTurn(GameAction('step'));
+      expect(_actorPos(engine, 'wei'), const Position(3, 0),
+          reason: "a negative stored index must clamp to 0 (program[0] == "
+              "'right')");
+      expect(engine.state.variables['tapeIndex'], 1);
+    });
+
+    test('a non-boolean cycle value does not cycle', () {
+      // "cycle": 1 is an ordinary JSON typo for true, not the real thing —
+      // the tape must treat only the boolean true as cycling, so a
+      // truthy-but-not-true value halts the tape exactly like cycle: false
+      // would.
+      final engine = _engineFor(
+        _makeTapedGame(['right'], cycle: 1),
+        _makeLevel(actors: [
+          [0, 0, 'wei']
+        ]),
+      );
+      engine.executeTurn(GameAction('step'));
+      engine.executeTurn(GameAction('step'));
+      expect(_actorPos(engine, 'wei'), const Position(1, 0),
+          reason: 'a non-boolean cycle value must not cycle — the tape '
+              'should have stopped after the first step');
+      expect(engine.state.variables['tapeIndex'], 1);
+    });
+
+    test('the tape honours a custom index variable name', () {
+      // Multi-machine packs need a distinct indexVariable per tape; the
+      // default "tapeIndex" name must not be hardcoded anywhere on the read
+      // or write path.
+      final engine = _engineFor(
+        _makeTapedGame(['right', 'right'], indexVariable: 'beltIndex'),
+        _makeLevel(actors: [
+          [0, 0, 'wei']
+        ]),
+      );
+      engine.executeTurn(GameAction('step'));
+      expect(engine.state.variables.containsKey('tapeIndex'), isFalse,
+          reason: 'a custom indexVariable must not also write the default '
+              'name');
+      expect(engine.state.variables['beltIndex'], 1);
+      engine.executeTurn(GameAction('step'));
+      expect(_actorPos(engine, 'wei'), const Position(2, 0));
+      expect(engine.state.variables['beltIndex'], 2);
     });
   });
 }

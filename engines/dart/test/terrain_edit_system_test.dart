@@ -78,6 +78,51 @@ GameAction _placeAt(int x, int y) => GameAction('place_wall', {
       'position': [x, y]
     });
 
+/// A second layer with `zero_or_one` occupancy and no `default`, so an
+/// untouched cell's `getEntity` returns null rather than an "empty" entity —
+/// unlike `ground` in `_makeGame`, which is `exactly_one`.
+GameDefinition _makeZeroOrOneGame() {
+  final data = {
+    'id': 'com.gridponder.test_terrain_edit_zero_or_one',
+    'layers': [
+      {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+      {'id': 'markers', 'occupancy': 'zero_or_one'},
+    ],
+    'entityKinds': {
+      'empty': {
+        'layer': 'ground',
+        'tags': ['walkable'],
+        'symbol': '.',
+      },
+      'marker': {
+        'layer': 'markers',
+        'tags': <String>[],
+        'symbol': 'M',
+      },
+    },
+    'actions': [
+      {
+        'id': 'place_marker',
+        'params': {
+          'position': {'type': 'position'},
+        },
+      },
+    ],
+    'systems': [
+      {
+        'id': 'edit',
+        'type': 'terrain_edit',
+        'config': {
+          'action': 'place_marker',
+          'layer': 'markers',
+          'kind': 'marker',
+        },
+      },
+    ],
+  };
+  return GameDefinition.fromJson(data, id: 'test_terrain_edit_zero_or_one');
+}
+
 void main() {
   group('terrain_edit', () {
     test('places a wall and spends budget', () {
@@ -148,6 +193,24 @@ void main() {
         'position': [double.nan, 0]
       }));
       expect(engine.state.variables['walls'], 1);
+    });
+
+    test(
+        'fromKind is the empty string, not null, for a previously-empty '
+        'zero_or_one cell', () {
+      // On a zero_or_one layer, getEntity returns null for an untouched
+      // cell — not an "empty" entity. The emitted cell_transformed event
+      // must still carry '' (not null) as fromKind, matching the Python
+      // engine's payload.
+      final engine = _engineFor(_makeZeroOrOneGame(), _makeLevel(budget: 1));
+      final result = engine.executeTurn(GameAction('place_marker', {
+        'position': [2, 0]
+      }));
+      final transformed =
+          result.events.where((e) => e.type == 'cell_transformed').toList();
+      expect(transformed.length, 1);
+      expect(transformed[0]['fromKind'], equals(''));
+      expect(transformed[0]['toKind'], equals('marker'));
     });
   });
 }

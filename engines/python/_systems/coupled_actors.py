@@ -22,7 +22,9 @@ Optionally, a ``tape`` config block (``{"program": [...], "cycle": bool,
 from the action's direction. The index lives in ``state.variables``, so it is
 part of the state key and undo, preview and solver dedup all work unchanged.
 With ``cycle`` false the world stops stepping once the programme is exhausted;
-with ``cycle`` true it repeats forever and the index stays bounded.
+with ``cycle`` true it repeats forever and the index stays bounded. ``cycle``
+is read strictly — only the boolean ``True`` cycles, so a non-boolean value
+(e.g. ``"cycle": 1``) behaves as ``False``.
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ from .._game_def import GameDef
 from .. import _events as ev
 from ._base import GameSystem
 from ._claim import apply_claim
+from ._runtime_var import read_int_variable
 
 # Buckets resolve in this fixed order so that a board whose actors travel in
 # several directions at once is still fully deterministic.
@@ -40,18 +43,25 @@ _CANONICAL_BUCKETS = ((0, -1), (0, 1), (-1, 0), (1, 0))  # up, down, left, right
 def _tape_direction(tape: dict, state: GameState) -> str | None:
     """Next instruction from the tape, advancing the stored index.
 
+    A negative stored index (e.g. from a rewind rule using
+    ``increment_variable`` with a negative amount) is clamped to 0 rather than
+    wrapping — a rewind-past-the-start is inert, not surprising.
+
     Returns None when a non-cycling programme is exhausted, which stops the
     world stepping. A cycling programme wraps, so its index stays bounded by
     the programme length — that keeps the joint state space finite for a
-    domain solver.
+    domain solver. ``cycle`` is checked with ``is True`` (not truthy) so a
+    typo like ``"cycle": 1`` behaves as non-cycling rather than cycling.
     """
     program = tape.get("program") or []
     if not program:
         return None
     idx_var = tape.get("indexVariable", "tapeIndex")
-    idx = int(state.variables.get(idx_var, 0))
+    idx = read_int_variable(state, idx_var)
+    if idx < 0:
+        idx = 0
     if idx >= len(program):
-        if not tape.get("cycle", False):
+        if tape.get("cycle") is not True:
             return None
         idx %= len(program)
     state.variables[idx_var] = idx + 1

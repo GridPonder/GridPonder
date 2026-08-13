@@ -12,6 +12,7 @@ from .._models import Pos, GameState, Entity
 from .._game_def import GameDef
 from .. import _events as ev
 from ._base import GameSystem
+from ._runtime_var import read_int_variable
 
 
 class TerrainEditSystem(GameSystem):
@@ -38,7 +39,7 @@ class TerrainEditSystem(GameSystem):
         budget_var = config.get("budgetVariable")
         remaining = 0
         if budget_var is not None:
-            remaining = int(state.variables.get(budget_var, 0))
+            remaining = read_int_variable(state, budget_var)
             if remaining <= 0:
                 return []
 

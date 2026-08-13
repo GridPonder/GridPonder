@@ -5,6 +5,7 @@ import '../models/game_action.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
+import 'runtime_variable.dart';
 
 /// TerrainEditSystem — see docs/dsl/04_systems.md.
 ///
@@ -34,7 +35,7 @@ class TerrainEditSystem extends GameSystem {
     final budgetVar = config['budgetVariable'] as String?;
     var remaining = 0;
     if (budgetVar != null) {
-      remaining = (state.variables[budgetVar] as num?)?.toInt() ?? 0;
+      remaining = readIntVariable(state, budgetVar);
       if (remaining <= 0) return const [];
     }
 
@@ -55,9 +56,11 @@ class TerrainEditSystem extends GameSystem {
 
   /// Type guard, not a try/catch: refuses non-list/short shapes and
   /// non-numeric elements instead of throwing. Also refuses non-finite
-  /// numbers (infinity, NaN) — `double.infinity.toInt()` throws
-  /// `UnsupportedError`, which would otherwise turn a malformed action into
-  /// a raise instead of a refusal.
+  /// numbers (`double.infinity`, `double.nan`) before calling `.toInt()`:
+  /// only NaN and Infinity throw `UnsupportedError` there — a finite double,
+  /// however large, saturates to the `int` range instead of throwing — so
+  /// this guard exists specifically for the non-finite case, which would
+  /// otherwise turn a malformed action into a raise instead of a refusal.
   Position? _parsePosition(dynamic raw) {
     if (raw is List && raw.length >= 2) {
       final x = raw[0];
