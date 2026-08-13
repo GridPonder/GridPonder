@@ -2,6 +2,8 @@
 from __future__ import annotations
 from typing import Any
 
+from ._goal import balance_counts
+
 
 def render_goals(
     level_def: dict,
@@ -68,6 +70,14 @@ def render_goals(
         elif goal_type == "count_constraint":
             goal_parts.append(_describe_count_constraint(config))
 
+        elif goal_type == "balance":
+            goal_parts.append(
+                _describe_balance(
+                    game_def, config, state,
+                    kind_to_label=kind_to_label if anonymize else None,
+                )
+            )
+
         elif goal_type == "param_match":
             goal_parts.append(
                 _describe_param_match(
@@ -79,6 +89,64 @@ def render_goals(
             goal_parts.append(goal_type)
 
     return "; ".join(goal_parts)
+
+
+def _list_names(names: list[str]) -> str:
+    if not names:
+        return "the owners"
+    if len(names) == 1:
+        return names[0]
+    return ", ".join(names[:-1]) + " and " + names[-1]
+
+
+def _describe_balance(
+    game_def, config: dict, state, *, kind_to_label: dict[str, str] | None
+) -> str:
+    """Describe a `balance` goal: divide the claimable cells between owners.
+
+    Generic over the config rather than written for any one pack — the two
+    flags are what the win condition actually reads, so the sentence changes
+    with them. Written because the fallback branch renders an unhandled goal as
+    its *type name*: an anonymous run of a pack with a balance goal was told,
+    in full, that its objective was "balance". Clear mode hid it, since a pack
+    with a `goalDescriptions` override never reaches the fallback and anonymous
+    mode skips those overrides by design.
+
+    In anonymous mode the owners come out as their aliases and the layer is
+    never named: `territory` is the pack's own vocabulary, and aliasing covers
+    entity kinds, not layer ids.
+
+    Progress is included for the same reason `sequence_match` includes it — a
+    goal you cannot tell you are close to meeting is a worse goal, not a harder
+    one — and is counted by the same function the win condition uses.
+    """
+    owners = list(config.get("owners") or [])
+    if kind_to_label is not None:
+        names = [kind_to_label.get(owner, owner) for owner in owners]
+    else:
+        names = [_resolve_entity_name(game_def, owner, None) for owner in owners]
+
+    listed = _list_names(names)
+    require_equal = config.get("requireEqual", True)
+    require_complete = config.get("requireComplete", True)
+    if require_complete and require_equal:
+        head = f"Claim every claimable cell, and give {listed} an equal number each"
+    elif require_equal:
+        head = f"Give {listed} an equal number of cells each"
+    elif require_complete:
+        head = f"Claim every claimable cell for {listed}"
+    else:
+        head = f"Claim cells for {listed}"
+
+    counts, claimable = balance_counts(config, state)
+    if not owners:
+        return head
+    tally = ", ".join(f"{name} {counts.get(owner, 0)}"
+                      for name, owner in zip(names, owners))
+    owned = sum(counts.values())
+    if claimable:
+        return f"{head} ({tally} — {owned} of {claimable} claimed)"
+    return f"{head} ({tally})"
 
 
 def _resolve_entity_name(game_def, kind_id: str | None, tag: str | None) -> str:

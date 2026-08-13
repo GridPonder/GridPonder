@@ -320,6 +320,36 @@ def _count_claimable(board: Any, cfg: dict) -> int:
     return sum(1 for _pos, entity in layer.entries() if entity.kind in kinds)
 
 
+def _balance_tally(
+    cfg: dict, state: GameState
+) -> tuple[dict[str, int], dict[str, set], int]:
+    """Cells held by each owner, where those cells sit, and how many cells are
+    claimable at all.
+
+    The single pass everything about a balance goal is derived from, so the
+    progress an agent is shown and the condition it is scored against cannot
+    disagree. Two copies of this counting would drift, and the drift would be
+    invisible: the agent would be told it was one cell short of a goal it had
+    already met. `positions` feeds the connectivity check the same way.
+    """
+    layer = state.board.layers.get(cfg.get("layer"))
+    counts = {o: 0 for o in cfg.get("owners", [])}
+    positions: dict[str, set] = {o: set() for o in counts}
+    if layer is not None:
+        for pos, entity in layer.entries():
+            if entity.kind in counts:
+                counts[entity.kind] += 1
+                positions[entity.kind].add(pos)
+    return counts, positions, _count_claimable(state.board, cfg)
+
+
+def balance_counts(cfg: dict, state: GameState) -> tuple[dict[str, int], int]:
+    """Cells held by each owner, and how many cells are claimable at all —
+    what the goal renderer needs. See :func:`_balance_tally`."""
+    counts, _positions, claimable = _balance_tally(cfg, state)
+    return counts, claimable
+
+
 def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
     """Win when a territory layer is divided completely and into exactly-equal
     shares among the configured owners (or per requireComplete/requireEqual).
@@ -329,15 +359,7 @@ def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
     position through cells of the same owner.  This models supply lines without
     coupling the generic balance goal to any game-specific capital entity.
     """
-    layer = state.board.layers.get(cfg.get("layer"))
-    counts = {o: 0 for o in cfg.get("owners", [])}
-    positions = {o: set() for o in counts}
-    if layer is not None:
-        for pos, entity in layer.entries():
-            if entity.kind in counts:
-                counts[entity.kind] += 1
-                positions[entity.kind].add(pos)
-    claimable = _count_claimable(state.board, cfg)
+    counts, positions, claimable = _balance_tally(cfg, state)
     owned = sum(counts.values())
     equal = len(set(counts.values())) == 1
     complete = owned == claimable

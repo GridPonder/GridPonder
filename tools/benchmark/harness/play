@@ -1,0 +1,79 @@
+#!/usr/bin/env python3
+"""The agent's entire interface to the puzzle.
+
+Stateless: the supervisor on the other end of the socket owns the game. Copied
+into the sandbox as the only executable there. Stdlib only, and no imports from
+the benchmark package, because the sandbox contains no other Python files.
+
+Exit codes: 0 ok, 2 usage/transport error, 3 run is over.
+"""
+import json
+import os
+import socket
+import sys
+
+SOCK_NAME = ".play.sock"
+DEFAULT_TIMEOUT_SECONDS = 30.0
+
+# Substituted by the supervisor when it copies this file into the sandbox.
+# AF_UNIX paths cap at ~108 bytes and a sandbox nested under a project
+# directory overruns that, so the socket cannot always sit next to this
+# script. Left empty the sibling is used, which keeps a hand-built sandbox
+# working with no substitution at all.
+SOCK_PATH = ""
+
+
+def main() -> int:
+    argv = sys.argv[1:]
+    if not argv:
+        print("usage: ./play state | move '<json>' | history | give_up")
+        return 2
+
+    sock_path = SOCK_PATH or os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), SOCK_NAME
+    )
+    timeout = float(os.environ.get("PLAY_SOCKET_TIMEOUT", DEFAULT_TIMEOUT_SECONDS))
+
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    try:
+        with sock:
+            sock.connect(sock_path)
+            sock.settimeout(timeout)
+            sock.sendall((json.dumps(argv) + "\n").encode("utf-8"))
+            chunks = []
+            while not chunks or not chunks[-1].endswith(b"\n"):
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+    except socket.timeout:
+        # socket.timeout is an alias of TimeoutError (itself an OSError); this
+        # clause must stay ahead of the OSError one below or it never fires.
+        print("The puzzle server did not respond in time. Nothing more can be done.",
+              file=sys.stderr)
+        return 2
+    except OSError:
+        print("The puzzle server is not running. Nothing more can be done.",
+              file=sys.stderr)
+        return 2
+
+    raw = b"".join(chunks).strip()
+    if not raw:
+        print("No response from the puzzle server.", file=sys.stderr)
+        return 2
+
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        print("The puzzle server sent a malformed response.", file=sys.stderr)
+        return 2
+    if not isinstance(payload, dict):
+        print("The puzzle server sent a malformed response.", file=sys.stderr)
+        return 2
+
+    print(payload.get("text", ""))
+    return 3 if payload.get("terminal") else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
