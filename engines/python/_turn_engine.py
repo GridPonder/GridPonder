@@ -103,6 +103,12 @@ class TurnEngine:
         params = params or {}
         action = {"actionId": action_id, "params": params}
 
+        # A finished level takes no further actions. Checked before the action
+        # itself so a won or lost board cannot keep advancing its turn counter,
+        # mirroring the same guard at the head of the Dart TurnEngine.
+        if self._state.is_won or self._state.is_lost:
+            return TurnResult(accepted=False, events=[], is_won=False, is_lost=False)
+
         # Phase 1: input validation
         if not self._game.is_valid_action(action_id):
             return TurnResult(accepted=False, events=[], is_won=False, is_lost=False)
