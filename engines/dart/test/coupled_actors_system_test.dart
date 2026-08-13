@@ -208,6 +208,120 @@ List<GameEvent> _claimEvents(TurnResult result) =>
 GameAction _moveRight() => GameAction('move', {'direction': 'right'});
 
 // ---------------------------------------------------------------------------
+// tape-driven stepping (DSL 0.5+)
+// ---------------------------------------------------------------------------
+
+GameDefinition _makeTapedGame(List<String> program, {bool cycle = false}) {
+  final data = {
+    'id': 'com.gridponder.test_coupled_actors_tape',
+    'layers': [
+      {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+      {'id': 'actors', 'occupancy': 'zero_or_one'},
+    ],
+    'entityKinds': {
+      'empty': {
+        'layer': 'ground',
+        'tags': ['walkable'],
+        'symbol': '.'
+      },
+      'wall': {
+        'layer': 'ground',
+        'tags': ['solid'],
+        'symbol': '#'
+      },
+      'wei': {
+        'layer': 'actors',
+        'tags': ['actor'],
+        'symbol': 'W'
+      },
+      'shu': {
+        'layer': 'actors',
+        'tags': ['actor'],
+        'symbol': 'S'
+      },
+    },
+    'actions': [
+      {
+        'id': 'move',
+        'params': {
+          'direction': {
+            'type': 'direction',
+            'values': ['up', 'down', 'left', 'right'],
+          },
+        },
+      },
+      {'id': 'step', 'params': <String, dynamic>{}},
+    ],
+    'systems': [
+      {
+        'id': 'movement',
+        'type': 'coupled_actors',
+        'config': {
+          'tape': {'program': program, 'cycle': cycle},
+        },
+      },
+    ],
+  };
+  return GameDefinition.fromJson(data, id: 'test_coupled_actors_tape');
+}
+
+void _tapeTests() {
+  group('tape-driven stepping', () {
+    test('the tape direction overrides the action direction', () {
+      final engine = _engineFor(
+        _makeTapedGame(['right']),
+        _makeLevel(actors: [
+          [0, 0, 'wei']
+        ]),
+      );
+      engine.executeTurn(GameAction('move', {'direction': 'left'}));
+      expect(_actorPos(engine, 'wei'), const Position(1, 0));
+      expect(engine.state.variables['tapeIndex'], 1);
+    });
+
+    test('the tape advances on a param-less action', () {
+      final engine = _engineFor(
+        _makeTapedGame(['right', 'right']),
+        _makeLevel(actors: [
+          [0, 0, 'wei']
+        ]),
+      );
+      engine.executeTurn(GameAction('step'));
+      engine.executeTurn(GameAction('step'));
+      expect(_actorPos(engine, 'wei'), const Position(2, 0));
+      expect(engine.state.variables['tapeIndex'], 2);
+    });
+
+    test('a finite tape stops when exhausted', () {
+      final engine = _engineFor(
+        _makeTapedGame(['right']),
+        _makeLevel(actors: [
+          [0, 0, 'wei']
+        ]),
+      );
+      engine.executeTurn(GameAction('step'));
+      engine.executeTurn(GameAction('step'));
+      expect(_actorPos(engine, 'wei'), const Position(1, 0));
+      expect(engine.state.variables['tapeIndex'], 1);
+    });
+
+    test('a cyclic tape wraps and keeps the index bounded', () {
+      final engine = _engineFor(
+        _makeTapedGame(['right', 'left'], cycle: true),
+        _makeLevel(actors: [
+          [0, 0, 'wei']
+        ]),
+      );
+      for (var i = 0; i < 5; i++) {
+        engine.executeTurn(GameAction('step'));
+      }
+      expect(_actorPos(engine, 'wei'), const Position(1, 0));
+      expect(engine.state.variables['tapeIndex'], 1);
+    });
+  });
+}
+
+// ---------------------------------------------------------------------------
 // directionTransforms (DSL 0.8) — per-actor direction mapping
 // ---------------------------------------------------------------------------
 
@@ -265,6 +379,8 @@ GameDefinition _makeGameWithTransforms(Map<String, String> transforms) {
 }
 
 void main() {
+  _tapeTests();
+
   group('coupled_actors — directionTransforms', () {
     test('identity transforms match legacy order (compatibility guarantee)',
         () {

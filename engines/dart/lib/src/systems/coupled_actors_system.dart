@@ -1,4 +1,5 @@
 import '../engine/game_system.dart';
+import '../models/direction.dart';
 import '../models/direction_transform.dart';
 import '../models/entity.dart';
 import '../models/event.dart';
@@ -16,6 +17,28 @@ class _Mover {
   final Position eff;
 
   const _Mover(this.pos, this.entity, this.eff);
+}
+
+/// Next instruction from the tape, advancing the stored index.
+///
+/// Returns null when a non-cycling programme is exhausted, which stops the
+/// world stepping. A cycling programme wraps, so its index stays bounded by
+/// the programme length — that keeps the joint state space finite for a
+/// domain solver.
+String? _tapeDirection(Map<String, dynamic> tape, LevelState state) {
+  final program = (tape['program'] as List<dynamic>? ?? const [])
+      .map((d) => d.toString())
+      .toList();
+  if (program.isEmpty) return null;
+
+  final idxVar = tape['indexVariable'] as String? ?? 'tapeIndex';
+  var idx = (state.variables[idxVar] as num?)?.toInt() ?? 0;
+  if (idx >= program.length) {
+    if (tape['cycle'] != true) return null;
+    idx %= program.length;
+  }
+  state.variables[idxVar] = idx + 1;
+  return program[idx];
 }
 
 /// CoupledActorsSystem — see docs/dsl/04_systems.md.
@@ -37,6 +60,14 @@ class _Mover {
 /// if the cell is currently empty there; an already-owned territory cell is
 /// never overwritten. Claiming applies only to cells reached by a move this
 /// turn, not to blocked/staying actors or to actors' initial cells.
+///
+/// Optionally, a `tape` config block (`{"program": [...], "cycle": bool,
+/// "indexVariable": String}`) drives the system from a stored programme
+/// instead of from the action's direction. The index lives in
+/// `state.variables`, so it is part of the state key and undo, preview and
+/// solver dedup all work unchanged. With `cycle` false the world stops
+/// stepping once the programme is exhausted; with `cycle` true it repeats
+/// forever and the index stays bounded.
 class CoupledActorsSystem extends GameSystem {
   const CoupledActorsSystem({required super.id})
       : super(type: 'coupled_actors');
@@ -59,23 +90,31 @@ class CoupledActorsSystem extends GameSystem {
     GameDefinition game,
   ) {
     final config = game.systemConfig(id, {});
+    final tape = config['tape'] as Map<String, dynamic>?;
 
-    final moveAction = config['moveAction'] as String? ?? 'move';
-    if (action.actionId != moveAction) return const [];
+    final String? directionStr;
+    if (tape == null) {
+      final moveAction = config['moveAction'] as String? ?? 'move';
+      if (action.actionId != moveAction) return const [];
+      directionStr = action.directionStr;
+    } else {
+      // Tape-driven: the direction comes from the programme, so *any* accepted
+      // action steps the world. A vetoed turn cannot leak the advanced index,
+      // because the turn engine runs the whole turn on a working copy.
+      directionStr = _tapeDirection(tape, state);
+    }
 
     final allowedRaw =
         config['directions'] as List<dynamic>? ?? _defaultDirections;
     final allowed = allowedRaw.map((d) => d.toString()).toList();
 
-    final directionStr = action.directionStr;
     if (directionStr == null || !allowed.contains(directionStr)) {
       return const [];
     }
 
-    final direction = action.direction;
-    if (direction == null) return const [];
-
-    final delta = direction.offset;
+    // Safe: `allowed` only ever holds parseable direction names, and
+    // Direction.fromJson throws on anything else.
+    final delta = Direction.fromJson(directionStr).offset;
     if (delta.x == 0 && delta.y == 0) return const [];
 
     final actorLayerId = config['actorLayer'] as String? ?? 'actors';
