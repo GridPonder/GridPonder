@@ -336,7 +336,12 @@ A territory layer is divided completely and equally among a fixed set of owners 
     "claimableLayer": "ground",
     "claimableKind": "empty",
     "requireComplete": true,
-    "requireEqual": true
+    "requireEqual": true,
+    "requireConnected": true,
+    "connectionSources": {
+      "terr_wei": [0, 0],
+      "terr_shu": [0, 4]
+    }
 }}
 ```
 
@@ -348,8 +353,14 @@ A territory layer is divided completely and equally among a fixed set of owners 
 | `claimableKind` | string or array of strings | Kind(s) that count as claimable. A list is allowed for boards where more than one ground kind can be owned. Default: that layer's declared `default` kind. |
 | `requireComplete` | boolean | Require every claimable cell to be owned (`owned == claimable`). Default: `true`. |
 | `requireEqual` | boolean | Require every owner's count to be identical. Default: `true`. |
+| `requireConnected` | boolean | Require every configured owner's territory to form one orthogonally connected component containing its connection source. Default: `false`. |
+| `connectionSources` | object | Map from each owner kind to its fixed `[x, y]` source cell. Required for every owner when `requireConnected` is `true`; the source must itself be owned by that owner. |
 
-**Engine behavior:** Tally each owner's cell count on `layer`. `claimable` = number of `claimableLayer` cells whose kind matches `claimableKind`. At least one cell must be owned. The goal is then done when (`equal`, or `requireEqual` is `false`) and (`complete`, or `requireComplete` is `false`); progress = owned / claimable (or `0.0` when nothing is claimable).
+**Engine behavior:** Tally each owner's cell count on `layer`. `claimable` = number of `claimableLayer` cells whose kind matches `claimableKind`. At least one cell must be owned. The goal is then done when (`equal`, or `requireEqual` is `false`), (`complete`, or `requireComplete` is `false`), and (`connected`, or `requireConnected` is `false`). Connectivity uses cardinal neighbours only and walks through cells carrying the same owner kind. When connectivity is required, progress is the number of source-connected owned cells divided by `claimable`; otherwise it remains `owned / claimable` (or `0.0` when nothing is claimable).
+
+`connectionSources` deliberately contains positions rather than entity kinds. Packs may render capitals, generators, roots, or other game-specific source markers on any layer without making the generic goal evaluator depend on those entities.
+
+The balance lose conditions continue to reason about claim counts and move budgets only; they do not attempt to prove whether a disconnected component can still be rejoined. Connected-territory levels should retain an appropriate `max_actions` bound when they need a terminal failure.
 
 > **Keep `claimableKind` in step with the board.** The balance lose conditions count claimable cells the same way. If a board introduces a second walkable ground kind and `claimableKind` still names only one, `claimable` silently drops — which usually makes it indivisible by the owner count and fails the level as "equal shares impossible" before anything else is evaluated.
 

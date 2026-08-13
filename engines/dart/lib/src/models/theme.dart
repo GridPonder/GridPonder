@@ -1,7 +1,8 @@
 /// Non-normative theme and controls configuration.
 
 class GestureBinding {
-  final String gesture; // swipe_cardinal, swipe_diagonal, tap_cell, button, key_press
+  final String
+      gesture; // swipe_cardinal, swipe_diagonal, tap_cell, button, key_press
   final String action;
   final String? buttonId;
   final String? key; // for key_press: single character, e.g. "c"
@@ -104,7 +105,8 @@ class AvatarSpriteEntry {
 class AvatarThemeDef {
   final bool visible;
   final String? sprite; // fallback
-  final Map<String, Map<String, AvatarSpriteEntry>> sprites; // state → dir → entry
+  final Map<String, Map<String, AvatarSpriteEntry>>
+      sprites; // state → dir → entry
 
   const AvatarThemeDef({
     this.visible = true,
@@ -135,6 +137,39 @@ class AvatarThemeDef {
   }
 }
 
+/// A sprite-strip animation played at a cell in response to an engine event.
+///
+/// Purely presentational: the engine never reads this, and a client that does
+/// not implement effects simply ignores it. The strip is a single image of
+/// [frames] equal-width frames laid out left to right.
+class CellEffectDef {
+  /// Path to the horizontal sprite strip, relative to the pack.
+  final String sheet;
+
+  /// Number of equal-width frames in the strip.
+  final int frames;
+
+  /// Total play time for one pass through the strip, in milliseconds.
+  final int durationMs;
+
+  /// Draw scale relative to one board cell (1.0 = exactly one cell).
+  final double scale;
+
+  const CellEffectDef({
+    required this.sheet,
+    this.frames = 1,
+    this.durationMs = 300,
+    this.scale = 1.0,
+  });
+
+  factory CellEffectDef.fromJson(Map<String, dynamic> j) => CellEffectDef(
+        sheet: j['sheet'] as String,
+        frames: (j['frames'] as num?)?.toInt() ?? 1,
+        durationMs: (j['durationMs'] as num?)?.toInt() ?? 300,
+        scale: (j['scale'] as num?)?.toDouble() ?? 1.0,
+      );
+}
+
 /// Full theme definition.
 class ThemeDef {
   final ControlsDef? controls;
@@ -143,6 +178,11 @@ class ThemeDef {
   final String? backgroundColor;
   final BoardStyleDef? boardStyle;
   final AvatarThemeDef? avatar;
+
+  /// Optional event-driven cell effects: engine event type → sprite-strip
+  /// animation played at that event's position. E.g. `cell_transformed` to
+  /// flash a burst wherever a capture flipped a cell.
+  final Map<String, CellEffectDef> effects;
 
   /// Optional named-colour palette: maps colour names (e.g. "red", "teal")
   /// to CSS hex strings. Used by the renderer when an entity or action
@@ -159,6 +199,7 @@ class ThemeDef {
     this.boardStyle,
     this.avatar,
     this.palette = const {},
+    this.effects = const {},
   });
 
   factory ThemeDef.fromJson(Map<String, dynamic> j) => ThemeDef(
@@ -176,5 +217,11 @@ class ThemeDef {
             : null,
         palette: ((j['palette'] as Map?) ?? const {})
             .map((k, v) => MapEntry(k.toString(), v.toString())),
+        effects: ((j['effects'] as Map?) ?? const {}).map(
+          (k, v) => MapEntry(
+            k.toString(),
+            CellEffectDef.fromJson(v as Map<String, dynamic>),
+          ),
+        ),
       );
 }

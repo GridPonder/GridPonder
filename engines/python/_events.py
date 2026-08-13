@@ -68,8 +68,13 @@ def line_of_sight_detected(
     }
 
 
-def cell_cleared(pos: Pos, previous_kind: str) -> dict:
-    return {"type": "cell_cleared", "position": pos, "previousKind": previous_kind}
+def cell_cleared(pos: Pos, previous_kind: str, layer: str = "objects") -> dict:
+    return {
+        "type": "cell_cleared",
+        "position": pos,
+        "previousKind": previous_kind,
+        "layer": layer,
+    }
 
 
 def cell_transformed(pos: Pos, from_kind: str, to_kind: str, layer: str) -> dict:
@@ -152,12 +157,26 @@ def item_released(emitter_id: str, kind: str, pos: Pos, params: dict | None = No
     }
 
 
-def object_settled(kind: str, pos: Pos, from_pos: Pos) -> dict:
+def object_settled(
+    kind: str,
+    pos: Pos,
+    from_pos: Pos,
+    layer: str = "objects",
+    from_kind: str | None = None,
+) -> dict:
+    """`layer` lets a UI animate the travel from `from_pos` to `pos` with the
+    right sprite; gravity-style effects only ever move `objects`.
+
+    `from_kind` is what the entity looked like on the way; `kind` is what it
+    became on arrival. A UI animating the travel should draw `from_kind`, or
+    the entity appears to transform before it has landed."""
     return {
         "type": "object_settled",
         "kind": kind,
         "position": pos,
         "fromPosition": from_pos,
+        "layer": layer,
+        "fromKind": from_kind if from_kind is not None else kind,
     }
 
 
@@ -177,6 +196,22 @@ def actor_entered(kind: str, pos: Pos, from_pos: Pos, direction: str) -> dict:
         "kind": kind,
         "fromPosition": from_pos,
         "position": pos,
+        "direction": direction,
+    }
+
+
+def actor_reacted(kind: str, from_pos: Pos, to_pos: Pos, direction: str) -> dict:
+    """A reactive (non-player) actor answered the player's move.
+
+    Deliberately distinct from ``actor_moved`` so move counters and budgets
+    keyed on player movement are unaffected; systems that should treat a rival
+    landing as an anchor name this event explicitly.
+    """
+    return {
+        "type": "actor_reacted",
+        "kind": kind,
+        "fromPosition": from_pos,
+        "position": to_pos,
         "direction": direction,
     }
 

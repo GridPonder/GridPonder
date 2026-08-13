@@ -481,16 +481,25 @@ class GoalEvaluator {
   ///                      layer's declared default kind)
   ///   requireComplete  — require owned == claimable (default true)
   ///   requireEqual     — require every owner's count to match (default true)
+  ///   requireConnected — require each owner's cells to form one orthogonally
+  ///                      connected component containing its connection source
+  ///   connectionSources — map from owner kind to fixed [x,y] source position
   (bool, double) _balance(GoalDef goal, LevelState state, GameDefinition game) {
     final owners = (goal.config['owners'] as List?)?.cast<String>() ?? [];
     final counts = <String, int>{for (final o in owners) o: 0};
+    final positions = <String, Set<Position>>{
+      for (final o in owners) o: <Position>{},
+    };
 
     final layerId = goal.config['layer'] as String?;
     final layer = state.board.layers[layerId];
     if (layer != null) {
       for (final entry in layer.entries()) {
         final kind = entry.value.kind;
-        if (counts.containsKey(kind)) counts[kind] = counts[kind]! + 1;
+        if (counts.containsKey(kind)) {
+          counts[kind] = counts[kind]! + 1;
+          positions[kind]!.add(entry.key);
+        }
       }
     }
 
@@ -498,13 +507,54 @@ class GoalEvaluator {
     final owned = counts.values.fold(0, (a, b) => a + b);
     final equal = counts.values.toSet().length == 1;
     final complete = owned == claimable;
-    final progress = claimable != 0 ? owned / claimable : 0.0;
+    final requireConnected =
+        (goal.config['requireConnected'] as bool?) ?? false;
+    var connected = true;
+    var connectedOwned = owned;
+    if (requireConnected) {
+      connectedOwned = 0;
+      final rawSources =
+          goal.config['connectionSources'] as Map<String, dynamic>? ?? {};
+      for (final owner in owners) {
+        final cells = positions[owner]!;
+        final rawSource = rawSources[owner];
+        if (rawSource is! List || rawSource.length != 2) {
+          connected = false;
+          continue;
+        }
+        final source = Position.fromJson(rawSource);
+        if (!cells.contains(source)) {
+          connected = false;
+          continue;
+        }
+        final reached = <Position>{source};
+        final frontier = <Position>[source];
+        while (frontier.isNotEmpty) {
+          final current = frontier.removeLast();
+          for (final neighbor in <Position>[
+            Position(current.x + 1, current.y),
+            Position(current.x - 1, current.y),
+            Position(current.x, current.y + 1),
+            Position(current.x, current.y - 1),
+          ]) {
+            if (cells.contains(neighbor) && reached.add(neighbor)) {
+              frontier.add(neighbor);
+            }
+          }
+        }
+        connectedOwned += reached.length;
+        if (reached.length != cells.length) connected = false;
+      }
+    }
+    final progressNumerator = requireConnected ? connectedOwned : owned;
+    final progress = claimable != 0 ? progressNumerator / claimable : 0.0;
 
     final requireEqual = (goal.config['requireEqual'] as bool?) ?? true;
     final requireComplete = (goal.config['requireComplete'] as bool?) ?? true;
     final done = owned > 0 &&
         (equal || !requireEqual) &&
-        (complete || !requireComplete);
+        (complete || !requireComplete) &&
+        connected;
     return (done, progress);
   }
 }

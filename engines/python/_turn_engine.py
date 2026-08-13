@@ -24,6 +24,14 @@ class TurnResult:
     lose_reason: Optional[str] = None
     goal_progress: Optional[dict[str, float]] = None
 
+    #: The board the action produced, set only by :meth:`TurnEngine.preview_turn`.
+    #: After a real turn the caller reads ``engine.state``, but a preview rolls
+    #: that back, so the previewed board would otherwise be unreachable — the
+    #: one question a dry run exists to answer. Dart's TurnResult carries the
+    #: equivalent ``newState`` on every result; here it stays optional so no
+    #: existing call site changes.
+    new_state: Optional[GameState] = None
+
 
 class TurnEngine:
     """
@@ -103,6 +111,12 @@ class TurnEngine:
         params = params or {}
         action = {"actionId": action_id, "params": params}
 
+        # A finished level takes no further actions. Checked before the action
+        # itself so a won or lost board cannot keep advancing its turn counter,
+        # mirroring the same guard at the head of the Dart TurnEngine.
+        if self._state.is_won or self._state.is_lost:
+            return TurnResult(accepted=False, events=[], is_won=False, is_lost=False)
+
         # Phase 1: input validation
         if not self._game.is_valid_action(action_id):
             return TurnResult(accepted=False, events=[], is_won=False, is_lost=False)
@@ -162,7 +176,16 @@ class TurnEngine:
             all_events.extend(events)
 
         # Phase 7: Goal evaluation
-        state.action_count += 1
+        #
+        # A turn that only *selects* an actor changes no board state, so it is
+        # not a move: it must not be charged against `max_actions`, nor shown
+        # as one in the UI, which reads this counter. Games that tap to switch
+        # between actors would otherwise pay for the tap as well as the step.
+        # `turn_count` still advances — it is the pipeline's tick, not a move.
+        selection_only = bool(all_events) and all(
+            e["type"] == "actor_selected" for e in all_events)
+        if not selection_only:
+            state.action_count += 1
         state.turn_count += 1
 
         goals = self._level.get("goals", []) or []
@@ -190,6 +213,31 @@ class TurnEngine:
             lose_reason=lose_reason,
             goal_progress=goal_progress,
         )
+
+    def preview_turn(
+        self, action_id: str, params: Optional[dict] = None
+    ) -> TurnResult:
+        """Dry-run an action without committing it.
+
+        Returns the TurnResult the action *would* produce, leaving this
+        engine's state, history and win/loss flags untouched, so a UI can
+        answer "what would this do?" — which cells a destructive verb would
+        remove, what would move and where it would come to rest — before the
+        player commits.  Generic: any pack whose actions have consequences
+        that cannot be read off a static board can offer the same preview.
+
+        The previewed board is returned as ``result.new_state``: execute_turn
+        leaves it on the engine, so it is handed to the caller before being
+        rolled back.  A refused action changes nothing, so its ``new_state`` is
+        the live board — matching Dart's ``TurnResult.rejected(state)``.
+        """
+        saved = self._state
+        try:
+            result = self.execute_turn(action_id, params, save_history=False)
+            result.new_state = self._state
+            return result
+        finally:
+            self._state = saved
 
     def undo(self) -> bool:
         """Restore previous state. Returns False if nothing to undo."""

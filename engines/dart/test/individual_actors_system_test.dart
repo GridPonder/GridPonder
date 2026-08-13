@@ -408,4 +408,123 @@ void main() {
     expect(_actorPos(engine, 'wei'), equals(const Position(2, 0)));
     expect(_actorPos(engine, 'shu'), equals(const Position(3, 0)));
   });
+
+  test('reactive kinds mirror the mover\'s direction', () {
+    // wei is the player's piece; shu is reactive with `invert`, so a move right
+    // sends shu left. The rival's step emits `actor_reacted`, never
+    // `actor_moved`, so move counters keyed on player movement stay honest.
+    final game = _makeGame(config: const {
+      'reactiveKinds': {'shu': 'invert'},
+    });
+    final engine = _engineFor(game, _makeReactiveLevel());
+
+    engine.executeTurn(GameAction('tap_cell', {
+      'position': [1, 0],
+    }));
+    final result = engine.executeTurn(GameAction('move', {
+      'direction': 'right',
+    }));
+
+    expect(result.accepted, isTrue);
+    expect(_actorPos(engine, 'wei'), equals(const Position(2, 0)));
+    expect(_actorPos(engine, 'shu'), equals(const Position(4, 0)));
+
+    final reacted =
+        result.events.where((e) => e.type == 'actor_reacted').toList();
+    expect(reacted, hasLength(1));
+    expect(reacted.single.payload['kind'], 'shu');
+    expect(reacted.single.payload['direction'], 'left');
+    expect(
+      result.events
+          .where((e) => e.type == 'actor_moved')
+          .map((e) => e.payload['kind'])
+          .toSet(),
+      equals({'wei'}),
+    );
+  });
+
+  test('a reactive actor stays put when its mirrored step is blocked', () {
+    final game = _makeGame(config: const {
+      'reactiveKinds': {'shu': 'invert'},
+    });
+    final level = _makeReactiveLevel();
+    (level['board'] as Map<String, dynamic>)['layers']['actors']['entries'] = [
+      {
+        'position': [1, 0],
+        'kind': 'wei',
+      },
+      {
+        'position': [6, 0],
+        'kind': 'shu',
+      },
+    ];
+    final engine = _engineFor(game, level);
+
+    engine.executeTurn(GameAction('tap_cell', {
+      'position': [1, 0],
+    }));
+    final result = engine.executeTurn(GameAction('move', {
+      'direction': 'left',
+    }));
+
+    expect(_actorPos(engine, 'wei'), equals(const Position(0, 0)));
+    expect(_actorPos(engine, 'shu'), equals(const Position(6, 0)));
+    expect(result.events.any((e) => e.type == 'actor_reacted'), isFalse);
+  });
+
+  test('reactive actors do not move on a blocked player move', () {
+    final game = _makeGame(config: const {
+      'reactiveKinds': {'shu': 'invert'},
+    });
+    final level = _makeReactiveLevel();
+    (level['board'] as Map<String, dynamic>)['layers']['actors']['entries'] = [
+      {
+        'position': [0, 0],
+        'kind': 'wei',
+      },
+      {
+        'position': [5, 0],
+        'kind': 'shu',
+      },
+    ];
+    final engine = _engineFor(game, level);
+
+    engine.executeTurn(GameAction('tap_cell', {
+      'position': [0, 0],
+    }));
+    final result = engine.executeTurn(GameAction('move', {
+      'direction': 'left',
+    }));
+
+    expect(_actorPos(engine, 'shu'), equals(const Position(5, 0)));
+    expect(result.events.any((e) => e.type == 'actor_reacted'), isFalse);
+    expect(result.events.any((e) => e.type == 'actor_blocked'), isTrue);
+  });
 }
+
+Map<String, dynamic> _makeReactiveLevel() => {
+      'id': 'test_reactive_level',
+      'board': {
+        'size': [7, 1],
+        'layers': {
+          'ground': {'format': 'sparse', 'entries': []},
+          'actors': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [1, 0],
+                'kind': 'wei',
+              },
+              {
+                'position': [5, 0],
+                'kind': 'shu',
+              },
+            ],
+          },
+          'territory': {'format': 'sparse', 'entries': []},
+        },
+      },
+      'state': {},
+      'goals': [],
+      'loseConditions': [],
+    };

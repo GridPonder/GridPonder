@@ -54,16 +54,19 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `directions` | array of strings | `["up","down","left","right"]` | Allowed movement directions. |
 | `solidHandling` | string | `"block"` | What happens when moving into a solid cell: `"block"` (reject move) or `"delegate"` (let later systems handle, e.g. push or consume). |
 | `moveAction` | string | `"move"` | Which action id triggers navigation. |
+| `validGroundTags` | array of strings | `[]` | When non-empty, the target's ground cell must carry one of these tags. Empty keeps the void-only check, so packs that omit the field are unaffected. |
+| `groundLayer` | string | `"ground"` | Layer checked by `validGroundTags`. |
 
 **Behavior:**
 1. Compute target position from direction.
 2. Check bounds — reject if out of grid.
 3. Check ground layer — reject if `void`.
-4. Check `solid` tag on objects layer:
+4. If `validGroundTags` is non-empty, reject unless the `groundLayer` cell at the target carries one of those tags. This is how a game makes some non-void terrain unwalkable — landed debris, deep water, a roof you may stand beside but not on.
+5. Check `solid` tag on objects layer:
    - `"block"`: reject move.
    - `"delegate"`: mark the move as pending. Emit `move_blocked` with the target position and blocker kind. Later phases (push) or rules (`resolve_move` effect) may complete or reject the pending move.
-5. If not blocked, move avatar to target. Emit `avatar_exited` for old position, `avatar_entered` for new position.
-6. Update `avatar.facing` to the movement direction.
+6. If not blocked, move avatar to target. Emit `avatar_exited` for old position, `avatar_entered` for new position.
+7. Update `avatar.facing` to the movement direction.
 
 ---
 
@@ -472,7 +475,7 @@ Example config:
 
 **Phase:** `action_resolution`
 
-**Events emitted:** `actor_selected`, `actor_moved`, `actor_entered`, `actor_blocked`, `cell_claimed` (only when `claim` is configured), `action_vetoed` (when selection/movement is invalid)
+**Events emitted:** `actor_selected`, `actor_moved`, `actor_entered`, `actor_blocked`, `actor_reacted` (only when `reactiveKinds` is configured), `cell_claimed` (only when `claim` is configured), `action_vetoed` (when selection/movement is invalid)
 
 **Config:**
 
@@ -490,6 +493,7 @@ Example config:
 | `budgets` | object | — | Optional actor kind → successful move count. When configured, a selected actor at 0 remaining moves cannot move. |
 | `budgetVariable` | string | `"actorMovesRemaining"` | Runtime variable storing remaining move budgets. |
 | `claim` | object | — | Optional. Same shape and semantics as `coupled_actors.claim`. |
+| `reactiveKinds` | object | `{}` | Optional. Actor kind → direction transform, using the same vocabulary as `coupled_actors.directionTransforms` (`identity`, `invert`, `mirror_x`, `mirror_y`). Actors of these kinds are **not** driven by the player: after each successful player move they take one step of their own, derived from the player's direction. See [Reactive actors](#reactive-actors). |
 
 Example config:
 ```json
@@ -511,7 +515,32 @@ Example config:
 3. Compute the selected actor's target cell. If the target is out of bounds, tagged `wallTag` on `groundLayer`, or occupied by another actor, the actor stays and emits `actor_blocked`.
 4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, apply the claim policy to the destination cell (see [Claim overwrite](#214-claim-overwrite)), and decrement that actor's remaining budget when budgets are configured.
 
-**Reuse:** Game-agnostic — any game with multiple layer-entity actors can use it for tap-to-select movement, squad puzzles, or budgeted routing.
+<a name="reactive-actors"></a>
+**Reactive actors (opposition).** `reactiveKinds` turns named kinds into an
+*opposition* that answers the player rather than obeying them. After a player
+move resolves successfully, each reactive actor computes its own direction by
+applying its transform to the **player's** direction — `invert` makes it mirror
+the player, so moving left drives it right — and takes one step. Rules:
+
+1. Reactive actors move **only after a successful player step**. A blocked
+   attempt costs the player the action but gives the opposition nothing.
+2. Resolution matches `coupled_actors`: bucket by effective direction in the
+   canonical order `up, down, left, right`, front-first within a bucket, with a
+   live `occupied` set. Fully deterministic — the whole turn stays a pure
+   function of the player's move, so a solver's branching factor does not grow.
+3. A blocked reactive actor simply holds position and emits nothing.
+4. Reactive movement emits **`actor_reacted`**, never `actor_moved`. This keeps
+   move counters, budgets and rules keyed on player movement unaffected by the
+   opposition. A system that should treat a rival's landing as an anchor names
+   the event explicitly — e.g. `flank_capture` with
+   `"triggerEvents": ["actor_moved", "actor_reacted"]`, which lets the rival
+   capture with the same bracket rule the player uses.
+5. Reactive actors ignore `budgets`; only the player spends a pool.
+
+**Reuse:** Game-agnostic — any game with multiple layer-entity actors can use it
+for tap-to-select movement, squad puzzles, or budgeted routing; `reactiveKinds`
+adds deterministic opposition (mirror-chasers, pursuit puzzles, adversarial
+capture games) without any per-game engine code.
 
 ---
 
@@ -607,6 +636,203 @@ Shared by `coupled_actors` and `individual_actors` — both resolve claims ident
 
 ---
 
+### 2.15 `flank_capture`
+
+**Purpose:** Reversi/Othello-style bracket capture, applied after an actor
+moves. A straight run of one piece kind that ends up bracketed between two of
+the opposing kind (or a terminating wall) is flipped to the bracketing kind.
+Two `pairs` entries make the rule cut both ways: an aggressor bracketing a run
+of its victim **captures** it, and a run of that same aggressor bracketed by the
+victim is **flipped back** — the piece that just moved included. The system
+transforms the board directly; it does not require rules.
+
+**Phase:** `cascade_resolution`, event-triggered (like [`line_of_sight`](#213-line_of_sight)).
+
+**Events emitted:** `cell_transformed` (one per flipped cell).
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pieceLayer` | string | `"pieces"` | Layer holding the flippable pieces. |
+| `pairs` | object | — | Aggressor kind → victim kind, **or an array of victim kinds**. `{ "alien": "human", "human": "alien" }` makes aliens capture human runs and human-bracketed alien runs flip back; `{ "alien": ["human", "splinter"] }` lets alien terminals capture runs of either kind. |
+| `order` | array of strings | keys of `pairs` | Order the aggressor passes run in. With `["alien","human"]` the possess pass runs before the expose pass. Observable only when two aggressors share a victim kind — see **Multiple victim kinds** below. |
+| `directions` | array of strings | all 4 cardinals | Which axes are scanned: any of `left`/`right` scans the **row** through the moved cell; any of `up`/`down` scans the **column**. |
+| `wallTerminates` | boolean | `true` | Whether a wall may serve as a bracket terminal. |
+| `wallLayer` | string | `"ground"` | Layer checked for wall terminals. |
+| `wallTag` | string | `"solid"` | Tag that marks a wall terminal on `wallLayer`. |
+| `terminalKinds` | object | `{}` | Aggressor kind → extra `pieceLayer` kinds that may close a bracket **for that aggressor only**. Gives a game asymmetric terrain: `{"human": ["insulator"]}` lets a neutral pylon bracket runs on the `human` pass while never closing one for any other aggressor. |
+| `triggerEvents` | array of strings | `["actor_moved"]` | Events whose `position` (the mover's destination) anchors a capture pass. |
+
+**Behavior (per move):**
+1. Ignore the cascade pass unless one of its pending events matches
+   `triggerEvents`. Collect the destination cell **B** of each matching event.
+2. Take a **single snapshot** of `pieceLayer`. Every pass below reads this
+   pre-flip snapshot.
+3. For each aggressor `K` in `order` (victim `V = pairs[K]`), and each `B`, scan
+   the full row and/or column through `B` (per `directions`). On each line, find
+   every **maximal run of `V`** that is
+   - **bracketed** on both ends by a `K` piece (snapshot) or, when
+     `wallTerminates`, a wall — the **board edge is never a terminal**; and
+   - **anchored to the mover**: `B` lies inside the run, or `B` is one of the
+     two bracketing terminals.
+
+   Flip every cell of such a run to `K` and emit `cell_transformed`.
+4. Because all passes read the one snapshot, a cell never flips twice per move
+   and the passes never observe each other's fresh cells. In particular a victim
+   captured this move still counts as a terminal for a later pass — the elegant,
+   deterministic "single snapshot, possess-then-expose" rule; a solver must
+   mirror it bit-for-bit.
+
+Anchoring keeps captures tied to the move that caused them: a run sitting
+between two walls is not silently flipped the first time an unrelated piece
+happens onto its row. The mover is automatically a **terminal** in the capture
+pass and a **member of the run** in the flip-back pass, so both directions fall
+out of the same rule.
+
+**Multiple victim kinds.** An aggressor may name a list of victim kinds. Each
+victim kind is scanned on its own pass, so victim runs are always
+**homogeneous**: a run that mixes two victim kinds is not a maximal run of
+either, and is therefore immune. Two aggressors may name the same victim kind —
+with `{"alien": ["human", "splinter"], "human": ["alien", "splinter"]}` a
+`splinter` cell can be claimed by either pass. Flips dedupe **first-writer-wins**
+in `order`, so the aggressor listed earlier claims a contested cell; with a
+single victim kind per aggressor the victim sets are disjoint and `order` has no
+observable effect. Three-way configurations are how a pack builds rival factions
+that are each other's jaws (Pincer's arc 4).
+
+Example config:
+```json
+{
+  "id": "capture",
+  "type": "flank_capture",
+  "config": {
+    "pieceLayer": "pieces",
+    "pairs": { "alien": "human", "human": "alien" },
+    "order": ["alien", "human"],
+    "wallLayer": "ground",
+    "wallTag": "solid"
+  }
+}
+```
+
+Pair with [`individual_actors`](#212-individual_actors) or
+[`coupled_actors`](#211-coupled_actors) (whose moves emit `actor_moved`) and an
+[`all_cleared`](03_levels.md#all_cleared) goal on the victim kind for a
+"convert every opponent" win.
+
+**Reuse:** Any game with two opposing piece kinds that flip on a straight-line
+bracket — Reversi/Othello puzzles, contagion-by-flanking, tug-of-war captures —
+uses it by naming its own `pairs` and `pieceLayer`.
+
+---
+
+### 2.16 `support_collapse`
+
+**Purpose:** Cells that lose their connection to a support root fall as rigid
+components. A structure is held up by cells tagged as roots; after any cell is
+removed, every maximal group of member cells that can no longer reach a root is
+an orphan and falls, keeping its exact shape.
+
+**Phase:** `action_resolution` (the sever verb) and `cascade_resolution`
+(event-driven recompute)
+
+**Events emitted:** `cell_cleared`, `object_settled`, `variable_changed`,
+`action_vetoed`
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `layer` | string | `"ground"` | Layer holding the structure. |
+| `severAction` | string | — | Action id that removes a cell adjacent to the avatar. Omit for a purely event-driven collapse. |
+| `severableTags` | array of strings | `["severable"]` | Tags a cell must carry to be removable by the sever action. |
+| `rootTags` | array of strings | `["support_root"]` | Cells that are always supported. |
+| `memberTags` | array of strings | `["supported"]` | Cells that participate in the support graph. |
+| `connectivity` | string | `"orthogonal"` | `"orthogonal"` or `"diagonal"`. |
+| `direction` | string | `"down"` | Direction orphaned components fall. |
+| `restLayers` | array of strings | `[layer]` | Layers checked for what stops a falling component. |
+| `restTags` | array of strings | `["solid"]` | Tags on `restLayers` that stop a falling component. |
+| `settleTransform` | object | `{}` | Kind→kind map applied to each cell when its component comes to rest. |
+| `deflect` | object | `{}` | Map of tag → direction. A component blocked by cells carrying one of these tags steps one cell in the mapped direction instead of resting, then carries on falling. Empty disables deflection. |
+| `carryAvatar` | boolean | `true` | Whether the avatar rides the component it is standing on. |
+| `avatarFellVariable` | string | — | Variable incremented when the avatar rides a component down. Pair with a [`variable_threshold`](03_levels.md#variable_threshold) lose condition. |
+| `triggerEvents` | array of strings | `[]` | Event types that trigger a cascade-phase recompute. Empty disables the cascade path. |
+
+**Behavior:**
+1. On the sever action, resolve the target cell. The action may name it either
+   as a `position` param (a tapped cell, which must be orthogonally adjacent to
+   the actor) or as a `direction` param (one step from the actor). Reject with
+   `action_vetoed` if the target is out of bounds, holds nothing on `layer`, or
+   carries no `severableTags` tag. A vetoed action does not count as a move.
+2. Remove the target cell and emit `cell_cleared`.
+3. BFS the supported set from every `rootTags` cell through `memberTags` cells
+   using `connectivity`.
+4. Every maximal connected group of member cells outside the supported set is an
+   orphan component.
+5. Lift every orphan cell off the board, so a component is never blocked by the
+   hole it is falling out of, nor by a component that has not fallen yet.
+6. Resolve components one at a time, the one furthest along `direction` first
+   (ties broken by lowest `x`, then lowest `y`), writing each back to the board
+   as soon as it comes to rest. Ordering them this way is what makes the result
+   deterministic: every component that could block another has already landed
+   by the time the other is resolved.
+   - A component steps in `direction` while nothing blocks it. It is blocked
+     when a destination cell holds an entity carrying a `restTags` tag on a
+     `restLayers` layer.
+   - Leaving the board does **not** block. A component whose cells have all left
+     the board is destroyed.
+   - **Deflection.** When `deflect` is non-empty and the component is blocked,
+     the blocking kinds decide what happens next. If every blocker carries a
+     `deflect` tag and they all map to the same direction, the component steps
+     one cell that way and carries on falling. If any blocker carries no
+     `deflect` tag, or the blockers disagree, the component rests. The sideways
+     step is refused — and the component rests — when a destination cell is out
+     of bounds or holds a `restTags` entity.
+   - A component may deflect **at most once per lane**, and must travel one cell
+     along `direction` before it may deflect again. Without this, two ramps
+     facing each other would trade a component back and forth forever.
+7. Apply `settleTransform` to each landed cell and emit `object_settled` per
+   cell.
+8. If `carryAvatar` and the avatar stood on an orphan, move it with the
+   component and increment `avatarFellVariable`.
+
+**Clearing on an `exactly_one` layer** writes that layer's declared `default`
+kind, not an empty cell.
+
+Example:
+
+```json
+{
+  "id": "collapse",
+  "type": "support_collapse",
+  "config": {
+    "layer": "ground",
+    "severAction": "cut",
+    "severableTags": ["severable"],
+    "rootTags": ["support_root"],
+    "memberTags": ["supported"],
+    "direction": "down",
+    "restLayers": ["ground"],
+    "restTags": ["solid"],
+    "settleTransform": { "hull": "wreck", "pod": "pod_settled" },
+    "deflect": { "slope_left": "left", "slope_right": "right" },
+    "carryAvatar": true,
+    "avatarFellVariable": "wrecked"
+  }
+}
+```
+
+**Reuse:** `severAction` is optional, so the collapse half stands alone for any
+game where rules or other systems remove cells. Suits hanging structures,
+crumbling bridges, calving ice shelves, mining a ceiling, or any "cut the
+support" mechanic. Without `deflect`, gravity is a straight translation: with
+`direction: "down"` a cell's column never changes, only how far it falls.
+`deflect` relaxes exactly that, and only at obstructions — a component never
+changes lane in free fall.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -615,6 +841,8 @@ Shared by `coupled_actors` and `individual_actors` — both resolve claims ident
 | Push Objects | `push_objects` | `movement_resolution` | (automatic on move into pushable) |
 | Sliding Blocks | `sliding_blocks` | `action_resolution` | `move(position, direction)` |
 | Line of Sight | `line_of_sight` | `cascade_resolution` | event-triggered detection |
+| Flank Capture | `flank_capture` | `cascade_resolution` | event-triggered bracket capture |
+| Support Collapse | `support_collapse` | `action_resolution` + `cascade_resolution` | configurable sever verb (`position` or `direction`) |
 | Portals | `portals` | `movement_resolution` | (automatic on portal entry) |
 | Slide Merge | `slide_merge` | `action_resolution` | `move` |
 | Queued Emitters | `queued_emitters` | `cascade_resolution` | (event-triggered) |
