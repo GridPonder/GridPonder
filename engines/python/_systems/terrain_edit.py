@@ -30,7 +30,7 @@ class TerrainEditSystem(GameSystem):
             return []
         try:
             pos = Pos(int(raw[0]), int(raw[1]))
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             return []
         if not state.board.is_in_bounds(pos):
             return []

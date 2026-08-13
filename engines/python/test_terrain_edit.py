@@ -120,6 +120,15 @@ def test_refuses_malformed_position():
         "one-element position list must not spend budget"
 
 
+def test_refuses_non_finite_position():
+    engine = TurnEngine(_make_game(), _make_level(budget=1))
+    engine.execute_turn("place_wall", {"position": [float("inf"), 0]})
+    assert _kind_at(engine, 2, 0) == "empty", \
+        "a non-finite position must leave the board untouched"
+    assert engine.state.variables["walls"] == 1, \
+        "a non-finite position must not spend budget"
+
+
 def run_all() -> bool:
     tests = [
         test_places_a_wall_and_spends_budget,
@@ -129,6 +138,7 @@ def run_all() -> bool:
         test_ignores_other_actions,
         test_refuses_non_numeric_position,
         test_refuses_malformed_position,
+        test_refuses_non_finite_position,
     ]
     passed = 0
     failed = 0
