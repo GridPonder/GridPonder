@@ -28,7 +28,10 @@ class TerrainEditSystem(GameSystem):
         raw = action.get("params", {}).get("position")
         if not isinstance(raw, (list, tuple)) or len(raw) < 2:
             return []
-        pos = Pos(int(raw[0]), int(raw[1]))
+        try:
+            pos = Pos(int(raw[0]), int(raw[1]))
+        except (TypeError, ValueError):
+            return []
         if not state.board.is_in_bounds(pos):
             return []
 

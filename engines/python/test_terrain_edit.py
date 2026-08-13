@@ -26,6 +26,7 @@ def _make_game() -> GameDef:
         },
         "actions": [
             {"id": "place_wall", "params": {"position": {"type": "position"}}},
+            {"id": "other_action", "params": {"position": {"type": "position"}}},
         ],
         "systems": [
             {"id": "edit", "type": "terrain_edit", "config": {
@@ -82,11 +83,41 @@ def test_refuses_when_from_kind_does_not_match():
         "editing a cell that is already a wall must not spend budget"
 
 
-def test_ignores_out_of_bounds_and_other_actions():
+def test_ignores_out_of_bounds():
     engine = TurnEngine(_make_game(), _make_level(budget=1))
     engine.execute_turn("place_wall", {"position": [99, 0]})
     assert engine.state.variables["walls"] == 1, \
         "an out-of-bounds edit must be a no-op"
+
+
+def test_ignores_other_actions():
+    engine = TurnEngine(_make_game(), _make_level(budget=1))
+    engine.execute_turn("other_action", {"position": [2, 0]})
+    assert _kind_at(engine, 2, 0) == "empty", \
+        "an action-id mismatch must leave the board untouched"
+    assert engine.state.variables["walls"] == 1, \
+        "an action-id mismatch must not spend budget"
+
+
+def test_refuses_non_numeric_position():
+    engine = TurnEngine(_make_game(), _make_level(budget=1))
+    engine.execute_turn("place_wall", {"position": ["a", 0]})
+    assert _kind_at(engine, 2, 0) == "empty", \
+        "a non-numeric position must leave the board untouched"
+    assert engine.state.variables["walls"] == 1, \
+        "a non-numeric position must not spend budget"
+
+
+def test_refuses_malformed_position():
+    engine = TurnEngine(_make_game(), _make_level(budget=1))
+    # Test missing position key
+    engine.execute_turn("place_wall", {})
+    assert engine.state.variables["walls"] == 1, \
+        "missing position key must not spend budget"
+    # Test one-element list
+    engine.execute_turn("place_wall", {"position": [2]})
+    assert engine.state.variables["walls"] == 1, \
+        "one-element position list must not spend budget"
 
 
 def run_all() -> bool:
@@ -94,7 +125,10 @@ def run_all() -> bool:
         test_places_a_wall_and_spends_budget,
         test_refuses_when_budget_is_exhausted,
         test_refuses_when_from_kind_does_not_match,
-        test_ignores_out_of_bounds_and_other_actions,
+        test_ignores_out_of_bounds,
+        test_ignores_other_actions,
+        test_refuses_non_numeric_position,
+        test_refuses_malformed_position,
     ]
     passed = 0
     failed = 0
