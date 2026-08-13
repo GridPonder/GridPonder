@@ -49,7 +49,8 @@ GameDefinition _game() {
 // 4x1 board:  H H E H  — the avatar starts at the left end. Reaching the exit
 // wins, and a walkable cell remains past it, so an action taken after the win
 // is refused because the level is over, not because it is illegal.
-LevelDefinition _level(GameDefinition game) {
+// [loseAfter] caps the action count, which is how the loss case is set up.
+LevelDefinition _level(GameDefinition game, {int? loseAfter}) {
   return LevelDefinition.fromJson({
     'id': 'turn_preview',
     'board': {
@@ -91,6 +92,13 @@ LevelDefinition _level(GameDefinition game) {
         'config': {'targetKind': 'exit'},
       }
     ],
+    'loseConditions': <Map<String, dynamic>>[
+      if (loseAfter != null)
+        {
+          'type': 'max_actions',
+          'config': {'limit': loseAfter},
+        },
+    ],
     'rules': <Map<String, dynamic>>[],
     'solution': {'goldPath': <Map<String, dynamic>>[]},
   }, game.layers);
@@ -119,17 +127,32 @@ void main() {
     expect(entered.map((e) => e.position), [const Position(1, 0)]);
   });
 
+  test('preview exposes the board it would produce', () {
+    final game = _game();
+    final engine = TurnEngine(game, _level(game));
+
+    final result = engine.previewTurn(_right());
+
+    // The whole point of a dry run: read the would-be board without entering
+    // it. The live board is untouched at the same moment.
+    expect(result.newState.avatar.position, const Position(1, 0));
+    expect(engine.state.avatar.position, const Position(0, 0));
+  });
+
   test('preview commits nothing', () {
     final game = _game();
     final engine = TurnEngine(game, _level(game));
 
     engine.previewTurn(_right());
 
-    // Position, both counters and the undo stack are exactly as they were.
+    // Position, both counters, the undo stack and both flags are exactly as
+    // they were.
     expect(engine.state.avatar.position, const Position(0, 0));
     expect(engine.state.actionCount, 0);
     expect(engine.state.turnCount, 0);
     expect(engine.undoDepth, 0);
+    expect(engine.isWon, isFalse);
+    expect(engine.isLost, isFalse);
   });
 
   test('preview matches the turn it predicts', () {
@@ -162,6 +185,19 @@ void main() {
     final game = _game();
     final engine = TurnEngine(game, _level(game));
     _walkToExit(engine);
+
+    final result = engine.previewTurn(_right());
+
+    expect(result.accepted, isFalse);
+    expect(result.events, isEmpty);
+  });
+
+  test('preview on a lost level is refused', () {
+    // One action allowed, and one step is not enough to reach the exit.
+    final game = _game();
+    final engine = TurnEngine(game, _level(game, loseAfter: 1));
+    engine.executeTurn(_right());
+    expect(engine.isLost, isTrue);
 
     final result = engine.previewTurn(_right());
 

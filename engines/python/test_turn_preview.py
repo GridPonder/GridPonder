@@ -51,10 +51,11 @@ def _game() -> GameDef:
     )
 
 
-def _level() -> dict:
+def _level(lose_after: int | None = None) -> dict:
     # 4x1 board:  H H E H  — the avatar starts at the left end. Reaching the
     # exit wins, and a walkable cell remains past it, so an action taken after
     # the win is refused because the level is over, not because it is illegal.
+    # `lose_after` caps the action count, which is how the loss case is set up.
     return {
         "id": "turn_preview",
         "board": {
@@ -79,6 +80,11 @@ def _level() -> dict:
                 "config": {"targetKind": "exit"},
             }
         ],
+        "loseConditions": (
+            [{"type": "max_actions", "config": {"limit": lose_after}}]
+            if lose_after is not None
+            else []
+        ),
         "rules": [],
         "solution": {"goldPath": []},
     }
@@ -99,16 +105,30 @@ class TurnPreviewTest(unittest.TestCase):
         entered = [e for e in result.events if e["type"] == "avatar_entered"]
         self.assertEqual([e["position"] for e in entered], [Pos(1, 0)])
 
+    def test_preview_exposes_the_board_it_would_produce(self):
+        engine = TurnEngine(_game(), _level())
+
+        result = engine.preview_turn("move", {"direction": "right"})
+
+        # The whole point of a dry run: read the would-be board without
+        # entering it. The live board is untouched at the same moment.
+        self.assertIsNotNone(result.new_state)
+        self.assertEqual(result.new_state.avatar.position, Pos(1, 0))
+        self.assertEqual(engine.state.avatar.position, Pos(0, 0))
+
     def test_preview_commits_nothing(self):
         engine = TurnEngine(_game(), _level())
 
         engine.preview_turn("move", {"direction": "right"})
 
-        # Position, both counters and the undo stack are exactly as they were.
+        # Position, both counters, the undo stack and both flags are exactly
+        # as they were.
         self.assertEqual(engine.state.avatar.position, Pos(0, 0))
         self.assertEqual(engine.state.action_count, 0)
         self.assertEqual(engine.state.turn_count, 0)
         self.assertEqual(engine.undo_depth, 0)
+        self.assertFalse(engine.is_won)
+        self.assertFalse(engine.is_lost)
 
     def test_preview_matches_the_turn_it_predicts(self):
         engine = TurnEngine(_game(), _level())
@@ -135,6 +155,17 @@ class TurnPreviewTest(unittest.TestCase):
     def test_preview_on_a_won_level_is_refused(self):
         engine = TurnEngine(_game(), _level())
         _walk_to_exit(engine)
+
+        result = engine.preview_turn("move", {"direction": "right"})
+
+        self.assertFalse(result.accepted)
+        self.assertEqual(result.events, [])
+
+    def test_preview_on_a_lost_level_is_refused(self):
+        # One action allowed, and one step is not enough to reach the exit.
+        engine = TurnEngine(_game(), _level(lose_after=1))
+        engine.execute_turn("move", {"direction": "right"})
+        self.assertTrue(engine.is_lost)
 
         result = engine.preview_turn("move", {"direction": "right"})
 

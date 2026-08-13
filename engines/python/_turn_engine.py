@@ -24,6 +24,14 @@ class TurnResult:
     lose_reason: Optional[str] = None
     goal_progress: Optional[dict[str, float]] = None
 
+    #: The board the action produced, set only by :meth:`TurnEngine.preview_turn`.
+    #: After a real turn the caller reads ``engine.state``, but a preview rolls
+    #: that back, so the previewed board would otherwise be unreachable — the
+    #: one question a dry run exists to answer. Dart's TurnResult carries the
+    #: equivalent ``newState`` on every result; here it stays optional so no
+    #: existing call site changes.
+    new_state: Optional[GameState] = None
+
 
 class TurnEngine:
     """
@@ -217,10 +225,17 @@ class TurnEngine:
         remove, what would move and where it would come to rest — before the
         player commits.  Generic: any pack whose actions have consequences
         that cannot be read off a static board can offer the same preview.
+
+        The previewed board is returned as ``result.new_state``: execute_turn
+        leaves it on the engine, so it is handed to the caller before being
+        rolled back.  A refused action changes nothing, so its ``new_state`` is
+        the live board — matching Dart's ``TurnResult.rejected(state)``.
         """
         saved = self._state
         try:
-            return self.execute_turn(action_id, params, save_history=False)
+            result = self.execute_turn(action_id, params, save_history=False)
+            result.new_state = self._state
+            return result
         finally:
             self._state = saved
 
