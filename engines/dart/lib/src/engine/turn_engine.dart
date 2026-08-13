@@ -53,6 +53,21 @@ class TurnEngine {
     return result;
   }
 
+  /// Dry-run an action without committing it.
+  ///
+  /// Returns the [TurnResult] the action *would* produce, leaving this
+  /// engine's state, history and win/loss flags untouched. Lets a UI answer
+  /// "what would this do?" — which cells a destructive verb would remove, what
+  /// would move and where it would come to rest — before the player commits.
+  /// Generic: any pack whose actions have consequences that cannot be read off
+  /// a static board can offer the same preview.
+  TurnResult previewTurn(GameAction action) {
+    if (_state.isWon || _state.isLost) {
+      return TurnResult.rejected(_state);
+    }
+    return _runner.run(action, _state.copy());
+  }
+
   /// Undo the last action.
   bool undo() {
     if (_history.isEmpty) return false;

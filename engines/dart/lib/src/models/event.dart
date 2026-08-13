@@ -18,7 +18,8 @@ class GameEvent {
 
   // --- Named constructors ---
 
-  static GameEvent avatarEntered(Position pos, Position from, String direction) =>
+  static GameEvent avatarEntered(
+          Position pos, Position from, String direction) =>
       GameEvent('avatar_entered', {
         'position': pos,
         'fromPosition': from,
@@ -28,8 +29,8 @@ class GameEvent {
   static GameEvent avatarExited(Position pos) =>
       GameEvent('avatar_exited', {'position': pos});
 
-  static GameEvent moveBlocked(
-          Position target, Position from, String direction, String blockerKind) =>
+  static GameEvent moveBlocked(Position target, Position from, String direction,
+          String blockerKind) =>
       GameEvent('move_blocked', {
         'position': target,
         'fromPosition': from,
@@ -64,8 +65,10 @@ class GameEvent {
       GameEvent('object_removed',
           {'position': pos, 'kind': kind, 'animation': animationName});
 
-  static GameEvent cellCleared(Position pos, String previousKind) =>
-      GameEvent('cell_cleared', {'position': pos, 'previousKind': previousKind});
+  static GameEvent cellCleared(Position pos, String previousKind,
+          {String layer = 'objects'}) =>
+      GameEvent('cell_cleared',
+          {'position': pos, 'previousKind': previousKind, 'layer': layer});
 
   static GameEvent cellTransformed(
           Position pos, String fromKind, String toKind, String layer) =>
@@ -102,8 +105,7 @@ class GameEvent {
   /// A single tile slid from [from] to [to] without merging.
   /// Carries enough information for the renderer to play an `entity_move`
   /// animation; engines that don't render simply ignore it.
-  static GameEvent tileMoved(
-          Position from, Position to, String kind,
+  static GameEvent tileMoved(Position from, Position to, String kind,
           {Map<String, dynamic> params = const {}, String layer = 'objects'}) =>
       GameEvent('tile_moved', {
         'fromPosition': from,
@@ -119,8 +121,7 @@ class GameEvent {
         'movedCount': movedCount,
       });
 
-  static GameEvent itemReleased(
-          String emitterId, String kind, Position pos,
+  static GameEvent itemReleased(String emitterId, String kind, Position pos,
           [Map<String, dynamic> params = const {}]) =>
       GameEvent('item_released', {
         'emitterId': emitterId,
@@ -129,11 +130,22 @@ class GameEvent {
         'params': params,
       });
 
-  static GameEvent objectSettled(String kind, Position pos, Position from) =>
+  /// [layer] lets a UI animate the travel from [from] to [pos] with the right
+  /// sprite. Gravity-style effects that only ever move the `objects` layer keep
+  /// the default.
+  ///
+  /// [fromKind] is what the entity looked like on the way — [kind] is what it
+  /// became on arrival, which for a system with a settle transform is not the
+  /// same thing. A UI that animates the travel should draw [fromKind], or the
+  /// entity appears to transform before it has landed.
+  static GameEvent objectSettled(String kind, Position pos, Position from,
+          {String layer = 'objects', String? fromKind}) =>
       GameEvent('object_settled', {
         'kind': kind,
         'position': pos,
         'fromPosition': from,
+        'layer': layer,
+        'fromKind': fromKind ?? kind,
       });
 
   static GameEvent npcMoved(String npcId, Position from, Position to) =>
@@ -160,6 +172,20 @@ class GameEvent {
         'kind': kind,
         'fromPosition': from,
         'position': pos,
+        'direction': direction,
+      });
+
+  /// A reactive (non-player) actor answered the player's move.
+  ///
+  /// Deliberately distinct from [actorMoved] so move counters and budgets keyed
+  /// on player movement are unaffected; systems that should treat a rival
+  /// landing as an anchor name this event explicitly.
+  static GameEvent actorReacted(
+          String kind, Position from, Position to, String direction) =>
+      GameEvent('actor_reacted', {
+        'kind': kind,
+        'fromPosition': from,
+        'position': to,
         'direction': direction,
       });
 

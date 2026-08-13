@@ -466,6 +466,44 @@ class GoalEvaluator {
     return layer.entries().where((e) => kinds.contains(e.value.kind)).length;
   }
 
+  /// Cells held by each owner, where those cells sit, and how many cells are
+  /// claimable at all.
+  ///
+  /// The single pass everything about a balance goal is derived from, so the
+  /// progress an agent is shown and the condition it is scored against cannot
+  /// disagree. Two copies of this counting would drift, and the drift would be
+  /// invisible: the agent would be told it was one cell short of a goal it had
+  /// already met. The positions feed the connectivity check the same way.
+  (Map<String, int>, Map<String, Set<Position>>, int) _balanceTally(
+      Map<String, dynamic> cfg, LevelState state, GameDefinition game) {
+    final owners = (cfg['owners'] as List?)?.cast<String>() ?? [];
+    final counts = <String, int>{for (final o in owners) o: 0};
+    final positions = <String, Set<Position>>{
+      for (final o in owners) o: <Position>{},
+    };
+
+    final layerId = cfg['layer'] as String?;
+    final layer = state.board.layers[layerId];
+    if (layer != null) {
+      for (final entry in layer.entries()) {
+        final kind = entry.value.kind;
+        if (counts.containsKey(kind)) {
+          counts[kind] = counts[kind]! + 1;
+          positions[kind]!.add(entry.key);
+        }
+      }
+    }
+    return (counts, positions, _countClaimable(state.board, cfg, game));
+  }
+
+  /// Cells held by each owner, and how many cells are claimable at all — what
+  /// the goal renderer needs. See [_balanceTally].
+  (Map<String, int>, int) balanceCounts(
+      Map<String, dynamic> cfg, LevelState state, GameDefinition game) {
+    final (counts, _, claimable) = _balanceTally(cfg, state, game);
+    return (counts, claimable);
+  }
+
   /// Win when a territory layer is divided completely and into exactly-equal
   /// shares among the configured owners (or per requireComplete/requireEqual).
   ///
@@ -477,39 +515,64 @@ class GoalEvaluator {
   ///                      layer's declared default kind)
   ///   requireComplete  — require owned == claimable (default true)
   ///   requireEqual     — require every owner's count to match (default true)
-  /// Cells held by each owner, and how many cells are claimable at all.
-  ///
-  /// Shared with the goal renderer so the progress an agent is shown and the
-  /// condition it is scored against are computed the same way. Two copies of
-  /// this counting would drift, and the drift would be invisible: the agent
-  /// would be told it was one cell short of a goal it had already met.
-  (Map<String, int>, int) balanceCounts(
-      Map<String, dynamic> cfg, LevelState state, GameDefinition game) {
-    final owners = (cfg['owners'] as List?)?.cast<String>() ?? [];
-    final counts = <String, int>{for (final o in owners) o: 0};
-
-    final layerId = cfg['layer'] as String?;
-    final layer = state.board.layers[layerId];
-    if (layer != null) {
-      for (final entry in layer.entries()) {
-        final kind = entry.value.kind;
-        if (counts.containsKey(kind)) counts[kind] = counts[kind]! + 1;
-      }
-    }
-    return (counts, _countClaimable(state.board, cfg, game));
-  }
-
+  ///   requireConnected — require each owner's cells to form one orthogonally
+  ///                      connected component containing its connection source
+  ///   connectionSources — map from owner kind to fixed [x,y] source position
   (bool, double) _balance(GoalDef goal, LevelState state, GameDefinition game) {
-    final (counts, claimable) = balanceCounts(goal.config, state, game);
+    final owners = (goal.config['owners'] as List?)?.cast<String>() ?? [];
+    final (counts, positions, claimable) =
+        _balanceTally(goal.config, state, game);
     final owned = counts.values.fold(0, (a, b) => a + b);
     final equal = counts.values.toSet().length == 1;
     final complete = owned == claimable;
-    final progress = claimable != 0 ? owned / claimable : 0.0;
+    final requireConnected =
+        (goal.config['requireConnected'] as bool?) ?? false;
+    var connected = true;
+    var connectedOwned = owned;
+    if (requireConnected) {
+      connectedOwned = 0;
+      final rawSources =
+          goal.config['connectionSources'] as Map<String, dynamic>? ?? {};
+      for (final owner in owners) {
+        final cells = positions[owner]!;
+        final rawSource = rawSources[owner];
+        if (rawSource is! List || rawSource.length != 2) {
+          connected = false;
+          continue;
+        }
+        final source = Position.fromJson(rawSource);
+        if (!cells.contains(source)) {
+          connected = false;
+          continue;
+        }
+        final reached = <Position>{source};
+        final frontier = <Position>[source];
+        while (frontier.isNotEmpty) {
+          final current = frontier.removeLast();
+          for (final neighbor in <Position>[
+            Position(current.x + 1, current.y),
+            Position(current.x - 1, current.y),
+            Position(current.x, current.y + 1),
+            Position(current.x, current.y - 1),
+          ]) {
+            if (cells.contains(neighbor) && reached.add(neighbor)) {
+              frontier.add(neighbor);
+            }
+          }
+        }
+        connectedOwned += reached.length;
+        if (reached.length != cells.length) connected = false;
+      }
+    }
+    final progressNumerator = requireConnected ? connectedOwned : owned;
+    final progress = claimable != 0 ? progressNumerator / claimable : 0.0;
 
     final requireEqual = (goal.config['requireEqual'] as bool?) ?? true;
     final requireComplete = (goal.config['requireComplete'] as bool?) ?? true;
-    final done =
-        owned > 0 && (equal || !requireEqual) && (complete || !requireComplete);
+    final done = owned > 0 &&
+        (equal || !requireEqual) &&
+        (complete || !requireComplete) &&
+        connected;
     return (done, progress);
   }
 }

@@ -159,6 +159,52 @@ def test_complete_and_equal_is_done() -> None:
     print("  OK  complete_and_equal_is_done")
 
 
+def test_connected_balance_accepts_three_supplied_regions() -> None:
+    """Three equal rows, each connected to its configured capital source."""
+    game = _make_game()
+    territory = [
+        (0, 0, "terr_wei"), (1, 0, "terr_wei"), (2, 0, "terr_wei"),
+        (0, 1, "terr_shu"), (1, 1, "terr_shu"), (2, 1, "terr_shu"),
+        (0, 2, "terr_wu"), (1, 2, "terr_wu"), (2, 2, "terr_wu"),
+    ]
+    state = _make_state(game, territory)
+    goal = {**_GOAL, "config": {**_GOAL["config"],
+        "requireConnected": True,
+        "connectionSources": {
+            "terr_wei": [0, 0], "terr_shu": [0, 1], "terr_wu": [0, 2],
+        },
+    }}
+
+    done, progress = _evaluate_goal(goal, state, game, [])
+
+    assert done
+    assert abs(progress - 1.0) < 1e-9
+    print("  OK  connected_balance_accepts_three_supplied_regions")
+
+
+def test_connected_balance_rejects_equal_but_cut_off_region() -> None:
+    """Counts remain 3/3/3, but one Wei province is cut off from its source."""
+    game = _make_game()
+    territory = [
+        (0, 0, "terr_wei"), (1, 0, "terr_wei"), (2, 2, "terr_wei"),
+        (2, 0, "terr_shu"), (2, 1, "terr_shu"), (1, 1, "terr_shu"),
+        (0, 1, "terr_wu"), (0, 2, "terr_wu"), (1, 2, "terr_wu"),
+    ]
+    state = _make_state(game, territory)
+    goal = {**_GOAL, "config": {**_GOAL["config"],
+        "requireConnected": True,
+        "connectionSources": {
+            "terr_wei": [0, 0], "terr_shu": [2, 0], "terr_wu": [0, 2],
+        },
+    }}
+
+    done, progress = _evaluate_goal(goal, state, game, [])
+
+    assert not done
+    assert abs(progress - 8 / 9) < 1e-9
+    print("  OK  connected_balance_rejects_equal_but_cut_off_region")
+
+
 def test_omitted_claimable_kind_falls_back_to_layer_default() -> None:
     """Reuses the 3/3/3 complete-and-equal fixture but OMITS `claimableKind`
     from the goal config, so `_count_claimable` must resolve the claimable
@@ -468,6 +514,8 @@ def run_all() -> bool:
         test_incomplete_is_not_done,
         test_complete_but_unequal_is_not_done,
         test_complete_and_equal_is_done,
+        test_connected_balance_accepts_three_supplied_regions,
+        test_connected_balance_rejects_equal_but_cut_off_region,
         test_omitted_claimable_kind_falls_back_to_layer_default,
         test_claimable_kind_accepts_list,
         test_omitted_claimable_layer_defaults_to_ground,

@@ -63,4 +63,58 @@ void main() {
       'assets/actors/test_actor/walk_right_2.png',
     );
   });
+
+  test('resolves a pack-local avatar fallback sprite', () {
+    final theme = AvatarThemeDef.fromJson({
+      'visible': true,
+      'sprite': 'assets/sprites/alien.png',
+    });
+
+    expect(resolveAvatarSpriteChoice(theme, 'right'), (
+      visible: true,
+      path: 'assets/sprites/alien.png',
+      mirrorHorizontally: false,
+    ));
+  });
+
+  test('honors hidden and mirrored avatar theme entries', () {
+    final hidden = AvatarThemeDef.fromJson({'visible': false});
+    expect(resolveAvatarSpriteChoice(hidden, 'left'), (
+      visible: false,
+      path: null,
+      mirrorHorizontally: false,
+    ));
+
+    final mirrored = AvatarThemeDef.fromJson({
+      'sprites': {
+        'idle': {
+          'right': 'assets/sprites/alien_right.png',
+          'left': {'mirror': 'right'},
+        },
+      },
+    });
+    expect(resolveAvatarSpriteChoice(mirrored, 'left'), (
+      visible: true,
+      path: 'assets/sprites/alien_right.png',
+      mirrorHorizontally: true,
+    ));
+  });
+
+  test('renders board layers in the order declared by the pack', () {
+    final game = GameDefinition.fromJson({
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'floor'},
+        {'id': 'territory', 'occupancy': 'zero_or_one'},
+        {'id': 'markers', 'occupancy': 'zero_or_one'},
+        {'id': 'objects', 'occupancy': 'zero_or_one'},
+      ],
+    });
+
+    expect(resolveBoardLayerOrder(game), [
+      'ground',
+      'territory',
+      'markers',
+      'objects',
+    ]);
+  });
 }

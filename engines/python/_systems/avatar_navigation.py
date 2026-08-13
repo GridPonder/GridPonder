@@ -40,6 +40,18 @@ class AvatarNavigationSystem(GameSystem):
         if board.is_void(target):
             return []
 
+        # Optional stricter ground test: the destination's ground cell must carry
+        # one of these tags. Empty (the default) keeps the void-only check, so
+        # every pack that omits the field behaves exactly as before.
+        valid_ground_tags = config.get("validGroundTags", [])
+        if valid_ground_tags:
+            ground_layer = config.get("groundLayer", "ground")
+            ground_entity = board.get_entity(ground_layer, target)
+            if ground_entity is None or not any(
+                game.has_tag(ground_entity.kind, tag) for tag in valid_ground_tags
+            ):
+                return []
+
         solid_handling = config.get("solidHandling", "block")
         entity_at_target = board.get_entity("objects", target)
 

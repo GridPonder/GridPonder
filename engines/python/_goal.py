@@ -320,34 +320,84 @@ def _count_claimable(board: Any, cfg: dict) -> int:
     return sum(1 for _pos, entity in layer.entries() if entity.kind in kinds)
 
 
-def balance_counts(cfg: dict, state: GameState) -> tuple[dict[str, int], int]:
-    """Cells held by each owner, and how many cells are claimable at all.
+def _balance_tally(
+    cfg: dict, state: GameState
+) -> tuple[dict[str, int], dict[str, set], int]:
+    """Cells held by each owner, where those cells sit, and how many cells are
+    claimable at all.
 
-    Shared with the goal renderer so the progress an agent is shown and the
-    condition it is scored against are computed the same way. Two copies of
-    this counting would drift, and the drift would be invisible: the agent
-    would be told it was one cell short of a goal it had already met.
+    The single pass everything about a balance goal is derived from, so the
+    progress an agent is shown and the condition it is scored against cannot
+    disagree. Two copies of this counting would drift, and the drift would be
+    invisible: the agent would be told it was one cell short of a goal it had
+    already met. `positions` feeds the connectivity check the same way.
     """
     layer = state.board.layers.get(cfg.get("layer"))
     counts = {o: 0 for o in cfg.get("owners", [])}
+    positions: dict[str, set] = {o: set() for o in counts}
     if layer is not None:
-        for _pos, entity in layer.entries():
+        for pos, entity in layer.entries():
             if entity.kind in counts:
                 counts[entity.kind] += 1
-    return counts, _count_claimable(state.board, cfg)
+                positions[entity.kind].add(pos)
+    return counts, positions, _count_claimable(state.board, cfg)
+
+
+def balance_counts(cfg: dict, state: GameState) -> tuple[dict[str, int], int]:
+    """Cells held by each owner, and how many cells are claimable at all —
+    what the goal renderer needs. See :func:`_balance_tally`."""
+    counts, _positions, claimable = _balance_tally(cfg, state)
+    return counts, claimable
 
 
 def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
     """Win when a territory layer is divided completely and into exactly-equal
-    shares among the configured owners (or per requireComplete/requireEqual)."""
-    counts, claimable = balance_counts(cfg, state)
+    shares among the configured owners (or per requireComplete/requireEqual).
+
+    When ``requireConnected`` is true, every cell owned by a configured owner
+    must be orthogonally connected to that owner's fixed ``connectionSources``
+    position through cells of the same owner.  This models supply lines without
+    coupling the generic balance goal to any game-specific capital entity.
+    """
+    counts, positions, claimable = _balance_tally(cfg, state)
     owned = sum(counts.values())
     equal = len(set(counts.values())) == 1
     complete = owned == claimable
-    progress = owned / claimable if claimable else 0.0
+    connected = True
+    connected_owned = owned
+    if cfg.get("requireConnected", False):
+        connected_owned = 0
+        raw_sources = cfg.get("connectionSources", {})
+        for owner, cells in positions.items():
+            raw_source = raw_sources.get(owner)
+            if not isinstance(raw_source, (list, tuple)) or len(raw_source) != 2:
+                connected = False
+                continue
+            source = Pos(int(raw_source[0]), int(raw_source[1]))
+            if source not in cells:
+                connected = False
+                continue
+            reached = {source}
+            frontier = [source]
+            while frontier:
+                current = frontier.pop()
+                for neighbor in (
+                    Pos(current.x + 1, current.y),
+                    Pos(current.x - 1, current.y),
+                    Pos(current.x, current.y + 1),
+                    Pos(current.x, current.y - 1),
+                ):
+                    if neighbor in cells and neighbor not in reached:
+                        reached.add(neighbor)
+                        frontier.append(neighbor)
+            connected_owned += len(reached)
+            if len(reached) != len(cells):
+                connected = False
+    progress_numerator = connected_owned if cfg.get("requireConnected", False) else owned
+    progress = progress_numerator / claimable if claimable else 0.0
     done = owned > 0 and \
            (equal or not cfg.get("requireEqual", True)) and \
-           (complete or not cfg.get("requireComplete", True))
+           (complete or not cfg.get("requireComplete", True)) and connected
     return done, progress
 
 

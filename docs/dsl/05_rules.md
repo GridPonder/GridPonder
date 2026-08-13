@@ -148,12 +148,13 @@ what effect it has.
 | `sourceKind` | string | Source entity kind. |
 
 ### `cell_cleared`
-A cell on the objects layer became empty (had content, now has `null`).
+A cell became empty (had content, now has `null`).
 
 | Payload | Type | Description |
 |---------|------|-------------|
 | `position` | `[x, y]` | Cell that was cleared. |
 | `previousKind` | string | Kind that was there before. |
+| `layer` | string | Layer the cell belongs to. Defaults to `"objects"`. |
 
 ### `cell_transformed`
 A cell's entity was replaced with a different entity.
@@ -207,9 +208,15 @@ An entity settled after gravity/motion.
 
 | Payload | Type | Description |
 |---------|------|-------------|
-| `kind` | string | Entity kind. |
+| `kind` | string | Entity kind on arrival. |
 | `position` | `[x, y]` | Final position. |
 | `fromPosition` | `[x, y]` | Position before settling. |
+| `layer` | string | Layer the entity settled on. Defaults to `"objects"`. |
+| `fromKind` | string | Kind it had while travelling. Same as `kind` unless the system applied a settle transform on arrival. |
+
+A UI animates the travel from `fromPosition` to `position` using `fromKind`,
+so an entity that transforms on impact is not drawn transformed in mid-air.
+Cells of one rigid component settle in the same batch and so animate together.
 
 ### `npc_moved`
 An NPC moved during NPC resolution.

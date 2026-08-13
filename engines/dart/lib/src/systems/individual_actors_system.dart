@@ -1,4 +1,5 @@
 import '../engine/game_system.dart';
+import '../models/direction_transform.dart';
 import '../models/entity.dart';
 import '../models/event.dart';
 import '../models/game_action.dart';
@@ -100,7 +101,8 @@ class IndividualActorsSystem extends GameSystem {
     final actorLayer = board.layers[actorLayerId];
     if (actorLayer == null) return [GameEvent.actionVetoed()];
 
-    final selectedPosition = _parsePosition(state.variables[selectedPositionKey]);
+    final selectedPosition =
+        _parsePosition(state.variables[selectedPositionKey]);
     Position? pos;
     EntityInstance? entity;
     final occupied = <Position>{};
@@ -117,7 +119,8 @@ class IndividualActorsSystem extends GameSystem {
     // Backward compatibility for states created before position-based
     // selection: a kind is sufficient only when it identifies one actor.
     if (selectedPosition == null) {
-      final matches = actorLayer.entries()
+      final matches = actorLayer
+          .entries()
           .where((entry) => entry.value.kind == selectedKind)
           .toList();
       if (matches.length == 1) {
@@ -159,7 +162,111 @@ class IndividualActorsSystem extends GameSystem {
       remaining[entity.kind] = (remaining[entity.kind] ?? 0) - 1;
     }
 
+    events.addAll(_react(
+        state, game, config, delta, actorLayerId, groundLayerId, wallTag));
+
     return events;
+  }
+
+  /// Moves every reactive-kind actor in response to a successful player move.
+  ///
+  /// Rivals answer the *player's* direction through their own transform, so the
+  /// move the player makes is also the move the opposition makes. Runs only
+  /// after a real step — a blocked attempt gives the rivals nothing. Resolution
+  /// mirrors `coupled_actors`: bucket by effective direction in canonical
+  /// order, front-first within a bucket, with a live `occupied` set, so the
+  /// outcome is fully deterministic.
+  ///
+  /// Emits `actor_reacted` rather than `actor_moved` so move counters and
+  /// budgets keyed on player movement stay honest; a level that wants rival
+  /// landings to anchor captures names `actor_reacted` in the capture system's
+  /// `triggerEvents`.
+  List<GameEvent> _react(
+    LevelState state,
+    GameDefinition game,
+    Map<String, dynamic> config,
+    Position delta,
+    String actorLayerId,
+    String groundLayerId,
+    String wallTag,
+  ) {
+    final reactive = config['reactiveKinds'] as Map<String, dynamic>?;
+    if (reactive == null || reactive.isEmpty) return const [];
+
+    final board = state.board;
+    final actorLayer = board.layers[actorLayerId];
+    if (actorLayer == null) return const [];
+
+    final occupied = <Position>{};
+    final triples = <List<Object>>[];
+    for (final entry in actorLayer.entries()) {
+      occupied.add(entry.key);
+      final transform = reactive[entry.value.kind];
+      if (transform == null) continue;
+      triples.add([
+        entry.key,
+        entry.value,
+        transformDelta(delta, transform.toString()),
+      ]);
+    }
+    if (triples.isEmpty) return const [];
+
+    final ordered = <List<Object>>[];
+    for (final bucket in _canonicalBuckets) {
+      final members = triples.where((t) {
+        final d = t[2] as Position;
+        return d.x == bucket.x && d.y == bucket.y;
+      }).toList()
+        ..sort((a, b) {
+          final pa = a[0] as Position;
+          final pb = b[0] as Position;
+          final projA = -(pa.x * bucket.x + pa.y * bucket.y);
+          final projB = -(pb.x * bucket.x + pb.y * bucket.y);
+          if (projA != projB) return projA.compareTo(projB);
+          final sideA = pa.x * bucket.y.abs() + pa.y * bucket.x.abs();
+          final sideB = pb.x * bucket.y.abs() + pb.y * bucket.x.abs();
+          if (sideA != sideB) return sideA.compareTo(sideB);
+          return (a[1] as EntityInstance).kind.compareTo(
+                (b[1] as EntityInstance).kind,
+              );
+        });
+      ordered.addAll(members);
+    }
+
+    final events = <GameEvent>[];
+    for (final triple in ordered) {
+      final pos = triple[0] as Position;
+      final entity = triple[1] as EntityInstance;
+      final rdelta = triple[2] as Position;
+      if (rdelta.x == 0 && rdelta.y == 0) continue;
+      final target = Position(pos.x + rdelta.x, pos.y + rdelta.y);
+      final blocked = !board.isInBounds(target) ||
+          board.hasTagAt(groundLayerId, target, wallTag, game.entityKinds) ||
+          occupied.contains(target);
+      if (blocked) continue;
+      board.setEntity(actorLayerId, pos, null);
+      board.setEntity(actorLayerId, target, entity);
+      occupied.remove(pos);
+      occupied.add(target);
+      events.add(GameEvent.actorReacted(
+          entity.kind, pos, target, _deltaDirection(rdelta)));
+    }
+    return events;
+  }
+
+  static const _canonicalBuckets = [
+    Position(0, -1),
+    Position(0, 1),
+    Position(-1, 0),
+    Position(1, 0),
+  ];
+
+  static String _deltaDirection(Position d) {
+    if (d.x == 0 && d.y == -1) return 'up';
+    if (d.x == 0 && d.y == 1) return 'down';
+    if (d.x == -1 && d.y == 0) return 'left';
+    if (d.x == 1 && d.y == 0) return 'right';
+    return '';
   }
 
   Position? _parsePosition(dynamic raw) {

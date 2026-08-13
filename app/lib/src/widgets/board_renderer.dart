@@ -1,4 +1,5 @@
 import 'dart:math';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
 import '../services/pack_service.dart';
@@ -49,6 +50,42 @@ class LineOfSightFeedback {
   });
 }
 
+/// One in-flight cell effect: which strip to draw, where, and which frame.
+///
+/// Driven by `theme.json`'s `effects` block — an engine event type mapped to a
+/// sprite strip — so any pack can flash art at a cell without app changes.
+class CellEffectPlayback {
+  final Position position;
+  final CellEffectDef def;
+  final int frameIndex;
+
+  const CellEffectPlayback({
+    required this.position,
+    required this.def,
+    required this.frameIndex,
+  });
+}
+
+/// One entity in flight, positioned in *fractional* cells so travel between
+/// cells can be interpolated instead of snapped from one cell to the next.
+///
+/// [squash] scales the sprite about its base — 1.0 is at rest, less than 1.0
+/// compresses it, which is how a landing reads as an impact rather than a
+/// stop. Volume is roughly preserved by widening as it flattens.
+class MovingSprite {
+  final EntityInstance entity;
+  final double x;
+  final double y;
+  final double squash;
+
+  const MovingSprite({
+    required this.entity,
+    required this.x,
+    required this.y,
+    this.squash = 1.0,
+  });
+}
+
 /// Resolves the sprite path for an entity instance, including optional
 /// direction-aware motion sprites declared under `motion.sprites`.
 String? resolveEntitySpritePath(
@@ -71,6 +108,34 @@ String? resolveEntitySpritePath(
   final value = entity.param(spriteParam);
   return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
 }
+
+({bool visible, String? path, bool mirrorHorizontally})
+resolveAvatarSpriteChoice(AvatarThemeDef? theme, String direction) {
+  if (theme?.visible == false) {
+    return (visible: false, path: null, mirrorHorizontally: false);
+  }
+
+  var entry = theme?.resolve('idle', direction);
+  var mirrorHorizontally = false;
+  if (entry?.mirror case final mirrorDirection?) {
+    entry = theme?.resolve('idle', mirrorDirection);
+    mirrorHorizontally = true;
+  }
+  final path =
+      entry?.staticPath ??
+      (entry?.frames?.isNotEmpty == true ? entry!.frames!.first : null);
+  return (visible: true, path: path, mirrorHorizontally: mirrorHorizontally);
+}
+
+/// Layer ids in the order the pack declares them (first = bottom), per the
+/// DSL spec. Cached per [GameDefinition]: this is read once per cell per
+/// frame, and the layer stack never changes for a loaded game.
+final Expando<List<String>> _boardLayerOrderCache = Expando<List<String>>();
+
+List<String> resolveBoardLayerOrder(GameDefinition game) =>
+    _boardLayerOrderCache[game] ??= List<String>.unmodifiable([
+      for (final layer in game.layers) layer.id,
+    ]);
 
 String? _motionSpritePath(
   Map<String, dynamic> motion,
@@ -104,12 +169,38 @@ class BoardRenderer extends StatelessWidget {
   final LevelState state;
   final GameDefinition game;
   final PackService packService;
+
   /// Optional overlay sprites rendered on top of the objects layer, used during
   /// entity destruction animations. Maps cell position → DSL sprite path.
   /// Resolved pack-first then gridponder-base, matching static sprite behaviour.
   final Map<Position, String>? animationOverlays;
+
   /// Called when the user taps/clicks a cell. Enables tap-to-act gestures.
   final void Function(int x, int y)? onCellTap;
+
+  /// Called with the cell the pointer entered, or `(null, null)` when it
+  /// leaves the board. Only wired up where a pointer exists.
+  final void Function(int? x, int? y)? onCellHover;
+
+  /// What each action available to the player would set in motion, keyed by
+  /// the cell that action targets: the cells that would move if it were taken,
+  /// in the positions they occupy now. An entry mapped to an empty set is an
+  /// action that is legal but moves nothing.
+  ///
+  /// Drawn as a marker on each target plus, for the target under the pointer,
+  /// an outline around what it would release — so a destructive verb can be
+  /// read before it is committed rather than inferred after.
+  final Map<Position, Set<Position>> actionPreviews;
+
+  /// Which entry of [actionPreviews] the pointer is over. When null, a single
+  /// target that would actually move something is outlined on its own, so the
+  /// common case needs no pointer at all.
+  final Position? hoveredPreviewTarget;
+
+  /// Entities currently in flight, drawn above the board at fractional cell
+  /// positions. A listenable rather than a plain list so motion can be driven
+  /// at frame rate without rebuilding the board underneath it.
+  final ValueListenable<List<MovingSprite>>? movingSprites;
 
   /// Last known facing direction per actor kind. Used to render idle actor
   /// sprites after movement animation has finished.
@@ -118,6 +209,7 @@ class BoardRenderer extends StatelessWidget {
   /// When set, cell_flooded entities are rendered in this color instead of
   /// their default color — used by Flood Colors to show the last chosen color.
   final Color? floodedColorOverride;
+
   /// When set, the avatar is rendered at this position instead of
   /// state.avatar.position — used during ice slide animations.
   final Position? avatarPositionOverride;
@@ -130,6 +222,11 @@ class BoardRenderer extends StatelessWidget {
 
   /// Short-lived visual feedback for a line-of-sight detection event.
   final List<LineOfSightFeedback> lineOfSightFeedbacks;
+
+  /// Short-lived sprite-strip effects playing at specific cells, declared by
+  /// the pack theme's `effects` block (e.g. a burst wherever a capture flipped
+  /// a cell).
+  final List<CellEffectPlayback> cellEffects;
 
   const BoardRenderer({
     super.key,
@@ -144,7 +241,66 @@ class BoardRenderer extends StatelessWidget {
     this.selectedMultiCellObjectId,
     this.selectedActorPosition,
     this.lineOfSightFeedbacks = const [],
+    this.cellEffects = const [],
+    this.onCellHover,
+    this.actionPreviews = const {},
+    this.hoveredPreviewTarget,
+    this.movingSprites,
   });
+
+  /// Wraps a cell so pointer movement over it can drive the action preview.
+  /// A no-op wherever nothing is listening — touch input included.
+  Widget _hoverable(int x, int y, Widget child) {
+    if (onCellHover == null) return child;
+    return MouseRegion(
+      onEnter: (_) => onCellHover!(x, y),
+      onExit: (_) => onCellHover!(null, null),
+      child: child,
+    );
+  }
+
+  /// Draws one in-flight entity at its current sub-cell position. Reuses the
+  /// cell renderer so sprite-backed and procedurally-drawn entities travel the
+  /// same way, and squashes about the base so a landing lands.
+  Widget _buildMovingSprite(MovingSprite sprite, double cellSize) {
+    final tile = _Cell(
+      x: 0,
+      y: 0,
+      state: state,
+      game: game,
+      packService: packService,
+      cellSize: cellSize,
+      entityOverride: sprite.entity,
+      actorFacingByKind: actorFacingByKind,
+      floodedColorOverride: floodedColorOverride,
+    );
+    return Positioned(
+      left: sprite.x * cellSize,
+      top: sprite.y * cellSize,
+      width: cellSize,
+      height: cellSize,
+      child: sprite.squash == 1.0
+          ? tile
+          : Transform(
+              alignment: Alignment.bottomCenter,
+              transform: Matrix4.diagonal3Values(
+                2 - sprite.squash,
+                sprite.squash,
+                1,
+              ),
+              child: tile,
+            ),
+    );
+  }
+
+  Widget _tappable(int x, int y, Widget child) {
+    if (onCellTap == null) return child;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => onCellTap!(x, y),
+      child: child,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -195,37 +351,27 @@ class BoardRenderer extends StatelessWidget {
                     top: y * cellSize,
                     width: cellSize,
                     height: cellSize,
-                    child: onCellTap != null
-                        ? GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onTap: () => onCellTap!(x, y),
-                            child: _Cell(
-                              x: x,
-                              y: y,
-                              state: state,
-                              game: game,
-                              packService: packService,
-                              cellSize: cellSize,
-                              skipGround: backgroundMcoPosSet.contains(
-                                Position(x, y),
-                              ),
-                              actorFacingByKind: actorFacingByKind,
-                              floodedColorOverride: floodedColorOverride,
-                            ),
-                          )
-                        : _Cell(
-                            x: x,
-                            y: y,
-                            state: state,
-                            game: game,
-                            packService: packService,
-                            cellSize: cellSize,
-                            skipGround: backgroundMcoPosSet.contains(
-                              Position(x, y),
-                            ),
-                            actorFacingByKind: actorFacingByKind,
-                            floodedColorOverride: floodedColorOverride,
+                    child: _hoverable(
+                      x,
+                      y,
+                      _tappable(
+                        x,
+                        y,
+                        _Cell(
+                          x: x,
+                          y: y,
+                          state: state,
+                          game: game,
+                          packService: packService,
+                          cellSize: cellSize,
+                          skipGround: backgroundMcoPosSet.contains(
+                            Position(x, y),
                           ),
+                          actorFacingByKind: actorFacingByKind,
+                          floodedColorOverride: floodedColorOverride,
+                        ),
+                      ),
+                    ),
                   ),
               for (final mco in foregroundMcos)
                 ..._buildMcoCells(
@@ -244,6 +390,38 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               ),
+              // Entities in flight. Rebuilt on their own listenable so a fall
+              // can be driven at frame rate without rebuilding every cell
+              // underneath it.
+              if (movingSprites case final sprites?)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ValueListenableBuilder<List<MovingSprite>>(
+                      valueListenable: sprites,
+                      builder: (context, inFlight, _) => Stack(
+                        children: [
+                          for (final s in inFlight)
+                            _buildMovingSprite(s, cellSize),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              // What the player's available actions would do, drawn above the
+              // board but below the avatar so it never hides who is standing
+              // where.
+              if (actionPreviews.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _ActionPreviewPainter(
+                        actionPreviews,
+                        hoveredPreviewTarget,
+                        cellSize,
+                      ),
+                    ),
+                  ),
+                ),
               if (selectedActorPosition case final selectedPos?)
                 _buildSelectedActorRing(selectedPos, cellSize),
               if (animationOverlays != null)
@@ -264,6 +442,8 @@ class BoardRenderer extends StatelessWidget {
                 ),
               for (final feedback in lineOfSightFeedbacks)
                 _buildLineOfSightTargetFeedback(feedback, cellSize),
+              for (final effect in cellEffects)
+                _buildCellEffect(effect, cellSize),
               if (state.avatar.enabled && state.avatar.position != null)
                 _buildAvatar(
                   avatarPositionOverride != null
@@ -287,10 +467,8 @@ class BoardRenderer extends StatelessWidget {
     final exitPos = exitList != null
         ? Position(exitList[0] as int, exitList[1] as int)
         : null;
-    final queue = (mco.params['queue'] as List?)
-            ?.map((e) => e as int)
-            .toList() ??
-        [];
+    final queue =
+        (mco.params['queue'] as List?)?.map((e) => e as int).toList() ?? [];
     final currentIndex = (mco.params['currentIndex'] as int?) ?? 0;
 
     // Assign queued values to pipe cells.
@@ -333,7 +511,8 @@ class BoardRenderer extends StatelessWidget {
           width: cellSize,
           height: cellSize,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => _mcoFallback(pos, mco, exitPos, cellSize),
+          errorBuilder: (_, __, ___) =>
+              _mcoFallback(pos, mco, exitPos, cellSize),
         );
       } else {
         background = _mcoFallback(pos, mco, exitPos, cellSize);
@@ -475,7 +654,10 @@ class BoardRenderer extends StatelessWidget {
       child: IgnorePointer(
         child: Container(
           decoration: BoxDecoration(
-            border: Border.all(color: Colors.amber.withOpacity(0.9), width: 2.5),
+            border: Border.all(
+              color: Colors.amber.withOpacity(0.9),
+              width: 2.5,
+            ),
             color: Colors.amber.withOpacity(0.08),
             borderRadius: BorderRadius.circular(3),
           ),
@@ -507,6 +689,48 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
+  /// Draws one frame of a horizontal sprite strip over a cell.
+  ///
+  /// The strip is laid out left to right; frame `i` is shown by sliding the
+  /// full-width image left by `i` cell widths inside a clip the size of one
+  /// cell. `scale` lets an effect spill outside its cell (a burst usually
+  /// reads better slightly larger than the tile it fires on).
+  Widget _buildCellEffect(CellEffectPlayback effect, double cellSize) {
+    final def = effect.def;
+    final size = cellSize * def.scale;
+    final inset = (cellSize - size) / 2;
+    final frames = def.frames < 1 ? 1 : def.frames;
+    final frame = effect.frameIndex.clamp(0, frames - 1);
+
+    return Positioned(
+      left: effect.position.x * cellSize + inset,
+      top: effect.position.y * cellSize + inset,
+      width: size,
+      height: size,
+      child: IgnorePointer(
+        child: ClipRect(
+          child: Stack(
+            clipBehavior: Clip.hardEdge,
+            children: [
+              Positioned(
+                left: -frame * size,
+                top: 0,
+                width: size * frames,
+                height: size,
+                child: Image(
+                  image: packService.resolvePackImage(def.sheet),
+                  fit: BoxFit.fill,
+                  filterQuality: FilterQuality.medium,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildAnimOverlay(Position pos, String dslPath, double cellSize) {
     return Positioned(
       left: pos.x * cellSize,
@@ -527,8 +751,16 @@ class BoardRenderer extends StatelessWidget {
   }
 
   Widget _buildAvatar(AvatarState avatar, double cellSize) {
-    final assetPath =
-        packService.resolveAvatarSprite(_avatarSpriteFile(avatar.facing.toJson()));
+    final direction = avatar.facing.toJson();
+    final themed = resolveAvatarSpriteChoice(
+      packService.theme?.avatar,
+      direction,
+    );
+    if (!themed.visible) return const SizedBox.shrink();
+
+    final fallbackAssetPath = packService.resolveAvatarSprite(
+      _avatarSpriteFile(direction),
+    );
     final slot = avatar.inventory.slot;
 
     // When an overlay exists, center the avatar at the overlay's midpoint.
@@ -552,19 +784,33 @@ class BoardRenderer extends StatelessWidget {
       height: size,
       child: Stack(
         children: [
-          Image.asset(
-            assetPath,
-            fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => Container(
-              decoration: BoxDecoration(
-                color: Colors.pink.shade200,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(Icons.pets, size: size * 0.6, color: Colors.white),
-            ),
+          Transform.flip(
+            flipX: themed.mirrorHorizontally,
+            child: themed.path != null
+                ? Image(
+                    image: packService.resolvePackImage(themed.path!),
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, __, ___) =>
+                        _buildFallbackAvatar(fallbackAssetPath, size),
+                  )
+                : _buildFallbackAvatar(fallbackAssetPath, size),
           ),
           if (slot != null) _buildInventoryBadge(slot, size),
         ],
+      ),
+    );
+  }
+
+  Widget _buildFallbackAvatar(String assetPath, double size) {
+    return Image.asset(
+      assetPath,
+      fit: BoxFit.contain,
+      errorBuilder: (_, __, ___) => Container(
+        decoration: BoxDecoration(
+          color: Colors.pink.shade200,
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.pets, size: size * 0.6, color: Colors.white),
       ),
     );
   }
@@ -640,6 +886,100 @@ class _LineOfSightFeedbackPainter extends CustomPainter {
   }
 }
 
+/// Draws what the player's available actions would do, before they commit:
+/// a marker on every cell they can act on, and an outline around the cells the
+/// pointed-at action would set in motion.
+///
+/// The outline strokes only the boundary of the moving group, so it reads as
+/// one piece — which is how it will actually behave when it goes.
+class _ActionPreviewPainter extends CustomPainter {
+  final Map<Position, Set<Position>> previews;
+  final Position? hovered;
+  final double cellSize;
+
+  const _ActionPreviewPainter(this.previews, this.hovered, this.cellSize);
+
+  static const _live = Color(0xFFFFB74D);
+  static const _inert = Color(0xFF7C8DA6);
+
+  /// The group to outline: whatever is pointed at, or — when nothing is, and
+  /// exactly one available action would move anything — that one, so the
+  /// common case is legible without a pointer at all. Ambiguity is left to
+  /// the player to resolve by pointing.
+  Set<Position>? get _focus {
+    if (hovered != null) return previews[hovered];
+    Set<Position>? only;
+    for (final entry in previews.entries) {
+      if (entry.value.isEmpty) continue;
+      if (only != null) return null;
+      only = entry.value;
+    }
+    return only;
+  }
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final focus = _focus;
+    if (focus != null && focus.isNotEmpty) {
+      final fill = Paint()..color = _live.withValues(alpha: 0.15);
+      final stroke = Paint()
+        ..color = _live
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2
+        ..strokeCap = StrokeCap.square;
+      for (final p in focus) {
+        final l = p.x * cellSize;
+        final t = p.y * cellSize;
+        canvas.drawRect(Rect.fromLTWH(l, t, cellSize, cellSize), fill);
+        if (!focus.contains(Position(p.x, p.y - 1))) {
+          canvas.drawLine(Offset(l, t), Offset(l + cellSize, t), stroke);
+        }
+        if (!focus.contains(Position(p.x, p.y + 1))) {
+          canvas.drawLine(
+            Offset(l, t + cellSize),
+            Offset(l + cellSize, t + cellSize),
+            stroke,
+          );
+        }
+        if (!focus.contains(Position(p.x - 1, p.y))) {
+          canvas.drawLine(Offset(l, t), Offset(l, t + cellSize), stroke);
+        }
+        if (!focus.contains(Position(p.x + 1, p.y))) {
+          canvas.drawLine(
+            Offset(l + cellSize, t),
+            Offset(l + cellSize, t + cellSize),
+            stroke,
+          );
+        }
+      }
+    }
+
+    // Filled where the action would release something, hollow where it would
+    // only remove the cell itself and leave the structure standing.
+    final radius = (cellSize * 0.11).clamp(2.0, 7.0);
+    for (final entry in previews.entries) {
+      final moves = entry.value.isNotEmpty;
+      canvas.drawCircle(
+        Offset(
+          entry.key.x * cellSize + cellSize / 2,
+          entry.key.y * cellSize + cellSize / 2,
+        ),
+        radius,
+        Paint()
+          ..color = moves ? _live : _inert
+          ..style = moves ? PaintingStyle.fill : PaintingStyle.stroke
+          ..strokeWidth = 1.5,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ActionPreviewPainter oldDelegate) =>
+      oldDelegate.previews != previews ||
+      oldDelegate.hovered != hovered ||
+      oldDelegate.cellSize != cellSize;
+}
+
 class _Cell extends StatelessWidget {
   final int x, y;
   final LevelState state;
@@ -649,6 +989,10 @@ class _Cell extends StatelessWidget {
   final bool skipGround;
   final Map<String, String> actorFacingByKind;
   final Color? floodedColorOverride;
+
+  /// When set, the cell draws this entity alone and ignores the board — used
+  /// for entities in flight, which sit between cells and so belong to no cell.
+  final EntityInstance? entityOverride;
 
   const _Cell({
     required this.x,
@@ -660,57 +1004,88 @@ class _Cell extends StatelessWidget {
     this.skipGround = false,
     this.actorFacingByKind = const {},
     this.floodedColorOverride,
+    this.entityOverride,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (entityOverride case final entity?) return _entity(entity, null);
     final pos = Position(x, y);
     final groundEntity = state.board.getEntity('ground', pos);
     if (groundEntity?.kind == 'void' && !skipGround) {
-      final kindDef = game.entityKinds['void'];
-      final spritePath = resolveEntitySpritePath(kindDef, groundEntity!);
-      if (spritePath != null) {
-        return Image.asset(
-          packService.resolveSprite(spritePath),
-          width: cellSize,
-          height: cellSize,
-          fit: BoxFit.cover,
-        );
-      }
-      // Procedural fallback only when the game itself uses procedural
-      // rendering for normal cells (no sprite on `empty`). Sprite-backed
-      // packs (e.g. twinseed: empty=grass.png) frame voids naturally via the
-      // surrounding tiles, so we leave them transparent.
-      final emptySprite = game.entityKinds['empty']?.sprite;
-      if (emptySprite == null) {
-        return Container(
-          width: cellSize,
-          height: cellSize,
-          color: const Color(0xFFB0B0B0),
-        );
-      }
-      return const SizedBox.shrink();
+      final background = _voidBackground(groundEntity!);
+      // Open air can still carry something worth seeing — a target marker
+      // painted on the floor below, an actor crossing a gap. Keep the void
+      // backdrop and stack those on top rather than hiding them.
+      final overlays = _overlayLayers
+          .where((id) => state.board.getEntity(id, pos) != null)
+          .toList();
+      if (overlays.isEmpty) return background;
+      return SizedBox(
+        width: cellSize,
+        height: cellSize,
+        child: Stack(
+          children: [background, for (final id in overlays) _layer(id, pos)],
+        ),
+      );
     }
     return Container(
-      decoration:
-          BoxDecoration(border: Border.all(color: Colors.black12, width: 0.5)),
+      decoration: BoxDecoration(
+        border: Border.all(color: Colors.black12, width: 0.5),
+      ),
       child: Stack(
         children: [
-          if (!skipGround) _layer('ground', pos),
-          _layer('territory', pos),
-          _layer('portals', pos),
-          _layer('objects', pos),
-          _layer('clone', pos),
-          _layer('markers', pos),
-          _layer('actors', pos),
+          for (final layerId in resolveBoardLayerOrder(game))
+            if (!skipGround || layerId != 'ground') _layer(layerId, pos),
         ],
       ),
     );
   }
 
+  /// Everything drawn above `ground`, in the order the pack declares it.
+  Iterable<String> get _overlayLayers =>
+      resolveBoardLayerOrder(game).where((id) => id != 'ground');
+
+  /// How an open-air cell is drawn when nothing else occupies it.
+  Widget _voidBackground(EntityInstance groundEntity) {
+    final kindDef = game.entityKinds['void'];
+    final spritePath = resolveEntitySpritePath(kindDef, groundEntity);
+    if (spritePath != null) {
+      return Image(
+        image: packService.resolvePackImage(spritePath),
+        width: cellSize,
+        height: cellSize,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => Image.asset(
+          packService.resolveSprite(spritePath),
+          width: cellSize,
+          height: cellSize,
+          fit: BoxFit.cover,
+        ),
+      );
+    }
+    // Procedural fallback only when the game itself uses procedural
+    // rendering for normal cells (no sprite on `empty`). Sprite-backed
+    // packs (e.g. twinseed: empty=grass.png) frame voids naturally via the
+    // surrounding tiles, so we leave them transparent.
+    final emptySprite = game.entityKinds['empty']?.sprite;
+    if (emptySprite == null) {
+      return Container(
+        width: cellSize,
+        height: cellSize,
+        color: const Color(0xFFB0B0B0),
+      );
+    }
+    return const SizedBox.shrink();
+  }
+
   Widget _layer(String layerId, Position pos) {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
+    return _entity(entity, layerId);
+  }
+
+  Widget _entity(EntityInstance entity, String? layerId) {
     final kindDef = game.entityKinds[entity.kind];
     final facingDirection = layerId == 'actors'
         ? actorFacingByKind[entity.kind]
@@ -797,7 +1172,10 @@ class _Cell extends StatelessWidget {
   /// null when [display] doesn't specify a recognised type (caller falls
   /// back to legacy procedural paths). Sole pack-visible vocabulary, so
   /// the renderer doesn't have to recognise specific entity-kind names.
-  Widget? _renderFromDisplay(Map<String, dynamic> display, EntityInstance entity) {
+  Widget? _renderFromDisplay(
+    Map<String, dynamic> display,
+    EntityInstance entity,
+  ) {
     final type = display['type'] as String?;
     final color = _resolveDisplayColor(display['color'], entity);
     switch (type) {
@@ -808,7 +1186,11 @@ class _Cell extends StatelessWidget {
             color: color ?? _namedColor('grey'),
             borderRadius: BorderRadius.circular(cellSize * 0.1),
             boxShadow: const [
-              BoxShadow(color: Colors.black26, blurRadius: 2, offset: Offset(1, 1)),
+              BoxShadow(
+                color: Colors.black26,
+                blurRadius: 2,
+                offset: Offset(1, 1),
+              ),
             ],
           ),
         );
@@ -828,7 +1210,8 @@ class _Cell extends StatelessWidget {
           ),
         );
       case 'label':
-        final labelText = _resolveDisplayString(display['label'], entity) ?? '?';
+        final labelText =
+            _resolveDisplayString(display['label'], entity) ?? '?';
         return Container(
           color: color ?? _namedColor('grey'),
           alignment: Alignment.center,
@@ -906,11 +1289,11 @@ class _Cell extends StatelessWidget {
   /// Tiny lookup so a pack can name a Material icon by its standard name.
   /// Extend as needed; unknown names render the default placeholder.
   IconData _materialIcon(String? name) => switch (name) {
-        'blur_on' => Icons.blur_on,
-        'star' => Icons.star,
-        'flag' => Icons.flag,
-        _ => Icons.circle_outlined,
-      };
+    'blur_on' => Icons.blur_on,
+    'star' => Icons.star,
+    'flag' => Icons.flag,
+    _ => Icons.circle_outlined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -923,14 +1306,19 @@ class _Cell extends StatelessWidget {
 class TargetBoardRenderer extends StatelessWidget {
   final Map<String, dynamic> targetLayers;
   final LevelState? currentState;
+
   /// Pack-specific colour overrides forwarded to [cellNamedColor]. Pass
   /// `packService.theme?.palette` from the caller; null falls back to
   /// the renderer's built-in palette.
   final Map<String, String>? palette;
   static const double _cellSize = 24.0;
 
-  const TargetBoardRenderer(
-      {super.key, required this.targetLayers, this.currentState, this.palette});
+  const TargetBoardRenderer({
+    super.key,
+    required this.targetLayers,
+    this.currentState,
+    this.palette,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -953,11 +1341,12 @@ class TargetBoardRenderer extends StatelessWidget {
                 width: _cellSize,
                 height: _cellSize,
                 child: _TargetCell(
-                    x: x,
-                    y: y,
-                    targetLayers: targetLayers,
-                    currentState: currentState,
-                    palette: palette),
+                  x: x,
+                  y: y,
+                  targetLayers: targetLayers,
+                  currentState: currentState,
+                  palette: palette,
+                ),
               ),
         ],
       ),
@@ -971,12 +1360,13 @@ class _TargetCell extends StatelessWidget {
   final LevelState? currentState;
   final Map<String, String>? palette;
 
-  const _TargetCell(
-      {required this.x,
-      required this.y,
-      required this.targetLayers,
-      this.currentState,
-      this.palette});
+  const _TargetCell({
+    required this.x,
+    required this.y,
+    required this.targetLayers,
+    this.currentState,
+    this.palette,
+  });
 
   String? _kindAt(String layerId) {
     final layer = targetLayers[layerId] as List?;
@@ -999,7 +1389,9 @@ class _TargetCell extends StatelessWidget {
   Widget build(BuildContext context) {
     String? kind;
     bool matched = false;
-    for (final layerId in ['objects', 'markers']) {
+    // Read whichever layers the goal actually declares — a pack may target
+    // `ground` (terrain-shaping goals) just as well as `objects`.
+    for (final layerId in targetLayers.keys) {
       final k = _kindAt(layerId);
       if (k != null) {
         kind = k;
@@ -1007,13 +1399,15 @@ class _TargetCell extends StatelessWidget {
         break;
       }
     }
-    final bgColor =
-        matched ? Colors.lightGreen.shade200 : const Color(0xFFF5F0E8);
+    final bgColor = matched
+        ? Colors.lightGreen.shade200
+        : const Color(0xFFF5F0E8);
     return Container(
       decoration: BoxDecoration(
         color: bgColor,
         border: const Border.fromBorderSide(
-            BorderSide(color: Colors.black12, width: 0.5)),
+          BorderSide(color: Colors.black12, width: 0.5),
+        ),
       ),
       child: kind != null ? _buildTargetCell(kind) : null,
     );
@@ -1052,6 +1446,12 @@ class _TargetCell extends StatelessWidget {
 
   Color _cellColor(String kind) {
     if (kind.startsWith('cell_')) return _namedColor(kind.substring(5));
+    // A pack may colour a goal swatch by naming the entity kind in its palette.
+    final fromPalette = palette?[kind];
+    if (fromPalette != null) {
+      final parsed = _parsePaletteHex(fromPalette);
+      if (parsed != null) return parsed;
+    }
     return switch (kind) {
       'empty' => const Color(0xFFF5F0E8),
       'rock' => const Color(0xFF9E9E9E),
@@ -1078,10 +1478,10 @@ class _PipeCellPainter extends CustomPainter {
     required this.isExit,
   });
 
-  static const _bg = Color(0xFF37474F);       // dark steel background
-  static const _wall = Color(0xFF263238);      // darker outline
-  static const _lumen = Color(0xFF78909C);     // inner channel fill
-  static const _lumenLight = Color(0xFF90A4AE);// highlight inside channel
+  static const _bg = Color(0xFF37474F); // dark steel background
+  static const _wall = Color(0xFF263238); // darker outline
+  static const _lumen = Color(0xFF78909C); // inner channel fill
+  static const _lumenLight = Color(0xFF90A4AE); // highlight inside channel
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1095,7 +1495,7 @@ class _PipeCellPainter extends CustomPainter {
 
     final lumenPaint = Paint()..color = _lumen;
     final lightPaint = Paint()..color = _lumenLight;
-    final wallPaint  = Paint()
+    final wallPaint = Paint()
       ..color = _wall
       ..style = PaintingStyle.stroke
       ..strokeWidth = 1.0;
@@ -1112,30 +1512,35 @@ class _PipeCellPainter extends CustomPainter {
       final isHoriz = (y2 - y1).abs() < (x2 - x1).abs();
       if (isHoriz) {
         canvas.drawRect(
-            Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.25),
-            lightPaint);
+          Rect.fromLTWH(rect.left, rect.top, rect.width, rect.height * 0.25),
+          lightPaint,
+        );
       } else {
         canvas.drawRect(
-            Rect.fromLTWH(rect.left, rect.top, rect.width * 0.25, rect.height),
-            lightPaint);
+          Rect.fromLTWH(rect.left, rect.top, rect.width * 0.25, rect.height),
+          lightPaint,
+        );
       }
       canvas.drawRect(rect, wallPaint);
     }
 
     // Center square — filled whenever two or more sides are open.
     final centerRect = Rect.fromLTWH(cx - cr, cy - cr, cr * 2, cr * 2);
-    final openCount = [openLeft, openRight, openUp, openDown]
-        .where((v) => v)
-        .length;
+    final openCount = [
+      openLeft,
+      openRight,
+      openUp,
+      openDown,
+    ].where((v) => v).length;
     if (openCount >= 2) {
       canvas.drawRect(centerRect, lumenPaint);
       canvas.drawRect(centerRect, wallPaint);
     }
 
-    if (openLeft)  drawSegment(0,      cy - cr, cx, cy + cr);
-    if (openRight) drawSegment(cx,     cy - cr, w,  cy + cr);
-    if (openUp)    drawSegment(cx - cr, 0,      cx + cr, cy);
-    if (openDown)  drawSegment(cx - cr, cy,     cx + cr, h);
+    if (openLeft) drawSegment(0, cy - cr, cx, cy + cr);
+    if (openRight) drawSegment(cx, cy - cr, w, cy + cr);
+    if (openUp) drawSegment(cx - cr, 0, cx + cr, cy);
+    if (openDown) drawSegment(cx - cr, cy, cx + cr, h);
 
     // Exit indicator: small downward chevron at the bottom edge.
     if (isExit) {
@@ -1184,7 +1589,8 @@ class _OutlinePainter extends CustomPainter {
       final outline = kindDef.outline;
       if (outline == null) continue;
 
-      final color = _parseHex(outline['color'] as String?) ?? const Color(0xFF222222);
+      final color =
+          _parseHex(outline['color'] as String?) ?? const Color(0xFF222222);
       final width = (outline['width'] as num?)?.toDouble() ?? 2.0;
       final paint = Paint()
         ..color = color
