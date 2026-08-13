@@ -91,9 +91,128 @@ def test_territory_symbol_shown_on_owned_empty_cell_and_hidden_under_actor() -> 
     print("  OK  territory_symbol_shown_on_owned_empty_cell_and_hidden_under_actor")
 
 
+def test_whitespace_symbol_is_rendered_visibly() -> None:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "void"}
+            ],
+            "entityKinds": {
+                "void": {
+                    "layer": "ground",
+                    "symbol": " ",
+                    "uiName": "Open air",
+                }
+            },
+        }
+    )
+    level = {
+        "board": {"size": [2, 1], "layers": {}},
+        "state": {"avatar": {"enabled": False}},
+        "goals": [],
+    }
+
+    rendered = text_renderer.render(
+        TurnEngine(game, level).state, game, include_legend=False
+    )
+    assert rendered.splitlines()[0] == "··"
+
+
+def test_entity_state_includes_non_symbol_parameters() -> None:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+                {"id": "actors", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "empty": {"layer": "ground", "symbol": "."},
+                "watcher": {
+                    "layer": "actors",
+                    "symbol": "W",
+                    "uiName": "Watcher",
+                },
+            },
+        }
+    )
+    level = {
+        "board": {
+            "size": [2, 1],
+            "layers": {
+                "actors": {
+                    "format": "sparse",
+                    "entries": [
+                        {
+                            "position": [1, 0],
+                            "kind": "watcher",
+                            "behavior": "stalk",
+                            "gaze": "left",
+                        }
+                    ],
+                }
+            },
+        },
+        "state": {"avatar": {"enabled": False}},
+        "goals": [],
+    }
+
+    rendered = text_renderer.render(TurnEngine(game, level).state, game)
+    assert "(1,0) Watcher: behavior=stalk, gaze=left" in rendered
+
+
+def test_anonymous_entity_state_preserves_dynamics_without_kind_name() -> None:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+                {"id": "actors", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "empty": {"layer": "ground", "symbol": "."},
+                "watcher": {
+                    "layer": "actors",
+                    "symbol": "W",
+                    "uiName": "Watcher",
+                },
+            },
+        }
+    )
+    level = {
+        "board": {
+            "size": [2, 1],
+            "layers": {
+                "actors": {
+                    "format": "sparse",
+                    "entries": [
+                        {
+                            "position": [1, 0],
+                            "kind": "watcher",
+                            "behavior": "stalk",
+                            "gaze": "left",
+                        }
+                    ],
+                }
+            },
+        },
+        "state": {"avatar": {"enabled": False}},
+        "goals": [],
+    }
+
+    rendered = text_renderer.render(
+        TurnEngine(game, level).state,
+        game,
+        kind_symbol_overrides={"watcher": "A"},
+    )
+    assert "(1,0) A: behavior=stalk, gaze=left" in rendered
+    assert "Watcher" not in rendered
+
+
 def run_all() -> bool:
     tests = [
         test_territory_symbol_shown_on_owned_empty_cell_and_hidden_under_actor,
+        test_whitespace_symbol_is_rendered_visibly,
+        test_entity_state_includes_non_symbol_parameters,
+        test_anonymous_entity_state_preserves_dynamics_without_kind_name,
     ]
     passed = 0
     failed = 0

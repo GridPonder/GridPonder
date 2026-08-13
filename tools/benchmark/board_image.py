@@ -20,7 +20,6 @@ pack_dir (../gridponder-base/sprites/tiles).
 from __future__ import annotations
 
 import io
-import os
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -67,6 +66,7 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
     Python engine; pack_dir is the pack root (so sprites can be located)."""
     pack_dir = Path(pack_dir)
     base_dir = pack_dir.parent / "gridponder-base" / "sprites" / "tiles"
+    theme = _load_theme(pack_dir)
 
     width_cells = state.board.width
     height_cells = state.board.height
@@ -92,7 +92,9 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
             x0 = AXIS_PX + PADDING + x * CELL_PX
             y0 = AXIS_PX + PADDING + y * CELL_PX
             x1, y1 = x0 + CELL_PX, y0 + CELL_PX
-            _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
+            _paint_cell(
+                canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir
+            )
             draw.rectangle((x0, y0, x1, y1), outline=_GRID_LINE, width=1)
 
     # Region outlines: stroke the perimeter of every contiguous group of
@@ -105,7 +107,15 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
         ax, ay = avatar.position.x, avatar.position.y
         x0 = AXIS_PX + PADDING + ax * CELL_PX
         y0 = AXIS_PX + PADDING + ay * CELL_PX
-        _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir)
+        _draw_avatar(
+            canvas,
+            draw,
+            x0,
+            y0,
+            pack_dir,
+            base_dir,
+            _avatar_sprite(theme, avatar.facing),
+        )
 
     out = io.BytesIO()
     canvas.save(out, format="PNG", optimize=True)
@@ -166,7 +176,7 @@ def _parse_hex(hex_str):
 
 
 def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir):
-    """Paint a single cell: ground → objects → markers → clone (top to bottom)."""
+    """Paint one cell from bottom to top, including custom layers and MCOs."""
     # Ground
     ground = state.board.get_entity("ground", _Pos(x, y))
     if ground is None:
@@ -177,8 +187,13 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
         if not _paste_sprite(canvas, ground.kind, kind_def, ground.params, x0, y0, pack_dir, base_dir):
             _procedural_ground(draw, ground.kind, x0, y0)
 
-    # Object / marker / clone layers on top
-    for layer in ("objects", "markers", "clone"):
+    layer_ids = [layer["id"] for layer in game_def.layers if layer["id"] != "ground"]
+    preferred = ["territory", "structures", "objects", "markers", "actors", "clone"]
+    ordered = [layer for layer in preferred if layer in layer_ids]
+    ordered.extend(layer for layer in layer_ids if layer not in ordered)
+
+    # Territory is a floor overlay. Draw it before a multi-cell object.
+    for layer in [layer for layer in ordered if layer == "territory"]:
         ent = state.board.get_entity(layer, _Pos(x, y))
         if ent is None:
             continue
@@ -186,21 +201,44 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
         if not _paste_sprite(canvas, ent.kind, kind_def, ent.params, x0, y0, pack_dir, base_dir):
             _procedural_object(canvas, draw, ent.kind, kind_def, ent.params, x0, y0)
 
+    for mco in state.board.multi_cell_objects:
+        if not any(cell.x == x and cell.y == y for cell in mco.cells):
+            continue
+        kind_def = game_def.entity_kinds.get(mco.kind, {})
+        if not _paste_sprite(
+            canvas, mco.kind, kind_def, mco.params, x0, y0, pack_dir, base_dir
+        ):
+            _procedural_object(
+                canvas, draw, mco.kind, kind_def, mco.params, x0, y0
+            )
+
+    for layer in [layer for layer in ordered if layer != "territory"]:
+        ent = state.board.get_entity(layer, _Pos(x, y))
+        if ent is None:
+            continue
+        kind_def = game_def.entity_kinds.get(ent.kind, {})
+        if not _paste_sprite(
+            canvas, ent.kind, kind_def, ent.params, x0, y0, pack_dir, base_dir
+        ):
+            _procedural_object(
+                canvas, draw, ent.kind, kind_def, ent.params, x0, y0
+            )
+
 
 def _paste_sprite(canvas, kind, kind_def, params, x0, y0, pack_dir, base_dir) -> bool:
     """Try to paste a PNG sprite. Returns True on success."""
     sprite_path = kind_def.get("sprite")
     if not sprite_path:
         return False
-    fname = os.path.basename(sprite_path)
+    resolved_path = sprite_path
     # Templated sprites (e.g. box_{sides}.png on box_fragment).
-    if "{" in fname and "}" in fname:
-        for key in re.findall(r"\{(\w+)\}", fname):
+    if "{" in resolved_path and "}" in resolved_path:
+        for key in re.findall(r"\{(\w+)\}", resolved_path):
             val = params.get(key)
             if val is None:
                 return False
-            fname = fname.replace("{" + key + "}", str(val))
-    img = _load_sprite(pack_dir, base_dir, fname)
+            resolved_path = resolved_path.replace("{" + key + "}", str(val))
+    img = _load_sprite(pack_dir, base_dir, resolved_path)
     if img is None:
         return False
     if img.size != (CELL_PX, CELL_PX):
@@ -334,8 +372,12 @@ def _hue_color(value: int) -> str:
     return "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
 
 
-def _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir):
-    img = _load_sprite(pack_dir, base_dir, "rabbit_idle_facing_player.png")
+def _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir, sprite_path=None):
+    img = _load_sprite(
+        pack_dir,
+        base_dir,
+        sprite_path or "rabbit_idle_facing_player.png",
+    )
     if img is not None:
         if img.size != (CELL_PX, CELL_PX):
             img = img.resize((CELL_PX, CELL_PX), Image.LANCZOS)
@@ -353,7 +395,13 @@ def _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir):
 
 @lru_cache(maxsize=256)
 def _load_sprite(pack_dir: Path, base_dir: Path, fname: str) -> Image.Image | None:
-    for candidate in (pack_dir / "assets" / "sprites" / fname, base_dir / fname):
+    relative = Path(fname)
+    candidates = (
+        pack_dir / relative,
+        pack_dir / "assets" / "sprites" / relative.name,
+        base_dir / relative.name,
+    )
+    for candidate in candidates:
         if candidate.exists():
             try:
                 img = Image.open(candidate)
@@ -362,6 +410,26 @@ def _load_sprite(pack_dir: Path, base_dir: Path, fname: str) -> Image.Image | No
             except (OSError, ValueError):
                 pass
     return None
+
+
+@lru_cache(maxsize=64)
+def _load_theme(pack_dir: Path) -> dict:
+    try:
+        import json
+
+        return json.loads((pack_dir / "theme.json").read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _avatar_sprite(theme: dict, facing: str) -> str | None:
+    avatar = theme.get("avatar") or {}
+    idle = (avatar.get("sprites") or {}).get("idle") or {}
+    value = idle.get(facing)
+    if isinstance(value, str):
+        return value
+    sprite = avatar.get("sprite")
+    return sprite if isinstance(sprite, str) else None
 
 
 @lru_cache(maxsize=8)
@@ -379,5 +447,3 @@ def _font(size: int) -> ImageFont.ImageFont:
             except OSError:
                 pass
     return ImageFont.load_default()
-
-

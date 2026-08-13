@@ -40,6 +40,7 @@ def build_prompt(
     memory: str = "",
     text_board: bool = True,
     attach_image: bool = False,
+    valid_actions: list[dict[str, Any]] | None = None,
 ) -> str:
     """Build the full LLM prompt string matching the Dart runner output.
 
@@ -50,7 +51,8 @@ def build_prompt(
     "the image is the same current board" note so the model doesn't waste
     reasoning on what the image is or whether it matches the text grid.
     """
-    valid_actions = enumerate_actions(game_def, state)
+    if valid_actions is None:
+        valid_actions = enumerate_actions(game_def, state)
 
     # ── Anon maps ────────────────────────────────────────────────────────────
     kind_to_label: dict[str, str] = {}

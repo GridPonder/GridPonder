@@ -334,6 +334,7 @@ def build_leaderboard(data: dict[str, dict]) -> dict:
 
 
 def main() -> None:
+    global PACKS_DIR
     parser = argparse.ArgumentParser(description="Aggregate benchmark results → leaderboard.json")
     parser.add_argument(
         "--results-dir",
@@ -352,7 +353,16 @@ def main() -> None:
         default=None,
         help="Filter to a single inference mode (default: include all modes)",
     )
+    parser.add_argument(
+        "--packs-dir",
+        type=Path,
+        default=PACKS_DIR,
+        help=f"Pack root used for level metadata (default: {PACKS_DIR})",
+    )
     args = parser.parse_args()
+
+    PACKS_DIR = args.packs_dir
+    _level_metrics_cache.clear()
 
     if not args.results_dir.exists():
         print(f"No results directory found at {args.results_dir}. Nothing to aggregate.")
