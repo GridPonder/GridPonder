@@ -433,6 +433,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 | `groundLayer` | string | `"ground"` | Layer checked for wall collisions. |
 | `wallTag` | string | `"solid"` | Tag on `groundLayer` that blocks a mover. |
 | `directionTransforms` | object | `{}` | Actor kind → direction transform. Kinds not listed use `identity`. Values: `identity`, `invert` (180° reverse), `mirror_x` (flip left/right), `mirror_y` (flip up/down). Unrecognised values are treated as `identity`. |
+| `tape` | object | — | Optional. Drives the system from a stored programme instead of from the action's direction. See [Tape-driven stepping](#tape-driven-stepping). |
 | `claim` | object | — | Optional. When present, an actor that reaches a new cell also claims it in a territory layer. See below. |
 
 `claim` object:
@@ -464,6 +465,34 @@ Example config:
 5. If `claim` is configured and the actor moved, apply the claim policy — see [Claim overwrite](#214-claim-overwrite). Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
 
 **Mirrored actors.** `directionTransforms` lets one input drive actors in different directions at once — mirrored/opposed avatars, tug-of-war pairs, reflection puzzles. Two actors that target each other's cells (a mutual swap) both stay put; this falls out of the live `occupied` set and needs no special case. `actor_moved` / `actor_entered` always report the **action's** direction, not the effective one.
+
+<a name="tape-driven-stepping"></a>
+**Tape-driven stepping.** With a `tape` block the system ignores the action's
+`direction` and takes each step from a stored programme, so the world advances
+on *any* accepted action — the player's turns drive a machine they do not
+steer.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `program` | array of direction strings | — | The instruction word. Directions outside `directions` are ignored. |
+| `cycle` | boolean | `false` | When `true` the programme repeats forever; when `false` the world stops stepping once it is exhausted. |
+| `indexVariable` | string | `"tapeIndex"` | Runtime variable holding the next instruction index. |
+
+```json
+"tape": { "program": ["right", "right", "down", "left"], "cycle": true }
+```
+
+The index lives in a runtime variable, so it is part of the state key: undo,
+`previewTurn` and solver deduplication all work with no extra handling. A
+cycling programme wraps its index, keeping it bounded by the programme length,
+which keeps the joint state space finite for a domain solver. A vetoed turn
+cannot leak an advanced index, because the turn engine runs the whole turn on a
+working copy and discards it on veto. The index advances before the
+`directions` check runs, so a filtered-out instruction still consumes its slot
+and produces no movement — the machine ticks regardless.
+
+**Reuse:** metronomes, patrols, conveyors and scripted opposition — any pack
+where the world should step on a script rather than on input.
 
 **Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals).
 
@@ -830,6 +859,52 @@ support" mechanic. Without `deflect`, gravity is a straight translation: with
 `direction: "down"` a cell's column never changes, only how far it falls.
 `deflect` relaxes exactly that, and only at obstructions — a component never
 changes lane in free fall.
+
+---
+
+### 2.17 `terrain_edit`
+
+**Purpose:** Consume a position-carrying action and write one entity kind onto
+a layer, optionally spending from a runtime budget. This is the generic hook
+for player-driven terrain change — the rules engine cannot express it, because
+there is no "player acted at position" event.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `cell_transformed`
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `action` | string | `"place"` | Action id consumed. Must declare a `position` param. |
+| `layer` | string | — | **Required.** Layer written to. |
+| `kind` | string | — | **Required.** Entity kind written. |
+| `fromKind` | string | — | Optional. The target cell must currently hold exactly this kind, or the edit is refused. |
+| `budgetVariable` | string | — | Optional. Runtime variable that must be greater than zero; decremented on a successful edit. |
+
+Example config:
+```json
+{
+  "action": "place_wall",
+  "layer": "ground",
+  "kind": "wall",
+  "fromKind": "empty",
+  "budgetVariable": "walls"
+}
+```
+
+**Behavior:**
+1. Ignore any action whose id is not `action`.
+2. Read the `position` param; ignore the action if it is missing, malformed, or out of bounds — a malformed position (a non-numeric element, a non-finite number, a too-short list) is refused, never raised.
+3. If `budgetVariable` is set and its value is zero or less, refuse.
+4. If `fromKind` is set and the target cell does not hold exactly that kind, refuse.
+5. Otherwise write `kind` to `layer` at that cell, decrement the budget when
+   configured, and emit `cell_transformed`. A refused edit mutates nothing and
+   emits nothing — it is a wasted turn, not a vetoed one.
+
+**Reuse:** Game-agnostic — any pack where the player places, paves, blocks or
+marks a cell.
 
 ---
 
