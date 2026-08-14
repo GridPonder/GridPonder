@@ -1179,6 +1179,14 @@ class _Cell extends StatelessWidget {
     final type = display['type'] as String?;
     final color = _resolveDisplayColor(display['color'], entity);
     switch (type) {
+      // An entity that occupies state without being drawn. Used by games that
+      // hide an objective the player must locate by other means (see the
+      // `sonar` system): the cell still holds the entity, the renderer simply
+      // has nothing to say about it. Distinct from omitting `display`
+      // altogether, which falls through to the procedural palette and paints
+      // an unknown kind bright pink.
+      case 'none':
+        return const SizedBox.shrink();
       case 'tile':
         return Container(
           margin: EdgeInsets.all(cellSize * 0.1),

@@ -334,7 +334,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final targets = <CellEffectPlayback>[];
     CellEffectDef? active;
     for (final event in events) {
-      final def = effects[event.type];
+      final candidates = effects[event.type];
+      if (candidates == null) continue;
+      // First matching `when` filter wins, so several effects can share one
+      // event type — a cut and a backfill are both `cell_transformed`.
+      CellEffectDef? def;
+      for (final candidate in candidates) {
+        if (candidate.matches(event.payload)) {
+          def = candidate;
+          break;
+        }
+      }
       if (def == null) continue;
       final pos = event.position;
       if (pos == null) continue;
@@ -1709,22 +1719,101 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final ui = widget.packService.game.ui;
     final showGoal = ui.showGoal && _levelDef.goals.isNotEmpty;
     final showGuide = ui.showGuide && (_levelDef.guide?.isNotEmpty ?? false);
+    final readouts = ui.readouts
+        .where((r) => state.variables.containsKey(r.variable))
+        .toList();
 
-    if (!showGoal && !showGuide) return const SizedBox.shrink();
+    if (!showGoal && !showGuide && readouts.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (showGoal) ...[
-              Expanded(child: _buildGoalPanel(state)),
-              if (showGuide) const SizedBox(width: 10),
-            ],
-            if (showGuide) Expanded(child: _buildGuidePanel()),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (readouts.isNotEmpty) ...[
+            _buildReadoutStrip(state, readouts),
+            if (showGoal || showGuide) const SizedBox(height: 6),
           ],
-        ),
+          if (showGoal || showGuide)
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (showGoal) ...[
+                    Expanded(child: _buildGoalPanel(state)),
+                    if (showGuide) const SizedBox(width: 10),
+                  ],
+                  if (showGuide) Expanded(child: _buildGuidePanel()),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// A row of live `state.variables` chips declared by `game.json`'s
+  /// `ui.readouts`. Pack-agnostic: the app never learns what a given variable
+  /// means, only how to draw a labelled number.
+  Widget _buildReadoutStrip(LevelState state, List<GameReadout> readouts) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      alignment: WrapAlignment.center,
+      children: [
+        for (final r in readouts)
+          _buildReadoutChip(r, state.variables[r.variable]),
+      ],
+    );
+  }
+
+  Widget _buildReadoutChip(GameReadout readout, Object? rawValue) {
+    final number = (rawValue is num) ? rawValue.toInt() : null;
+    final blank = number == null || number == readout.blankWhen;
+    final tint = readout.color == null
+        ? Theme.of(context).colorScheme.primary
+        : cellNamedColor(
+            readout.color!,
+            palette: widget.packService.theme?.palette,
+          );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.14),
+        border: Border.all(color: tint.withValues(alpha: 0.55)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: tint),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            readout.label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade700,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            blank ? '—' : '$number',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: tint,
+            ),
+          ),
+        ],
       ),
     );
   }
