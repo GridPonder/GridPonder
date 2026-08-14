@@ -2,12 +2,12 @@
 """Work-queue benchmark launcher.
 
 Parallelises at the individual level granularity rather than the job level.
-A fixed pool of N workers pulls (model, mode, anon, pack, level) items from
-a shared queue, keeping all slots busy until the very end.
+Each resolved model variant has an independent executor, so a slow model
+cannot occupy another model's worker capacity.
 
 Usage:
   python run_queue.py --all                          # all models, all levels, default modes
-  python run_queue.py --all --workers 20             # limit to 20 concurrent workers
+  python run_queue.py --all --workers-per-model 10   # 10 workers for every model
   python run_queue.py --all --model br-claude-haiku  # single model
   python run_queue.py --all --dry-run                # preview work items
 """
@@ -24,11 +24,12 @@ import queue
 import time
 import uuid
 from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Iterator
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -45,6 +46,14 @@ from bench import (
 from run_manifest import source_snapshot
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
+SCHEDULER_TYPE = "independent_model_executors"
+SCHEDULER_MIGRATION_PATHS = {
+    "tools/benchmark/README.md",
+    "tools/benchmark/private_report.py",
+    "tools/benchmark/run_queue.py",
+    "tools/benchmark/test_private_report.py",
+    "tools/benchmark/test_run_queue.py",
+}
 
 
 @dataclass
@@ -234,33 +243,172 @@ def writer_loop(
 _shutdown = threading.Event()
 
 
-def _parse_provider_workers(values: list[str]) -> dict[str, int]:
+def _parse_worker_limits(values: list[str], option: str) -> dict[str, int]:
     limits: dict[str, int] = {}
     for value in values:
-        group, sep, raw_limit = value.partition("=")
-        group = group.strip()
-        if not sep or not group:
+        key, sep, raw_limit = value.partition("=")
+        key = key.strip()
+        if not sep or not key:
             raise SystemExit(
-                f"Invalid --provider-workers value {value!r}; expected GROUP=N"
+                f"Invalid {option} value {value!r}; expected NAME=N"
             )
         try:
             limit = int(raw_limit)
         except ValueError as exc:
             raise SystemExit(
-                f"Invalid --provider-workers value {value!r}; N must be an integer"
+                f"Invalid {option} value {value!r}; N must be an integer"
             ) from exc
         if limit < 1:
             raise SystemExit(
-                f"Invalid --provider-workers value {value!r}; N must be positive"
+                f"Invalid {option} value {value!r}; N must be positive"
             )
-        if group in limits:
-            raise SystemExit(f"Duplicate --provider-workers group: {group}")
-        limits[group] = limit
+        if key in limits:
+            raise SystemExit(f"Duplicate {option} name: {key}")
+        limits[key] = limit
     return limits
 
 
+def _parse_provider_workers(values: list[str]) -> dict[str, int]:
+    return _parse_worker_limits(values, "--provider-workers")
+
+
+def _parse_model_workers(values: list[str]) -> dict[str, int]:
+    return _parse_worker_limits(values, "--model-workers")
+
+
+def _resolve_model_workers(
+    model_specs: list[dict[str, Any]],
+    workers_per_model: int | None,
+    model_overrides: dict[str, int],
+    legacy_workers: int | None = None,
+    legacy_provider_limits: dict[str, int] | None = None,
+) -> dict[str, int]:
+    model_ids = [str(spec["model_id"]) for spec in model_specs]
+    unknown = sorted(set(model_overrides) - set(model_ids))
+    if unknown:
+        raise SystemExit(
+            "Unknown --model-workers model ID(s): " + ", ".join(unknown)
+        )
+
+    if workers_per_model is not None and workers_per_model < 1:
+        raise SystemExit("--workers-per-model must be positive")
+    if legacy_workers is not None and legacy_workers < 1:
+        raise SystemExit("--workers must be positive")
+
+    default_limit = workers_per_model
+    if default_limit is None:
+        default_limit = (
+            max(1, legacy_workers // max(len(model_ids), 1))
+            if legacy_workers is not None
+            else 10
+        )
+
+    provider_limits = legacy_provider_limits or {}
+    limits: dict[str, int] = {}
+    for spec in model_specs:
+        model_id = str(spec["model_id"])
+        group = str(spec.get("concurrency_group", ""))
+        legacy_limit = provider_limits.get(group)
+        limits[model_id] = model_overrides.get(
+            model_id,
+            (
+                legacy_limit
+                if workers_per_model is None and legacy_limit
+                else default_limit
+            ),
+        )
+    return limits
+
+
+@contextmanager
+def independent_model_futures(
+    items: list[WorkItem],
+    execute: Callable[[WorkItem], tuple[WorkItem, dict]],
+    model_workers: dict[str, int],
+) -> Iterator[dict[Future[tuple[WorkItem, dict]], WorkItem]]:
+    """Submit work to dedicated executors keyed by resolved model variant."""
+    with ExitStack() as stack:
+        executors = {
+            model_id: stack.enter_context(
+                ThreadPoolExecutor(
+                    max_workers=limit,
+                    thread_name_prefix=f"benchmark-{model_id}",
+                )
+            )
+            for model_id, limit in model_workers.items()
+        }
+        futures: dict[Future[tuple[WorkItem, dict]], WorkItem] = {}
+        for item in items:
+            executor = executors.get(item.full_variant_id)
+            if executor is None:
+                raise RuntimeError(
+                    f"No model executor configured for {item.full_variant_id}"
+                )
+            futures[executor.submit(execute, item)] = item
+        yield futures
+
+
+def _source_sha(source: dict[str, Any] | None) -> str | None:
+    return ((source or {}).get("repository") or {}).get("sha")
+
+
+def _scheduler_from_meta(meta: dict[str, Any]) -> dict[str, Any]:
+    scheduler = meta.get("scheduler")
+    if scheduler:
+        return dict(scheduler)
+    return {
+        "type": "shared_executor_with_group_semaphores",
+        "workers": meta.get("workers"),
+        "provider_workers": meta.get("provider_workers") or {},
+    }
+
+
+def _unsupported_scheduler_migration_paths(paths: list[str]) -> list[str]:
+    return sorted(set(paths) - SCHEDULER_MIGRATION_PATHS)
+
+
+def _assert_scheduler_migration(
+    repo_root: Path,
+    old_sha: str,
+    new_sha: str,
+) -> list[str]:
+    ancestor = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", old_sha, new_sha],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if ancestor.returncode != 0:
+        raise SystemExit(
+            "Refusing scheduler migration: the new source is not a descendant "
+            f"of the recorded source {old_sha}"
+        )
+
+    diff = subprocess.run(
+        ["git", "diff", "--name-only", f"{old_sha}..{new_sha}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+    )
+    if diff.returncode != 0:
+        raise SystemExit(
+            "Unable to verify scheduler migration diff: " + diff.stderr.strip()
+        )
+    changed_paths = [line for line in diff.stdout.splitlines() if line]
+    unsupported = _unsupported_scheduler_migration_paths(changed_paths)
+    if unsupported:
+        raise SystemExit(
+            "Refusing scheduler migration; non-scheduler paths changed: "
+            + ", ".join(unsupported)
+        )
+    return changed_paths
+
+
 def _assert_resume_compatible(
-    existing: dict[str, Any], current: dict[str, Any]
+    existing: dict[str, Any],
+    current: dict[str, Any],
+    *,
+    allow_source_change: bool = False,
 ) -> None:
     fields = [
         "modes",
@@ -285,7 +433,10 @@ def _assert_resume_compatible(
         mismatches.append("source.packs_digest")
     old_repo = old_source.get("repository") or {}
     new_repo = new_source.get("repository") or {}
-    if old_repo.get("sha") != new_repo.get("sha"):
+    if (
+        old_repo.get("sha") != new_repo.get("sha")
+        and not allow_source_change
+    ):
         mismatches.append("source.repository.sha")
     if old_repo.get("dirty") or new_repo.get("dirty"):
         mismatches.append("source.repository.dirty")
@@ -328,8 +479,25 @@ def main() -> None:
                              "image and text+image require vision-capable models. "
                              "Anon variants are only ever run with text. (default: text)")
 
-    parser.add_argument("--workers", type=int, default=40,
-                        help="Concurrent worker threads (default: 40)")
+    parser.add_argument(
+        "--workers-per-model",
+        type=int,
+        default=None,
+        help="Workers in each independent model queue (default: 10)",
+    )
+    parser.add_argument(
+        "--model-workers",
+        action="append",
+        default=[],
+        metavar="MODEL=N",
+        help="Override workers for one resolved model variant; repeatable",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Deprecated legacy total; distributed across model queues",
+    )
     parser.add_argument("--action-timeout", type=int, default=120,
                         help="Per-LLM-call timeout in seconds (default: 120)")
     parser.add_argument("--attempt-multiplier", type=int, default=2)
@@ -357,7 +525,16 @@ def main() -> None:
         action="append",
         default=[],
         metavar="GROUP=N",
-        help="Concurrency cap for one model group; repeatable",
+        help="Deprecated legacy group limit; mapped to each matching model queue",
+    )
+    parser.add_argument(
+        "--allow-scheduler-migration",
+        action="store_true",
+        help="Allow a clean, scheduler-only source change when resuming",
+    )
+    parser.add_argument(
+        "--scheduler-migration-reason",
+        help="Reason recorded when --allow-scheduler-migration changes source SHA",
     )
 
     args = parser.parse_args()
@@ -407,8 +584,23 @@ def main() -> None:
         for model, variant in model_variants
     ]
     resolved_model_specs = model_run_specs(model_variants)
+    provider_limits = _parse_provider_workers(args.provider_workers)
+    model_worker_overrides = _parse_model_workers(args.model_workers)
+    model_workers = _resolve_model_workers(
+        resolved_model_specs,
+        args.workers_per_model,
+        model_worker_overrides,
+        legacy_workers=args.workers,
+        legacy_provider_limits=provider_limits,
+    )
+    scheduler_config = {
+        "type": SCHEDULER_TYPE,
+        "workers_by_model": model_workers,
+        "total_capacity": sum(model_workers.values()),
+    }
     resume_meta: dict[str, Any] | None = None
     source: dict[str, Any] | None = None
+    scheduler_migration: dict[str, Any] | None = None
 
     if args.run_dir:
         meta_path = Path(args.run_dir) / "meta.json"
@@ -432,7 +624,38 @@ def main() -> None:
                     "levels_by_pack": levels_by_pack,
                     "source": source,
                 },
+                allow_source_change=args.allow_scheduler_migration,
             )
+            old_sha = _source_sha(resume_meta.get("source"))
+            new_sha = _source_sha(source)
+            if old_sha != new_sha:
+                if not args.allow_scheduler_migration:
+                    raise SystemExit(
+                        "Refusing to resume after a source change without "
+                        "--allow-scheduler-migration"
+                    )
+                if not args.scheduler_migration_reason:
+                    raise SystemExit(
+                        "--scheduler-migration-reason is required when the "
+                        "recorded source SHA changes"
+                    )
+                if not old_sha or not new_sha:
+                    raise SystemExit(
+                        "Cannot verify scheduler migration without both source SHAs"
+                    )
+                changed_paths = _assert_scheduler_migration(
+                    SCRIPT_DIR.parent.parent,
+                    old_sha,
+                    new_sha,
+                )
+                scheduler_migration = {
+                    "from_source_sha": old_sha,
+                    "to_source_sha": new_sha,
+                    "reason": args.scheduler_migration_reason,
+                    "changed_paths": changed_paths,
+                    "from_scheduler": _scheduler_from_meta(resume_meta),
+                    "to_scheduler": scheduler_config,
+                }
             args.run_id = resume_meta.get("run_id", args.run_id)
         elif any(Path(args.run_dir).glob("*.jsonl")):
             raise SystemExit(
@@ -440,6 +663,7 @@ def main() -> None:
             )
 
     # ── Resume filtering ─────────────────────────────────────────────────────
+    skipped = 0
     if not args.no_resume and args.run_dir:
         before = len(items)
         items = filter_completed(items, scan_dir=Path(args.run_dir))
@@ -458,19 +682,21 @@ def main() -> None:
     config_count = len(args.modes) * len(args.input_modes) + sum(
         1 for mode in args.modes if mode in args.anon_modes
     )
-    provider_limits = _parse_provider_workers(args.provider_workers)
     print(f"{'=' * 68}")
     print(f"  GridPonder Work-Queue Benchmark")
     print(f"  Work items:       {len(items)}")
     print(f"  Model variants:   {len(model_variants)}")
     print(f"  Levels:           {total_levels}")
     print(f"  Configurations:   {config_count}")
-    print(f"  Workers:          {args.workers}")
-    if provider_limits:
-        print(
-            "  Provider limits:  "
-            + ", ".join(f"{group}={limit}" for group, limit in sorted(provider_limits.items()))
+    print(f"  Scheduler:        independent model queues")
+    print(
+        "  Model workers:    "
+        + ", ".join(
+            f"{model_id}={limit}"
+            for model_id, limit in sorted(model_workers.items())
         )
+    )
+    print(f"  Total capacity:   {sum(model_workers.values())}")
     print(f"  Timeout:          {args.action_timeout}s per LLM call")
     print(f"{'=' * 68}")
 
@@ -491,12 +717,19 @@ def main() -> None:
         results_dir = RESULTS_BASE / ts
     results_dir.mkdir(parents=True, exist_ok=True)
 
+    resumed_at = datetime.now(timezone.utc).isoformat() if resume_meta else None
+    current_source = source or source_snapshot(
+        SCRIPT_DIR.parent.parent, args.packs_dir
+    )
     run_config = {
-        "schema_version": 2,
+        "schema_version": 3,
         "run_id": args.run_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "launcher": "run_queue.py",
-        "workers": args.workers,
+        "workers": sum(model_workers.values()),
+        "workers_per_model": args.workers_per_model,
+        "model_workers": model_workers,
+        "scheduler": scheduler_config,
         "modes": args.modes,
         "anon_modes": args.anon_modes,
         "input_modes": args.input_modes,
@@ -513,16 +746,69 @@ def main() -> None:
         "runner": args.runner,
         "total_work_items": planned_work_items,
         "levels_by_pack": levels_by_pack,
-        "source": source
-        or source_snapshot(SCRIPT_DIR.parent.parent, args.packs_dir),
+        "source": current_source,
     }
+    if not resume_meta:
+        run_config["source_history"] = [current_source]
+        run_config["scheduler_history"] = [
+            {
+                **scheduler_config,
+                "source_sha": _source_sha(current_source),
+                "active_from": run_config["timestamp"],
+            }
+        ]
     if resume_meta:
         run_config["timestamp"] = resume_meta.get(
             "timestamp", run_config["timestamp"]
         )
-        run_config["resumed_at"] = datetime.now(timezone.utc).isoformat()
-    with open(results_dir / "meta.json", "w") as f:
-        json.dump(run_config, f, indent=2)
+        run_config["resumed_at"] = resumed_at
+
+        source_history = list(resume_meta.get("source_history") or [])
+        if not source_history and resume_meta.get("source"):
+            source_history.append(resume_meta["source"])
+        if not source_history or _source_sha(source_history[-1]) != _source_sha(
+            current_source
+        ):
+            source_history.append(current_source)
+        run_config["source_history"] = source_history
+
+        scheduler_history = list(resume_meta.get("scheduler_history") or [])
+        if not scheduler_history:
+            initial_scheduler = _scheduler_from_meta(resume_meta)
+            initial_scheduler["source_sha"] = _source_sha(resume_meta.get("source"))
+            initial_scheduler["active_from"] = resume_meta.get("timestamp")
+            scheduler_history.append(initial_scheduler)
+        if scheduler_history[-1].get("type") != scheduler_config["type"] or (
+            scheduler_history[-1].get("workers_by_model")
+            != scheduler_config["workers_by_model"]
+        ):
+            scheduler_entry = {
+                **scheduler_config,
+                "source_sha": _source_sha(current_source),
+                "active_from": resumed_at,
+            }
+            if scheduler_migration:
+                scheduler_entry["reason"] = scheduler_migration["reason"]
+            scheduler_history.append(scheduler_entry)
+        run_config["scheduler_history"] = scheduler_history
+
+        resume_history = list(resume_meta.get("resume_history") or [])
+        resume_entry = {
+            "resumed_at": resumed_at,
+            "completed_before_resume": skipped,
+            "remaining_before_resume": len(items),
+            "source_sha": _source_sha(current_source),
+            "scheduler": scheduler_config,
+        }
+        if scheduler_migration:
+            resume_entry["scheduler_migration"] = scheduler_migration
+        resume_history.append(resume_entry)
+        run_config["resume_history"] = resume_history
+
+    meta_path = results_dir / "meta.json"
+    meta_tmp_path = results_dir / "meta.json.tmp"
+    meta_tmp_path.write_text(json.dumps(run_config, indent=2) + "\n")
+    meta_tmp_path.replace(meta_path)
 
     # ── Pre-compute run_meta for each output key ─────────────────────────────
     meta_by_key: dict[str, dict] = {}
@@ -557,49 +843,26 @@ def main() -> None:
     # ── Stats tracking ───────────────────────────────────────────────────────
     stats: dict[str, dict[str, int]] = defaultdict(lambda: {"done": 0, "won": 0, "failed": 0})
     stats_lock = threading.Lock()
-    provider_semaphores = {
-        group: threading.BoundedSemaphore(limit)
-        for group, limit in provider_limits.items()
-    }
-
     # ── Worker function ──────────────────────────────────────────────────────
     def execute(item: WorkItem) -> tuple[WorkItem, dict]:
         if _shutdown.is_set():
             return item, {"type": "level", "skipped": True}
 
         try:
-            semaphore = provider_semaphores.get(item.concurrency_group)
-            if semaphore is None:
-                result = run_level(
-                    item.pack_id, item.level_id,
-                    item.model, item.variant,
-                    args.attempt_multiplier, args.total_multiplier,
-                    action_timeout=args.action_timeout,
-                    mode=item.mode,
-                    step_size=3,
-                    max_n=item.max_n,
-                    flex_penalty=args.flex_penalty,
-                    anon=item.anon,
-                    runner=args.runner,
-                    input_mode=item.input_mode,
-                    packs_dir=args.packs_dir,
-                )
-            else:
-                with semaphore:
-                    result = run_level(
-                        item.pack_id, item.level_id,
-                        item.model, item.variant,
-                        args.attempt_multiplier, args.total_multiplier,
-                        action_timeout=args.action_timeout,
-                        mode=item.mode,
-                        step_size=3,
-                        max_n=item.max_n,
-                        flex_penalty=args.flex_penalty,
-                        anon=item.anon,
-                        runner=args.runner,
-                        input_mode=item.input_mode,
-                        packs_dir=args.packs_dir,
-                    )
+            result = run_level(
+                item.pack_id, item.level_id,
+                item.model, item.variant,
+                args.attempt_multiplier, args.total_multiplier,
+                action_timeout=args.action_timeout,
+                mode=item.mode,
+                step_size=3,
+                max_n=item.max_n,
+                flex_penalty=args.flex_penalty,
+                anon=item.anon,
+                runner=args.runner,
+                input_mode=item.input_mode,
+                packs_dir=args.packs_dir,
+            )
         except Exception as exc:
             result = {
                 "type": "level",
@@ -627,9 +890,7 @@ def main() -> None:
     total_cost_known = True
     t_start = time.monotonic()
 
-    with ThreadPoolExecutor(max_workers=args.workers) as executor:
-        futures = {executor.submit(execute, item): item for item in items}
-
+    with independent_model_futures(items, execute, model_workers) as futures:
         pbar = tqdm(total=len(items), desc="Benchmark", unit="lvl")
         for future in as_completed(futures):
             item, result = future.result()

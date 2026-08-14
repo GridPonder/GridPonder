@@ -30,8 +30,8 @@ The request and result types are defined in `connector_api.py`. The interface
 supports text and inline PNG input and does not assume a particular API,
 authentication scheme, or model provider.
 
-A local model entry can select the connector and an independent concurrency
-group:
+A local model entry can select the connector and retain a concurrency group
+for transport metadata:
 
 ```yaml
 - id: example-frontier
@@ -67,12 +67,15 @@ The eleven standard configurations are generated with:
   --anon-modes single flex-n \
   --input-modes text image text+image \
   --model MODEL_A --model MODEL_B \
-  --workers 20 \
-  --provider-workers provider-a=10 \
-  --provider-workers provider-b=10 \
+  --workers-per-model 10 \
   --runner python \
   --action-timeout 1800
 ```
+
+Every resolved model variant has its own executor. Slow or rate-limited work
+for one model cannot occupy another model's worker threads. Use repeatable
+`--model-workers MODEL=N` arguments when individual models need different
+limits.
 
 `--all` follows each pack's `levelSequence`. Level files that are not referenced
 by that sequence are intentionally outside the benchmark scope.
@@ -97,10 +100,20 @@ Before the full queue, run the same matrix on one short level:
   --anon-modes single flex-n \
   --input-modes text image text+image \
   --model MODEL_A --model MODEL_B \
-  --workers 2 \
-  --provider-workers provider-a=1 \
-  --provider-workers provider-b=1 \
+  --workers-per-model 1 \
   --runner python \
   --action-timeout 1800 \
   --run-dir tools/benchmark/results/run/CANARY_DIRECTORY
 ```
+
+Resume normally uses the same source SHA. A reviewed scheduler-only descendant
+commit can resume an existing run with:
+
+```bash
+--allow-scheduler-migration \
+--scheduler-migration-reason "replace shared pool with independent model queues"
+```
+
+The launcher rejects dirty trees, changed packs or experiment settings, and
+source diffs outside the benchmark scheduler, tests, documentation, and private
+report. The run metadata and private report retain both scheduler versions.

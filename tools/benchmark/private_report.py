@@ -211,6 +211,9 @@ def render_html(summary: dict[str, Any]) -> str:
     source = run.get("source") or {}
     repository = source.get("repository") or {}
     configurations = summary["configurations"]
+    scheduler_history = list(run.get("scheduler_history") or [])
+    if not scheduler_history and run.get("scheduler"):
+        scheduler_history.append(run["scheduler"])
 
     def esc(value: Any) -> str:
         return html.escape(str(value))
@@ -278,6 +281,20 @@ def render_html(summary: dict[str, Any]) -> str:
             + summary["incomplete_configurations"]
         )
     ) or "<li>None.</li>"
+    scheduler_items = "\n".join(
+        "<li>"
+        f"<strong>{esc(scheduler.get('type', 'unknown'))}</strong>: "
+        f"<code>{esc(json.dumps(scheduler.get('workers_by_model') or scheduler.get('provider_workers') or {}, sort_keys=True))}</code>"
+        f"; source <code>{esc(scheduler.get('source_sha', 'unknown'))}</code>"
+        f"; active from {esc(scheduler.get('active_from', 'unknown'))}"
+        + (
+            f"; {esc(scheduler['reason'])}"
+            if scheduler.get("reason")
+            else ""
+        )
+        + "</li>"
+        for scheduler in scheduler_history
+    ) or "<li>No scheduler metadata recorded.</li>"
     status = "COMPLETE" if summary["complete"] else "INCOMPLETE"
 
     return f"""<!doctype html>
@@ -330,6 +347,8 @@ a {{ color: #075985; }}
     packs <code>{esc(source.get('packs_digest', 'unknown'))}</code>;
     Python <code>{esc((source.get('python') or {}).get('version', 'unknown'))}</code>.
   </p>
+  <h2>Scheduler History</h2>
+  <ul>{scheduler_items}</ul>
 
   <h2>Configurations</h2>
   <div class="table-wrap"><table>

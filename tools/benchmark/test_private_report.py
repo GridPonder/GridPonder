@@ -22,6 +22,21 @@ def test_report_flags_missing_configuration_and_unknown_cost() -> None:
                 "packs_digest": "sha256:fixture",
                 "python": {"version": "3.12"},
             },
+            "scheduler_history": [
+                {
+                    "type": "shared_executor_with_group_semaphores",
+                    "provider_workers": {"provider": 10},
+                    "source_sha": "abc",
+                    "active_from": "2026-08-13T00:00:00+00:00",
+                },
+                {
+                    "type": "independent_model_executors",
+                    "workers_by_model": {"frontier-xhigh": 10},
+                    "source_sha": "def",
+                    "active_from": "2026-08-14T00:00:00+00:00",
+                    "reason": "independent queues",
+                },
+            ],
         }
         (results_dir / "meta.json").write_text(json.dumps(run_meta))
         records = [
@@ -73,6 +88,8 @@ def test_report_flags_missing_configuration_and_unknown_cost() -> None:
     ]
     assert "INCOMPLETE" in report
     assert "n/a" in report
+    assert "independent_model_executors" in report
+    assert "independent queues" in report
 
 
 if __name__ == "__main__":
