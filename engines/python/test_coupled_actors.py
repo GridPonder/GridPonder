@@ -501,6 +501,270 @@ def test_inverted_actors_swapping_cells_both_block() -> None:
     print("  OK  inverted_actors_swapping_cells_both_block")
 
 
+# ---------------------------------------------------------------------------
+# Excavation fixtures (`excavate` system config)
+# ---------------------------------------------------------------------------
+
+_DEFAULT_EXCAVATE = {
+    "diggableTag": "diggable",
+    "clearedKind": "empty",
+    "backfillKind": "rubble",
+}
+
+
+def _make_excavate_game(excavate: dict | None = None) -> GameDef:
+    """A coupled_actors game whose ground has three solid kinds: `rock` is
+    diggable, `rubble` (the spoil) and `bedrock` are not. Pass
+    ``excavate=None`` for a game with no excavate block at all."""
+    config: dict = {}
+    if excavate is not None:
+        config["excavate"] = excavate
+    data = {
+        "id": "com.gridponder.test_excavate",
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            {"id": "actors", "occupancy": "zero_or_one"},
+        ],
+        "entityKinds": {
+            "empty":   {"layer": "ground", "tags": ["walkable"]},
+            "rock":    {"layer": "ground", "tags": ["solid", "diggable"]},
+            "rubble":  {"layer": "ground", "tags": ["solid"]},
+            "bedrock": {"layer": "ground", "tags": ["solid"]},
+            "wei":     {"layer": "actors", "tags": ["actor"]},
+            "shu":     {"layer": "actors", "tags": ["actor"]},
+        },
+        "actions": [
+            {"id": "move", "params": {"direction": {"type": "direction", "values": ["up", "down", "left", "right"]}}},
+        ],
+        "systems": [
+            {"id": "movement", "type": "coupled_actors", "config": config},
+        ],
+    }
+    return GameDef.from_dict(data, id="test_excavate")
+
+
+def _make_terrain_level(
+    actors: list[tuple[int, int, str]],
+    ground: list[tuple[int, int, str]],
+    width: int = 6,
+) -> dict:
+    """actors: (x, y, kind); ground: (x, y, kind) for non-default cells."""
+    return {
+        "id": "test_level",
+        "board": {
+            "size": [width, 1],
+            "layers": {
+                "ground": {
+                    "format": "sparse",
+                    "entries": [{"position": [x, y], "kind": k} for x, y, k in ground],
+                },
+                "actors": {
+                    "format": "sparse",
+                    "entries": [{"position": [x, y], "kind": k} for x, y, k in actors],
+                },
+            },
+        },
+        "state": {},
+        "goals": [],
+        "loseConditions": [],
+    }
+
+
+def _ground_kind(engine: TurnEngine, pos: Pos) -> str | None:
+    entity = engine.state.board.get_entity("ground", pos)
+    return None if entity is None else entity.kind
+
+
+def _transform_events(result) -> list[dict]:
+    return [e for e in result.events if e["type"] == "cell_transformed"]
+
+
+def test_excavate_cuts_rock_and_backfills_behind() -> None:
+    """A lone excavator cuts the rock in front of it and the cell it left is
+    filled with spoil — the one-way trip that defines the mechanic."""
+    game = _make_excavate_game(_DEFAULT_EXCAVATE)
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "rock")])
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert result.accepted, "move action should be accepted"
+    assert _actor_pos(engine, "wei") == Pos(2, 0), (
+        f"wei should take the cell it cut, got {_actor_pos(engine, 'wei')}"
+    )
+    assert _ground_kind(engine, Pos(2, 0)) == "empty", (
+        f"the cut cell should be cleared, got {_ground_kind(engine, Pos(2, 0))}"
+    )
+    assert _ground_kind(engine, Pos(1, 0)) == "rubble", (
+        f"the vacated cell should be backfilled, got {_ground_kind(engine, Pos(1, 0))}"
+    )
+
+    events = _transform_events(result)
+    assert len(events) == 2, f"expected a cut and a backfill event, got {events}"
+    assert events[0]["position"] == Pos(2, 0) and events[0]["toKind"] == "empty"
+    assert events[0]["fromKind"] == "rock", f"cut should report the rock it removed, got {events[0]}"
+    assert events[1]["position"] == Pos(1, 0) and events[1]["toKind"] == "rubble"
+    print("  OK  excavate_cuts_rock_and_backfills_behind")
+
+
+def test_trailing_partner_hauls_the_spoil_out() -> None:
+    """The whole point of coupling: a partner ending the turn on the vacated
+    cell means no backfill, so the corridor stays open."""
+    game = _make_excavate_game(_DEFAULT_EXCAVATE)
+    level = _make_terrain_level(
+        actors=[(1, 0, "wei"), (2, 0, "shu")], ground=[(3, 0, "rock")])
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "shu") == Pos(3, 0), "shu (front) should cut and advance"
+    assert _actor_pos(engine, "wei") == Pos(2, 0), "wei should train into shu's vacated cell"
+    assert _ground_kind(engine, Pos(2, 0)) == "empty", (
+        "wei ended the turn on shu's vacated cell, so the spoil is hauled out; "
+        f"got {_ground_kind(engine, Pos(2, 0))}"
+    )
+
+    events = _transform_events(result)
+    assert len(events) == 1, f"only the cut should transform a cell, got {events}"
+
+    hauled = [e for e in result.events if e["type"] == "spoil_hauled"]
+    assert len(hauled) == 1, f"the skipped backfill must announce itself, got {result.events}"
+    assert hauled[0]["position"] == Pos(2, 0), (
+        f"spoil_hauled should report the cell that stayed open, got {hauled[0]}"
+    )
+    assert hauled[0]["layer"] == "ground"
+    print("  OK  trailing_partner_hauls_the_spoil_out")
+
+
+def test_partner_one_cell_too_far_back_does_not_haul() -> None:
+    """Adjacency is the mechanic: a partner two cells back still moves, but
+    not into the vacated cell, so the spoil lands."""
+    game = _make_excavate_game(_DEFAULT_EXCAVATE)
+    level = _make_terrain_level(
+        actors=[(0, 0, "wei"), (2, 0, "shu")], ground=[(3, 0, "rock")])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(1, 0), "wei moves, but only to (1,0)"
+    assert _ground_kind(engine, Pos(2, 0)) == "rubble", (
+        f"nobody ended on (2,0), so it backfills; got {_ground_kind(engine, Pos(2, 0))}"
+    )
+    print("  OK  partner_one_cell_too_far_back_does_not_haul")
+
+
+def test_backfill_and_haul_are_mutually_exclusive() -> None:
+    """Exactly one of the two must fire per pending cell — a game reacting to
+    both would double-count the same excavation."""
+    game = _make_excavate_game(_DEFAULT_EXCAVATE)
+    for actors, expect_haul in (
+        ([(1, 0, "wei"), (2, 0, "shu")], True),   # trained: hauled
+        ([(0, 0, "wei"), (2, 0, "shu")], False),  # spread: backfilled
+    ):
+        engine = TurnEngine(game, _make_terrain_level(
+            actors=actors, ground=[(3, 0, "rock")]))
+        result = engine.execute_turn("move", {"direction": "right"})
+        hauled = [e for e in result.events if e["type"] == "spoil_hauled"]
+        filled = [e for e in _transform_events(result) if e["toKind"] == "rubble"]
+        assert bool(hauled) is expect_haul, f"haul={hauled} for {actors}"
+        assert bool(filled) is (not expect_haul), f"backfill={filled} for {actors}"
+    print("  OK  backfill_and_haul_are_mutually_exclusive")
+
+
+def test_spoil_is_not_diggable_once_placed() -> None:
+    """Backfilled spoil is solid but untagged, so it can never be cut again —
+    this is what makes a solo tunnel irreversible."""
+    game = _make_excavate_game(_DEFAULT_EXCAVATE)
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "rock")])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+    result = engine.execute_turn("move", {"direction": "left"})
+
+    assert _actor_pos(engine, "wei") == Pos(2, 0), (
+        f"wei must be blocked by its own spoil, got {_actor_pos(engine, 'wei')}"
+    )
+    assert _transform_events(result) == [], "a blocked actor must not transform anything"
+    blocked = [e for e in result.events if e["type"] == "actor_blocked"]
+    assert len(blocked) == 1, f"expected an actor_blocked event, got {result.events}"
+    print("  OK  spoil_is_not_diggable_once_placed")
+
+
+def test_undiggable_solid_still_blocks() -> None:
+    """Bedrock carries the wall tag without the diggable tag, so it behaves
+    exactly as a wall did before `excavate` existed."""
+    game = _make_excavate_game(_DEFAULT_EXCAVATE)
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "bedrock")])
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(1, 0), "bedrock must block"
+    assert _transform_events(result) == [], "bedrock must not be transformed"
+    print("  OK  undiggable_solid_still_blocks")
+
+
+def test_ordinary_move_never_backfills() -> None:
+    """Walking open ground is not excavation — corridors must not seal
+    themselves behind a passing actor."""
+    game = _make_excavate_game(_DEFAULT_EXCAVATE)
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[])
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(2, 0)
+    assert _ground_kind(engine, Pos(1, 0)) == "empty", (
+        f"an ordinary move must leave the vacated cell open, got {_ground_kind(engine, Pos(1, 0))}"
+    )
+    assert _transform_events(result) == []
+    print("  OK  ordinary_move_never_backfills")
+
+
+def test_without_excavate_config_diggable_rock_still_blocks() -> None:
+    """The `diggable` tag alone does nothing; excavation is opt-in per game."""
+    game = _make_excavate_game(None)
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "rock")])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(1, 0), (
+        "without an excavate block, tagged rock must block like any wall"
+    )
+    print("  OK  without_excavate_config_diggable_rock_still_blocks")
+
+
+def test_excavate_without_cleared_kind_is_inert() -> None:
+    """Tolerance contract: a block missing the required `clearedKind` behaves
+    exactly as if `excavate` were absent, in both engines."""
+    game = _make_excavate_game({"diggableTag": "diggable", "backfillKind": "rubble"})
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "rock")])
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(1, 0), "a malformed excavate block must be inert"
+    assert _transform_events(result) == []
+    print("  OK  excavate_without_cleared_kind_is_inert")
+
+
+def test_omitted_backfill_kind_leaves_an_open_corridor() -> None:
+    """A pure tunneller: terrain is removed and nothing is put back."""
+    game = _make_excavate_game({"diggableTag": "diggable", "clearedKind": "empty"})
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "rock")])
+    engine = TurnEngine(game, level)
+
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(2, 0)
+    assert _ground_kind(engine, Pos(1, 0)) == "empty", (
+        f"no backfillKind means no spoil, got {_ground_kind(engine, Pos(1, 0))}"
+    )
+    assert len(_transform_events(result)) == 1, "only the cut should fire"
+    print("  OK  omitted_backfill_kind_leaves_an_open_corridor")
+
+
 def run_all() -> bool:
     tests = [
         test_open_move_shifts_and_trains_both_actors,
@@ -520,6 +784,16 @@ def run_all() -> bool:
         test_identity_transforms_match_legacy_order,
         test_invert_moves_actor_opposite,
         test_inverted_actors_swapping_cells_both_block,
+        test_excavate_cuts_rock_and_backfills_behind,
+        test_trailing_partner_hauls_the_spoil_out,
+        test_partner_one_cell_too_far_back_does_not_haul,
+        test_backfill_and_haul_are_mutually_exclusive,
+        test_spoil_is_not_diggable_once_placed,
+        test_undiggable_solid_still_blocks,
+        test_ordinary_move_never_backfills,
+        test_without_excavate_config_diggable_rock_still_blocks,
+        test_excavate_without_cleared_kind_is_inert,
+        test_omitted_backfill_kind_leaves_an_open_corridor,
     ]
     passed = 0
     failed = 0

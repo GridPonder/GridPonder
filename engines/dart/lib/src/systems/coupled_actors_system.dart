@@ -8,6 +8,7 @@ import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
 import 'claim_policy.dart';
+import 'excavate_policy.dart';
 import 'runtime_variable.dart';
 
 /// One actor resolved for this turn, with the effective direction it travels
@@ -77,6 +78,13 @@ String? _tapeDirection(Map<String, dynamic> tape, LevelState state) {
 /// forever and the index stays bounded. `cycle` is read strictly — only the
 /// boolean `true` cycles, so a non-boolean value (e.g. `"cycle": 1`) behaves
 /// as `false`.
+///
+/// Optionally, an `excavate` config block (`{"diggableTag": String,
+/// "clearedKind": String, "backfillKind": String}`) lets actors cut through
+/// terrain that would otherwise block them: the target cell is reduced to
+/// `clearedKind`, the actor takes it, and the cell it left is backfilled with
+/// `backfillKind` unless another actor ends the turn standing there. See
+/// `excavate_policy.dart` for the semantics and the tolerance contract.
 class CoupledActorsSystem extends GameSystem {
   const CoupledActorsSystem({required super.id})
       : super(type: 'coupled_actors');
@@ -135,6 +143,7 @@ class CoupledActorsSystem extends GameSystem {
     final groundLayerId = config['groundLayer'] as String? ?? 'ground';
     final wallTag = config['wallTag'] as String? ?? 'solid';
     final claim = config['claim'] as Map<String, dynamic>?;
+    final excavate = ExcavatePolicy.read(config);
 
     final board = state.board;
     final actorLayer = board.layers[actorLayerId];
@@ -181,19 +190,31 @@ class CoupledActorsSystem extends GameSystem {
 
     final occupied = {for (final e in actors) e.key};
     final events = <GameEvent>[];
+    final pendingBackfill = <Position>[];
 
     for (final mover in ordered) {
       final pos = mover.pos;
       final entity = mover.entity;
       final target = Position(pos.x + mover.eff.x, pos.y + mover.eff.y);
 
-      final blocked = !board.isInBounds(target) ||
-          board.hasTagAt(groundLayerId, target, wallTag, game.entityKinds) ||
-          occupied.contains(target);
+      final inBounds = board.isInBounds(target);
+      final solid = inBounds &&
+          board.hasTagAt(groundLayerId, target, wallTag, game.entityKinds);
+      // Only a cell that is *both* solid and diggable is excavated, so
+      // walking open ground stays an ordinary move and never backfills.
+      final digging =
+          solid && isDiggable(board, game, groundLayerId, target, excavate);
+      final blocked =
+          !inBounds || (solid && !digging) || occupied.contains(target);
 
       if (blocked) {
         events.add(GameEvent.actorBlocked(entity.kind, pos));
         continue;
+      }
+
+      if (digging) {
+        events.add(cut(board, groundLayerId, target, excavate!));
+        pendingBackfill.add(pos);
       }
 
       occupied.remove(pos);
@@ -208,6 +229,13 @@ class CoupledActorsSystem extends GameSystem {
           applyClaim(board, game, claim, groundLayerId, target, entity.kind);
       if (claimEvent != null) events.add(claimEvent);
     }
+
+    // After every actor has resolved: `occupied` is now the final positions
+    // for the turn, which is exactly what decides whether a trailing partner
+    // hauled each excavator's spoil out.
+    events.addAll(
+      backfill(board, groundLayerId, pendingBackfill, occupied, excavate),
+    );
 
     return events;
   }

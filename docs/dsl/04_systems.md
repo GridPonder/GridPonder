@@ -435,6 +435,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 | `directionTransforms` | object | `{}` | Actor kind → direction transform. Kinds not listed use `identity`. Values: `identity`, `invert` (180° reverse), `mirror_x` (flip left/right), `mirror_y` (flip up/down). Unrecognised values are treated as `identity`. |
 | `tape` | object | — | Optional. Drives the system from a stored programme instead of from the action's direction. See [Tape-driven stepping](#tape-driven-stepping). |
 | `claim` | object | — | Optional. When present, an actor that reaches a new cell also claims it in a territory layer. See below. |
+| `excavate` | object | — | Optional. Lets actors cut through terrain that would otherwise block them, backfilling the cell they leave. See [Excavating movers](#excavating-movers). |
 
 `claim` object:
 
@@ -501,7 +502,59 @@ Two taped `coupled_actors` systems both left at the default `indexVariable`
 independent machines their own `actorLayer` **and** their own `indexVariable`,
 or they will silently desynchronise from their own programmes.
 
-**Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals); the optional `tape` block turns the same system into a scripted lock-step mover — a metronome or patrol driven by a stored programme rather than by input. Because the tape drives every actor on the layer identically, it cannot move only the entities on particular cells (that would be a conveyor, which this is not).
+<a name="excavating-movers"></a>
+**Excavating movers.** With an `excavate` block an actor treats terrain it
+would normally be blocked by as passable at a price: the target cell is cut
+down to `clearedKind`, the actor takes it, and the cell the actor *left* is
+backfilled with `backfillKind`.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `diggableTag` | string | `"diggable"` | Tag on `groundLayer` marking terrain a mover excavates instead of being blocked by. |
+| `clearedKind` | string | — | **Required.** Kind the excavated cell becomes. |
+| `backfillKind` | string | — | Optional. Kind placed in the vacated cell. **Omitted means no backfill** — a pure tunneller that simply removes terrain. |
+
+```json
+"excavate": { "diggableTag": "diggable", "clearedKind": "floor", "backfillKind": "rubble" }
+```
+
+Resolution, inside the existing per-actor loop:
+
+1. Out of bounds, or a target still occupied by another actor → blocked, as
+   without the block.
+2. Target carries `wallTag` **and** `diggableTag` → excavated, then entered.
+3. Target carries `wallTag` without `diggableTag` → blocked, as without the
+   block. Terrain is only diggable if a game opts in by tagging it; the tag
+   alone does nothing without an `excavate` block.
+4. Target is free ground → an ordinary move. **No backfill** — walking a
+   corridor never seals it.
+5. After **every** actor has resolved, each pending backfill cell is set to
+   `backfillKind` **unless an actor occupies it at end of turn**, in which case
+   nothing is placed.
+
+Step 5 is deliberately outside the per-actor loop, and is the reason the block
+is worth having: whether a corridor survives depends on whether a *second*
+actor ends the turn in the excavator's vacated cell. Games get "one digger
+seals the tunnel behind it, two diggers in a train leave it open" out of the
+existing front-first ordering with no special case.
+
+Both the cut and the backfill emit `cell_transformed`, the same event
+`terrain_edit` emits — discriminate them on `toKind`. When a backfill is
+*skipped* because a mover hauled the spoil out, a
+[`spoil_hauled`](05_rules.md#spoil_hauled) event fires at that cell instead, so
+the corridor surviving is observable rather than being a silent absence.
+
+**Tolerance contract.** A non-object `excavate`, or one whose `clearedKind` is
+missing or not a non-empty string, is **inert** — the system behaves exactly
+as if the block were absent. A missing or non-string `backfillKind` means no
+backfill. A missing or non-string `diggableTag` falls back to `"diggable"`.
+Both engines implement precisely this; do not rely on any other coercion.
+
+Note that `backfillKind` is normally a kind that is **not** tagged
+`diggableTag`, which is what makes excavation irreversible. Tagging the spoil
+diggable is legal and yields a freely re-cuttable medium instead.
+
+**Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals); the optional `tape` block turns the same system into a scripted lock-step mover — a metronome or patrol driven by a stored programme rather than by input; the optional `excavate` block turns movers into tunnellers (mining, snow clearing, ice carving). The three blocks are orthogonal and compose. Because the tape drives every actor on the layer identically, it cannot move only the entities on particular cells (that would be a conveyor, which this is not).
 
 ---
 
@@ -915,6 +968,85 @@ marks a cell.
 
 ---
 
+### 2.18 `sonar`
+
+**Purpose:** Write a distance reading per source entity kind into
+`state.variables` every turn — for each source, the distance to its paired (or
+nearest) target entity. The system is **read-only with respect to the board**:
+it mutates variables and nothing else.
+
+This is the generic hook for "warmer/colder" sensing. A game can hide the
+target layer from the player and let them locate it by moving and reading
+(exploration by triangulation), or use the same reading as a proximity alarm,
+a heat-seeker, or a scoring input.
+
+**Phase:** `npc_resolution` — the last phase that runs unconditionally for
+every system on every turn, after action, movement and cascade resolution have
+settled the board and before goal evaluation. A reading therefore always
+describes the board the player is looking at when the turn ends.
+
+**Events emitted:** none.
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `sourceLayer` | string | `"actors"` | Layer whose entities take readings. |
+| `targetLayer` | string | — | **Required.** Layer holding the sensed entities. |
+| `pairing` | object | — | Optional. Source kind → target kind. Omitted: each source reads the *nearest* target of any kind. |
+| `metric` | string | `"manhattan"` | Reserved for future distance functions. Only `manhattan` is implemented. |
+| `variablePrefix` | string | `"echo_"` | The reading for source kind `k` is written to `variablePrefix + k`. |
+
+```json
+{
+  "id": "echo",
+  "type": "sonar",
+  "config": {
+    "sourceLayer": "actors",
+    "targetLayer": "seams",
+    "pairing": { "digger_a": "seam_a", "digger_b": "seam_b" }
+  }
+}
+```
+
+**Behavior:**
+1. For each entity on `sourceLayer`, select candidate targets on
+   `targetLayer` — filtered to `pairing[sourceKind]` when `pairing` is set,
+   otherwise all targets.
+2. Compute the Manhattan distance to the nearest candidate.
+3. Write it to `state.variables[variablePrefix + sourceKind]`.
+
+**The reading ignores terrain completely.** It reports how far, never how to
+get there — routing around walls remains the player's problem. Games relying
+on this gap should pin it with a test.
+
+**Why variables and not events.** Readings live in `state.variables`, so they
+are inside `to_key()` and undo, `previewTurn` and solver deduplication work
+with no extra handling. Because a reading is a pure function of board state it
+adds no new state distinctions and cannot inflate a solver's search space.
+
+**Tolerance contract.** A missing or non-string `targetLayer` makes the system
+**inert** — it writes nothing at all. A non-object `pairing` is treated as
+absent, selecting nearest-of-any-kind mode. A `metric` other than
+`"manhattan"` falls back to `"manhattan"` rather than raising. A non-string
+`variablePrefix` falls back to `"echo_"`. Both engines implement precisely
+this; do not rely on any other coercion.
+
+**No target reads `-1`,** rather than leaving the variable unwritten, so a
+level can never read a stale value from a previous turn. Two source entities
+sharing a kind write the same variable and the value is the **minimum** over
+them, so the result does not depend on iteration order.
+
+**Hiding the target layer** is a presentation concern and lives outside this
+system: give the target entity kinds a `display` of type `none` (see
+[02_game.md](02_game.md)) so they occupy state without being drawn.
+
+**Reuse:** Game-agnostic. Any pack can point it at any layer pair — hidden
+objectives, pursuit distance, "hot and cold" hint systems, or a scoring signal
+— without new code.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -936,6 +1068,7 @@ marks a cell.
 | Coupled Actors | `coupled_actors` | `action_resolution` | `move` (configurable via `moveAction`; any accepted action when `tape` is set) |
 | Individual Actors | `individual_actors` | `action_resolution` | `tap_cell` + `move` (configurable) |
 | Terrain Edit | `terrain_edit` | `action_resolution` | `place` (configurable via `action`) |
+| Sonar | `sonar` | `npc_resolution` | (automatic every turn; writes distance readings to variables) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 

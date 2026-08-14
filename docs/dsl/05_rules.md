@@ -166,6 +166,18 @@ A cell's entity was replaced with a different entity.
 | `toKind` | string | New kind. |
 | `layer` | string | Which layer changed. |
 
+### `spoil_hauled`
+An `excavate` backfill that did **not** happen, because a mover ended the turn
+on the excavator's vacated cell and carried the spoil out. Emitted in place of
+the `cell_transformed` that would otherwise have fired, so a game can react to
+a corridor *surviving* — which is otherwise an absence of an event and has
+nothing to hang a rule or an effect off.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell that stayed open. |
+| `layer` | string | Layer the backfill would have been written to. |
+
 ### `inventory_changed`
 Avatar inventory changed.
 
