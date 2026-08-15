@@ -36,6 +36,33 @@ def load_run(results_dir: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return run_meta, datasets
 
 
+def _canonicalize_levels(
+    levels: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], int, int, int]:
+    """Choose one result per level while retaining retry accounting."""
+    grouped: dict[tuple[str, str], list[tuple[int, dict[str, Any]]]] = defaultdict(list)
+    for index, level in enumerate(levels):
+        key = (str(level.get("pack_id", "")), str(level.get("level_id", "")))
+        grouped[key].append((index, level))
+
+    selected: list[tuple[int, dict[str, Any]]] = []
+    duplicate_valid = 0
+    superseded_errors = 0
+    for attempts in grouped.values():
+        valid = [attempt for attempt in attempts if "error" not in attempt[1]]
+        chosen = valid[-1] if valid else attempts[-1]
+        selected.append(chosen)
+        duplicate_valid += max(0, len(valid) - 1)
+        superseded_errors += sum(
+            1
+            for attempt in attempts
+            if "error" in attempt[1] and attempt[0] != chosen[0]
+        )
+
+    canonical = [level for _, level in sorted(selected)]
+    return canonical, len(levels) - len(canonical), superseded_errors, duplicate_valid
+
+
 def summarize(
     run_meta: dict[str, Any], datasets: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -51,24 +78,29 @@ def summarize(
     unknown_cost_levels = 0
     total_errors = 0
     total_completed = 0
-    seen_keys: set[tuple[str, str, str, str, bool, str]] = set()
     duplicates = 0
+    attempt_records = 0
+    superseded_records = 0
+    superseded_errors = 0
 
     for dataset in datasets:
         meta = dataset["meta"]
-        levels = dataset["levels"]
+        all_levels = dataset["levels"]
+        levels, superseded, retried_errors, duplicate_valid = (
+            _canonicalize_levels(all_levels)
+        )
         valid = [level for level in levels if "error" not in level]
         errors = [level for level in levels if "error" in level]
         successes = [level for level in valid if level.get("success")]
         scores = [float(level.get("aggregate_score") or 0.0) for level in valid]
         costs = [
             float(level["cost_usd"])
-            for level in levels
+            for level in all_levels
             if level.get("cost_usd") is not None
         ]
         unknown_cost = sum(
             1
-            for level in levels
+            for level in all_levels
             if level.get("cost_usd") is None
             and int(level.get("llm_calls") or 0) > 0
         )
@@ -76,19 +108,10 @@ def summarize(
         unknown_cost_levels += unknown_cost
         total_errors += len(errors)
         total_completed += len(levels)
-
-        for level in levels:
-            key = (
-                str(meta.get("model_id", "")),
-                str(level.get("pack_id", "")),
-                str(level.get("level_id", "")),
-                str(meta.get("inference_mode", "single")),
-                bool(meta.get("anon", False)),
-                str(meta.get("input_mode", "text")),
-            )
-            if key in seen_keys:
-                duplicates += 1
-            seen_keys.add(key)
+        attempt_records += len(all_levels)
+        superseded_records += superseded
+        superseded_errors += retried_errors
+        duplicates += duplicate_valid
 
         configs.append(
             {
@@ -104,6 +127,9 @@ def summarize(
                 "input_mode": meta.get("input_mode", "text"),
                 "expected": expected_levels,
                 "completed": len(levels),
+                "attempt_records": len(all_levels),
+                "superseded_records": superseded,
+                "superseded_errors": retried_errors,
                 "valid": len(valid),
                 "errors": len(errors),
                 "successes": len(successes),
@@ -120,19 +146,24 @@ def summarize(
                 "cost_sources": sorted(
                     {
                         source
-                        for level in levels
+                        for level in all_levels
                         for source in (level.get("cost_sources") or [])
                     }
                 ),
-                "llm_calls": sum(int(level.get("llm_calls") or 0) for level in levels),
+                "llm_calls": sum(
+                    int(level.get("llm_calls") or 0) for level in all_levels
+                ),
                 "input_tokens": sum(
-                    int(level.get("input_tokens_total") or 0) for level in levels
+                    int(level.get("input_tokens_total") or 0)
+                    for level in all_levels
                 ),
                 "reasoning_tokens": sum(
-                    int(level.get("thinking_tokens_total") or 0) for level in levels
+                    int(level.get("thinking_tokens_total") or 0)
+                    for level in all_levels
                 ),
                 "output_tokens": sum(
-                    int(level.get("output_tokens_total") or 0) for level in levels
+                    int(level.get("output_tokens_total") or 0)
+                    for level in all_levels
                 ),
             }
         )
@@ -144,7 +175,8 @@ def summarize(
     for dataset in datasets:
         model_id = str(dataset["meta"].get("model_id", ""))
         config = _config_label(dataset["meta"])
-        for level in dataset["levels"]:
+        levels, _, _, _ = _canonicalize_levels(dataset["levels"])
+        for level in levels:
             pack = str(level.get("pack_id", ""))
             per_pack[pack]["completed"] += 1
             if "error" in level:
@@ -191,6 +223,9 @@ def summarize(
         "missing_configurations": missing_configurations,
         "incomplete_configurations": incomplete_configurations,
         "completed": total_completed,
+        "attempt_records": attempt_records,
+        "superseded_records": superseded_records,
+        "superseded_errors": superseded_errors,
         "errors": total_errors,
         "duplicates": duplicates,
         "cost_usd": None if unknown_cost_levels else known_cost_total,
@@ -231,7 +266,13 @@ def render_html(summary: dict[str, Any]) -> str:
         "<tr>"
         f"<td>{esc(config['display_name'])}<small>{esc(config['model'])}</small></td>"
         f"<td>{esc(_config_label(config))}</td>"
-        f"<td>{config['completed']}/{config['expected'] or '?'}</td>"
+        f"<td>{config['completed']}/{config['expected'] or '?'}"
+        + (
+            f"<small>{config['attempt_records']} attempts</small>"
+            if config["superseded_records"]
+            else ""
+        )
+        + "</td>"
         f"<td>{config['errors']}</td>"
         f"<td>{config['successes']}</td>"
         f"<td>{pct(config['success_rate_expected'])}</td>"
@@ -334,6 +375,7 @@ a {{ color: #075985; }}
   <section class="metrics">
     <div class="metric"><strong>{summary['configuration_count']}/{summary['expected_configuration_count']}</strong><span>configuration files</span></div>
     <div class="metric"><strong>{summary['completed']}/{summary['expected_level_runs']}</strong><span>completed level runs</span></div>
+    <div class="metric"><strong>{summary['attempt_records']}</strong><span>attempt records ({summary['superseded_records']} superseded)</span></div>
     <div class="metric"><strong>{summary['errors']}</strong><span>infrastructure errors</span></div>
     <div class="metric"><strong>{summary['duplicates']}</strong><span>duplicate result keys</span></div>
     <div class="metric"><strong>{summary['llm_calls']}</strong><span>model calls</span></div>

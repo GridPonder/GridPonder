@@ -47,7 +47,9 @@ from run_manifest import source_snapshot
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
 SCHEDULER_TYPE = "independent_model_executors"
-SCHEDULER_MIGRATION_PATHS = {
+SOURCE_MIGRATION_PATHS = {
+    "engines/python/_models.py",
+    "engines/python/test_sliding_blocks.py",
     "tools/benchmark/README.md",
     "tools/benchmark/private_report.py",
     "tools/benchmark/run_queue.py",
@@ -363,11 +365,11 @@ def _scheduler_from_meta(meta: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _unsupported_scheduler_migration_paths(paths: list[str]) -> list[str]:
-    return sorted(set(paths) - SCHEDULER_MIGRATION_PATHS)
+def _unsupported_source_migration_paths(paths: list[str]) -> list[str]:
+    return sorted(set(paths) - SOURCE_MIGRATION_PATHS)
 
 
-def _assert_scheduler_migration(
+def _assert_source_migration(
     repo_root: Path,
     old_sha: str,
     new_sha: str,
@@ -380,7 +382,7 @@ def _assert_scheduler_migration(
     )
     if ancestor.returncode != 0:
         raise SystemExit(
-            "Refusing scheduler migration: the new source is not a descendant "
+            "Refusing source migration: the new source is not a descendant "
             f"of the recorded source {old_sha}"
         )
 
@@ -392,13 +394,13 @@ def _assert_scheduler_migration(
     )
     if diff.returncode != 0:
         raise SystemExit(
-            "Unable to verify scheduler migration diff: " + diff.stderr.strip()
+            "Unable to verify source migration diff: " + diff.stderr.strip()
         )
     changed_paths = [line for line in diff.stdout.splitlines() if line]
-    unsupported = _unsupported_scheduler_migration_paths(changed_paths)
+    unsupported = _unsupported_source_migration_paths(changed_paths)
     if unsupported:
         raise SystemExit(
-            "Refusing scheduler migration; non-scheduler paths changed: "
+            "Refusing source migration; unreviewed paths changed: "
             + ", ".join(unsupported)
         )
     return changed_paths
@@ -528,13 +530,17 @@ def main() -> None:
         help="Deprecated legacy group limit; mapped to each matching model queue",
     )
     parser.add_argument(
+        "--allow-source-migration",
         "--allow-scheduler-migration",
+        dest="allow_source_migration",
         action="store_true",
-        help="Allow a clean, scheduler-only source change when resuming",
+        help="Allow a clean, reviewed source change when resuming",
     )
     parser.add_argument(
+        "--source-migration-reason",
         "--scheduler-migration-reason",
-        help="Reason recorded when --allow-scheduler-migration changes source SHA",
+        dest="source_migration_reason",
+        help="Reason recorded when --allow-source-migration changes source SHA",
     )
 
     args = parser.parse_args()
@@ -600,7 +606,7 @@ def main() -> None:
     }
     resume_meta: dict[str, Any] | None = None
     source: dict[str, Any] | None = None
-    scheduler_migration: dict[str, Any] | None = None
+    source_migration: dict[str, Any] | None = None
 
     if args.run_dir:
         meta_path = Path(args.run_dir) / "meta.json"
@@ -624,34 +630,34 @@ def main() -> None:
                     "levels_by_pack": levels_by_pack,
                     "source": source,
                 },
-                allow_source_change=args.allow_scheduler_migration,
+                allow_source_change=args.allow_source_migration,
             )
             old_sha = _source_sha(resume_meta.get("source"))
             new_sha = _source_sha(source)
             if old_sha != new_sha:
-                if not args.allow_scheduler_migration:
+                if not args.allow_source_migration:
                     raise SystemExit(
                         "Refusing to resume after a source change without "
-                        "--allow-scheduler-migration"
+                        "--allow-source-migration"
                     )
-                if not args.scheduler_migration_reason:
+                if not args.source_migration_reason:
                     raise SystemExit(
-                        "--scheduler-migration-reason is required when the "
+                        "--source-migration-reason is required when the "
                         "recorded source SHA changes"
                     )
                 if not old_sha or not new_sha:
                     raise SystemExit(
-                        "Cannot verify scheduler migration without both source SHAs"
+                        "Cannot verify source migration without both source SHAs"
                     )
-                changed_paths = _assert_scheduler_migration(
+                changed_paths = _assert_source_migration(
                     SCRIPT_DIR.parent.parent,
                     old_sha,
                     new_sha,
                 )
-                scheduler_migration = {
+                source_migration = {
                     "from_source_sha": old_sha,
                     "to_source_sha": new_sha,
-                    "reason": args.scheduler_migration_reason,
+                    "reason": args.source_migration_reason,
                     "changed_paths": changed_paths,
                     "from_scheduler": _scheduler_from_meta(resume_meta),
                     "to_scheduler": scheduler_config,
@@ -787,8 +793,8 @@ def main() -> None:
                 "source_sha": _source_sha(current_source),
                 "active_from": resumed_at,
             }
-            if scheduler_migration:
-                scheduler_entry["reason"] = scheduler_migration["reason"]
+            if source_migration:
+                scheduler_entry["reason"] = source_migration["reason"]
             scheduler_history.append(scheduler_entry)
         run_config["scheduler_history"] = scheduler_history
 
@@ -800,8 +806,8 @@ def main() -> None:
             "source_sha": _source_sha(current_source),
             "scheduler": scheduler_config,
         }
-        if scheduler_migration:
-            resume_entry["scheduler_migration"] = scheduler_migration
+        if source_migration:
+            resume_entry["source_migration"] = source_migration
         resume_history.append(resume_entry)
         run_config["resume_history"] = resume_history
 

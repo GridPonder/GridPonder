@@ -106,14 +106,16 @@ Before the full queue, run the same matrix on one short level:
   --run-dir tools/benchmark/results/run/CANARY_DIRECTORY
 ```
 
-Resume normally uses the same source SHA. A reviewed scheduler-only descendant
-commit can resume an existing run with:
+Resume normally uses the same source SHA. A reviewed descendant commit limited
+to the benchmark scheduler/report or state-key normalization can resume an
+existing run with:
 
 ```bash
---allow-scheduler-migration \
---scheduler-migration-reason "replace shared pool with independent model queues"
+--allow-source-migration \
+--source-migration-reason "make nested engine state keys hashable"
 ```
 
 The launcher rejects dirty trees, changed packs or experiment settings, and
-source diffs outside the benchmark scheduler, tests, documentation, and private
-report. The run metadata and private report retain both scheduler versions.
+source diffs outside the reviewed migration paths. The run metadata and private
+report retain source and scheduler histories. The previous
+`--allow-scheduler-migration` option remains as a compatibility alias.

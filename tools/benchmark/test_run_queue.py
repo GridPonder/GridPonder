@@ -7,7 +7,7 @@ from run_queue import (
     _assert_resume_compatible,
     _parse_provider_workers,
     _resolve_model_workers,
-    _unsupported_scheduler_migration_paths,
+    _unsupported_source_migration_paths,
     build_work_items,
     independent_model_futures,
     model_run_specs,
@@ -182,9 +182,10 @@ def test_resume_allows_explicit_clean_source_migration() -> None:
     _assert_resume_compatible(base, current, allow_source_change=True)
 
 
-def test_scheduler_migration_rejects_unrelated_paths() -> None:
-    assert _unsupported_scheduler_migration_paths(
+def test_source_migration_rejects_unrelated_paths() -> None:
+    assert _unsupported_source_migration_paths(
         [
+            "engines/python/_models.py",
             "tools/benchmark/run_queue.py",
             "packs/example/game.json",
         ]
@@ -199,5 +200,5 @@ if __name__ == "__main__":
     test_model_specs_capture_connector_and_params()
     test_resume_rejects_changed_model_spec()
     test_resume_allows_explicit_clean_source_migration()
-    test_scheduler_migration_rejects_unrelated_paths()
+    test_source_migration_rejects_unrelated_paths()
     print("8 passed")

@@ -92,6 +92,57 @@ def test_report_flags_missing_configuration_and_unknown_cost() -> None:
     assert "independent queues" in report
 
 
+def test_report_replaces_retryable_error_with_valid_result() -> None:
+    run_meta = {
+        "modes": ["single"],
+        "anon_modes": [],
+        "input_modes": ["text"],
+        "model_variants": ["frontier-xhigh"],
+        "levels_by_pack": {"pack": ["one"]},
+    }
+    dataset = {
+        "path": Path("frontier_single.jsonl"),
+        "meta": {
+            "model_id": "frontier-xhigh",
+            "inference_mode": "single",
+            "anon": False,
+            "input_mode": "text",
+        },
+        "levels": [
+            {
+                "type": "level",
+                "pack_id": "pack",
+                "level_id": "one",
+                "error": "runner failed",
+                "llm_calls": 1,
+                "cost_usd": 0.1,
+            },
+            {
+                "type": "level",
+                "pack_id": "pack",
+                "level_id": "one",
+                "success": True,
+                "aggregate_score": 1.0,
+                "llm_calls": 2,
+                "cost_usd": 0.2,
+            },
+        ],
+    }
+
+    summary = summarize(run_meta, [dataset])
+
+    assert summary["complete"] is True
+    assert summary["completed"] == 1
+    assert summary["attempt_records"] == 2
+    assert summary["superseded_records"] == 1
+    assert summary["superseded_errors"] == 1
+    assert summary["errors"] == 0
+    assert summary["duplicates"] == 0
+    assert summary["llm_calls"] == 3
+    assert abs(summary["cost_usd"] - 0.3) < 1e-9
+
+
 if __name__ == "__main__":
     test_report_flags_missing_configuration_and_unknown_cost()
-    print("1 passed")
+    test_report_replaces_retryable_error_with_valid_result()
+    print("2 passed")
