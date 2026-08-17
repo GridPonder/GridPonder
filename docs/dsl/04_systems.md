@@ -996,6 +996,8 @@ describes the board the player is looking at when the turn ends.
 | `pairing` | object | — | Optional. Source kind → target kind. Omitted: each source reads the *nearest* target of any kind. |
 | `metric` | string | `"manhattan"` | Reserved for future distance functions. Only `manhattan` is implemented. |
 | `variablePrefix` | string | `"echo_"` | The reading for source kind `k` is written to `variablePrefix + k`. |
+| `aggregate` | string | — | Optional. `"sum"`, `"min"` or `"max"`. Writes one combined reading for the whole source layer instead of one variable per source kind. Any other value behaves as absent. |
+| `aggregateVariable` | string | `variablePrefix + "total"` | Variable receiving the combined reading. Only consulted when `aggregate` is set. |
 
 ```json
 {
@@ -1016,6 +1018,32 @@ describes the board the player is looking at when the turn ends.
 2. Compute the Manhattan distance to the nearest candidate.
 3. Write it to `state.variables[variablePrefix + sourceKind]`.
 
+**Aggregate mode.** When `aggregate` is set, steps 1–2 run unchanged but the
+per-source distances are reduced to a single value written to
+`aggregateVariable`; no per-kind variables are written by that instance. A pack
+wanting both surfaces declares two `sonar` instances.
+
+This turns N independent readings into one equation in N unknowns. Under
+lockstep movement — every source stepping together — consecutive readings are
+redundant and the system never closes, so an aggregate gauge only yields
+information on turns where the sources *split*: some blocked, some moving.
+Packs using it for deduction must supply that asymmetry through terrain; a
+gauge over sources that always move together is unsolvable by reasoning.
+
+```json
+{
+  "id": "crew_gauge",
+  "type": "sonar",
+  "config": {
+    "sourceLayer": "actors",
+    "targetLayer": "seams",
+    "pairing": { "digger_d": "hidden_seam_d", "digger_e": "hidden_seam_e" },
+    "aggregate": "sum",
+    "aggregateVariable": "echo_total"
+  }
+}
+```
+
 **The reading ignores terrain completely.** It reports how far, never how to
 get there — routing around walls remains the player's problem. Games relying
 on this gap should pin it with a test.
@@ -1029,8 +1057,15 @@ adds no new state distinctions and cannot inflate a solver's search space.
 **inert** — it writes nothing at all. A non-object `pairing` is treated as
 absent, selecting nearest-of-any-kind mode. A `metric` other than
 `"manhattan"` falls back to `"manhattan"` rather than raising. A non-string
-`variablePrefix` falls back to `"echo_"`. Both engines implement precisely
-this; do not rely on any other coercion.
+`variablePrefix` falls back to `"echo_"`. An `aggregate` other than `"sum"`,
+`"min"` or `"max"` is treated as absent, selecting per-kind mode. A non-string
+or empty `aggregateVariable` falls back to `variablePrefix + "total"`. Under
+`sum`, a single source without a target makes the whole reading `-1` — a
+partial sum is numerically indistinguishable from a real one and would silently
+corrupt a player's deduction. Under `min` and `max`, target-less sources are
+skipped and the result is `-1` only when no source has a target. An empty
+source layer reads `-1`; a *missing* source layer leaves the system inert. Both
+engines implement precisely this; do not rely on any other coercion.
 
 **No target reads `-1`,** rather than leaving the variable unwritten, so a
 level can never read a stale value from a previous turn. Two source entities
