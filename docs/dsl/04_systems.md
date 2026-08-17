@@ -993,7 +993,7 @@ describes the board the player is looking at when the turn ends.
 |-------|------|---------|-------------|
 | `sourceLayer` | string | `"actors"` | Layer whose entities take readings. |
 | `targetLayer` | string | — | **Required.** Layer holding the sensed entities. |
-| `pairing` | object | — | Optional. Source kind → target kind. Omitted: each source reads the *nearest* target of any kind. |
+| `pairing` | object | — | Optional. Source kind → target kind. Omitted: each source reads the *nearest* target of any kind. Present: a source kind that is **not a key** is not sensed by this instance at all. |
 | `metric` | string | `"manhattan"` | Reserved for future distance functions. Only `manhattan` is implemented. |
 | `variablePrefix` | string | `"echo_"` | The reading for source kind `k` is written to `variablePrefix + k`. |
 | `aggregate` | string | — | Optional. `"sum"`, `"min"` or `"max"`. Writes one combined reading for the whole source layer instead of one variable per source kind. Any other value behaves as absent. |
@@ -1017,6 +1017,14 @@ describes the board the player is looking at when the turn ends.
    otherwise all targets.
 2. Compute the Manhattan distance to the nearest candidate.
 3. Write it to `state.variables[variablePrefix + sourceKind]`.
+
+**Pairing scopes the instance.** When `pairing` is present, a source whose kind
+is not one of its keys is skipped entirely — no variable is written for it, and
+it contributes nothing to an aggregate. This is what lets **two `sonar`
+instances share one source layer**, each sensing only its own kinds; without
+it the second instance would sense the first's sources against whatever target
+happened to be nearest. A pairing omitted altogether still means
+nearest-of-any-kind for every source.
 
 **Aggregate mode.** When `aggregate` is set, steps 1–2 run unchanged but the
 per-source distances are reduced to a single value written to

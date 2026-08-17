@@ -423,6 +423,50 @@ def test_absent_aggregate_leaves_per_kind_behaviour_unchanged() -> None:
     print("  OK  absent_aggregate_leaves_per_kind_behaviour_unchanged")
 
 
+def test_source_kind_absent_from_pairing_is_not_sensed() -> None:
+    """Two sonar instances must be able to share a source layer.
+
+    A kind missing from a *present* pairing map is skipped entirely, not
+    resolved as nearest-of-any. Without this the Spoil pack's second instance
+    sensed the first instance's diggers and published a bogus crew total on
+    every level of the earlier arcs.
+    """
+    game = _make_game({**_PAIRED, "aggregate": "sum"})
+    level = _make_level(
+        actors=[(1, 1, "digger_c")],            # not a key in _PAIRED
+        seams=[(3, 1, "seam_a"), (5, 1, "seam_b")],
+    )
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.variables.get("echo_total") == -1, (
+        f"digger_c is unpaired here, so this instance senses nothing; "
+        f"got {engine.state.variables}"
+    )
+    print("  OK  source_kind_absent_from_pairing_is_not_sensed")
+
+
+def test_unpaired_kind_writes_no_per_kind_variable() -> None:
+    """The same rule in per-kind mode: no variable at all, not a -1 and not a
+    nearest-of-any reading."""
+    game = _make_game(_PAIRED)
+    level = _make_level(
+        actors=[(1, 1, "digger_a"), (2, 1, "digger_c")],
+        seams=[(3, 1, "seam_a"), (5, 1, "seam_b")],
+    )
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    v = engine.state.variables
+    assert v.get("echo_digger_a") == 1, f"paired source still reads; got {v}"
+    assert "echo_digger_c" not in v, (
+        f"an unpaired source must not be published at all; got {v}"
+    )
+    print("  OK  unpaired_kind_writes_no_per_kind_variable")
+
+
 def run_all() -> bool:
     tests = [
         test_reading_is_written_on_the_first_turn,
@@ -445,6 +489,8 @@ def run_all() -> bool:
         test_no_sources_reads_minus_one,
         test_custom_aggregate_variable,
         test_absent_aggregate_leaves_per_kind_behaviour_unchanged,
+        test_source_kind_absent_from_pairing_is_not_sensed,
+        test_unpaired_kind_writes_no_per_kind_variable,
     ]
     passed = failed = 0
     for t in tests:

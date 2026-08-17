@@ -157,7 +157,17 @@ class SonarSystem extends GameSystem {
     final distances = <int>[];
     final readings = <String, int>{};
     for (final source in sourceLayer.entries()) {
-      final wanted = cfg.pairing?[source.value.kind] as String?;
+      // A source kind absent from a *present* pairing map is not sensed by
+      // this instance at all — it is skipped rather than falling through to
+      // nearest-of-any. Without this, two sonar instances sharing a source
+      // layer contaminate each other: the second would sense the first's
+      // sources against whatever target happened to be closest. Pairing
+      // omitted entirely still means nearest-of-any.
+      final pairing = cfg.pairing;
+      if (pairing != null && !pairing.containsKey(source.value.kind)) {
+        continue;
+      }
+      final wanted = pairing?[source.value.kind] as String?;
       var best = -1;
       for (final target in targets) {
         if (wanted != null && target.value.kind != wanted) continue;

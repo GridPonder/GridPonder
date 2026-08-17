@@ -491,5 +491,44 @@ void main() {
       expect(
           engine.state.variables.keys.any((k) => k.endsWith('total')), isFalse);
     });
+
+    test('a source kind absent from the pairing is not sensed', () {
+      // Two sonar instances must be able to share a source layer. A kind
+      // missing from a *present* pairing map is skipped entirely, not
+      // resolved as nearest-of-any.
+      final engine = _engineFor(
+        _makeGame({..._paired, 'aggregate': 'sum'}),
+        _makeLevel(actors: [
+          [1, 1, 'digger_c'] // not a key in _paired
+        ], seams: [
+          [3, 1, 'seam_a'],
+          [5, 1, 'seam_b'],
+        ]),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_total'], -1,
+          reason: 'digger_c is unpaired here, so this instance senses nothing');
+    });
+
+    test('an unpaired kind writes no per-kind variable', () {
+      final engine = _engineFor(
+        _makeGame(_paired),
+        _makeLevel(actors: [
+          [1, 1, 'digger_a'],
+          [2, 1, 'digger_c'],
+        ], seams: [
+          [3, 1, 'seam_a'],
+          [5, 1, 'seam_b'],
+        ]),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_digger_a'], 1);
+      expect(engine.state.variables.containsKey('echo_digger_c'), isFalse,
+          reason: 'an unpaired source must not be published at all');
+    });
   });
 }

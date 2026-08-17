@@ -144,6 +144,14 @@ class SonarSystem(GameSystem):
         distances: list[int] = []
         readings: dict[str, int] = {}
         for pos, entity in source_layer.entries():
+            # A source kind absent from a *present* pairing map is not sensed
+            # by this instance at all — it is skipped rather than falling
+            # through to nearest-of-any. Without this, two sonar instances
+            # sharing a source layer contaminate each other: the second would
+            # sense the first's sources against whatever target happened to be
+            # closest. Pairing omitted entirely still means nearest-of-any.
+            if pairing is not None and entity.kind not in pairing:
+                continue
             wanted = pairing.get(entity.kind) if pairing is not None else None
             best = -1
             for tpos, tentity in targets:
