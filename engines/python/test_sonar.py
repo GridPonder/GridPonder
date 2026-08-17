@@ -34,8 +34,10 @@ def _make_game(sonar_config: dict | None) -> GameDef:
             "wall":     {"layer": "ground", "tags": ["solid"]},
             "seam_a":   {"layer": "seams", "tags": ["goal_target"]},
             "seam_b":   {"layer": "seams", "tags": ["goal_target"]},
+            "seam_c":   {"layer": "seams", "tags": ["goal_target"]},
             "digger_a": {"layer": "actors", "tags": ["actor"]},
             "digger_b": {"layer": "actors", "tags": ["actor"]},
+            "digger_c": {"layer": "actors", "tags": ["actor"]},
         },
         "actions": [
             {"id": "move", "params": {"direction": {"type": "direction", "values": ["up", "down", "left", "right"]}}},
@@ -241,6 +243,186 @@ def test_reading_is_a_pure_function_of_position() -> None:
     print("  OK  reading_is_a_pure_function_of_position")
 
 
+# ---------------------------------------------------------------------------
+# aggregate — the crew gauge. One reading for the whole source layer.
+# ---------------------------------------------------------------------------
+
+_AGG = {**_PAIRED, "aggregate": "sum"}
+
+# One geometry discriminates all three reductions. After a single `right`:
+# digger_a (2,1) -> seam_a (3,1) = 1;  digger_b (3,1) -> seam_b (5,1) = 2.
+# So sum=3, min=1, max=2 — no two reductions can be confused.
+_SPLIT_ACTORS = [(1, 1, "digger_a"), (2, 1, "digger_b")]
+_SPLIT_SEAMS = [(3, 1, "seam_a"), (5, 1, "seam_b")]
+
+
+def test_aggregate_sum_of_two() -> None:
+    game = _make_game(_AGG)
+    level = _make_level(actors=_SPLIT_ACTORS, seams=_SPLIT_SEAMS)
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.variables.get("echo_total") == 3, (
+        f"1 + 2 = 3; got {engine.state.variables}"
+    )
+    print("  OK  aggregate_sum_of_two")
+
+
+def test_aggregate_sum_of_three() -> None:
+    """Three sources, because the crew gauge's whole point is that one number
+    constrains N unknowns jointly."""
+    game = _make_game({
+        "sourceLayer": "actors",
+        "targetLayer": "seams",
+        "pairing": {"digger_a": "seam_a", "digger_b": "seam_b",
+                    "digger_c": "seam_c"},
+        "aggregate": "sum",
+    })
+    level = _make_level(
+        actors=[(1, 1, "digger_a"), (2, 1, "digger_b"), (3, 1, "digger_c")],
+        seams=[(6, 1, "seam_a"), (7, 1, "seam_b"), (0, 1, "seam_c")],
+        size=(8, 3),
+    )
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    # a(2,1)->6 = 4;  b(3,1)->7 = 4;  c(4,1)->0 = 4
+    assert engine.state.variables.get("echo_total") == 12, (
+        f"4 + 4 + 4 = 12; got {engine.state.variables}"
+    )
+    print("  OK  aggregate_sum_of_three")
+
+
+def test_aggregate_min() -> None:
+    game = _make_game({**_PAIRED, "aggregate": "min"})
+    level = _make_level(actors=_SPLIT_ACTORS, seams=_SPLIT_SEAMS)
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.variables.get("echo_total") == 1, (
+        f"min(1, 2) = 1; got {engine.state.variables}"
+    )
+    print("  OK  aggregate_min")
+
+
+def test_aggregate_max() -> None:
+    game = _make_game({**_PAIRED, "aggregate": "max"})
+    level = _make_level(actors=_SPLIT_ACTORS, seams=_SPLIT_SEAMS)
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.variables.get("echo_total") == 2, (
+        f"max(1, 2) = 2; got {engine.state.variables}"
+    )
+    print("  OK  aggregate_max")
+
+
+def test_unrecognised_aggregate_falls_back_to_per_kind() -> None:
+    """Tolerance contract: a typo must not make one engine throw while the
+    other silently continues — it degrades to per-kind mode."""
+    game = _make_game({**_PAIRED, "aggregate": "median"})
+    level = _make_level(actors=_SPLIT_ACTORS, seams=_SPLIT_SEAMS)
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    v = engine.state.variables
+    assert v.get("echo_digger_a") == 1, f"expected per-kind readings; got {v}"
+    assert v.get("echo_digger_b") == 2, f"expected per-kind readings; got {v}"
+    assert "echo_total" not in v, f"no aggregate should be written; got {v}"
+    print("  OK  unrecognised_aggregate_falls_back_to_per_kind")
+
+
+def test_sum_with_missing_target_reads_minus_one() -> None:
+    """A partial sum is numerically indistinguishable from a real reading and
+    would silently corrupt the player's deduction, so it must never be
+    written."""
+    game = _make_game(_AGG)
+    level = _make_level(
+        actors=_SPLIT_ACTORS,
+        seams=[(3, 1, "seam_a")],       # no seam_b anywhere
+    )
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.variables.get("echo_total") == -1, (
+        f"digger_b has no target, so the sum is unknowable; "
+        f"got {engine.state.variables}"
+    )
+    print("  OK  sum_with_missing_target_reads_minus_one")
+
+
+def test_min_skips_sources_without_targets() -> None:
+    """The deliberate asymmetry with `sum`: a min over the available targets is
+    a well-defined answer to the question min asks, whereas a partial sum is
+    not. Both engines must pick the same side of this."""
+    game = _make_game({**_PAIRED, "aggregate": "min"})
+    level = _make_level(
+        actors=_SPLIT_ACTORS,
+        seams=[(3, 1, "seam_a")],       # no seam_b anywhere
+    )
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.variables.get("echo_total") == 1, (
+        f"min ignores the target-less digger_b and reports 1; "
+        f"got {engine.state.variables}"
+    )
+    print("  OK  min_skips_sources_without_targets")
+
+
+def test_no_sources_reads_minus_one() -> None:
+    """An empty source layer must read -1, not go unwritten. This is what
+    blanks the crew chip on the levels that use the per-digger readouts."""
+    game = _make_game(_AGG)
+    level = _make_level(actors=[], seams=[(3, 1, "seam_a")])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert engine.state.variables.get("echo_total") == -1, (
+        f"no sources on the board; got {engine.state.variables}"
+    )
+    print("  OK  no_sources_reads_minus_one")
+
+
+def test_custom_aggregate_variable() -> None:
+    game = _make_game({**_PAIRED, "aggregate": "sum",
+                       "aggregateVariable": "crew_total"})
+    level = _make_level(actors=_SPLIT_ACTORS, seams=_SPLIT_SEAMS)
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    v = engine.state.variables
+    assert v.get("crew_total") == 3, f"got {v}"
+    assert "echo_total" not in v, f"default name must not also be written; {v}"
+    print("  OK  custom_aggregate_variable")
+
+
+def test_absent_aggregate_leaves_per_kind_behaviour_unchanged() -> None:
+    """The back-compatibility guarantee that keeps sp_003-sp_008 untouched."""
+    game = _make_game(_PAIRED)
+    level = _make_level(actors=_SPLIT_ACTORS, seams=_SPLIT_SEAMS)
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    v = engine.state.variables
+    assert v.get("echo_digger_a") == 1, f"got {v}"
+    assert v.get("echo_digger_b") == 2, f"got {v}"
+    assert not any(k.endswith("total") for k in v), (
+        f"no aggregate variable without an aggregate config; got {v}"
+    )
+    print("  OK  absent_aggregate_leaves_per_kind_behaviour_unchanged")
+
+
 def run_all() -> bool:
     tests = [
         test_reading_is_written_on_the_first_turn,
@@ -253,6 +435,16 @@ def run_all() -> bool:
         test_missing_target_layer_is_inert,
         test_non_object_pairing_falls_back_to_nearest,
         test_reading_is_a_pure_function_of_position,
+        test_aggregate_sum_of_two,
+        test_aggregate_sum_of_three,
+        test_aggregate_min,
+        test_aggregate_max,
+        test_unrecognised_aggregate_falls_back_to_per_kind,
+        test_sum_with_missing_target_reads_minus_one,
+        test_min_skips_sources_without_targets,
+        test_no_sources_reads_minus_one,
+        test_custom_aggregate_variable,
+        test_absent_aggregate_leaves_per_kind_behaviour_unchanged,
     ]
     passed = failed = 0
     for t in tests:

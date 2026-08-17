@@ -32,6 +32,23 @@ never read a stale value from a previous turn.
 Two source entities sharing a kind both write the same variable; the value is
 the **minimum** over them, so the reading is deterministic regardless of
 iteration order.
+
+An ``aggregate`` of ``"sum"``, ``"min"`` or ``"max"`` makes the system write a
+single combined reading to ``aggregateVariable`` (default
+``variablePrefix + "total"``) instead of one variable per source kind; any
+other value, or none, selects per-kind mode. A non-string
+``aggregateVariable`` falls back to the default. Under ``sum`` a single source
+without a target makes the whole reading ``-1``, because a partial sum is
+numerically indistinguishable from a real one; ``min`` and ``max`` instead skip
+target-less sources and return ``-1`` only when no source has a target. An
+empty source layer reads ``-1``; a *missing* source layer leaves the system
+inert, exactly as today.
+
+One number reducing N sources is one equation in N unknowns, and under
+lockstep movement consecutive readings are redundant — so a pack using an
+aggregate for deduction must supply asymmetry through terrain that stops some
+sources and not others. A gauge over sources that always move together yields
+no information at all.
 """
 from __future__ import annotations
 
@@ -61,12 +78,46 @@ def _read_config(config: dict) -> dict | None:
     # `metric` is reserved for future distance functions; anything we do not
     # recognise falls back to manhattan rather than raising, so a typo cannot
     # make one engine throw while the other silently continues.
+    # An unrecognised reduction degrades to per-kind mode rather than raising,
+    # for the same reason `metric` does: a typo must not make one engine throw
+    # while the other silently continues.
+    aggregate = config.get("aggregate")
+    if aggregate not in ("sum", "min", "max"):
+        aggregate = None
+
+    aggregate_variable = config.get("aggregateVariable")
+    if not isinstance(aggregate_variable, str) or not aggregate_variable:
+        aggregate_variable = prefix + "total"
+
     return {
         "sourceLayer": source_layer,
         "targetLayer": target_layer,
         "pairing": pairing,
         "variablePrefix": prefix,
+        "aggregate": aggregate,
+        "aggregateVariable": aggregate_variable,
     }
+
+
+def _reduce(mode: str, distances: list[int]) -> int:
+    """Combine per-source distances into one crew reading.
+
+    The asymmetry between ``sum`` and ``min``/``max`` is deliberate. A partial
+    sum is numerically indistinguishable from a real reading, so a missing
+    target poisons the whole value and must yield -1. A min or max over the
+    sources that *do* have targets is a well-defined answer to the question
+    that reduction asks, so those skip the target-less sources instead.
+    """
+    if not distances:
+        return -1
+    if mode == "sum":
+        if any(d < 0 for d in distances):
+            return -1
+        return sum(distances)
+    found = [d for d in distances if d >= 0]
+    if not found:
+        return -1
+    return min(found) if mode == "min" else max(found)
 
 
 class SonarSystem(GameSystem):
@@ -89,6 +140,8 @@ class SonarSystem(GameSystem):
         pairing = cfg["pairing"]
         prefix = cfg["variablePrefix"]
 
+        aggregate = cfg["aggregate"]
+        distances: list[int] = []
         readings: dict[str, int] = {}
         for pos, entity in source_layer.entries():
             wanted = pairing.get(entity.kind) if pairing is not None else None
@@ -99,6 +152,14 @@ class SonarSystem(GameSystem):
                 dist = abs(pos.x - tpos.x) + abs(pos.y - tpos.y)
                 if best < 0 or dist < best:
                     best = dist
+
+            if aggregate is not None:
+                # In aggregate mode the per-source distance is an input to the
+                # reduction and is never published on its own — a pack wanting
+                # both surfaces declares two sonar instances.
+                distances.append(best)
+                continue
+
             # Two sources of the same kind collapse to the minimum, so the
             # written value does not depend on iteration order. -1 (no target)
             # loses to any real distance.
@@ -106,6 +167,11 @@ class SonarSystem(GameSystem):
             prev = readings.get(name)
             if prev is None or prev < 0 or (best >= 0 and best < prev):
                 readings[name] = best
+
+        if aggregate is not None:
+            state.variables[cfg["aggregateVariable"]] = _reduce(
+                aggregate, distances)
+            return []
 
         state.variables.update(readings)
         return []
