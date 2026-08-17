@@ -202,8 +202,8 @@ class CoupledActorsSystem extends GameSystem {
           board.hasTagAt(groundLayerId, target, wallTag, game.entityKinds);
       // Only a cell that is *both* solid and diggable is excavated, so
       // walking open ground stays an ordinary move and never backfills.
-      final digging =
-          solid && isDiggable(board, game, groundLayerId, target, excavate);
+      final digging = solid &&
+          isDiggable(board, game, groundLayerId, target, excavate, entity.kind);
       final blocked =
           !inBounds || (solid && !digging) || occupied.contains(target);
 

@@ -23,10 +23,16 @@ class ExcavatePolicy {
   final String clearedKind;
   final String? backfillKind;
 
+  /// Mover kind → extra ground tags that kind may excavate, on top of
+  /// [diggableTag]. This is what makes one cell a wall for one mover and a
+  /// doorway for another.
+  final Map<String, List<String>> extraDiggableTags;
+
   const ExcavatePolicy({
     required this.diggableTag,
     required this.clearedKind,
     required this.backfillKind,
+    this.extraDiggableTags = const {},
   });
 
   /// Normalises the `excavate` block. Returns null when excavation is off.
@@ -37,7 +43,11 @@ class ExcavatePolicy {
   /// if the block were absent. A missing or non-string `backfillKind` means
   /// *no backfill*, which is a legitimate configuration: a pure tunneller
   /// that removes terrain and leaves an open corridor. A missing or
-  /// non-string `diggableTag` falls back to `'diggable'`.
+  /// non-string `diggableTag` falls back to `'diggable'`. `extraDiggableTags`
+  /// maps a mover's entity kind to extra ground tags that kind alone may
+  /// excavate, on top of `diggableTag`; a missing or non-object
+  /// `extraDiggableTags` grants nothing, and any entry whose value is not a
+  /// list of non-empty strings is dropped rather than coerced.
   static ExcavatePolicy? read(Map<String, dynamic> config) {
     final raw = config['excavate'];
     if (raw is! Map<String, dynamic>) return null;
@@ -56,7 +66,24 @@ class ExcavatePolicy {
       diggableTag: tag,
       clearedKind: cleared,
       backfillKind: backfill,
+      extraDiggableTags: _readExtraTags(raw['extraDiggableTags']),
     );
+  }
+
+  /// Anything malformed is dropped rather than coerced: a non-object grants
+  /// nothing, an entry whose value is not a list of non-empty strings is
+  /// ignored for that kind, and an empty list is indistinguishable from an
+  /// absent entry. Python's `_read_extra_tags` implements the same contract.
+  static Map<String, List<String>> _readExtraTags(Object? raw) {
+    if (raw is! Map) return const {};
+    final out = <String, List<String>>{};
+    raw.forEach((key, value) {
+      if (key is! String || key.isEmpty || value is! List) return;
+      final clean =
+          value.whereType<String>().where((t) => t.isNotEmpty).toList();
+      if (clean.isNotEmpty) out[key] = clean;
+    });
+    return out;
   }
 }
 
@@ -64,15 +91,29 @@ class ExcavatePolicy {
 /// by. Callers check the wall tag separately: only a cell that is *both*
 /// solid and diggable is excavated, so untagged open ground stays an ordinary
 /// move and never triggers a backfill.
+///
+/// [kind] is the mover's entity kind. Terrain carrying `diggableTag` is
+/// diggable by every mover; `extraDiggableTags` grants additional tags to
+/// named kinds, which is what makes one cell a wall for one mover and a
+/// doorway for another.
 bool isDiggable(
   Board board,
   GameDefinition game,
   String layerId,
   Position pos,
-  ExcavatePolicy? excavate,
-) {
+  ExcavatePolicy? excavate, [
+  String? kind,
+]) {
   if (excavate == null) return false;
-  return board.hasTagAt(layerId, pos, excavate.diggableTag, game.entityKinds);
+  if (board.hasTagAt(layerId, pos, excavate.diggableTag, game.entityKinds)) {
+    return true;
+  }
+  final extra = excavate.extraDiggableTags[kind];
+  if (extra == null) return false;
+  for (final tag in extra) {
+    if (board.hasTagAt(layerId, pos, tag, game.entityKinds)) return true;
+  }
+  return false;
 }
 
 GameEvent _transform(

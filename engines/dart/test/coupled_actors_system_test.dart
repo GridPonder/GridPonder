@@ -487,6 +487,16 @@ GameDefinition _makeExcavateGame(Map<String, dynamic>? excavate) {
         'tags': ['solid'],
         'symbol': 'X',
       },
+      'hard': {
+        'layer': 'ground',
+        'tags': ['solid', 'diggable_hard'],
+        'symbol': 'H',
+      },
+      'sludge': {
+        'layer': 'ground',
+        'tags': ['solid', 'diggable_wet'],
+        'symbol': 'G',
+      },
       'wei': {
         'layer': 'actors',
         'tags': ['actor'],
@@ -799,6 +809,110 @@ void _excavateTests() {
           reason: 'no backfillKind means no spoil');
       expect(_transformEvents(result).length, 1,
           reason: 'only the cut should fire');
+    });
+
+    const gatedExcavate = <String, dynamic>{
+      'diggableTag': 'diggable',
+      'clearedKind': 'empty',
+      'backfillKind': 'rubble',
+      'extraDiggableTags': {
+        'wei': ['diggable_hard'],
+      },
+    };
+
+    test('extraDiggableTags gate terrain by mover kind', () {
+      // The load-bearing case: the same cell is a doorway for wei and a wall
+      // for shu, which is what splits a lock-stepped crew.
+      final engine = _engineFor(
+        _makeExcavateGame(gatedExcavate),
+        _makeTerrainLevel(
+          actors: [
+            [1, 0, 'wei'],
+            [3, 0, 'shu'],
+          ],
+          ground: [
+            [2, 0, 'hard'],
+            [4, 0, 'hard'],
+          ],
+        ),
+      );
+
+      engine.executeTurn(_moveRight());
+
+      expect(_actorPos(engine, 'wei'), equals(const Position(2, 0)),
+          reason: 'wei holds the grant and must cut through');
+      expect(_groundKind(engine, const Position(2, 0)), equals('empty'));
+      expect(_actorPos(engine, 'shu'), equals(const Position(3, 0)),
+          reason: 'shu has no grant and must be blocked');
+      expect(_groundKind(engine, const Position(4, 0)), equals('hard'),
+          reason: "shu's target must be untouched");
+    });
+
+    test('extraDiggableTags are additive, not a replacement', () {
+      final engine = _engineFor(
+        _makeExcavateGame(gatedExcavate),
+        _makeTerrainLevel(
+          actors: [
+            [1, 0, 'wei'],
+          ],
+          ground: [
+            [2, 0, 'rock'],
+          ],
+        ),
+      );
+
+      engine.executeTurn(_moveRight());
+
+      expect(_actorPos(engine, 'wei'), equals(const Position(2, 0)),
+          reason: 'a granted mover must still cut soft rock');
+      expect(_groundKind(engine, const Position(1, 0)), equals('rubble'),
+          reason: 'the ordinary backfill must still happen');
+    });
+
+    test('extraDiggableTags grant only the listed tags', () {
+      final engine = _engineFor(
+        _makeExcavateGame(gatedExcavate),
+        _makeTerrainLevel(
+          actors: [
+            [1, 0, 'wei'],
+          ],
+          ground: [
+            [2, 0, 'sludge'],
+          ],
+        ),
+      );
+
+      engine.executeTurn(_moveRight());
+
+      expect(_actorPos(engine, 'wei'), equals(const Position(1, 0)),
+          reason: 'a diggable_hard grant must not open diggable_wet');
+    });
+
+    test('malformed extraDiggableTags are ignored', () {
+      // Tolerance contract, matched to Python: a string instead of a list is
+      // dropped rather than coerced, so a typo loses the grant instead of
+      // granting something unintended.
+      final engine = _engineFor(
+        _makeExcavateGame(const <String, dynamic>{
+          'diggableTag': 'diggable',
+          'clearedKind': 'empty',
+          'backfillKind': 'rubble',
+          'extraDiggableTags': {'wei': 'diggable_hard'},
+        }),
+        _makeTerrainLevel(
+          actors: [
+            [1, 0, 'wei'],
+          ],
+          ground: [
+            [2, 0, 'hard'],
+          ],
+        ),
+      );
+
+      engine.executeTurn(_moveRight());
+
+      expect(_actorPos(engine, 'wei'), equals(const Position(1, 0)),
+          reason: 'a string instead of a list must be ignored');
     });
   });
 }
