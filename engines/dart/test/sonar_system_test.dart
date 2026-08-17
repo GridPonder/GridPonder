@@ -478,7 +478,8 @@ void main() {
     });
 
     test('absent aggregate leaves per-kind behaviour unchanged', () {
-      // The back-compatibility guarantee that keeps sp_003-sp_008 untouched.
+      // The back-compatibility guarantee that keeps the parked Echo levels
+      // (sp_003-sp_008, retired to spoil/levels_retired/) untouched.
       final engine = _engineFor(
         _makeGame(_paired),
         _makeLevel(actors: splitActors, seams: splitSeams),

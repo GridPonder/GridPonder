@@ -112,7 +112,7 @@ Rules can react to this event to implement tool-based interactions (e.g., torch 
 ### `actor_moved`
 Emitted by `coupled_actors` / `individual_actors` for each actor that moved.
 
-| Field | Type | Description |
+| Payload | Type | Description |
 |-------|------|-------------|
 | `kind` | string | The actor's entity kind. |
 | `position` | `[x, y]` | Cell the actor moved into. |
@@ -153,7 +153,7 @@ place.
 ### `actor_blocked`
 Emitted for each actor that could not move.
 
-| Field | Type | Description |
+| Payload | Type | Description |
 |-------|------|-------------|
 | `kind` | string | The actor's entity kind. |
 | `position` | `[x, y]` | Cell the actor stayed in. |

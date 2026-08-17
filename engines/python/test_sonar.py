@@ -407,7 +407,8 @@ def test_custom_aggregate_variable() -> None:
 
 
 def test_absent_aggregate_leaves_per_kind_behaviour_unchanged() -> None:
-    """The back-compatibility guarantee that keeps sp_003-sp_008 untouched."""
+    """The back-compatibility guarantee that keeps the parked Echo levels
+    (sp_003-sp_008, retired to spoil/levels_retired/) untouched."""
     game = _make_game(_PAIRED)
     level = _make_level(actors=_SPLIT_ACTORS, seams=_SPLIT_SEAMS)
     engine = TurnEngine(game, level)
