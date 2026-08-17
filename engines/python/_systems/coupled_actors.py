@@ -155,7 +155,7 @@ class CoupledActorsSystem(GameSystem):
             # Only a cell that is *both* solid and diggable is excavated, so
             # walking open ground stays an ordinary move and never backfills.
             digging = solid and is_diggable(
-                board, game, ground_layer_id, target, excavate)
+                board, game, ground_layer_id, target, excavate, entity.kind)
             blocked = (
                 not in_bounds
                 or (solid and not digging)

@@ -19,7 +19,10 @@ not a non-empty string, is **inert** — the system behaves exactly as if the
 block were absent. A missing or non-string `backfillKind` means *no backfill*,
 which is a legitimate configuration: a pure tunneller that removes terrain and
 leaves an open corridor. A missing or non-string `diggableTag` falls back to
-`"diggable"`.
+`"diggable"`. `extraDiggableTags` maps a mover's entity kind to extra ground
+tags that kind alone may excavate, on top of `diggableTag`; a missing or
+non-object `extraDiggableTags` grants nothing, and any entry whose value is
+not a list of non-empty strings is dropped rather than coerced.
 """
 from __future__ import annotations
 
@@ -45,17 +48,51 @@ def read_excavate(config: dict) -> dict | None:
     if not isinstance(tag, str) or not tag:
         tag = "diggable"
 
-    return {"diggableTag": tag, "clearedKind": cleared, "backfillKind": backfill}
+    return {
+        "diggableTag": tag,
+        "clearedKind": cleared,
+        "backfillKind": backfill,
+        "extraDiggableTags": _read_extra_tags(raw.get("extraDiggableTags")),
+    }
 
 
-def is_diggable(board, game, layer_id, pos, excavate) -> bool:
+def _read_extra_tags(raw) -> dict[str, tuple[str, ...]]:
+    """Mover kind → extra ground tags that kind may excavate, on top of
+    `diggableTag`. Anything malformed is dropped rather than coerced: a
+    non-object grants nothing, an entry whose value is not a list of non-empty
+    strings is ignored for that kind, and an empty list is indistinguishable
+    from an absent entry."""
+    if not isinstance(raw, dict):
+        return {}
+    out: dict[str, tuple[str, ...]] = {}
+    for kind, tags in raw.items():
+        if not isinstance(kind, str) or not kind or not isinstance(tags, list):
+            continue
+        clean = tuple(t for t in tags if isinstance(t, str) and t)
+        if clean:
+            out[kind] = clean
+    return out
+
+
+def is_diggable(board, game, layer_id, pos, excavate, kind: str | None = None) -> bool:
     """Whether `pos` is terrain this mover cuts through instead of being
     blocked by. Callers check the wall tag separately: only a cell that is
     *both* solid and diggable is excavated, so untagged open ground is an
-    ordinary move and never triggers a backfill."""
+    ordinary move and never triggers a backfill.
+
+    `kind` is the mover's entity kind. Terrain carrying `diggableTag` is
+    diggable by every mover; `extraDiggableTags` grants additional tags to
+    named kinds, which is what makes one cell a wall for one mover and a
+    doorway for another.
+    """
     if excavate is None:
         return False
-    return board.has_tag_at(layer_id, pos, excavate["diggableTag"], game.entity_kinds)
+    if board.has_tag_at(layer_id, pos, excavate["diggableTag"], game.entity_kinds):
+        return True
+    for tag in excavate["extraDiggableTags"].get(kind or "", ()):
+        if board.has_tag_at(layer_id, pos, tag, game.entity_kinds):
+            return True
+    return False
 
 
 def _transform(board, layer_id, pos, to_kind: str) -> dict:

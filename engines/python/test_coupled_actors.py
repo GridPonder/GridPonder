@@ -530,6 +530,8 @@ def _make_excavate_game(excavate: dict | None = None) -> GameDef:
             "rock":    {"layer": "ground", "tags": ["solid", "diggable"]},
             "rubble":  {"layer": "ground", "tags": ["solid"]},
             "bedrock": {"layer": "ground", "tags": ["solid"]},
+            "hard":    {"layer": "ground", "tags": ["solid", "diggable_hard"]},
+            "sludge":  {"layer": "ground", "tags": ["solid", "diggable_wet"]},
             "wei":     {"layer": "actors", "tags": ["actor"]},
             "shu":     {"layer": "actors", "tags": ["actor"]},
         },
@@ -765,6 +767,96 @@ def test_omitted_backfill_kind_leaves_an_open_corridor() -> None:
     print("  OK  omitted_backfill_kind_leaves_an_open_corridor")
 
 
+_GATED_EXCAVATE = {
+    "diggableTag": "diggable",
+    "clearedKind": "empty",
+    "backfillKind": "rubble",
+    "extraDiggableTags": {"wei": ["diggable_hard"]},
+}
+
+
+def test_extra_diggable_tags_gate_terrain_by_mover_kind() -> None:
+    """The load-bearing case: the same cell is diggable for one mover and a
+    wall for another, so a typed obstacle splits a lock-stepped crew."""
+    game = _make_excavate_game(_GATED_EXCAVATE)
+    # wei at x=1 faces hard rock at x=2; shu at x=3 faces hard rock at x=4.
+    level = _make_terrain_level(
+        actors=[(1, 0, "wei"), (3, 0, "shu")],
+        ground=[(2, 0, "hard"), (4, 0, "hard")],
+    )
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(2, 0), (
+        f"wei holds the grant and must cut through, got {_actor_pos(engine, 'wei')}"
+    )
+    assert _ground_kind(engine, Pos(2, 0)) == "empty", (
+        f"wei's target should be cleared, got {_ground_kind(engine, Pos(2, 0))}"
+    )
+    assert _actor_pos(engine, "shu") == Pos(3, 0), (
+        f"shu has no grant and must be blocked, got {_actor_pos(engine, 'shu')}"
+    )
+    assert _ground_kind(engine, Pos(4, 0)) == "hard", (
+        f"shu's target must be untouched, got {_ground_kind(engine, Pos(4, 0))}"
+    )
+    print("  OK  extra_diggable_tags_gate_terrain_by_mover_kind")
+
+
+def test_extra_diggable_tags_are_additive_not_a_replacement() -> None:
+    """A granted kind still cuts plain `diggableTag` terrain — the grant adds
+    tags, it never narrows the base set."""
+    game = _make_excavate_game(_GATED_EXCAVATE)
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "rock")])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(2, 0), (
+        f"a granted mover must still cut soft rock, got {_actor_pos(engine, 'wei')}"
+    )
+    assert _ground_kind(engine, Pos(1, 0)) == "rubble", (
+        "the ordinary backfill must still happen for a granted mover"
+    )
+    print("  OK  extra_diggable_tags_are_additive_not_a_replacement")
+
+
+def test_extra_diggable_tags_grant_only_the_listed_tags() -> None:
+    """A grant is per-tag, not a licence to dig everything solid."""
+    game = _make_excavate_game(_GATED_EXCAVATE)
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "sludge")])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(1, 0), (
+        f"wei is granted diggable_hard only and must be blocked by sludge, "
+        f"got {_actor_pos(engine, 'wei')}"
+    )
+    print("  OK  extra_diggable_tags_grant_only_the_listed_tags")
+
+
+def test_malformed_extra_diggable_tags_are_ignored() -> None:
+    """Tolerance contract: a non-list entry is dropped rather than coerced, so
+    a typo silently loses the grant instead of granting something unintended.
+    Both engines must agree on this."""
+    game = _make_excavate_game({
+        "diggableTag": "diggable",
+        "clearedKind": "empty",
+        "backfillKind": "rubble",
+        "extraDiggableTags": {"wei": "diggable_hard"},
+    })
+    level = _make_terrain_level(actors=[(1, 0, "wei")], ground=[(2, 0, "hard")])
+    engine = TurnEngine(game, level)
+
+    engine.execute_turn("move", {"direction": "right"})
+
+    assert _actor_pos(engine, "wei") == Pos(1, 0), (
+        f"a string instead of a list must be ignored, got {_actor_pos(engine, 'wei')}"
+    )
+    print("  OK  malformed_extra_diggable_tags_are_ignored")
+
+
 def run_all() -> bool:
     tests = [
         test_open_move_shifts_and_trains_both_actors,
@@ -794,6 +886,10 @@ def run_all() -> bool:
         test_without_excavate_config_diggable_rock_still_blocks,
         test_excavate_without_cleared_kind_is_inert,
         test_omitted_backfill_kind_leaves_an_open_corridor,
+        test_extra_diggable_tags_gate_terrain_by_mover_kind,
+        test_extra_diggable_tags_are_additive_not_a_replacement,
+        test_extra_diggable_tags_grant_only_the_listed_tags,
+        test_malformed_extra_diggable_tags_are_ignored,
     ]
     passed = 0
     failed = 0
