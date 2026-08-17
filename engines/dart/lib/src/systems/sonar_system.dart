@@ -9,12 +9,16 @@ class _SonarConfig {
   final String targetLayer;
   final Map<String, dynamic>? pairing;
   final String variablePrefix;
+  final String? aggregate;
+  final String aggregateVariable;
 
   const _SonarConfig({
     required this.sourceLayer,
     required this.targetLayer,
     required this.pairing,
     required this.variablePrefix,
+    required this.aggregate,
+    required this.aggregateVariable,
   });
 
   /// Returns null when the system is inert.
@@ -35,13 +39,49 @@ class _SonarConfig {
     // `metric` is reserved for future distance functions; anything we do not
     // recognise falls back to manhattan rather than raising, so a typo cannot
     // make one engine throw while the other silently continues.
+    // An unrecognised reduction degrades to per-kind mode rather than raising,
+    // for the same reason `metric` does.
+    final rawAggregate = config['aggregate'];
+    final aggregate = (rawAggregate == 'sum' ||
+            rawAggregate == 'min' ||
+            rawAggregate == 'max')
+        ? rawAggregate as String
+        : null;
+
+    final rawAggVar = config['aggregateVariable'];
+    final aggregateVariable = (rawAggVar is String && rawAggVar.isNotEmpty)
+        ? rawAggVar
+        : '${prefix}total';
+
     return _SonarConfig(
       sourceLayer: sourceLayer,
       targetLayer: targetLayer,
       pairing: pairing,
       variablePrefix: prefix,
+      aggregate: aggregate,
+      aggregateVariable: aggregateVariable,
     );
   }
+}
+
+/// Combine per-source distances into one crew reading.
+///
+/// The asymmetry between `sum` and `min`/`max` is deliberate. A partial sum is
+/// numerically indistinguishable from a real reading, so a missing target
+/// poisons the whole value and must yield -1. A min or max over the sources
+/// that *do* have targets is a well-defined answer to the question that
+/// reduction asks, so those skip the target-less sources instead.
+int _reduce(String mode, List<int> distances) {
+  if (distances.isEmpty) return -1;
+  if (mode == 'sum') {
+    if (distances.any((d) => d < 0)) return -1;
+    return distances.reduce((a, b) => a + b);
+  }
+  final found = distances.where((d) => d >= 0).toList();
+  if (found.isEmpty) return -1;
+  return mode == 'min'
+      ? found.reduce((a, b) => a < b ? a : b)
+      : found.reduce((a, b) => a > b ? a : b);
 }
 
 /// SonarSystem — see docs/dsl/04_systems.md.
@@ -78,6 +118,23 @@ class _SonarConfig {
 /// Two source entities sharing a kind both write the same variable; the value
 /// is the **minimum** over them, so the reading is deterministic regardless of
 /// iteration order.
+///
+/// An `aggregate` of `"sum"`, `"min"` or `"max"` makes the system write a
+/// single combined reading to `aggregateVariable` (default
+/// `variablePrefix + "total"`) instead of one variable per source kind; any
+/// other value, or none, selects per-kind mode. A non-string
+/// `aggregateVariable` falls back to the default. Under `sum` a single source
+/// without a target makes the whole reading `-1`, because a partial sum is
+/// numerically indistinguishable from a real one; `min` and `max` instead skip
+/// target-less sources and return `-1` only when no source has a target. An
+/// empty source layer reads `-1`; a *missing* source layer leaves the system
+/// inert, exactly as today.
+///
+/// One number reducing N sources is one equation in N unknowns, and under
+/// lockstep movement consecutive readings are redundant — so a pack using an
+/// aggregate for deduction must supply asymmetry through terrain that stops
+/// some sources and not others. A gauge over sources that always move together
+/// yields no information at all.
 class SonarSystem extends GameSystem {
   const SonarSystem({required super.id}) : super(type: 'sonar');
 
@@ -96,6 +153,8 @@ class SonarSystem extends GameSystem {
     final targetLayer = board.layers[cfg.targetLayer];
     final targets = targetLayer?.entries().toList() ?? const [];
 
+    final aggregate = cfg.aggregate;
+    final distances = <int>[];
     final readings = <String, int>{};
     for (final source in sourceLayer.entries()) {
       final wanted = cfg.pairing?[source.value.kind] as String?;
@@ -106,6 +165,15 @@ class SonarSystem extends GameSystem {
             (source.key.y - target.key.y).abs();
         if (best < 0 || dist < best) best = dist;
       }
+
+      if (aggregate != null) {
+        // In aggregate mode the per-source distance is an input to the
+        // reduction and is never published on its own — a pack wanting both
+        // surfaces declares two sonar instances.
+        distances.add(best);
+        continue;
+      }
+
       // Two sources of the same kind collapse to the minimum, so the written
       // value does not depend on iteration order. -1 (no target) loses to any
       // real distance.
@@ -114,6 +182,11 @@ class SonarSystem extends GameSystem {
       if (prev == null || prev < 0 || (best >= 0 && best < prev)) {
         readings[name] = best;
       }
+    }
+
+    if (aggregate != null) {
+      state.variables[cfg.aggregateVariable] = _reduce(aggregate, distances);
+      return const [];
     }
 
     state.variables.addAll(readings);

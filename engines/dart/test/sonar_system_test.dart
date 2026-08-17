@@ -54,6 +54,16 @@ GameDefinition _makeGame(Map<String, dynamic>? sonarConfig) {
         'tags': ['actor'],
         'symbol': '2',
       },
+      'seam_c': {
+        'layer': 'seams',
+        'tags': ['goal_target'],
+        'symbol': 'c',
+      },
+      'digger_c': {
+        'layer': 'actors',
+        'tags': ['actor'],
+        'symbol': '3',
+      },
     },
     'actions': [
       {
@@ -75,6 +85,7 @@ Map<String, dynamic> _makeLevel({
   required List<List<dynamic>> actors,
   required List<List<dynamic>> seams,
   List<List<int>> walls = const [],
+  List<int> size = const [6, 3],
 }) {
   final layers = <String, dynamic>{
     'seams': {
@@ -113,7 +124,7 @@ Map<String, dynamic> _makeLevel({
   return {
     'id': 'test_level',
     'board': {
-      'size': [6, 3],
+      'size': size,
       'layers': layers,
     },
     'state': <String, dynamic>{},
@@ -314,6 +325,171 @@ void main() {
 
       expect(there, 2);
       expect(back, equals(there));
+    });
+
+    // ---- aggregate: the crew gauge -------------------------------------
+    //
+    // One geometry discriminates all three reductions. After a single
+    // `right`: digger_a (2,1) -> seam_a (3,1) = 1; digger_b (3,1) ->
+    // seam_b (5,1) = 2. So sum=3, min=1, max=2.
+    const splitActors = [
+      [1, 1, 'digger_a'],
+      [2, 1, 'digger_b'],
+    ];
+    const splitSeams = [
+      [3, 1, 'seam_a'],
+      [5, 1, 'seam_b'],
+    ];
+
+    test('aggregate sum of two', () {
+      final engine = _engineFor(
+        _makeGame({..._paired, 'aggregate': 'sum'}),
+        _makeLevel(actors: splitActors, seams: splitSeams),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_total'], 3, reason: '1 + 2 = 3');
+    });
+
+    test('aggregate sum of three', () {
+      final engine = _engineFor(
+        _makeGame({
+          'sourceLayer': 'actors',
+          'targetLayer': 'seams',
+          'pairing': {
+            'digger_a': 'seam_a',
+            'digger_b': 'seam_b',
+            'digger_c': 'seam_c',
+          },
+          'aggregate': 'sum',
+        }),
+        _makeLevel(
+          actors: [
+            [1, 1, 'digger_a'],
+            [2, 1, 'digger_b'],
+            [3, 1, 'digger_c'],
+          ],
+          seams: [
+            [6, 1, 'seam_a'],
+            [7, 1, 'seam_b'],
+            [0, 1, 'seam_c'],
+          ],
+          size: [8, 3],
+        ),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_total'], 12, reason: '4 + 4 + 4');
+    });
+
+    test('aggregate min', () {
+      final engine = _engineFor(
+        _makeGame({..._paired, 'aggregate': 'min'}),
+        _makeLevel(actors: splitActors, seams: splitSeams),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_total'], 1);
+    });
+
+    test('aggregate max', () {
+      final engine = _engineFor(
+        _makeGame({..._paired, 'aggregate': 'max'}),
+        _makeLevel(actors: splitActors, seams: splitSeams),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_total'], 2);
+    });
+
+    test('an unrecognised aggregate falls back to per-kind', () {
+      // A typo must not make one engine throw while the other continues.
+      final engine = _engineFor(
+        _makeGame({..._paired, 'aggregate': 'median'}),
+        _makeLevel(actors: splitActors, seams: splitSeams),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_digger_a'], 1);
+      expect(engine.state.variables['echo_digger_b'], 2);
+      expect(engine.state.variables.containsKey('echo_total'), isFalse);
+    });
+
+    test('sum with a missing target reads -1, never a partial sum', () {
+      final engine = _engineFor(
+        _makeGame({..._paired, 'aggregate': 'sum'}),
+        _makeLevel(actors: splitActors, seams: [
+          [3, 1, 'seam_a']
+        ]),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_total'], -1,
+          reason: 'a partial sum is indistinguishable from a real reading');
+    });
+
+    test('min skips sources without targets', () {
+      // The deliberate asymmetry with sum; both engines must agree on it.
+      final engine = _engineFor(
+        _makeGame({..._paired, 'aggregate': 'min'}),
+        _makeLevel(actors: splitActors, seams: [
+          [3, 1, 'seam_a']
+        ]),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_total'], 1);
+    });
+
+    test('no sources reads -1', () {
+      final engine = _engineFor(
+        _makeGame({..._paired, 'aggregate': 'sum'}),
+        _makeLevel(actors: const [], seams: [
+          [3, 1, 'seam_a']
+        ]),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_total'], -1);
+    });
+
+    test('a custom aggregateVariable is honoured', () {
+      final engine = _engineFor(
+        _makeGame({
+          ..._paired,
+          'aggregate': 'sum',
+          'aggregateVariable': 'crew_total',
+        }),
+        _makeLevel(actors: splitActors, seams: splitSeams),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['crew_total'], 3);
+      expect(engine.state.variables.containsKey('echo_total'), isFalse);
+    });
+
+    test('absent aggregate leaves per-kind behaviour unchanged', () {
+      // The back-compatibility guarantee that keeps sp_003-sp_008 untouched.
+      final engine = _engineFor(
+        _makeGame(_paired),
+        _makeLevel(actors: splitActors, seams: splitSeams),
+      );
+
+      engine.executeTurn(_move('right'));
+
+      expect(engine.state.variables['echo_digger_a'], 1);
+      expect(engine.state.variables['echo_digger_b'], 2);
+      expect(
+          engine.state.variables.keys.any((k) => k.endsWith('total')), isFalse);
     });
   });
 }
