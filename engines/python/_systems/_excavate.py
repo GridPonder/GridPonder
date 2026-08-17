@@ -1,8 +1,8 @@
 """Shared excavation for the actor systems.
 
 Single home for the `excavate` config block (`{diggableTag, clearedKind,
-backfillKind}`) so that any actor system adopting it cannot drift from the
-others. See docs/dsl/04_systems.md.
+backfillKind, extraDiggableTags}`) so that any actor system adopting it cannot
+drift from the others. See docs/dsl/04_systems.md.
 
 An excavating mover treats terrain tagged `diggableTag` as passable at a
 price: the target cell is cut down to `clearedKind`, the mover takes it, and

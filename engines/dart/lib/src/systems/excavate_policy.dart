@@ -6,9 +6,9 @@ import '../models/position.dart';
 
 /// A normalised `excavate` config block.
 ///
-/// Single home for the block (`{diggableTag, clearedKind, backfillKind}`) so
-/// that any actor system adopting it cannot drift from the others. See
-/// docs/dsl/04_systems.md.
+/// Single home for the block (`{diggableTag, clearedKind, backfillKind,
+/// extraDiggableTags}`) so that any actor system adopting it cannot drift
+/// from the others. See docs/dsl/04_systems.md.
 ///
 /// An excavating mover treats terrain tagged [diggableTag] as passable at a
 /// price: the target cell is cut down to [clearedKind], the mover takes it,

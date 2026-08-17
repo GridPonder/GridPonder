@@ -513,16 +513,23 @@ backfilled with `backfillKind`.
 | `diggableTag` | string | `"diggable"` | Tag on `groundLayer` marking terrain a mover excavates instead of being blocked by. |
 | `clearedKind` | string | — | **Required.** Kind the excavated cell becomes. |
 | `backfillKind` | string | — | Optional. Kind placed in the vacated cell. **Omitted means no backfill** — a pure tunneller that simply removes terrain. |
+| `extraDiggableTags` | object | `{}` | Mover kind → additional ground tags that kind may excavate, on top of `diggableTag`. |
 
 ```json
-"excavate": { "diggableTag": "diggable", "clearedKind": "floor", "backfillKind": "rubble" }
+"excavate": {
+  "diggableTag": "diggable",
+  "clearedKind": "floor",
+  "backfillKind": "rubble",
+  "extraDiggableTags": { "digger_drill": ["diggable_hard"] }
+}
 ```
 
 Resolution, inside the existing per-actor loop:
 
 1. Out of bounds, or a target still occupied by another actor → blocked, as
    without the block.
-2. Target carries `wallTag` **and** `diggableTag` → excavated, then entered.
+2. Target carries `wallTag` **and** either `diggableTag` or a tag granted to
+   this mover's kind by `extraDiggableTags` → excavated, then entered.
 3. Target carries `wallTag` without `diggableTag` → blocked, as without the
    block. Terrain is only diggable if a game opts in by tagging it; the tag
    alone does nothing without an `excavate` block.
@@ -553,6 +560,22 @@ Both engines implement precisely this; do not rely on any other coercion.
 Note that `backfillKind` is normally a kind that is **not** tagged
 `diggableTag`, which is what makes excavation irreversible. Tagging the spoil
 diggable is legal and yields a freely re-cuttable medium instead.
+
+**Differently-abled tunnellers.** `extraDiggableTags` grants named mover kinds
+additional terrain tags on top of `diggableTag`, which every mover can always
+cut. It is purely **additive** — it never narrows what a mover can dig, and a
+kind absent from the map behaves exactly as it would with no block at all. The
+consequence worth designing around is that one cell becomes a wall for one
+mover and a doorway for another, so typed terrain can split a lock-stepped crew
+without any blocker being manufactured: an ice-breaker beside a snow-plough, a
+battering ram beside a lockpick, a drill rig entering strata a hand crew cannot.
+
+Extending the tolerance contract: a non-object `extraDiggableTags` grants
+nothing; an entry whose value is not a list of non-empty strings is ignored for
+that kind; an empty list is indistinguishable from an absent entry. Grants are
+per-tag, so a mover granted one tag is still blocked by every other undiggable
+solid. Both engines implement precisely this; do not rely on any other
+coercion.
 
 **Reuse:** Game-agnostic — any game with two or more entities that must move in lock-step (racing, paired agents, tug-of-war mechanics) can use this system; the optional `claim` block is only needed for territory-painting mechanics such as the [`balance` goal](03_levels.md#goals); the optional `tape` block turns the same system into a scripted lock-step mover — a metronome or patrol driven by a stored programme rather than by input; the optional `excavate` block turns movers into tunnellers (mining, snow clearing, ice carving). The three blocks are orthogonal and compose. Because the tape drives every actor on the layer identically, it cannot move only the entities on particular cells (that would be a conveyor, which this is not).
 
