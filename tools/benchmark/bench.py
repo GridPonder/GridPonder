@@ -36,7 +36,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 from dotenv import load_dotenv
@@ -136,6 +136,7 @@ def run_level(
     runner: str = "auto",
     input_mode: str = "text",
     packs_dir: Path = PACKS_DIR,
+    progress_callback: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Run one level with one model variant. Returns a result dict.
 
@@ -146,6 +147,7 @@ def run_level(
         max_n:           Max actions per call for flex-n mode.
         flex_penalty:    Cost per extra step beyond the first (flex-n only).
         runner:          'dart' | 'python' | 'auto' (auto-detects by binary presence).
+        progress_callback: Optional telemetry sink called with live counters.
     """
     # Image input requires the PIL renderer which only exists in the Python
     # runner — force python regardless of the requested runner choice.
@@ -218,6 +220,13 @@ def run_level(
     consecutive_timeouts = 0
     final_event: dict | None = None
     llm_log: list[dict] = []
+    llm_attempts = 0
+    last_call_latency_ms: float | None = None
+    last_model_error_type: str | None = None
+    last_state: dict[str, Any] = {}
+    progress_warning_emitted = False
+    started_at = datetime.now(timezone.utc)
+    started_monotonic = time.monotonic()
 
     proc = subprocess.Popen(
         cmd,
@@ -228,10 +237,72 @@ def run_level(
         bufsize=1,
     )
 
+    def report_progress(
+        phase: str,
+        *,
+        status: str = "running",
+        event: dict[str, Any] | None = None,
+        **extra: Any,
+    ) -> None:
+        nonlocal progress_warning_emitted
+        if progress_callback is None:
+            return
+        if event is not None:
+            for key in (
+                "actions_this_attempt",
+                "actions_total",
+                "action_limit_per_attempt",
+                "action_limit",
+                "attempt",
+                "gold_path_length",
+            ):
+                if key in event:
+                    last_state[key] = event[key]
+        snapshot = {
+            "status": status,
+            "phase": phase,
+            "model_id": full_model_id,
+            "pack_id": pack_id,
+            "level_id": level_id,
+            "inference_mode": mode,
+            "anon": anon,
+            "input_mode": input_mode,
+            "started_at": started_at.isoformat(),
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "elapsed_seconds": time.monotonic() - started_monotonic,
+            "runner_pid": proc.pid,
+            "llm_calls": llm_calls,
+            "llm_attempts": llm_attempts,
+            "resets": resets,
+            "voluntary_resets": voluntary_resets,
+            "rejections": total_rejections,
+            "latency_ms_total": sum(latencies),
+            "last_call_latency_ms": last_call_latency_ms,
+            "last_model_error_type": last_model_error_type,
+            "consecutive_timeouts": consecutive_timeouts,
+            "input_tokens_total": input_tokens_total,
+            "thinking_tokens_total": thinking_tokens_total,
+            "output_tokens_total": output_tokens_total,
+            "cost_usd": round(cost_total, 6) if cost_complete else None,
+            **last_state,
+            **extra,
+        }
+        try:
+            progress_callback(snapshot)
+        except Exception as exc:
+            if not progress_warning_emitted:
+                print(
+                    f"Live progress callback failed: {exc}",
+                    file=sys.stderr,
+                )
+                progress_warning_emitted = True
+
     def send(payload: dict) -> None:
         line = json.dumps(payload) + "\n"
         proc.stdin.write(line)  # type: ignore[union-attr]
         proc.stdin.flush()  # type: ignore[union-attr]
+
+    report_progress("starting")
 
     try:
         for raw_line in proc.stdout:  # type: ignore[union-attr]
@@ -250,6 +321,12 @@ def run_level(
                 image_b64: str | None = event.get("image_b64")
                 llm_ok = False
                 for _retry in range(3):
+                    llm_attempts += 1
+                    report_progress(
+                        "waiting_for_model" if _retry == 0 else "retrying_model",
+                        event=event,
+                        request_attempt=_retry + 1,
+                    )
                     try:
                         (
                             response_text,
@@ -270,6 +347,7 @@ def run_level(
                         break
                     except Exception as exc:
                         last_exc = exc
+                        last_model_error_type = type(exc).__name__
                         if _retry < 2:
                             time.sleep(2 ** _retry)
                 if not llm_ok:
@@ -281,7 +359,9 @@ def run_level(
                     continue
 
                 consecutive_timeouts = 0
+                last_model_error_type = None
                 latencies.append(latency_ms)
+                last_call_latency_ms = latency_ms
                 input_tokens_total += in_tok
                 thinking_tokens_total += think_tok
                 output_tokens_total += out_tok
@@ -353,9 +433,11 @@ def run_level(
                 resets += 1
                 if event.get("reason") == "voluntary":
                     voluntary_resets += 1
+                report_progress("resetting", event=event)
 
             elif etype in ("won", "lost"):
                 final_event = event
+                report_progress("finalizing", event=event)
                 break
 
     finally:
@@ -450,6 +532,12 @@ def run_level(
     if runner_error is not None:
         result["error"] = runner_error
 
+    report_progress(
+        "completed" if runner_error is None else "error",
+        status="completed" if runner_error is None else "error",
+        event=final_event,
+        success=success,
+    )
     return result
 
 

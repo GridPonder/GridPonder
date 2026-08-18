@@ -43,6 +43,7 @@ from bench import (
     load_completed,
     RESULTS_BASE,
 )
+from live_progress import progress_path, write_progress_snapshot
 from run_manifest import source_snapshot
 
 SCRIPT_DIR = Path(__file__).parent.resolve()
@@ -51,8 +52,12 @@ SOURCE_MIGRATION_PATHS = {
     "engines/python/_models.py",
     "engines/python/test_sliding_blocks.py",
     "tools/benchmark/README.md",
+    "tools/benchmark/bench.py",
+    "tools/benchmark/live_progress.py",
+    "tools/benchmark/live_status.py",
     "tools/benchmark/private_report.py",
     "tools/benchmark/run_queue.py",
+    "tools/benchmark/test_live_progress.py",
     "tools/benchmark/test_private_report.py",
     "tools/benchmark/test_run_queue.py",
 }
@@ -545,6 +550,7 @@ def main() -> None:
 
     args = parser.parse_args()
     args.run_id = str(uuid.uuid4())
+    launch_session_id = str(uuid.uuid4())
 
     # ── Resolve levels ───────────────────────────────────────────────────────
     if args.suite == "curated":
@@ -730,6 +736,7 @@ def main() -> None:
     run_config = {
         "schema_version": 3,
         "run_id": args.run_id,
+        "launch_session_id": launch_session_id,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "launcher": "run_queue.py",
         "workers": sum(model_workers.values()),
@@ -801,6 +808,7 @@ def main() -> None:
         resume_history = list(resume_meta.get("resume_history") or [])
         resume_entry = {
             "resumed_at": resumed_at,
+            "launch_session_id": launch_session_id,
             "completed_before_resume": skipped,
             "remaining_before_resume": len(items),
             "source_sha": _source_sha(current_source),
@@ -854,6 +862,33 @@ def main() -> None:
         if _shutdown.is_set():
             return item, {"type": "level", "skipped": True}
 
+        snapshot_path = progress_path(
+            results_dir,
+            item.output_key,
+            item.pack_id,
+            item.level_id,
+        )
+        progress_warning_emitted = False
+
+        def on_progress(snapshot: dict[str, Any]) -> None:
+            nonlocal progress_warning_emitted
+            try:
+                write_progress_snapshot(
+                    snapshot_path,
+                    {
+                        **snapshot,
+                        "launch_session_id": launch_session_id,
+                        "output_key": item.output_key,
+                    },
+                )
+            except Exception as exc:
+                if not progress_warning_emitted:
+                    tqdm.write(
+                        f"Live progress write failed for "
+                        f"{item.pack_id}/{item.level_id}: {exc}"
+                    )
+                    progress_warning_emitted = True
+
         try:
             result = run_level(
                 item.pack_id, item.level_id,
@@ -868,6 +903,7 @@ def main() -> None:
                 runner=args.runner,
                 input_mode=item.input_mode,
                 packs_dir=args.packs_dir,
+                progress_callback=on_progress,
             )
         except Exception as exc:
             result = {
@@ -881,6 +917,18 @@ def main() -> None:
                 "error": str(exc),
                 "success": False,
             }
+            on_progress({
+                "status": "error",
+                "phase": "error",
+                "model_id": item.full_variant_id,
+                "pack_id": item.pack_id,
+                "level_id": item.level_id,
+                "inference_mode": item.mode,
+                "anon": item.anon,
+                "input_mode": item.input_mode,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "error_type": type(exc).__name__,
+            })
 
         if not result.get("skipped"):
             writer_q.put((item.output_key, result))

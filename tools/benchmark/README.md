@@ -77,6 +77,20 @@ for one model cannot occupy another model's worker threads. Use repeatable
 `--model-workers MODEL=N` arguments when individual models need different
 limits.
 
+Each active level writes an atomic snapshot under `RUN_DIRECTORY/progress/`.
+Inspect action counters, model-call age and the projected time to each action
+limit while a run is active:
+
+```bash
+.venv/bin/python tools/benchmark/live_status.py \
+  --results-dir tools/benchmark/results/run/RUN_DIRECTORY
+```
+
+The action-limit ETA uses observed wall-clock actions per second. It is a
+conservative projection for runs that may solve before exhausting their limit.
+Snapshots are telemetry only: write failures are reported but do not fail a
+benchmark item.
+
 `--all` follows each pack's `levelSequence`. Level files that are not referenced
 by that sequence are intentionally outside the benchmark scope.
 
