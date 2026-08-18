@@ -40,6 +40,7 @@ def validate(
     *,
     include_images: bool = True,
     samples_dir: Path | None = None,
+    excluded_packs: set[str] | frozenset[str] = frozenset(),
 ) -> dict[str, Any]:
     issues: list[dict[str, str]] = []
     packs_out: dict[str, dict[str, Any]] = {}
@@ -55,9 +56,18 @@ def validate(
         )
     if not packs_dir.is_dir():
         _issue(issues, "error", "packs", f"Pack root does not exist: {packs_dir}")
-        return _finish(packs_dir, packs_out, prompt_max, issues, totals)
+        return _finish(
+            packs_dir,
+            packs_out,
+            prompt_max,
+            issues,
+            totals,
+            excluded_packs,
+        )
 
     for pack_dir in sorted(packs_dir.iterdir()):
+        if pack_dir.name in excluded_packs:
+            continue
         if not (pack_dir / "manifest.json").is_file():
             continue
         pack_id = pack_dir.name
@@ -221,7 +231,14 @@ def validate(
             )
         pack_stats["actions_seen"] = sorted(action_seen)
 
-    return _finish(packs_dir, packs_out, prompt_max, issues, totals)
+    return _finish(
+        packs_dir,
+        packs_out,
+        prompt_max,
+        issues,
+        totals,
+        excluded_packs,
+    )
 
 
 def _validate_state(
@@ -349,14 +366,22 @@ def _finish(
     prompt_max: dict[str, Any],
     issues: list[dict[str, str]],
     totals: Counter,
+    excluded_packs: set[str] | frozenset[str],
 ) -> dict[str, Any]:
-    source = source_snapshot(REPO_ROOT, packs_dir)
+    source = source_snapshot(REPO_ROOT, packs_dir, excluded_packs)
     if (source.get("repository") or {}).get("dirty"):
         _issue(
             issues,
             "warning",
             "source",
             "Repository worktree is dirty; commit or archive changes before the benchmark",
+        )
+    if (source.get("packs_repository") or {}).get("dirty"):
+        _issue(
+            issues,
+            "warning",
+            "packs_source",
+            "Pack repository worktree is dirty; commit or archive changes before the benchmark",
         )
     errors = sum(issue["severity"] == "error" for issue in issues)
     warnings = sum(issue["severity"] == "warning" for issue in issues)
@@ -365,6 +390,7 @@ def _finish(
         "generated": datetime.now(timezone.utc).isoformat(),
         "ok": errors == 0,
         "configuration_count": len(CONFIGURATIONS),
+        "excluded_packs": sorted(excluded_packs),
         "totals": {
             **dict(totals),
             "errors": errors,
@@ -387,6 +413,7 @@ def _markdown(report: dict[str, Any]) -> str:
         f"- Levels: {totals.get('levels', 0)}",
         f"- Gold paths passed: {totals.get('gold_paths_passed', 0)}",
         f"- Observation configurations: {report['configuration_count']}",
+        f"- Excluded packs: {', '.join(report['excluded_packs']) or 'none'}",
         f"- Errors: {totals.get('errors', 0)}",
         f"- Warnings: {totals.get('warnings', 0)}",
         "",
@@ -423,12 +450,19 @@ def main() -> None:
     parser.add_argument("--skip-images", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--samples-dir", type=Path)
+    parser.add_argument(
+        "--exclude-pack",
+        action="append",
+        default=[],
+        help="Exclude one pack ID; repeatable",
+    )
     args = parser.parse_args()
 
     report = validate(
         args.packs_dir,
         include_images=not args.skip_images,
         samples_dir=args.samples_dir,
+        excluded_packs=frozenset(args.exclude_pack),
     )
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

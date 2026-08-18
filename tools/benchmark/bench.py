@@ -76,11 +76,14 @@ def load_suite() -> dict[str, list[str]]:
         return yaml.safe_load(f)["levels"]
 
 
-def all_pack_levels(packs_dir: Path = PACKS_DIR) -> dict[str, list[str]]:
+def all_pack_levels(
+    packs_dir: Path = PACKS_DIR,
+    excluded_packs: set[str] | frozenset[str] = frozenset(),
+) -> dict[str, list[str]]:
     """Discover all levels for all packs by reading game.json files."""
     result: dict[str, list[str]] = {}
     for pack_dir in sorted(packs_dir.iterdir()):
-        if not pack_dir.is_dir():
+        if not pack_dir.is_dir() or pack_dir.name in excluded_packs:
             continue
         game_json = pack_dir / "game.json"
         if not game_json.exists():

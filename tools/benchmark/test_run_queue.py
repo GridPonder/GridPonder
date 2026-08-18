@@ -1,13 +1,17 @@
 from __future__ import annotations
 
+import json
 import threading
 from dataclasses import dataclass
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 from run_queue import (
     _assert_resume_compatible,
     _parse_provider_workers,
     _resolve_model_workers,
     _unsupported_source_migration_paths,
+    all_pack_levels,
     build_work_items,
     independent_model_futures,
     model_run_specs,
@@ -37,6 +41,26 @@ def test_standard_matrix_has_eleven_configurations() -> None:
     assert len({item.output_key for item in items}) == 11
     assert sum(item.anon for item in items) == 2
     assert all(item.input_mode == "text" for item in items if item.anon)
+
+
+def test_pack_discovery_can_exclude_fixture_pack() -> None:
+    with TemporaryDirectory() as temp:
+        root = Path(temp)
+        for pack_id in ("production", "fixture"):
+            pack = root / pack_id
+            pack.mkdir()
+            (pack / "game.json").write_text(
+                json.dumps(
+                    {
+                        "levelSequence": [
+                            {"type": "level", "ref": f"{pack_id}_001"},
+                        ]
+                    }
+                )
+            )
+        assert all_pack_levels(root, frozenset({"fixture"})) == {
+            "production": ["production_001"],
+        }
 
 
 def test_provider_worker_parser() -> None:
@@ -143,6 +167,7 @@ def test_resume_rejects_changed_model_spec() -> None:
         "flex_penalty": 0.5,
         "runner": "python",
         "levels_by_pack": {"pack": ["level"]},
+        "excluded_packs": [],
         "source": source,
     }
     changed = {**base, "model_specs": [{"model_id": "frontier-xhigh", "model": "v2"}]}
@@ -176,6 +201,7 @@ def test_resume_allows_explicit_clean_source_migration() -> None:
         "flex_penalty": 0.5,
         "runner": "python",
         "levels_by_pack": {"pack": ["level"]},
+        "excluded_packs": [],
         "source": old_source,
     }
     current = {**base, "source": new_source}
@@ -194,6 +220,7 @@ def test_source_migration_rejects_unrelated_paths() -> None:
 
 if __name__ == "__main__":
     test_standard_matrix_has_eleven_configurations()
+    test_pack_discovery_can_exclude_fixture_pack()
     test_provider_worker_parser()
     test_model_worker_resolution_is_per_model()
     test_model_queues_do_not_block_each_other()
@@ -201,4 +228,4 @@ if __name__ == "__main__":
     test_resume_rejects_changed_model_spec()
     test_resume_allows_explicit_clean_source_migration()
     test_source_migration_rejects_unrelated_paths()
-    print("8 passed")
+    print("9 passed")

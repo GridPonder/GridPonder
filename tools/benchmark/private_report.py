@@ -386,7 +386,10 @@ a {{ color: #075985; }}
   <p>
     Repository <code>{esc(repository.get('sha', 'unknown'))}</code>
     ({'dirty' if repository.get('dirty') else 'clean'});
+    pack repository <code>{esc((source.get('packs_repository') or {}).get('sha', 'same as repository'))}</code>
+    ({'dirty' if (source.get('packs_repository') or {}).get('dirty') else 'clean'});
     packs <code>{esc(source.get('packs_digest', 'unknown'))}</code>;
+    excluded <code>{esc(', '.join(source.get('excluded_packs') or []) or 'none')}</code>;
     Python <code>{esc((source.get('python') or {}).get('version', 'unknown'))}</code>.
   </p>
   <h2>Scheduler History</h2>

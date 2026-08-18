@@ -57,8 +57,10 @@ SOURCE_MIGRATION_PATHS = {
     "tools/benchmark/live_status.py",
     "tools/benchmark/private_report.py",
     "tools/benchmark/run_queue.py",
+    "tools/benchmark/run_manifest.py",
     "tools/benchmark/test_live_progress.py",
     "tools/benchmark/test_private_report.py",
+    "tools/benchmark/test_run_manifest.py",
     "tools/benchmark/test_run_queue.py",
 }
 
@@ -430,10 +432,13 @@ def _assert_resume_compatible(
         "flex_penalty",
         "runner",
         "levels_by_pack",
+        "excluded_packs",
     ]
-    mismatches = [
-        field for field in fields if existing.get(field) != current.get(field)
-    ]
+    mismatches = []
+    for field in fields:
+        default = [] if field == "excluded_packs" else None
+        if existing.get(field, default) != current.get(field, default):
+            mismatches.append(field)
     old_source = existing.get("source") or {}
     new_source = current.get("source") or {}
     if old_source.get("packs_digest") != new_source.get("packs_digest"):
@@ -528,6 +533,13 @@ def main() -> None:
         help="Pack root to benchmark",
     )
     parser.add_argument(
+        "--exclude-pack",
+        action="append",
+        default=[],
+        dest="excluded_packs",
+        help="Exclude one pack ID from discovery and provenance; repeatable",
+    )
+    parser.add_argument(
         "--provider-workers",
         action="append",
         default=[],
@@ -551,20 +563,22 @@ def main() -> None:
     args = parser.parse_args()
     args.run_id = str(uuid.uuid4())
     launch_session_id = str(uuid.uuid4())
+    args.excluded_packs = sorted(set(args.excluded_packs))
+    excluded_packs = frozenset(args.excluded_packs)
 
     # ── Resolve levels ───────────────────────────────────────────────────────
     if args.suite == "curated":
         levels_by_pack = load_suite()
     elif args.all:
-        levels_by_pack = all_pack_levels(args.packs_dir)
+        levels_by_pack = all_pack_levels(args.packs_dir, excluded_packs)
     elif args.pack:
-        all_levels = all_pack_levels(args.packs_dir)
+        all_levels = all_pack_levels(args.packs_dir, excluded_packs)
         if args.pack not in all_levels:
             sys.exit(f"Pack not found: {args.pack}")
         levels_by_pack = {args.pack: all_levels[args.pack]}
     elif args.level:
         pack_id, level_id = args.level
-        all_levels = all_pack_levels(args.packs_dir)
+        all_levels = all_pack_levels(args.packs_dir, excluded_packs)
         if pack_id not in all_levels:
             sys.exit(f"Pack not found: {pack_id}")
         if level_id not in all_levels[pack_id]:
@@ -618,7 +632,11 @@ def main() -> None:
         meta_path = Path(args.run_dir) / "meta.json"
         if meta_path.is_file():
             resume_meta = json.loads(meta_path.read_text())
-            source = source_snapshot(SCRIPT_DIR.parent.parent, args.packs_dir)
+            source = source_snapshot(
+                SCRIPT_DIR.parent.parent,
+                args.packs_dir,
+                excluded_packs,
+            )
             _assert_resume_compatible(
                 resume_meta,
                 {
@@ -634,6 +652,7 @@ def main() -> None:
                     "flex_penalty": args.flex_penalty,
                     "runner": args.runner,
                     "levels_by_pack": levels_by_pack,
+                    "excluded_packs": args.excluded_packs,
                     "source": source,
                 },
                 allow_source_change=args.allow_source_migration,
@@ -731,7 +750,9 @@ def main() -> None:
 
     resumed_at = datetime.now(timezone.utc).isoformat() if resume_meta else None
     current_source = source or source_snapshot(
-        SCRIPT_DIR.parent.parent, args.packs_dir
+        SCRIPT_DIR.parent.parent,
+        args.packs_dir,
+        excluded_packs,
     )
     run_config = {
         "schema_version": 3,
@@ -750,6 +771,7 @@ def main() -> None:
         "model_variants": resolved_variants,
         "model_specs": resolved_model_specs,
         "packs_dir": str(args.packs_dir.resolve()),
+        "excluded_packs": args.excluded_packs,
         "provider_workers": provider_limits,
         "action_timeout": args.action_timeout,
         "attempt_multiplier": args.attempt_multiplier,
