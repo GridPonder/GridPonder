@@ -80,6 +80,23 @@ class FollowerNpcsSystem extends GameSystem {
               ? _cardinalTowardTarget(npcPos, avatarPos).toJson()
               : 'rest';
         }
+
+        // Publish the sightline this system just computed, so rules can react
+        // to being seen exactly as they react to the standalone line_of_sight
+        // system. Only behaviors that actually test a line report one: an
+        // unconditional chaser never checked.
+        final avatarPos = state.avatar.position;
+        if (sight &&
+            (behaviorDef['requiresLineOfSight'] as bool? ?? false) &&
+            avatarPos != null) {
+          events.add(GameEvent.lineOfSightDetected(
+            npcPos,
+            avatarPos,
+            'avatar',
+            'spirit_${npcPos.x}_${npcPos.y}',
+            npcEntity.kind,
+          ));
+        }
       }
 
       // Frequency check. The turn counter lives on the state, not in the

@@ -617,7 +617,18 @@ left to rules and lose conditions.
 **Phase:** `npc_resolution` (after the player's action and all cascades have
 settled, before goal evaluation)
 
-**Events emitted:** `npc_moved`, `avatar_caught`
+**Events emitted:** `npc_moved`, `avatar_caught`, `line_of_sight_detected`
+
+A behavior with `requiresLineOfSight` already computes the same relation the
+[`line_of_sight`](#213-line_of_sight) system detects, so it publishes it under
+the same event name rather than keeping it private. The event fires once per
+seeing NPC per turn, **before** the `frequency` gate — an NPC that only steps
+every other turn still reports what it can see on the turns it stands still,
+which is what a "this one has noticed you" indicator needs. `kind` is the
+literal string `avatar`, since the avatar is not a board entity and has no
+entity kind; `sourcePosition` is where the NPC stood when it looked, not where
+it landed. Behaviors that never test a line (`patrol`, and `toward_avatar`
+without `requiresLineOfSight`) emit nothing, because they never checked.
 
 **Config:**
 
