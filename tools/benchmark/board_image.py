@@ -20,6 +20,7 @@ pack_dir (../gridponder-base/sprites/tiles).
 from __future__ import annotations
 
 import io
+import json
 import os
 import re
 from functools import lru_cache
@@ -105,7 +106,10 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
         ax, ay = avatar.position.x, avatar.position.y
         x0 = AXIS_PX + PADDING + ax * CELL_PX
         y0 = AXIS_PX + PADDING + ay * CELL_PX
-        _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir)
+        facing = getattr(getattr(avatar, 'facing', None), 'value', None) \
+            or getattr(avatar, 'facing', None)
+        _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir,
+                     facing=str(facing) if facing else None)
 
     out = io.BytesIO()
     canvas.save(out, format="PNG", optimize=True)
@@ -166,7 +170,7 @@ def _parse_hex(hex_str):
 
 
 def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir):
-    """Paint a single cell: ground → objects → markers → clone (top to bottom)."""
+    """Paint a single cell: ground → objects → actors → markers → clone."""
     # Ground
     ground = state.board.get_entity("ground", _Pos(x, y))
     if ground is None:
@@ -177,8 +181,10 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
         if not _paste_sprite(canvas, ground.kind, kind_def, ground.params, x0, y0, pack_dir, base_dir):
             _procedural_ground(draw, ground.kind, x0, y0)
 
-    # Object / marker / clone layers on top
-    for layer in ("objects", "markers", "clone"):
+    # Object / actor / marker / clone layers on top. `actors` holds NPCs, which
+    # were invisible in vision mode until this was added — a board whose only
+    # hazard is an NPC rendered as an empty field.
+    for layer in ("objects", "actors", "markers", "clone"):
         ent = state.board.get_entity(layer, _Pos(x, y))
         if ent is None:
             continue
@@ -334,8 +340,45 @@ def _hue_color(value: int) -> str:
     return "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
 
 
-def _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir):
-    img = _load_sprite(pack_dir, base_dir, "rabbit_idle_facing_player.png")
+@lru_cache(maxsize=32)
+def _theme_avatar_sprites(pack_dir: Path) -> tuple[str, ...]:
+    """Avatar sprite filenames from theme.json, most specific first.
+
+    Every pack themes its own avatar; hardcoding one pack's filename showed the
+    `@` fallback for all the others. Returns per-direction names ahead of the
+    plain `sprite`, and the legacy default last so existing packs keep working.
+    """
+    names: list[str] = []
+    try:
+        theme = json.loads((pack_dir / "theme.json").read_text())
+    except (OSError, ValueError):
+        theme = {}
+    avatar = theme.get("avatar") or {}
+    for state_sprites in (avatar.get("sprites") or {}).values():
+        if isinstance(state_sprites, dict):
+            names.extend(str(v) for v in state_sprites.values())
+        elif isinstance(state_sprites, str):
+            names.append(state_sprites)
+    if isinstance(avatar.get("sprite"), str):
+        names.append(avatar["sprite"])
+    names.append("rabbit_idle_facing_player.png")
+    return tuple(dict.fromkeys(os.path.basename(n) for n in names))
+
+
+def _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir, facing=None):
+    img = None
+    for fname in _theme_avatar_sprites(pack_dir):
+        # Prefer the sprite whose filename carries the current facing.
+        if facing and f"_{facing}." not in fname:
+            continue
+        img = _load_sprite(pack_dir, base_dir, fname)
+        if img is not None:
+            break
+    if img is None:
+        for fname in _theme_avatar_sprites(pack_dir):
+            img = _load_sprite(pack_dir, base_dir, fname)
+            if img is not None:
+                break
     if img is not None:
         if img.size != (CELL_PX, CELL_PX):
             img = img.resize((CELL_PX, CELL_PX), Image.LANCZOS)
