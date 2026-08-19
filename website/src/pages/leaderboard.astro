@@ -27,10 +27,16 @@ const allPacks = [...new Set(models.flatMap((m: any) => Object.keys(m.by_pack ??
 const modelsJson = JSON.stringify(models);
 const allPacksJson = JSON.stringify(allPacks);
 const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: levelResults });
+const reportTitle = process.env.GRIDPONDER_REPORT_TITLE ?? 'AI Leaderboard';
+const reportDescription = process.env.GRIDPONDER_REPORT_DESCRIPTION
+  ?? 'GridPonder benchmark results across packs, interaction modes, and input modalities.';
+const reportNotice = process.env.GRIDPONDER_REPORT_NOTICE ?? '';
+const reportModelDescription = process.env.GRIDPONDER_REPORT_MODELS
+  ?? 'Models included in this report are listed in the rankings below.';
 ---
 <Base
-  title="AI Leaderboard"
-  description="Which AI models can solve GridPonder puzzles, and how efficiently? Rankings across packs and levels."
+  title={reportTitle}
+  description={reportDescription}
 >
   <div class="max-w-6xl mx-auto px-4 sm:px-6 py-16">
     <!-- Header -->
@@ -40,11 +46,16 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
         <span>AI Benchmarks</span>
       </div>
       <h1 class="text-4xl sm:text-5xl font-black text-gray-900 mb-5 leading-tight">
-        AI Leaderboard
+        {reportTitle}
       </h1>
       <p class="text-lg text-gray-600 leading-relaxed">
-        GridPonder levels are fully deterministic with verified gold paths, making them a clean benchmark for evaluating AI reasoning.
+        {reportDescription}
       </p>
+      {reportNotice && (
+        <div class="mt-5 border-l-4 border-amber-500 bg-amber-50 px-4 py-3 text-sm text-gray-700">
+          {reportNotice}
+        </div>
+      )}
     </div>
 
     <!-- How it works -->
@@ -73,9 +84,7 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
         <div class="text-3xl mb-3">🤖</div>
         <h2 class="font-bold text-gray-900 mb-2">Which models</h2>
         <p class="text-sm text-gray-500 leading-relaxed">
-          Local models (Gemma 4, Qwen 3.5, GPT-OSS) run via Ollama;
-          API models (Claude, GPT, Gemini, Grok, MiniMax) run via LiteLLM. Vision-capable models can
-          additionally be evaluated in image and text+image modes.
+          {reportModelDescription}
         </p>
       </div>
     </div>
@@ -218,29 +227,14 @@ const levelResultsJson = JSON.stringify({ columns: levelResultsCols, rows: level
       <p class="mt-2 text-xs text-gray-400">Values show accuracy (% levels solved). ✦ = thinking/reasoning enabled.</p>
     </div>
 
-    <!-- How to run -->
+    <!-- Report scope -->
     <div class="mt-4 p-8 bg-amber-50 rounded-2xl border border-amber-100">
-      <h2 class="font-bold text-gray-900 text-lg mb-2">Running the benchmark</h2>
-      <p class="text-gray-600 text-sm leading-relaxed mb-4">
-        The benchmark tool lives in <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">tools/benchmark/</code>.
-        Requires <a href="https://ollama.com" class="text-brand-600 hover:underline" target="_blank">Ollama</a> for local models,
-        and API keys in <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">.env</code> (copy from <code class="bg-amber-100 px-1 py-0.5 rounded text-xs">.env.example</code>) for cloud models.
+      <h2 class="font-bold text-gray-900 text-lg mb-2">Report scope</h2>
+      <p class="text-gray-600 text-sm leading-relaxed">
+        This is a static internal snapshot generated from a single benchmark scope. Use the modality
+        tabs and planning-mode controls above to compare configurations. See the accompanying
+        challenge-analysis report for per-level discrimination and game-design findings.
       </p>
-      <div class="space-y-2">
-        {[
-          ['Build the runner (once)',      'make benchmark-build'],
-          ['Install Python deps',         'cd tools/benchmark && python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt'],
-          ['Run local non-think (5 combos)', 'cd tools/benchmark && bash run_local_nothink.sh'],
-          ['Run curated suite (all models)', 'make benchmark-suite'],
-          ['Run all packs × all models',  'make benchmark'],
-          ['Aggregate results',           'make benchmark-agg'],
-        ].map(([label, code]) => (
-          <div class="flex items-start gap-3">
-            <span class="text-gray-500 text-sm min-w-[200px] pt-1.5">{label}</span>
-            <code class="block bg-gray-900 text-green-400 font-mono text-xs px-3 py-2 rounded-lg flex-1">{code}</code>
-          </div>
-        ))}
-      </div>
     </div>
   </div>
 
