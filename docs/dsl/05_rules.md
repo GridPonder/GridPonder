@@ -135,9 +135,14 @@ An entity was removed from the objects layer (by any mechanism: pickup, destruct
 | `kind` | string | Entity kind that was removed. |
 
 ### `line_of_sight_detected`
-The `line_of_sight` system found a clear horizontal or vertical relation
-between a configured source and target. Detection is read-only; rules decide
-what effect it has.
+A clear horizontal or vertical relation was found between a source and a
+target. Detection is read-only; rules decide what effect it has.
+
+Two systems emit it. The [`line_of_sight`](04_systems.md#213-line_of_sight)
+system relates two board entities. [`follower_npcs`](04_systems.md#214-follower_npcs)
+emits it for a `requiresLineOfSight` behavior that can see the avatar, so a game
+whose watcher is an NPC can react to being seen the same way — there, `kind` is
+the literal string `avatar`, since the avatar is not a board entity.
 
 | Payload | Type | Description |
 |---------|------|-------------|

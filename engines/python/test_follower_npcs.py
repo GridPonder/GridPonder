@@ -189,6 +189,42 @@ def test_gaze_param_tracks_sight():
     assert watcher_gaze() == "left", watcher_gaze()
 
 
+def test_sight_is_published_as_an_event():
+    """Seeing the avatar must reach rules, not stay inside the system.
+
+    The other packs react to being seen through the standalone `line_of_sight`
+    system. A game whose watcher is a `follower_npcs` NPC could not, because the
+    same geometric test was computed here and thrown away.
+    """
+    game = _make_game({
+        "type": "toward_avatar",
+        "requiresLineOfSight": True,
+    })
+    engine = TurnEngine(game, _make_level(avatar=(0, 1), watcher=(3, 1)))
+
+    def sightings(result):
+        return [e for e in result.events if e["type"] == "line_of_sight_detected"]
+
+    seen = sightings(engine.execute_turn("move", {"direction": "right"}))
+    assert len(seen) == 1, seen
+    assert seen[0]["kind"] == "avatar"
+    assert seen[0]["sourceKind"] == "watcher"
+    assert seen[0]["position"] == engine.state.avatar.position
+    # The source is where the watcher stood when it looked, not where it landed.
+    assert seen[0]["sourcePosition"] != seen[0]["position"]
+
+    # Out of the line, nothing is reported.
+    assert sightings(engine.execute_turn("move", {"direction": "up"})) == []
+
+
+def test_a_patrol_never_reports_a_sightline():
+    """A behavior that never tests a line must not claim to have seen one."""
+    game = _make_game({"type": "patrol"})
+    engine = TurnEngine(game, _make_level(avatar=(0, 1), watcher=(3, 1)))
+    result = engine.execute_turn("move", {"direction": "right"})
+    assert [e for e in result.events if e["type"] == "line_of_sight_detected"] == []
+
+
 def test_rules_receive_npc_events():
     """`npc_moved` is documented as rule-triggerable, so a rule must see it."""
     game = _make_game({"type": "toward_avatar", "requiresLineOfSight": True})
@@ -312,6 +348,8 @@ TESTS = [
     test_npc_does_not_block_the_avatar_by_default,
     test_a_blocked_move_still_advances_the_turn,
     test_gaze_param_tracks_sight,
+    test_sight_is_published_as_an_event,
+    test_a_patrol_never_reports_a_sightline,
     test_rules_receive_npc_events,
     test_lethal_contact_governs_patrol_too,
     test_a_harmless_patrol_bounces_off_the_avatar,

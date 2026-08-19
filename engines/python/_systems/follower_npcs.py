@@ -99,6 +99,25 @@ class FollowerNpcsSystem(GameSystem):
                         else "rest"
                     )
 
+                # Publish the sightline this system just computed, so rules can
+                # react to being seen exactly as they react to the standalone
+                # `line_of_sight` system. Only behaviors that actually test a
+                # line report one: an unconditional chaser never checked.
+                if (
+                    sight
+                    and behavior_def.get("requiresLineOfSight", False)
+                    and state.avatar.position is not None
+                ):
+                    events.append(
+                        ev.line_of_sight_detected(
+                            npc_pos,
+                            state.avatar.position,
+                            "avatar",
+                            f"spirit_{npc_pos.x}_{npc_pos.y}",
+                            npc_entity.kind,
+                        )
+                    )
+
             # The turn counter lives on the state, not in the variables map, and
             # is incremented in the goal-evaluation phase after this one — so the
             # first turn sees 0 and a frequency of N acts on turn 1, then every

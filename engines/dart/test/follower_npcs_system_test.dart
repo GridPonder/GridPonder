@@ -241,6 +241,51 @@ void main() {
     expect(watcherGaze(), 'left');
   });
 
+  test('sight is published as an event', () {
+    // Seeing the avatar must reach rules, not stay inside the system. Other
+    // packs react to being seen through the standalone line_of_sight system; a
+    // game whose watcher is a follower_npcs NPC could not, because the same
+    // geometric test was computed here and thrown away.
+    final game = _makeGame({
+      'type': 'toward_avatar',
+      'requiresLineOfSight': true,
+    });
+    final engine = _engineFor(
+      game,
+      _levelJson(avatar: [0, 1], watcher: [3, 1]),
+    );
+
+    List<GameEvent> sightings(TurnResult result) => result.events
+        .where((e) => e.type == 'line_of_sight_detected')
+        .toList();
+
+    final seen = sightings(engine.executeTurn(_move('right')));
+    expect(seen, hasLength(1));
+    expect(seen.first.payload['kind'], 'avatar');
+    expect(seen.first.payload['sourceKind'], 'watcher');
+    expect(seen.first.payload['position'], engine.state.avatar.position);
+    // The source is where the watcher stood when it looked, not where it landed.
+    expect(seen.first.payload['sourcePosition'],
+        isNot(equals(seen.first.payload['position'])));
+
+    // Out of the line, nothing is reported.
+    expect(sightings(engine.executeTurn(_move('up'))), isEmpty);
+  });
+
+  test('a patrol never reports a sightline', () {
+    // A behavior that never tests a line must not claim to have seen one.
+    final game = _makeGame({'type': 'patrol'});
+    final engine = _engineFor(
+      game,
+      _levelJson(avatar: [0, 1], watcher: [3, 1]),
+    );
+    final result = engine.executeTurn(_move('right'));
+    expect(
+      result.events.where((e) => e.type == 'line_of_sight_detected'),
+      isEmpty,
+    );
+  });
+
   test('rules receive npc events', () {
     // `npc_moved` is documented as rule-triggerable, so a rule must see it.
     final game = _makeGame({
