@@ -318,6 +318,7 @@ def _episode_context(episode: StudyEpisode) -> dict[str, Any]:
         "model_family": episode.model_role.family,
         "model_tier": episode.model_role.tier,
         "condition": episode.condition,
+        "game_tags": list(episode.game_tags),
         "scope": episode.scope,
         "level_index": episode.level_index,
         "repeat_index": episode.repeat_index,

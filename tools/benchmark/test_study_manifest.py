@@ -32,6 +32,15 @@ MODELS = [
 def _write_pack(root: Path, pack_id: str, levels: list[str]) -> None:
     pack = root / pack_id
     pack.mkdir()
+    (pack / "manifest.json").write_text(
+        json.dumps(
+            {
+                "gameId": pack_id,
+                "title": pack_id,
+                "tags": ["spatial-planning"],
+            }
+        )
+    )
     (pack / "game.json").write_text(
         json.dumps(
             {
@@ -191,9 +200,57 @@ def test_anonymous_curriculum_is_rejected() -> None:
         raise AssertionError("anonymous curriculum should fail")
 
 
+def test_required_tags_and_taxonomy_are_enforced() -> None:
+    temp = TemporaryDirectory()
+    root = Path(temp.name)
+    packs = root / "packs"
+    packs.mkdir()
+    _write_pack(packs, "one", ["one_1", "one_2"])
+    _write_pack(packs, "two", ["two_1", "two_2"])
+    (root / "taxonomy.yaml").write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "tags": {
+                    "spatial-planning": {
+                        "definition": "Plan spatial decisions."
+                    }
+                },
+            }
+        )
+    )
+    manifest = _manifest()
+    manifest["corpus"]["require_game_tags"] = True
+    manifest["corpus"]["tag_taxonomy"] = "taxonomy.yaml"
+    path = root / "study.yaml"
+    path.write_text(yaml.safe_dump(manifest))
+    try:
+        study = resolve_study(path, packs, MODELS)
+        assert study.pack_tags["one"] == ("spatial-planning",)
+        assert study.tag_taxonomy_digest
+        assert all(
+            episode.game_tags == ("spatial-planning",)
+            for episode in study.episodes
+        )
+
+        one_manifest = packs / "one" / "manifest.json"
+        payload = json.loads(one_manifest.read_text())
+        payload["tags"] = ["unregistered-tag"]
+        one_manifest.write_text(json.dumps(payload))
+        try:
+            resolve_study(path, packs, MODELS)
+        except ValueError as exc:
+            assert "frozen taxonomy" in str(exc)
+        else:
+            raise AssertionError("unknown taxonomy tag should fail")
+    finally:
+        temp.cleanup()
+
+
 if __name__ == "__main__":
     test_nested_panels_reuse_identical_controls()
     test_role_substitution_preserves_episode_count()
     test_diagnostic_scope_must_be_headline_subset()
     test_anonymous_curriculum_is_rejected()
-    print("4 passed")
+    test_required_tags_and_taxonomy_are_enforced()
+    print("5 passed")

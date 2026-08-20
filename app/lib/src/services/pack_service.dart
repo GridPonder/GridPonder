@@ -21,6 +21,8 @@ class PackInfo {
   /// Ordered IDs of all playable levels in this pack (from game.json levelSequence).
   /// Used for progress tracking without loading individual level files.
   final List<String> levelIds;
+  /// Normalized game-level categories from manifest.json.
+  final List<String> tags;
 
   const PackInfo({
     required this.id,
@@ -31,6 +33,7 @@ class PackInfo {
     this.coverImage,
     this.isInstalled = false,
     this.levelIds = const [],
+    this.tags = const [],
   });
 
   /// What to show on the home/library tile — short if available, else fall back.
@@ -192,6 +195,7 @@ class PackService {
       coverImage: coverImage,
       isInstalled: isInstalled,
       levelIds: levelIds,
+      tags: List<String>.from(manifest['tags'] as List? ?? const []),
     );
   }
 

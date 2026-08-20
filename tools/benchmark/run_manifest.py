@@ -10,6 +10,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from game_tags import validate_game_tags
+
 
 def source_snapshot(
     repo_root: Path,
@@ -62,6 +64,9 @@ def pack_inventory(
         inventory[pack_dir.name] = {
             "id": manifest.get("id", pack_dir.name),
             "title": manifest.get("title", pack_dir.name),
+            "tags": list(
+                validate_game_tags(manifest, pack_id=pack_dir.name)
+            ),
             "levels": level_ids,
             "level_count": len(level_ids),
         }

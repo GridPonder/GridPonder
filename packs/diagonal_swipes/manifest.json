@@ -5,6 +5,7 @@
   "title": "Diagonal Swipes",
   "shortDescription": "Slide a 2\u00d72 selection and diagonally swap tiles to match a target pattern.",
   "description": "Move the 2\u00d72 selection overlay one step in any direction. The up-left swap (\u2196) exchanges the top-left and bottom-right cells of the overlay. The up-right swap (\u2197) exchanges the top-right and bottom-left cells. Rearrange the board to match the target pattern shown in the goal.",
+  "tags": ["pattern-transformation", "spatial-planning"],
   "coverImage": "assets/rabbit_diagonal_swipes.png",
   "version": "1.0.0",
   "minEngineVersion": "0.7.0"

@@ -10,6 +10,7 @@ from typing import Any, Iterable
 import yaml
 
 from bench import all_pack_levels, expand_model_variants
+from game_tags import validate_game_tags
 from instructions import INSTRUCTION_POLICY, canonical_json, sha256_json, sha256_text
 
 
@@ -73,6 +74,7 @@ class StudyEpisode:
     model_role: ModelRole
     condition: str
     pack_id: str
+    game_tags: tuple[str, ...]
     level_id: str
     level_index: int
     scope: str
@@ -131,6 +133,7 @@ class StudyEpisode:
             "model_id": self.model_id,
             "condition": self.condition,
             "pack_id": self.pack_id,
+            "game_tags": list(self.game_tags),
             "level_id": self.level_id,
             "level_index": self.level_index,
             "scope": self.scope,
@@ -155,6 +158,9 @@ class ResolvedStudy:
     diagnostic_games: tuple[str, ...]
     reliability_levels: tuple[tuple[str, str], ...]
     levels_by_pack: dict[str, list[str]]
+    pack_tags: dict[str, tuple[str, ...]]
+    tag_taxonomy: dict[str, Any] | None
+    tag_taxonomy_digest: str | None
     model_roles: dict[str, ModelRole]
     model_selection_record: dict[str, Any] | None
     model_selection_digest: str | None
@@ -170,6 +176,7 @@ class ResolvedStudy:
         by_condition: dict[str, int] = {}
         curriculum_sessions: set[str] = set()
         reflection_calls = 0
+        by_tag: dict[str, int] = {}
         for episode in self.episodes:
             for panel in episode.panels:
                 by_panel[panel] = by_panel.get(panel, 0) + 1
@@ -180,6 +187,8 @@ class ResolvedStudy:
             if episode.session_key:
                 curriculum_sessions.add(episode.session_key)
                 reflection_calls += 1
+            for tag in episode.game_tags:
+                by_tag[tag] = by_tag.get(tag, 0) + 1
         return {
             "study_id": self.study_id,
             "digest": self.digest,
@@ -191,6 +200,7 @@ class ResolvedStudy:
             "by_panel": dict(sorted(by_panel.items())),
             "by_model": dict(sorted(by_model.items())),
             "by_condition": dict(sorted(by_condition.items())),
+            "by_tag": dict(sorted(by_tag.items())),
         }
 
 
@@ -222,6 +232,37 @@ def _load_selection_record(
     if not isinstance(record, dict):
         raise ValueError(f"{field} must contain a JSON object")
     return record, sha256_json(record)
+
+
+def _load_tag_taxonomy(
+    manifest_path: Path,
+    value: Any,
+) -> tuple[dict[str, Any] | None, str | None, frozenset[str] | None]:
+    if value in (None, ""):
+        return None, None, None
+    path = Path(str(value))
+    if not path.is_absolute():
+        path = manifest_path.parent / path
+    if not path.is_file():
+        raise ValueError(f"corpus.tag_taxonomy does not exist: {path}")
+    record = yaml.safe_load(path.read_text())
+    if not isinstance(record, dict):
+        raise ValueError("corpus.tag_taxonomy must contain a YAML object")
+    if int(record.get("schema_version", 0)) != 1:
+        raise ValueError("corpus.tag_taxonomy schema_version must be 1")
+    tags = record.get("tags")
+    if not isinstance(tags, dict) or not tags:
+        raise ValueError("corpus.tag_taxonomy requires a non-empty tags object")
+    for tag, definition in tags.items():
+        validate_game_tags(
+            {"tags": [tag]},
+            pack_id="tag_taxonomy",
+        )
+        if not isinstance(definition, dict) or not definition.get("definition"):
+            raise ValueError(
+                f"corpus.tag_taxonomy tag {tag!r} requires a definition"
+            )
+    return record, sha256_json(record), frozenset(str(tag) for tag in tags)
 
 
 def _model_variant_index(
@@ -272,11 +313,13 @@ def _resolve_roles(
 def _resolve_levels(
     raw: dict[str, Any],
     packs_dir: Path,
+    allowed_tags: frozenset[str] | None,
 ) -> tuple[
     tuple[str, ...],
     tuple[str, ...],
     tuple[tuple[str, str], ...],
     dict[str, list[str]],
+    dict[str, tuple[str, ...]],
 ]:
     available = all_pack_levels(packs_dir)
     corpus = raw.get("corpus") or {}
@@ -291,6 +334,19 @@ def _resolve_levels(
         raise ValueError("Unknown headline games: " + ", ".join(missing))
     if not set(diagnostic).issubset(headline):
         raise ValueError("diagnostic_games must be a subset of headline_games")
+    require_tags = bool(corpus.get("require_game_tags", False))
+    pack_tags: dict[str, tuple[str, ...]] = {}
+    for pack_id in headline:
+        manifest_path = packs_dir / pack_id / "manifest.json"
+        if not manifest_path.is_file():
+            raise ValueError(f"Missing pack manifest: {manifest_path}")
+        manifest = json.loads(manifest_path.read_text())
+        pack_tags[pack_id] = validate_game_tags(
+            manifest,
+            pack_id=pack_id,
+            required=require_tags,
+            allowed_tags=allowed_tags,
+        )
 
     reliability: list[tuple[str, str]] = []
     for entry in corpus.get("reliability_levels") or []:
@@ -305,7 +361,13 @@ def _resolve_levels(
         reliability.append((pack_id, level_id))
 
     levels_by_pack = {pack_id: list(available[pack_id]) for pack_id in headline}
-    return headline, diagnostic, tuple(reliability), levels_by_pack
+    return (
+        headline,
+        diagnostic,
+        tuple(reliability),
+        levels_by_pack,
+        pack_tags,
+    )
 
 
 def _scope_levels(
@@ -387,11 +449,20 @@ def resolve_study(
         (raw.get("corpus") or {}).get("selection_record"),
         field="corpus.selection_record",
     )
+    (
+        tag_taxonomy,
+        tag_taxonomy_digest,
+        allowed_tags,
+    ) = _load_tag_taxonomy(
+        path,
+        (raw.get("corpus") or {}).get("tag_taxonomy"),
+    )
     digest = sha256_json(
         {
             "manifest": raw,
             "model_selection_record": model_selection_record,
             "corpus_selection_record": corpus_selection_record,
+            "tag_taxonomy": tag_taxonomy,
         }
     )
     study_id = str(raw["study_id"])
@@ -399,8 +470,16 @@ def resolve_study(
         raw.get("instruction_policy") or INSTRUCTION_POLICY
     )
     roles = _resolve_roles(raw, models)
-    headline, diagnostic, reliability, levels_by_pack = _resolve_levels(
-        raw, packs_dir
+    (
+        headline,
+        diagnostic,
+        reliability,
+        levels_by_pack,
+        pack_tags,
+    ) = _resolve_levels(
+        raw,
+        packs_dir,
+        allowed_tags,
     )
 
     panel_defs = raw.get("panels") or {}
@@ -518,6 +597,7 @@ def resolve_study(
                                 model_role=role,
                                 condition=condition,
                                 pack_id=pack_id,
+                                game_tags=pack_tags[pack_id],
                                 level_id=level_id,
                                 level_index=level_index,
                                 scope=scope,
@@ -553,6 +633,9 @@ def resolve_study(
         diagnostic_games=diagnostic,
         reliability_levels=reliability,
         levels_by_pack=levels_by_pack,
+        pack_tags=pack_tags,
+        tag_taxonomy=tag_taxonomy,
+        tag_taxonomy_digest=tag_taxonomy_digest,
         model_roles=roles,
         model_selection_record=model_selection_record,
         model_selection_digest=model_selection_digest,
@@ -573,6 +656,14 @@ def write_resolved_manifest(study: ResolvedStudy, path: Path) -> None:
         "instruction_policy": study.instruction_policy,
         "headline_games": list(study.headline_games),
         "diagnostic_games": list(study.diagnostic_games),
+        "game_tags": {
+            pack_id: list(tags)
+            for pack_id, tags in sorted(study.pack_tags.items())
+        },
+        "tag_taxonomy": {
+            "digest": study.tag_taxonomy_digest,
+            "record": study.tag_taxonomy,
+        },
         "reliability_levels": [
             {"pack": pack_id, "level": level_id}
             for pack_id, level_id in study.reliability_levels

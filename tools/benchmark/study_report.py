@@ -346,6 +346,7 @@ def _challenge_rows(
     roles: dict[str, dict[str, Any]],
     valid: dict[str, dict[str, Any]],
     headline: set[str],
+    pack_tags: dict[str, list[str]],
 ) -> list[dict[str, Any]]:
     rows = []
     for pack_id in sorted(headline):
@@ -374,6 +375,7 @@ def _challenge_rows(
         rows.append(
             {
                 "pack_id": pack_id,
+                "tags": list(pack_tags.get(pack_id) or []),
                 **metric,
                 "above_50_percent": (
                     metric["accuracy"] is not None and metric["accuracy"] > 0.5
@@ -388,6 +390,82 @@ def _challenge_rows(
             row["pack_id"],
         ),
     )
+
+
+def _tag_rows(
+    episodes: list[dict[str, Any]],
+    roles: dict[str, dict[str, Any]],
+    valid: dict[str, dict[str, Any]],
+    headline: set[str],
+    pack_tags: dict[str, list[str]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    tags = sorted(
+        {
+            tag
+            for pack_id in headline
+            for tag in pack_tags.get(pack_id, [])
+        }
+    )
+    capability: list[dict[str, Any]] = []
+    curriculum: list[dict[str, Any]] = []
+    for tag in tags:
+        packs = {
+            pack_id
+            for pack_id in headline
+            if tag in pack_tags.get(pack_id, [])
+        }
+        for role_name, role in sorted(roles.items()):
+            selected = _select(
+                episodes,
+                packs=packs,
+                model_role=role_name,
+                condition="independent",
+                mode="single",
+                input_mode="text",
+                anon=False,
+            )
+            if selected:
+                capability.append(
+                    {
+                        "tag": tag,
+                        "game_count": len(packs),
+                        "games": sorted(packs),
+                        "model_role": role_name,
+                        "model_id": role["variant_id"],
+                        "display_name": role["display_name"],
+                        **_metric_summary(selected, valid),
+                    }
+                )
+
+            baseline = selected
+            comparison = _select(
+                episodes,
+                packs=packs,
+                model_role=role_name,
+                condition="curriculum",
+                mode="single",
+                input_mode="text",
+                anon=False,
+            )
+            if comparison:
+                curriculum.append(
+                    {
+                        "tag": tag,
+                        "tag_game_count": len(packs),
+                        "tag_games": sorted(packs),
+                        "model_id": role["variant_id"],
+                        "display_name": role["display_name"],
+                        **_matched_contrast(
+                            name="curriculum_single_text_by_tag",
+                            model_role=role_name,
+                            baseline_episodes=baseline,
+                            comparison_episodes=comparison,
+                            valid=valid,
+                            exclude_first_level=True,
+                        ),
+                    }
+                )
+    return capability, curriculum
 
 
 def _curriculum_diagnostics(
@@ -538,6 +616,10 @@ def build_study_report(results_dir: Path) -> dict[str, Any]:
     roles = dict(resolved["models"])
     headline = set(resolved["headline_games"])
     diagnostic = set(resolved["diagnostic_games"])
+    pack_tags = {
+        str(pack_id): list(tags)
+        for pack_id, tags in (resolved.get("game_tags") or {}).items()
+    }
     reliability_levels = {
         (item["pack"], item["level"])
         for item in resolved.get("reliability_levels") or []
@@ -704,6 +786,14 @@ def build_study_report(results_dir: Path) -> dict[str, Any]:
                 }
             )
 
+    tag_capability, tag_curriculum = _tag_rows(
+        episodes,
+        roles,
+        valid,
+        headline,
+        pack_tags,
+    )
+
     return {
         "schema_version": 1,
         "generated": datetime.now(timezone.utc).isoformat(),
@@ -715,6 +805,8 @@ def build_study_report(results_dir: Path) -> dict[str, Any]:
             "headline_games": sorted(headline),
             "diagnostic_games": sorted(diagnostic),
             "models": roles,
+            "game_tags": pack_tags,
+            "tag_taxonomy": resolved.get("tag_taxonomy"),
         },
         "completion": {
             "expected": len(expected_ids),
@@ -779,13 +871,28 @@ def build_study_report(results_dir: Path) -> dict[str, Any]:
                     reliability_levels,
                 ),
             },
+            "tags": {
+                "title": "Game tags",
+                "scope": (
+                    "Overlapping, predeclared game categories; headline "
+                    "capability and matched text single-step curriculum effects"
+                ),
+                "rows": tag_capability,
+                "curriculum_rows": tag_curriculum,
+            },
         },
         "challenge": {
             "definition": (
                 "Independent named-text single-step accuracy across all "
                 "role-selected models"
             ),
-            "games": _challenge_rows(episodes, roles, valid, headline),
+            "games": _challenge_rows(
+                episodes,
+                roles,
+                valid,
+                headline,
+                pack_tags,
+            ),
         },
         "provenance": {
             "run_id": meta.get("run_id"),
@@ -805,6 +912,7 @@ def _report_html(report: dict[str, Any]) -> str:
     headline_rows = report["views"]["headline"]["rows"]
     challenge_rows = report["challenge"]["games"]
     curriculum_rows = report["views"]["curriculum"]["rows"]
+    tag_rows = report["views"]["tags"]["rows"]
 
     def table(headers: list[str], rows: list[list[str]]) -> str:
         head = "".join(f"<th>{html.escape(value)}</th>" for value in headers)
@@ -863,6 +971,19 @@ def _report_html(report: dict[str, Any]) -> str:
             for row in curriculum_rows
         ],
     )
+    tag_table = table(
+        ["Tag", "Games", "Model", "Complete", "Accuracy"],
+        [
+            [
+                html.escape(row["tag"]),
+                str(row["game_count"]),
+                html.escape(row["display_name"]),
+                f"{row['complete']}/{row['expected']}",
+                _percent(row["accuracy"]),
+            ]
+            for row in tag_rows
+        ],
+    )
     payload = html.escape(json.dumps(report, indent=2))
     return f"""<!doctype html>
 <html lang="en">
@@ -903,6 +1024,7 @@ pre {{ overflow: auto; padding: 16px; background: #172033; color: #e9edf5; font-
 <h2>Headline capability</h2>{headline_table}
 <h2>Challenge durability by game</h2><p class="lede">Accuracy above 50% is highlighted as a possible saturation risk, not as a quality failure.</p>{challenge_table}
 <h2>Curriculum versus independent</h2>{curriculum_table}
+<h2>Performance by game tag</h2><p class="lede">Tags overlap; rows are descriptive and retain their exact game and episode denominators.</p>{tag_table}
 <details><summary>Machine-readable report</summary><pre>{payload}</pre></details>
 </main></body></html>"""
 

@@ -153,6 +153,18 @@ Save frozen private copies with `.local.yaml` / `.local.json` names. They are
 gitignored. The selection-record contents are included in the resolved study
 digest, so changing a model decision or diagnostic panel invalidates resume.
 
+Each game may declare normalized categories in `manifest.json`:
+
+```json
+"tags": ["object-manipulation", "spatial-planning"]
+```
+
+The final study template requires at least one tag from
+`studies/game-tag-taxonomy.yaml`. The taxonomy contents and each pack manifest
+are frozen into study provenance. Extend or revise the taxonomy before model
+canaries, not after inspecting final outcomes. Tags may overlap; reports retain
+the exact games and episode denominators behind every tag-level row.
+
 Validate engine behavior, every observation, authored instructions, panel
 scope, and workload expansion:
 
@@ -205,6 +217,6 @@ GRIDPONDER_STUDY_DATA=../tools/benchmark/study-leaderboard.json npm run build
 ```
 
 The study page reports headline capability, planning, representation, semantic
-surface, curriculum, reliability, and per-game challenge durability. Every
-contrast exposes its matched denominator and scope. Curriculum confidence
+surface, curriculum, reliability, game tags, and per-game challenge durability.
+Every contrast exposes its matched denominator and scope. Curriculum confidence
 intervals resample complete games.

@@ -47,6 +47,7 @@ def _episode() -> StudyEpisode:
         model_role=role,
         condition="curriculum",
         pack_id="game",
+        game_tags=("spatial-planning",),
         level_id="level-1",
         level_index=0,
         scope="headline",

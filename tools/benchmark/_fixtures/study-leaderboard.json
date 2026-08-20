@@ -8,7 +8,22 @@
     "selected_panels": ["capability", "representation", "curriculum"],
     "headline_games": ["game_a", "game_b"],
     "diagnostic_games": ["game_a"],
-    "models": {}
+    "models": {},
+    "game_tags": {
+      "game_a": ["routing", "spatial-planning"],
+      "game_b": ["coverage"]
+    },
+    "tag_taxonomy": {
+      "digest": "sha256:taxonomy",
+      "record": {
+        "schema_version": 1,
+        "tags": {
+          "coverage": {"definition": "Cover the board."},
+          "routing": {"definition": "Establish paths."},
+          "spatial-planning": {"definition": "Plan spatial decisions."}
+        }
+      }
+    }
   },
   "completion": {
     "expected": 1200,
@@ -179,6 +194,52 @@
           "unanimous": false
         }
       ]
+    },
+    "tags": {
+      "title": "Game tags",
+      "scope": "Overlapping, predeclared game categories",
+      "rows": [
+        {
+          "tag": "routing",
+          "game_count": 1,
+          "games": ["game_a"],
+          "model_role": "gpt.frontier",
+          "model_id": "frontier-a",
+          "display_name": "Frontier A",
+          "expected": 20,
+          "complete": 20,
+          "completion_rate": 1,
+          "solved": 9,
+          "accuracy": 0.45,
+          "efficiency": 0.58,
+          "mean_actions": 25,
+          "mean_calls": 22,
+          "mean_cost_usd": 1,
+          "cost_usd": 20
+        }
+      ],
+      "curriculum_rows": [
+        {
+          "tag": "routing",
+          "tag_game_count": 1,
+          "tag_games": ["game_a"],
+          "name": "curriculum_single_text_by_tag",
+          "model_role": "gpt.frontier",
+          "model_id": "frontier-a",
+          "display_name": "Frontier A",
+          "paired_n": 19,
+          "games": 1,
+          "baseline_accuracy": 0.4211,
+          "comparison_accuracy": 0.5263,
+          "delta": 0.1052,
+          "ci95_low": null,
+          "ci95_high": null,
+          "helped": 4,
+          "harmed": 2,
+          "both_solved": 6,
+          "neither_solved": 7
+        }
+      ]
     }
   },
   "challenge": {
@@ -186,6 +247,7 @@
     "games": [
       {
         "pack_id": "game_a",
+        "tags": ["routing", "spatial-planning"],
         "expected": 120,
         "complete": 120,
         "completion_rate": 1,
@@ -201,6 +263,7 @@
       },
       {
         "pack_id": "game_b",
+        "tags": ["coverage"],
         "expected": 120,
         "complete": 120,
         "completion_rate": 1,

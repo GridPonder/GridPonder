@@ -24,6 +24,7 @@ def _episode(
         "model_id": "model-x",
         "condition": condition,
         "pack_id": pack_id,
+        "game_tags": ["spatial-planning"],
         "level_id": level_id,
         "level_index": level_index,
         "scope": "headline",
@@ -113,6 +114,21 @@ def test_report_uses_matched_curriculum_pairs_and_excludes_first_level() -> None
                     "selected_panels": ["curriculum"],
                     "headline_games": ["game_a", "game_b"],
                     "diagnostic_games": ["game_a"],
+                    "game_tags": {
+                        "game_a": ["spatial-planning"],
+                        "game_b": ["spatial-planning"],
+                    },
+                    "tag_taxonomy": {
+                        "digest": "sha256:tags",
+                        "record": {
+                            "schema_version": 1,
+                            "tags": {
+                                "spatial-planning": {
+                                    "definition": "Plan spatial decisions."
+                                }
+                            },
+                        },
+                    },
                     "reliability_levels": [],
                     "models": {
                         "frontier": {
@@ -144,6 +160,11 @@ def test_report_uses_matched_curriculum_pairs_and_excludes_first_level() -> None
     diagnostics = report["views"]["curriculum"]["diagnostics"]
     assert diagnostics["first_level_prompt_parity_checked"] == 2
     assert diagnostics["first_level_prompt_parity_failures"] == []
+    tag_row = report["views"]["tags"]["rows"][0]
+    assert tag_row["tag"] == "spatial-planning"
+    assert tag_row["game_count"] == 2
+    tag_curriculum = report["views"]["tags"]["curriculum_rows"][0]
+    assert tag_curriculum["paired_n"] == 2
 
 
 if __name__ == "__main__":

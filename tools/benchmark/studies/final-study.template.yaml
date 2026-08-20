@@ -9,6 +9,8 @@ instruction_policy: authored-v1
 
 corpus:
   selection_record: panel-selection.local.json
+  tag_taxonomy: game-tag-taxonomy.yaml
+  require_game_tags: true
   # Replace with the frozen 20-game corpus. Complete games are the sampling
   # units; do not select individual levels based on model results.
   headline_games:

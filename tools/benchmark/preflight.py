@@ -24,6 +24,7 @@ from engines.python.observation import build_prompt
 from engines.python.text_renderer import render as render_board
 from bench import all_pack_levels, load_models
 from board_image import render_board_png
+from game_tags import validate_game_tags
 from instructions import audit_instruction_payloads, compile_instruction_map
 from run_manifest import source_snapshot
 from study_manifest import resolve_study
@@ -86,11 +87,28 @@ def validate(
         }
         packs_out[pack_id] = pack_stats
         try:
+            raw_manifest = json.loads(
+                (pack_dir / "manifest.json").read_text()
+            )
             raw_game = json.loads((pack_dir / "game.json").read_text())
             game, levels = load_pack(pack_dir)
         except Exception as exc:
             _issue(issues, "error", pack_id, f"Pack load failed: {exc}")
             continue
+
+        try:
+            tags = validate_game_tags(raw_manifest, pack_id=pack_id)
+            pack_stats["tags"] = list(tags)
+            if not tags:
+                _issue(
+                    issues,
+                    "warning",
+                    pack_id,
+                    "manifest.tags is empty; tag-based analysis will omit this game",
+                )
+        except ValueError as exc:
+            pack_stats["tags"] = []
+            _issue(issues, "error", pack_id, str(exc))
 
         unknown = unsupported_system_types(game)
         if unknown:
@@ -422,12 +440,13 @@ def _markdown(report: dict[str, Any]) -> str:
         "",
         "## Packs",
         "",
-        "| Pack | Levels | Gold | States | Max prompt | Legal/syntactic actions |",
-        "|---|---:|---:|---:|---:|---:|",
+        "| Pack | Tags | Levels | Gold | States | Max prompt | Legal/syntactic actions |",
+        "|---|---|---:|---:|---:|---:|---:|",
     ]
     for pack_id, stats in report["packs"].items():
         lines.append(
-            f"| {pack_id} | {stats['levels']} | {stats['gold_paths_passed']} | "
+            f"| {pack_id} | {', '.join(stats.get('tags') or []) or 'none'} | "
+            f"{stats['levels']} | {stats['gold_paths_passed']} | "
             f"{stats['states_validated']} | {stats['max_prompt_chars']} | "
             f"{stats['max_legal_actions']}/{stats['max_syntactic_actions']} |"
         )

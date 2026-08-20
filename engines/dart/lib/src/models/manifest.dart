@@ -18,6 +18,8 @@ class PackManifest {
   final String? license;
   final String? website;
   final List<String> sharedAssets;
+  /// Normalized game-level categories used by discovery and analysis.
+  final List<String> tags;
 
   const PackManifest({
     required this.dslVersion,
@@ -36,6 +38,7 @@ class PackManifest {
     this.license,
     this.website,
     this.sharedAssets = const [],
+    this.tags = const [],
   });
 
   factory PackManifest.fromJson(Map<String, dynamic> j) => PackManifest(
@@ -56,6 +59,9 @@ class PackManifest {
         website: j['website'] as String?,
         sharedAssets: j['sharedAssets'] != null
             ? List<String>.from(j['sharedAssets'] as List)
+            : const [],
+        tags: j['tags'] != null
+            ? List<String>.from(j['tags'] as List)
             : const [],
       );
 }
