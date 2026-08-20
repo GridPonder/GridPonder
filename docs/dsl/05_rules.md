@@ -442,6 +442,7 @@ Change an entity at a position to a different kind. If `animation` is specified,
 ```json
 { "transform": { "position": [3, 2], "layer": "ground", "toKind": "bridge" } }
 { "transform": { "position": [3, 2], "layer": "ground", "toKind": "bridge", "animation": "dissolving" } }
+{ "transform": { "position": "$event.position", "layer": "ground", "fromKind": "cracked", "toKind": "void" } }
 ```
 
 | Field | Type | Required | Description |
@@ -449,7 +450,15 @@ Change an entity at a position to a different kind. If `animation` is specified,
 | `position` | `[x, y]` or ref | **yes** | Cell to transform. |
 | `layer` | string | **yes** | Layer to modify. |
 | `toKind` | string | **yes** | New entity kind. |
+| `fromKind` | string or array | no | Only transform when the cell already holds this kind (or one of these). No match, no effect and no event. |
 | `animation` | string | no | Animation name from the source entity kind's `animations` map. Played before transform. |
+
+`fromKind` exists because conditions cannot inspect a `$event` position — only
+effects can read one. Without it, a rule keyed on an event has to transform the
+cell blindly, which forces every cell the rule might ever touch to be authored
+as the same kind. With it, a rule such as "the floor gives way under whatever
+walks off it" applies to the cracked tiles and leaves solid ground alone, so the
+art and the rule agree without a per-cell repair rule propping them up.
 
 ### `move_entity`
 Move an entity from one position to another.
