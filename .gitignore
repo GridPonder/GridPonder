@@ -43,6 +43,8 @@ tools/benchmark/runner/.dart_tool/
 tools/benchmark/.env
 tools/benchmark/models.local.yaml
 tools/benchmark/requirements.local.txt
+tools/benchmark/studies/*.local.yaml
+tools/benchmark/studies/*.local.json
 # Benchmark: machine-local provider connector implementations
 tools/benchmark/connectors.local/
 

@@ -1,0 +1,159 @@
+# GridPonder final paper study.
+#
+# Copy this file to final-study.local.yaml and replace the example variant IDs
+# with the role-selected models recorded by the operational canary. Local study
+# manifests may contain private pack IDs and should not be committed.
+schema_version: 1
+study_id: gridponder-final-2027
+instruction_policy: authored-v1
+
+corpus:
+  selection_record: panel-selection.local.json
+  # Replace with the frozen 20-game corpus. Complete games are the sampling
+  # units; do not select individual levels based on model results.
+  headline_games:
+    - game_01
+    - game_02
+    - game_03
+    - game_04
+    - game_05
+    - game_06
+    - game_07
+    - game_08
+    - game_09
+    - game_10
+    - game_11
+    - game_12
+    - game_13
+    - game_14
+    - game_15
+    - game_16
+    - game_17
+    - game_18
+    - game_19
+    - game_20
+
+  # Freeze ten complete games before the final model run. Stratify by
+  # mechanics, authored instruction richness, grid/action characteristics,
+  # and pilot difficulty without using final-model outcomes.
+  diagnostic_games:
+    - game_01
+    - game_03
+    - game_05
+    - game_07
+    - game_09
+    - game_11
+    - game_13
+    - game_15
+    - game_17
+    - game_19
+
+  # Freeze 20 levels before the final run. Repeat indices 1 and 2 add two
+  # measurements beyond the canonical repeat-0 episode reused from other panels.
+  reliability_levels:
+    - {pack: game_01, level: game_01_level_01}
+    - {pack: game_02, level: game_02_level_01}
+    - {pack: game_03, level: game_03_level_01}
+    - {pack: game_04, level: game_04_level_01}
+    - {pack: game_05, level: game_05_level_01}
+    - {pack: game_06, level: game_06_level_01}
+    - {pack: game_07, level: game_07_level_01}
+    - {pack: game_08, level: game_08_level_01}
+    - {pack: game_09, level: game_09_level_01}
+    - {pack: game_10, level: game_10_level_01}
+    - {pack: game_11, level: game_11_level_01}
+    - {pack: game_12, level: game_12_level_01}
+    - {pack: game_13, level: game_13_level_01}
+    - {pack: game_14, level: game_14_level_01}
+    - {pack: game_15, level: game_15_level_01}
+    - {pack: game_16, level: game_16_level_01}
+    - {pack: game_17, level: game_17_level_01}
+    - {pack: game_18, level: game_18_level_01}
+    - {pack: game_19, level: game_19_level_01}
+    - {pack: game_20, level: game_20_level_01}
+
+models:
+  selection_record: model-selection.local.json
+  # These built-in IDs only make the template syntactically concrete. Replace
+  # them with the selected xhigh/local variants in models.local.yaml.
+  roles:
+    gpt.frontier:
+      variant_id: gemma4-e2b
+      family: gpt
+      tier: frontier
+      reference: true
+    gpt.middle:
+      variant_id: gemma4-e4b
+      family: gpt
+      tier: middle
+      reference: false
+    gpt.efficient:
+      variant_id: qwen3.5-0.8b
+      family: gpt
+      tier: efficient
+      reference: false
+    claude.frontier:
+      variant_id: gpt-oss-20b-high
+      family: claude
+      tier: frontier
+      reference: true
+    claude.middle:
+      variant_id: qwen3.5-2b
+      family: claude
+      tier: middle
+      reference: false
+    claude.efficient:
+      variant_id: qwen3.5-4b
+      family: claude
+      tier: efficient
+      reference: false
+
+panels:
+  capability:
+    priority: 10
+    model_roles:
+      - gpt.frontier
+      - gpt.middle
+      - gpt.efficient
+      - claude.frontier
+      - claude.middle
+      - claude.efficient
+    conditions: [independent]
+    cells:
+      - {id: headline-text-single, scope: headline, mode: single, input_mode: text}
+      - {id: planning-text-flex, scope: diagnostic, mode: flex-n, input_mode: text}
+      - {id: planning-text-full, scope: diagnostic, mode: full, input_mode: text}
+
+  representation:
+    priority: 20
+    model_roles:
+      - gpt.frontier
+      - gpt.efficient
+      - claude.frontier
+      - claude.efficient
+    conditions: [independent]
+    cells:
+      - {id: modality-image-single, scope: diagnostic, mode: single, input_mode: image}
+      - {id: modality-both-single, scope: diagnostic, mode: single, input_mode: text+image}
+      - {id: surface-anon-single, scope: diagnostic, mode: single, input_mode: text, anon: true}
+      - {id: surface-anon-flex, scope: diagnostic, mode: flex-n, input_mode: text, anon: true}
+
+  curriculum:
+    priority: 30
+    model_roles: [gpt.frontier, claude.frontier]
+    conditions: [independent, curriculum]
+    cells:
+      - {id: curriculum-text-single, scope: headline, mode: single, input_mode: text}
+      - {id: curriculum-image-single, scope: diagnostic, mode: single, input_mode: image}
+      - {id: curriculum-both-single, scope: diagnostic, mode: single, input_mode: text+image}
+      - {id: curriculum-text-flex, scope: diagnostic, mode: flex-n, input_mode: text}
+      - {id: curriculum-text-full, scope: diagnostic, mode: full, input_mode: text}
+
+  reliability:
+    priority: 40
+    model_roles: [gpt.frontier, claude.frontier]
+    conditions: [independent]
+    repeats: 3
+    cells:
+      - {id: reliability-text-single, scope: reliability, mode: single, input_mode: text}
+      - {id: reliability-image-single, scope: reliability, mode: single, input_mode: image}

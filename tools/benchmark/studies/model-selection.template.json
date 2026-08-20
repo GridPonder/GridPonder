@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "frozen_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "decision_rule": "Select roles using release recency, supported study configurations, connector reliability, projected cost, and projected runtime. Do not use private GridPonder accuracy.",
+  "canary": {
+    "manifest_digest": "sha256:replace",
+    "level_count": 20,
+    "configurations": [
+      "independent-single-text",
+      "independent-flex-n-text",
+      "independent-single-image"
+    ],
+    "admission_thresholds": {
+      "infrastructure_completion": 0.99,
+      "maximum_projected_study_days": 6,
+      "maximum_projected_total_cost_usd": 21000
+    }
+  },
+  "candidates": [],
+  "selected_roles": {},
+  "excluded_candidates": []
+}

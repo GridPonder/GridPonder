@@ -44,6 +44,11 @@ from tqdm import tqdm
 
 from agent_client import call_llm, extract_action, extract_actions_list
 from connector_api import estimate_cost
+from instructions import (
+    InstructionPayload,
+    compose_study_prompt,
+    sha256_text,
+)
 from run_manifest import source_snapshot
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
@@ -140,6 +145,9 @@ def run_level(
     input_mode: str = "text",
     packs_dir: Path = PACKS_DIR,
     progress_callback: Callable[[dict[str, Any]], None] | None = None,
+    instruction_payload: InstructionPayload | None = None,
+    game_notebook: str = "",
+    result_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run one level with one model variant. Returns a result dict.
 
@@ -151,7 +159,14 @@ def run_level(
         flex_penalty:    Cost per extra step beyond the first (flex-n only).
         runner:          'dart' | 'python' | 'auto' (auto-detects by binary presence).
         progress_callback: Optional telemetry sink called with live counters.
+        instruction_payload: Optional authored instruction stream for study runs.
+        game_notebook: Bounded cross-level notebook; ignored by legacy runs.
+        result_context: Additional immutable study provenance copied to the result.
     """
+    if game_notebook and instruction_payload is None:
+        raise ValueError("game_notebook requires instruction_payload")
+    if instruction_payload is not None and anon:
+        raise ValueError("Authored curriculum instructions do not support anon mode")
     # Image input requires the PIL renderer which only exists in the Python
     # runner — force python regardless of the requested runner choice.
     if input_mode != "text":
@@ -227,6 +242,8 @@ def run_level(
     last_call_latency_ms: float | None = None
     last_model_error_type: str | None = None
     last_state: dict[str, Any] = {}
+    initial_base_prompt_digest: str | None = None
+    initial_prompt_digest: str | None = None
     progress_warning_emitted = False
     started_at = datetime.now(timezone.utc)
     started_monotonic = time.monotonic()
@@ -287,7 +304,21 @@ def run_level(
             "thinking_tokens_total": thinking_tokens_total,
             "output_tokens_total": output_tokens_total,
             "cost_usd": round(cost_total, 6) if cost_complete else None,
+            "instruction_digest": (
+                instruction_payload.digest if instruction_payload else None
+            ),
+            "notebook_before_digest": (
+                sha256_text(game_notebook.strip())
+                if instruction_payload is not None
+                else None
+            ),
+            "notebook_before_chars": (
+                len(game_notebook.strip())
+                if instruction_payload is not None
+                else None
+            ),
             **last_state,
+            **(result_context or {}),
             **extra,
         }
         try:
@@ -320,7 +351,19 @@ def run_level(
             etype = event.get("event")
 
             if etype == "state":
-                prompt: str = event["prompt"]
+                base_prompt: str = event["prompt"]
+                prompt = (
+                    compose_study_prompt(
+                        base_prompt,
+                        instruction_payload,
+                        game_notebook,
+                    )
+                    if instruction_payload is not None
+                    else base_prompt
+                )
+                if initial_prompt_digest is None:
+                    initial_base_prompt_digest = sha256_text(base_prompt)
+                    initial_prompt_digest = sha256_text(prompt)
                 image_b64: str | None = event.get("image_b64")
                 llm_ok = False
                 for _retry in range(3):
@@ -524,6 +567,25 @@ def run_level(
         "cost_sources": sorted(cost_sources),
         "llm_log": llm_log,
     }
+    if instruction_payload is not None:
+        result.update(
+            {
+                "instruction_policy": instruction_payload.policy,
+                "instruction_digest": instruction_payload.digest,
+                "instruction_stage_index": instruction_payload.stage_index,
+                "sequence_index": instruction_payload.sequence_index,
+                "instruction_level_index": instruction_payload.level_index,
+                "omitted_instruction_media": list(
+                    instruction_payload.omitted_media
+                ),
+                "notebook_before_digest": sha256_text(game_notebook.strip()),
+                "notebook_before_chars": len(game_notebook.strip()),
+                "initial_base_prompt_digest": initial_base_prompt_digest,
+                "initial_prompt_digest": initial_prompt_digest,
+            }
+        )
+    if result_context:
+        result.update(result_context)
 
     if mode == "fixed-n":
         result["step_size"] = step_size

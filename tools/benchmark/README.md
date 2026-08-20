@@ -133,3 +133,78 @@ The launcher rejects dirty trees, changed packs or experiment settings, and
 source diffs outside the reviewed migration paths. The run metadata and private
 report retain source and scheduler histories. The previous
 `--allow-scheduler-migration` option remains as a compatibility alias.
+
+## Final nested-panel study
+
+The paper study is intentionally not a full model x configuration Cartesian
+product. `run_study.py` reads one immutable manifest, expands its predeclared
+panels, and deduplicates controls that are byte-compatible across panels.
+Complete games remain the sampling unit.
+
+Start from:
+
+```text
+tools/benchmark/studies/final-study.template.yaml
+tools/benchmark/studies/model-selection.template.json
+tools/benchmark/studies/panel-selection.template.json
+```
+
+Save frozen private copies with `.local.yaml` / `.local.json` names. They are
+gitignored. The selection-record contents are included in the resolved study
+digest, so changing a model decision or diagnostic panel invalidates resume.
+
+Validate engine behavior, every observation, authored instructions, panel
+scope, and workload expansion:
+
+```bash
+.venv/bin/python tools/benchmark/preflight.py \
+  --packs-dir /path/to/frozen/private-packs \
+  --study-manifest tools/benchmark/studies/final-study.local.yaml \
+  --output tools/benchmark/results/preflight/final-study.json
+
+.venv/bin/python tools/benchmark/run_study.py \
+  --packs-dir /path/to/frozen/private-packs \
+  --manifest tools/benchmark/studies/final-study.local.yaml \
+  --dry-run
+```
+
+Launch from clean public-engine and private-pack commits:
+
+```bash
+.venv/bin/python tools/benchmark/run_study.py \
+  --packs-dir /path/to/frozen/private-packs \
+  --manifest tools/benchmark/studies/final-study.local.yaml \
+  --run-dir /path/to/study-results \
+  --workers-per-model 20 \
+  --action-timeout 1800 \
+  --runner python
+```
+
+Every resolved model has an independent executor. Curriculum sessions are
+ordered within model x configuration x game, while different sessions remain
+parallel. Gameplay is atomically checkpointed before the short notebook
+reflection call. A reflection failure therefore resumes from reflection rather
+than repeating the paid gameplay episode.
+
+The independent and curriculum conditions receive the same authored
+instructions for a target level. The curriculum condition additionally receives
+a bounded cross-level notebook derived from earlier gameplay. Anonymous cells
+continue to use the legacy anonymised prompt and never receive semantic stories
+or notebooks.
+
+Inspect live action counters with `live_status.py`. Generate the matched study
+analysis and optional website data with:
+
+```bash
+.venv/bin/python tools/benchmark/study_report.py \
+  --results-dir /path/to/study-results \
+  --output tools/benchmark/study-leaderboard.json
+
+cd website
+GRIDPONDER_STUDY_DATA=../tools/benchmark/study-leaderboard.json npm run build
+```
+
+The study page reports headline capability, planning, representation, semantic
+surface, curriculum, reliability, and per-game challenge durability. Every
+contrast exposes its matched denominator and scope. Curriculum confidence
+intervals resample complete games.

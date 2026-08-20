@@ -17,8 +17,11 @@ from live_progress import (
 )
 
 
-def _completed_keys(results_dir: Path) -> set[tuple[str, str, str]]:
+def _completed_keys(
+    results_dir: Path,
+) -> tuple[set[tuple[str, str, str]], set[str]]:
     completed: set[tuple[str, str, str]] = set()
+    completed_episodes: set[str] = set()
     for path in results_dir.glob("*.jsonl"):
         output_key = path.stem
         with path.open() as handle:
@@ -29,10 +32,12 @@ def _completed_keys(results_dir: Path) -> set[tuple[str, str, str]]:
                     continue
                 if record.get("type") != "level" or record.get("error"):
                     continue
+                if record.get("episode_id"):
+                    completed_episodes.add(str(record["episode_id"]))
                 completed.add(
                     (output_key, record.get("pack_id", ""), record.get("level_id", ""))
                 )
-    return completed
+    return completed, completed_episodes
 
 
 def summarize_live(
@@ -44,7 +49,7 @@ def summarize_live(
     current = now or datetime.now(timezone.utc)
     meta_path = results_dir / "meta.json"
     meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
-    completed = _completed_keys(results_dir)
+    completed, completed_episodes = _completed_keys(results_dir)
     snapshots = load_progress_snapshots(results_dir)
     stale_after = stale_after_seconds
     if stale_after is None:
@@ -58,7 +63,13 @@ def summarize_live(
             snapshot.get("pack_id", ""),
             snapshot.get("level_id", ""),
         )
-        if key in completed or snapshot.get("status") == "completed":
+        episode_id = snapshot.get("episode_id")
+        is_completed = (
+            str(episode_id) in completed_episodes
+            if episode_id
+            else key in completed
+        )
+        if is_completed or snapshot.get("status") == "completed":
             continue
 
         updated_at = parse_timestamp(snapshot.get("updated_at"))
@@ -95,7 +106,10 @@ def summarize_live(
     stale.sort(key=lambda row: row.get("updated_at", ""), reverse=True)
 
     total = int(meta.get("total_work_items") or 0)
-    remaining = max(0, total - len(completed)) if total else None
+    completed_count = (
+        len(completed_episodes) if completed_episodes else len(completed)
+    )
+    remaining = max(0, total - completed_count) if total else None
     tracked_remaining = len(active) + len(stale)
     queued_or_untracked = (
         max(0, remaining - tracked_remaining)
@@ -117,7 +131,7 @@ def summarize_live(
 
     return {
         "generated_at": current.isoformat(),
-        "completed": len(completed),
+        "completed": completed_count,
         "total": total or None,
         "remaining": remaining,
         "active": active,

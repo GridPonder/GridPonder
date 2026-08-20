@@ -22,8 +22,11 @@ from engines.python.gold_path import gold_path_actions
 from engines.python.loader import load_pack
 from engines.python.observation import build_prompt
 from engines.python.text_renderer import render as render_board
+from bench import all_pack_levels, load_models
 from board_image import render_board_png
+from instructions import audit_instruction_payloads, compile_instruction_map
 from run_manifest import source_snapshot
+from study_manifest import resolve_study
 
 
 CONFIGURATIONS = [
@@ -428,6 +431,22 @@ def _markdown(report: dict[str, Any]) -> str:
             f"{stats['states_validated']} | {stats['max_prompt_chars']} | "
             f"{stats['max_legal_actions']}/{stats['max_syntactic_actions']} |"
         )
+    if report.get("study"):
+        study = report["study"]
+        lines.extend(
+            [
+                "",
+                "## Study manifest",
+                "",
+                f"- Study: {study['study_id']}",
+                f"- Panels: {', '.join(study['selected_panels'])}",
+                f"- Canonical episodes: {study['summary']['canonical_episodes']}",
+                f"- Reused controls: {study['summary']['reused_controls']}",
+                f"- Curriculum sessions: {study['summary']['curriculum_sessions']}",
+                f"- Instruction payloads: {study['instruction_audit']['payload_count']}",
+                f"- Instruction warnings: {len(study['instruction_audit']['warnings'])}",
+            ]
+        )
     lines.extend(["", "## Issues", ""])
     if not report["issues"]:
         lines.append("None.")
@@ -456,14 +475,85 @@ def main() -> None:
         default=[],
         help="Exclude one pack ID; repeatable",
     )
+    parser.add_argument(
+        "--study-manifest",
+        type=Path,
+        help="Also validate a manifest-defined nested-panel study",
+    )
+    parser.add_argument(
+        "--panel",
+        action="append",
+        default=[],
+        help="Restrict --study-manifest validation to one panel; repeatable",
+    )
     args = parser.parse_args()
+
+    study = None
+    excluded = set(args.exclude_pack)
+    if args.study_manifest:
+        try:
+            study = resolve_study(
+                args.study_manifest.resolve(),
+                args.packs_dir.resolve(),
+                load_models(),
+                selected_panels=args.panel or None,
+            )
+        except Exception as exc:
+            print(f"Preflight: FAIL; study manifest: {exc}")
+            raise SystemExit(1) from exc
+        available = set(all_pack_levels(args.packs_dir.resolve()))
+        excluded.update(available - set(study.headline_games))
+        invalid_exclusions = sorted(set(study.headline_games) & excluded)
+        if invalid_exclusions:
+            print(
+                "Preflight: FAIL; study headline games explicitly excluded: "
+                + ", ".join(invalid_exclusions)
+            )
+            raise SystemExit(1)
 
     report = validate(
         args.packs_dir,
         include_images=not args.skip_images,
         samples_dir=args.samples_dir,
-        excluded_packs=frozenset(args.exclude_pack),
+        excluded_packs=frozenset(excluded),
     )
+    if study is not None:
+        instruction_map = compile_instruction_map(
+            args.packs_dir.resolve(),
+            study.headline_games,
+            policy=study.instruction_policy,
+        )
+        audit = audit_instruction_payloads(instruction_map.values())
+        report["study"] = {
+            "study_id": study.study_id,
+            "manifest_digest": study.digest,
+            "selected_panels": list(study.selected_panels),
+            "summary": study.summary(),
+            "instruction_audit": audit,
+        }
+        for issue in audit["issues"]:
+            _issue(
+                report["issues"],
+                "error",
+                issue["level"],
+                "Study instruction audit: " + issue["message"],
+            )
+        for warning in audit["warnings"]:
+            _issue(
+                report["issues"],
+                "warning",
+                warning["level"],
+                "Study instruction audit: " + warning["message"],
+            )
+        errors = sum(
+            issue["severity"] == "error" for issue in report["issues"]
+        )
+        warnings = sum(
+            issue["severity"] == "warning" for issue in report["issues"]
+        )
+        report["totals"]["errors"] = errors
+        report["totals"]["warnings"] = warnings
+        report["ok"] = errors == 0
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(report, indent=2) + "\n")

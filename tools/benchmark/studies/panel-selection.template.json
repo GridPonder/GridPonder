@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "frozen_at": "YYYY-MM-DDTHH:MM:SSZ",
+  "headline_games": [],
+  "diagnostic_games": [],
+  "reliability_levels": [],
+  "selection_features": [
+    "mechanic family",
+    "spatial versus symbolic emphasis",
+    "grid and action characteristics",
+    "gold-path distribution",
+    "instruction and curriculum structure",
+    "renderer complexity"
+  ],
+  "excludes_final_model_results": true,
+  "notes": ""
+}

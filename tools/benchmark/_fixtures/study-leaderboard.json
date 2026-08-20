@@ -1,0 +1,225 @@
+{
+  "schema_version": 1,
+  "generated": "2026-08-20T12:00:00+00:00",
+  "study": {
+    "study_id": "fixture-study",
+    "manifest_digest": "sha256:fixture",
+    "instruction_policy": "authored-v1",
+    "selected_panels": ["capability", "representation", "curriculum"],
+    "headline_games": ["game_a", "game_b"],
+    "diagnostic_games": ["game_a"],
+    "models": {}
+  },
+  "completion": {
+    "expected": 1200,
+    "complete": 960,
+    "remaining": 240,
+    "completion_rate": 0.8,
+    "unresolved_error_episodes": 0,
+    "duplicate_valid_records": {},
+    "attempt_records": 960,
+    "recorded_cost_usd": 4321.5
+  },
+  "views": {
+    "headline": {
+      "title": "Headline capability",
+      "scope": "All frozen games; independent, named text, single-step",
+      "rows": [
+        {
+          "model_role": "gpt.frontier",
+          "model_id": "frontier-a",
+          "display_name": "Frontier A",
+          "family": "gpt",
+          "tier": "frontier",
+          "reference": true,
+          "expected": 400,
+          "complete": 400,
+          "completion_rate": 1,
+          "solved": 152,
+          "accuracy": 0.38,
+          "efficiency": 0.61,
+          "mean_actions": 24.1,
+          "mean_calls": 21.4,
+          "mean_cost_usd": 0.9,
+          "cost_usd": 360
+        },
+        {
+          "model_role": "claude.frontier",
+          "model_id": "frontier-b",
+          "display_name": "Frontier B",
+          "family": "claude",
+          "tier": "frontier",
+          "reference": true,
+          "expected": 400,
+          "complete": 320,
+          "completion_rate": 0.8,
+          "solved": 109,
+          "accuracy": 0.3406,
+          "efficiency": 0.57,
+          "mean_actions": 27.8,
+          "mean_calls": 24.9,
+          "mean_cost_usd": 2.1,
+          "cost_usd": 672
+        }
+      ]
+    },
+    "planning": {
+      "title": "Planning commitment",
+      "scope": "Matched diagnostic games and levels",
+      "rows": [
+        {
+          "name": "single_to_flex",
+          "model_role": "gpt.frontier",
+          "model_id": "frontier-a",
+          "display_name": "Frontier A",
+          "paired_n": 200,
+          "games": 10,
+          "baseline_accuracy": 0.42,
+          "comparison_accuracy": 0.47,
+          "delta": 0.05,
+          "ci95_low": 0.01,
+          "ci95_high": 0.09,
+          "helped": 22,
+          "harmed": 12,
+          "both_solved": 72,
+          "neither_solved": 94
+        }
+      ]
+    },
+    "representation": {
+      "title": "Representation",
+      "scope": "Matched diagnostic games and levels; single-step",
+      "rows": [
+        {
+          "name": "text_to_image",
+          "model_role": "gpt.frontier",
+          "model_id": "frontier-a",
+          "display_name": "Frontier A",
+          "paired_n": 200,
+          "games": 10,
+          "baseline_accuracy": 0.42,
+          "comparison_accuracy": 0.29,
+          "delta": -0.13,
+          "ci95_low": -0.2,
+          "ci95_high": -0.06,
+          "helped": 8,
+          "harmed": 34,
+          "both_solved": 50,
+          "neither_solved": 108
+        }
+      ]
+    },
+    "surface": {
+      "title": "Semantic surface",
+      "scope": "Matched diagnostic games and levels; text input",
+      "rows": [
+        {
+          "name": "named_to_anonymous_single",
+          "model_role": "gpt.frontier",
+          "model_id": "frontier-a",
+          "display_name": "Frontier A",
+          "paired_n": 200,
+          "games": 10,
+          "baseline_accuracy": 0.42,
+          "comparison_accuracy": 0.31,
+          "delta": -0.11,
+          "ci95_low": -0.17,
+          "ci95_high": -0.05,
+          "helped": 9,
+          "harmed": 31,
+          "both_solved": 53,
+          "neither_solved": 107
+        }
+      ]
+    },
+    "curriculum": {
+      "title": "Cross-level skill acquisition",
+      "scope": "Matched levels; first level excluded from the primary curriculum contrast",
+      "rows": [
+        {
+          "name": "curriculum_single_text",
+          "model_role": "gpt.frontier",
+          "model_id": "frontier-a",
+          "display_name": "Frontier A",
+          "configuration": "curriculum-single-text",
+          "paired_n": 380,
+          "games": 20,
+          "baseline_accuracy": 0.37,
+          "comparison_accuracy": 0.46,
+          "delta": 0.09,
+          "ci95_low": 0.04,
+          "ci95_high": 0.14,
+          "helped": 54,
+          "harmed": 20,
+          "both_solved": 121,
+          "neither_solved": 185
+        }
+      ],
+      "diagnostics": {
+        "first_level_prompt_parity_checked": 20,
+        "first_level_prompt_parity_failures": [],
+        "mean_notebook_chars": 742,
+        "reflection_cost_usd": 31.5,
+        "reflection_calls": 400
+      }
+    },
+    "reliability": {
+      "title": "Repeated-run reliability",
+      "scope": "Predeclared reliability levels and configurations",
+      "rows": [
+        {
+          "model_role": "gpt.frontier",
+          "display_name": "Frontier A",
+          "pack_id": "game_a",
+          "level_id": "level_08",
+          "configuration": "independent-single-text",
+          "expected_repeats": 3,
+          "complete_repeats": 3,
+          "solve_rate": 0.6667,
+          "unanimous": false
+        }
+      ]
+    }
+  },
+  "challenge": {
+    "definition": "Independent named-text single-step accuracy across all role-selected models",
+    "games": [
+      {
+        "pack_id": "game_a",
+        "expected": 120,
+        "complete": 120,
+        "completion_rate": 1,
+        "solved": 74,
+        "accuracy": 0.6167,
+        "efficiency": 0.59,
+        "mean_actions": 22,
+        "mean_calls": 19,
+        "mean_cost_usd": 1,
+        "cost_usd": 120,
+        "above_50_percent": true,
+        "models": []
+      },
+      {
+        "pack_id": "game_b",
+        "expected": 120,
+        "complete": 120,
+        "completion_rate": 1,
+        "solved": 31,
+        "accuracy": 0.2583,
+        "efficiency": 0.51,
+        "mean_actions": 31,
+        "mean_calls": 28,
+        "mean_cost_usd": 1.2,
+        "cost_usd": 144,
+        "above_50_percent": false,
+        "models": []
+      }
+    ]
+  },
+  "provenance": {
+    "run_id": "fixture",
+    "source": {},
+    "scheduler": {},
+    "launch_history": []
+  }
+}

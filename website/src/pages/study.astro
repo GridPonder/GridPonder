@@ -1,0 +1,261 @@
+---
+import { readFileSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
+import Base from '../layouts/Base.astro';
+
+const studyPath = resolve(
+  process.cwd(),
+  process.env.GRIDPONDER_STUDY_DATA ?? '../tools/benchmark/study-leaderboard.json',
+);
+let study: any = null;
+if (existsSync(studyPath)) {
+  try {
+    study = JSON.parse(readFileSync(studyPath, 'utf-8'));
+  } catch {}
+}
+const studyJson = JSON.stringify(study);
+const completion = study?.completion;
+const generated = study?.generated
+  ? new Date(study.generated).toLocaleString('en-GB', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
+  : null;
+---
+<Base
+  title="Study Analysis"
+  description="Matched nested-panel analysis of GridPonder capability, planning, representation, semantic surface, curriculum, and reliability."
+>
+  <div class="max-w-6xl mx-auto px-4 sm:px-6 py-12">
+    <header class="border-b border-gray-200 pb-8">
+      <p class="font-mono text-xs font-semibold uppercase text-amber-700">Final study design</p>
+      <h1 class="mt-3 text-3xl sm:text-4xl font-black text-gray-900">Nested study analysis</h1>
+      <p class="mt-3 max-w-3xl text-base leading-relaxed text-gray-600">
+        Each view uses a predeclared matched subset. Denominators and completion are shown explicitly;
+        results are never pooled across unsupported model, game, or configuration combinations.
+      </p>
+      {study && (
+        <nav class="mt-6 grid w-full max-w-[430px] grid-cols-2 border border-gray-200 bg-white p-1" aria-label="Benchmark reports">
+          <a href="/leaderboard/" class="px-2 py-2 text-center text-xs font-semibold text-gray-600 hover:bg-gray-50 hover:text-gray-900 sm:text-sm">
+            <span class="sm:hidden">Leaderboard</span>
+            <span class="hidden sm:inline">Configuration leaderboard</span>
+          </a>
+          <a href="/study/" class="bg-gray-900 px-2 py-2 text-center text-xs font-semibold text-white sm:text-sm">
+            <span class="sm:hidden">Study</span>
+            <span class="hidden sm:inline">Nested study analysis</span>
+          </a>
+        </nav>
+      )}
+    </header>
+
+    {!study ? (
+      <section class="py-16">
+        <h2 class="text-xl font-bold text-gray-900">No study data available</h2>
+        <p class="mt-2 text-sm text-gray-600">
+          Generate <code class="font-mono">study-leaderboard.json</code> with
+          <code class="font-mono"> tools/benchmark/study_report.py</code>.
+        </p>
+      </section>
+    ) : (
+      <>
+        <section class="grid grid-cols-2 lg:grid-cols-5 border-x border-b border-gray-200" aria-label="Study status">
+          <div class="border-r border-t border-gray-200 p-4">
+            <p class="text-xs font-semibold uppercase text-gray-500">Complete</p>
+            <p class="mt-1 text-2xl font-bold text-gray-900">{completion.complete}/{completion.expected}</p>
+          </div>
+          <div class="border-r border-t border-gray-200 p-4">
+            <p class="text-xs font-semibold uppercase text-gray-500">Progress</p>
+            <p class="mt-1 text-2xl font-bold text-gray-900">{(completion.completion_rate * 100).toFixed(1)}%</p>
+          </div>
+          <div class="border-r border-t border-gray-200 p-4">
+            <p class="text-xs font-semibold uppercase text-gray-500">Errors</p>
+            <p class="mt-1 text-2xl font-bold text-gray-900">{completion.unresolved_error_episodes}</p>
+          </div>
+          <div class="border-r border-t border-gray-200 p-4">
+            <p class="text-xs font-semibold uppercase text-gray-500">Recorded cost</p>
+            <p class="mt-1 text-2xl font-bold text-gray-900">${completion.recorded_cost_usd.toLocaleString()}</p>
+          </div>
+          <div class="col-span-2 border-t border-gray-200 p-4 lg:col-span-1">
+            <p class="text-xs font-semibold uppercase text-gray-500">Updated</p>
+            <p class="mt-2 text-sm font-semibold text-gray-800">{generated}</p>
+          </div>
+        </section>
+
+        <section class="min-w-0 py-8">
+          <div id="study-tabs" class="flex min-w-0 max-w-full gap-1 overflow-x-auto border-b border-gray-200" role="tablist">
+            {[
+              ['headline', 'Headline'],
+              ['planning', 'Planning'],
+              ['representation', 'Representation'],
+              ['surface', 'Surface'],
+              ['curriculum', 'Curriculum'],
+              ['reliability', 'Reliability'],
+              ['challenge', 'Challenge'],
+            ].map(([id, label]) => (
+              <button
+                type="button"
+                role="tab"
+                data-view={id}
+                class="study-tab shrink-0 border-b-2 border-transparent px-3 py-3 text-sm font-semibold text-gray-500 hover:text-gray-900"
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+
+          <div class="min-w-0 py-7">
+            <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h2 id="view-title" class="text-xl font-bold text-gray-900"></h2>
+                <p id="view-scope" class="mt-1 text-sm text-gray-500"></p>
+              </div>
+              <p id="view-denominator" class="font-mono text-xs text-gray-500"></p>
+            </div>
+            <div id="view-content" class="mt-5 min-w-0 max-w-full"></div>
+          </div>
+        </section>
+      </>
+    )}
+  </div>
+
+  {study && (
+    <script define:vars={{ studyJson }}>
+      const DATA = JSON.parse(studyJson);
+      const tabs = [...document.querySelectorAll('.study-tab')];
+      const title = document.getElementById('view-title');
+      const scope = document.getElementById('view-scope');
+      const denominator = document.getElementById('view-denominator');
+      const content = document.getElementById('view-content');
+
+      const pct = value => value == null ? 'n/a' : `${(value * 100).toFixed(1)}%`;
+      const signedPct = value => value == null ? 'n/a' : `${value >= 0 ? '+' : ''}${(value * 100).toFixed(1)} pp`;
+      const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;',
+      })[char]);
+
+      function table(headers, rows) {
+        return `
+          <div class="w-full min-w-0 max-w-full overflow-x-auto border border-gray-200">
+            <table class="w-full min-w-[760px] text-sm">
+              <thead class="border-b border-gray-200 bg-gray-50">
+                <tr>${headers.map(header => `<th class="whitespace-nowrap px-3 py-3 text-left text-xs font-semibold uppercase text-gray-500">${header}</th>`).join('')}</tr>
+              </thead>
+              <tbody class="divide-y divide-gray-100">
+                ${rows.length ? rows.map(row => `<tr class="hover:bg-gray-50">${row.map(cell => `<td class="whitespace-nowrap px-3 py-3 text-gray-700">${cell}</td>`).join('')}</tr>`).join('') : '<tr><td class="px-4 py-12 text-center text-gray-400" colspan="9">No completed matched results for this view.</td></tr>'}
+              </tbody>
+            </table>
+          </div>`;
+      }
+
+      function deltaBar(value) {
+        if (value == null) return '<span class="text-gray-400">n/a</span>';
+        const width = Math.min(50, Math.abs(value) * 100);
+        const left = value < 0 ? 50 - width : 50;
+        const color = value >= 0 ? '#19734b' : '#b34a2d';
+        return `<div class="flex items-center gap-2"><div class="relative h-2 w-24 bg-gray-100"><span class="absolute left-1/2 top-0 h-2 w-px bg-gray-400"></span><span class="absolute top-0 h-2" style="left:${left}%;width:${width}%;background:${color}"></span></div><span class="font-mono text-xs">${signedPct(value)}</span></div>`;
+      }
+
+      function renderHeadline(view) {
+        denominator.textContent = `${view.rows.reduce((sum, row) => sum + row.complete, 0)} completed episodes`;
+        content.innerHTML = table(
+          ['Model role', 'Model', 'Tier', 'Complete', 'Accuracy', 'Efficiency', 'Mean actions', 'Cost'],
+          view.rows.map(row => [
+            `<span class="font-mono text-xs">${escapeHtml(row.model_role)}</span>`,
+            `<strong class="text-gray-900">${escapeHtml(row.display_name)}</strong>`,
+            escapeHtml(row.tier),
+            `${row.complete}/${row.expected}`,
+            `<strong>${pct(row.accuracy)}</strong>`,
+            pct(row.efficiency),
+            row.mean_actions ?? 'n/a',
+            `$${Number(row.cost_usd ?? 0).toLocaleString()}`,
+          ]),
+        );
+      }
+
+      function renderContrasts(view) {
+        const paired = view.rows.reduce((sum, row) => sum + row.paired_n, 0);
+        denominator.textContent = `${paired} matched pairs shown`;
+        content.innerHTML = table(
+          ['Contrast', 'Model', 'Pairs', 'Baseline', 'Comparison', 'Delta', '95% game CI', 'Helped', 'Harmed'],
+          view.rows.map(row => [
+            `<span class="font-mono text-xs">${escapeHtml(row.name)}</span>`,
+            `<strong class="text-gray-900">${escapeHtml(row.display_name)}</strong>`,
+            row.paired_n,
+            pct(row.baseline_accuracy),
+            pct(row.comparison_accuracy),
+            deltaBar(row.delta),
+            row.ci95_low == null ? 'n/a' : `${signedPct(row.ci95_low)} to ${signedPct(row.ci95_high)}`,
+            row.helped,
+            row.harmed,
+          ]),
+        );
+      }
+
+      function renderReliability(view) {
+        denominator.textContent = `${view.rows.length} repeated level/configuration groups`;
+        content.innerHTML = table(
+          ['Model', 'Game', 'Level', 'Configuration', 'Complete', 'Solve rate', 'Unanimous'],
+          view.rows.map(row => [
+            `<strong class="text-gray-900">${escapeHtml(row.display_name)}</strong>`,
+            escapeHtml(row.pack_id),
+            escapeHtml(row.level_id),
+            `<span class="font-mono text-xs">${escapeHtml(row.configuration)}</span>`,
+            `${row.complete_repeats}/${row.expected_repeats}`,
+            pct(row.solve_rate),
+            row.unanimous == null ? 'n/a' : row.unanimous ? 'yes' : 'no',
+          ]),
+        );
+      }
+
+      function renderChallenge() {
+        const games = DATA.challenge.games;
+        title.textContent = 'Challenge durability';
+        scope.textContent = DATA.challenge.definition;
+        denominator.textContent = `${games.length} complete games`;
+        content.innerHTML = table(
+          ['Game', 'Complete', 'Accuracy', 'Assessment'],
+          games.map(row => [
+            `<strong class="text-gray-900">${escapeHtml(row.pack_id.replaceAll('_', ' '))}</strong>`,
+            `${row.complete}/${row.expected}`,
+            pct(row.accuracy),
+            row.above_50_percent
+              ? '<span class="font-semibold text-orange-700">Review for saturation</span>'
+              : '<span class="text-emerald-700">Challenge headroom</span>',
+          ]),
+        );
+      }
+
+      function render(viewId) {
+        tabs.forEach(tab => {
+          const active = tab.dataset.view === viewId;
+          tab.classList.toggle('border-gray-900', active);
+          tab.classList.toggle('text-gray-900', active);
+          tab.classList.toggle('border-transparent', !active);
+          tab.classList.toggle('text-gray-500', !active);
+          tab.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        if (viewId === 'challenge') {
+          renderChallenge();
+          return;
+        }
+        const view = DATA.views[viewId];
+        title.textContent = view.title;
+        scope.textContent = view.scope;
+        if (viewId === 'headline') renderHeadline(view);
+        else if (viewId === 'reliability') renderReliability(view);
+        else renderContrasts(view);
+      }
+
+      tabs.forEach(tab => tab.addEventListener('click', () => {
+        const view = tab.dataset.view;
+        history.replaceState(null, '', `${window.location.pathname}?view=${view}`);
+        render(view);
+      }));
+      const requested = new URLSearchParams(window.location.search).get('view');
+      render(tabs.some(tab => tab.dataset.view === requested) ? requested : 'headline');
+    </script>
+  )}
+</Base>
