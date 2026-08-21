@@ -25,6 +25,12 @@ class PushObjectsSystem(GameSystem):
         pushable_tags = [t for t in config.get("pushableTags", ["pushable"])]
         valid_target_tags = [t for t in config.get("validTargetTags", ["walkable"])]
         chain_push = config.get("chainPush", False)
+        # Layers besides `objects` that stop a push. Defaults to none, so packs
+        # that keep NPCs on `actors` have to opt in — without it a crate is
+        # pushed straight through a monster, since only objects and ground were
+        # ever consulted.
+        blocking_layers = [str(l) for l in config.get("blockingLayers", [])
+                           if str(l) != "objects"]
         tool_interactions = config.get("toolInteractions", [])
 
         board = state.board
@@ -73,6 +79,16 @@ class PushObjectsSystem(GameSystem):
         if not board.is_in_bounds(push_dest) or board.is_void(push_dest):
             return []
 
+        def _blocked_by_other_layer(pos: Pos) -> bool:
+            for layer_id in blocking_layers:
+                layer = board.layers.get(layer_id)
+                if layer is not None and layer.get(pos) is not None:
+                    return True
+            return False
+
+        if _blocked_by_other_layer(push_dest):
+            return []
+
         entity_at_push_dest = objects_layer.get(push_dest)
 
         if entity_at_push_dest is not None:
@@ -85,6 +101,8 @@ class PushObjectsSystem(GameSystem):
             if not board.is_in_bounds(chain_dest) or board.is_void(chain_dest):
                 return []
             if objects_layer.get(chain_dest) is not None:
+                return []
+            if _blocked_by_other_layer(chain_dest):
                 return []
             if not _valid_ground(ground_layer, chain_dest, valid_target_tags, game):
                 return []
