@@ -29,6 +29,13 @@ class PushObjectsSystem extends GameSystem {
         validTargetTagsRaw.map((t) => t.toString()).toList();
 
     final chainPush = config['chainPush'] as bool? ?? false;
+    // Layers besides `objects` that stop a push. Defaults to none, so packs that
+    // keep NPCs on `actors` have to opt in — without it a crate is pushed
+    // straight through a monster, since only objects and ground were consulted.
+    final blockingLayers = ((config['blockingLayers'] as List<dynamic>?) ?? const [])
+        .map((l) => l.toString())
+        .where((l) => l != 'objects')
+        .toList();
 
     // Parse toolInteractions — generic item-based destruction of entities.
     final toolInteractionsRaw =
@@ -97,6 +104,16 @@ class PushObjectsSystem extends GameSystem {
     if (!board.isInBounds(pushDest)) return const [];
     if (board.isVoid(pushDest)) return const [];
 
+    bool blockedByOtherLayer(Position pos) {
+      for (final layerId in blockingLayers) {
+        final layer = board.layers[layerId];
+        if (layer != null && layer.getAt(pos) != null) return true;
+      }
+      return false;
+    }
+
+    if (blockedByOtherLayer(pushDest)) return const [];
+
     // Check objects layer at pushDest
     final entityAtPushDest = objectsLayer.getAt(pushDest);
     if (entityAtPushDest != null) {
@@ -111,6 +128,7 @@ class PushObjectsSystem extends GameSystem {
       if (board.isVoid(chainDest)) return const [];
       final entityAtChainDest = objectsLayer.getAt(chainDest);
       if (entityAtChainDest != null) return const [];
+      if (blockedByOtherLayer(chainDest)) return const [];
       // Validate ground at chainDest
       if (!_isValidGround(groundLayer, chainDest, validTargetTags, game)) {
         return const [];
