@@ -25,12 +25,15 @@ class PushObjectsSystem(GameSystem):
         pushable_tags = [t for t in config.get("pushableTags", ["pushable"])]
         valid_target_tags = [t for t in config.get("validTargetTags", ["walkable"])]
         chain_push = config.get("chainPush", False)
-        # Layers besides `objects` that stop a push. Defaults to none, so packs
-        # that keep NPCs on `actors` have to opt in — without it a crate is
-        # pushed straight through a monster, since only objects and ground were
-        # ever consulted.
+        # Layers besides `objects` that stop a push, matching the pairing used by
+        # `sliding_blocks` and `line_of_sight`. Defaults to none, so packs that
+        # keep NPCs on `actors` have to opt in — without it a crate is pushed
+        # straight through a monster, since only objects and ground were ever
+        # consulted. `objects` is dropped because the push logic below already
+        # owns that layer, with chain-push semantics a generic check would break.
         blocking_layers = [str(l) for l in config.get("blockingLayers", [])
                            if str(l) != "objects"]
+        blocking_tags = [str(t) for t in config.get("blockingTags", ["solid"])]
         tool_interactions = config.get("toolInteractions", [])
 
         board = state.board
@@ -82,8 +85,17 @@ class PushObjectsSystem(GameSystem):
         def _blocked_by_other_layer(pos: Pos) -> bool:
             for layer_id in blocking_layers:
                 layer = board.layers.get(layer_id)
-                if layer is not None and layer.get(pos) is not None:
-                    return True
+                if layer is None:
+                    continue
+                entity = layer.get(pos)
+                if entity is None:
+                    continue
+                # No tags configured means every entity on the layer blocks.
+                if blocking_tags and not any(
+                    game.has_tag(entity.kind, tag) for tag in blocking_tags
+                ):
+                    continue
+                return True
             return False
 
         if _blocked_by_other_layer(push_dest):

@@ -29,13 +29,20 @@ class PushObjectsSystem extends GameSystem {
         validTargetTagsRaw.map((t) => t.toString()).toList();
 
     final chainPush = config['chainPush'] as bool? ?? false;
-    // Layers besides `objects` that stop a push. Defaults to none, so packs that
-    // keep NPCs on `actors` have to opt in — without it a crate is pushed
-    // straight through a monster, since only objects and ground were consulted.
+    // Layers besides `objects` that stop a push, matching the pairing used by
+    // `sliding_blocks` and `line_of_sight`. Defaults to none, so packs that keep
+    // NPCs on `actors` have to opt in — without it a crate is pushed straight
+    // through a monster, since only objects and ground were ever consulted.
+    // `objects` is dropped because the push logic below already owns that layer,
+    // with chain-push semantics a generic check would break.
     final blockingLayers = ((config['blockingLayers'] as List<dynamic>?) ?? const [])
         .map((l) => l.toString())
         .where((l) => l != 'objects')
         .toList();
+    final blockingTags =
+        ((config['blockingTags'] as List<dynamic>?) ?? const ['solid'])
+            .map((t) => t.toString())
+            .toList();
 
     // Parse toolInteractions — generic item-based destruction of entities.
     final toolInteractionsRaw =
@@ -107,7 +114,15 @@ class PushObjectsSystem extends GameSystem {
     bool blockedByOtherLayer(Position pos) {
       for (final layerId in blockingLayers) {
         final layer = board.layers[layerId];
-        if (layer != null && layer.getAt(pos) != null) return true;
+        if (layer == null) continue;
+        final entity = layer.getAt(pos);
+        if (entity == null) continue;
+        // No tags configured means every entity on the layer blocks.
+        if (blockingTags.isNotEmpty &&
+            !blockingTags.any((tag) => game.hasTag(entity.kind, tag))) {
+          continue;
+        }
+        return true;
       }
       return false;
     }

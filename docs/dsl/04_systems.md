@@ -90,6 +90,8 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `pushableTags` | array of strings | `["pushable"]` | Tags identifying pushable entities. |
 | `validTargetTags` | array of strings | `["walkable"]` | Tags the destination ground must have. Also allows `null` (empty objects layer) cells. |
 | `chainPush` | boolean | `false` | Whether pushing into another pushable triggers a chain push. |
+| `blockingLayers` | array of strings | `[]` | Layers **besides `objects`** that stop a push, checked at both the push and chain destinations. Empty keeps the old behaviour, where only the objects and ground layers were consulted and a pushable travelled straight through an NPC on `actors`. Listing `objects` has no effect: the push logic owns that layer, including chain-push semantics a generic check would break. |
+| `blockingTags` | array of strings | `["solid"]` | Tags that block a push on `blockingLayers`. Empty means any entity on those layers blocks. |
 | `toolInteractions` | array | `[]` | List of item-based destruction interactions. Each entry: `{ "item": "<kind>", "targetTag": "<tag>", "consumeItem": false, "animation": "<name>" }`. When the avatar holds the specified item and moves into an entity with the specified tag, the entity is destroyed and the avatar enters the vacated cell. `consumeItem` (default `false`) controls whether the item is removed from inventory. `animation` (optional) names an animation defined on the target entity kind to play before removal. Applies before pushable logic — works on any solid entity, not just pushable ones. |
 
 **Behavior:**
@@ -97,9 +99,9 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
    a. Check `toolInteractions` in order. If any interaction matches (avatar holds the required item, entity has the required tag), destroy entity, optionally consume item, play animation if configured, move avatar. Skip remaining push logic.
    b. If entity is not pushable, movement fails.
    c. Compute push destination (one cell further in movement direction).
-   c. Check push destination: must be in bounds, ground must have a `validTargetTags` tag, objects layer must be empty (or have matching tag if `chainPush`).
-   d. If valid: move pushed object, then move avatar into vacated cell.
-   e. If invalid: movement fails, avatar stays.
+   d. Check push destination: must be in bounds, ground must have a `validTargetTags` tag, no `blockingTags` match on any `blockingLayers` layer, and the objects layer must be empty (or have a matching tag if `chainPush`, in which case the chain destination is checked the same way).
+   e. If valid: move pushed object, then move avatar into vacated cell.
+   f. If invalid: movement fails, avatar stays.
 2. Emit `object_pushed`, `object_placed` for pushed object; standard avatar events.
 
 ---
