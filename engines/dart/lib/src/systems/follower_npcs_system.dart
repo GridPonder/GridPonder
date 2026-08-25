@@ -80,20 +80,32 @@ class FollowerNpcsSystem extends GameSystem {
               ? _cardinalTowardTarget(npcPos, avatarPos).toJson()
               : 'rest';
         }
+      }
 
-        // Publish the sightline this system just computed, so rules can react
-        // to being seen exactly as they react to the standalone line_of_sight
-        // system. Only behaviors that actually test a line report one: an
-        // unconditional chaser never checked.
-        final avatarPos = state.avatar.position;
-        if (sight &&
-            (behaviorDef['requiresLineOfSight'] as bool? ?? false) &&
-            avatarPos != null) {
+      // Publish the sightline this system just computed, so rules can react to
+      // being seen exactly as they react to the standalone line_of_sight
+      // system. Only behaviors that actually test a line report one: an
+      // unconditional chaser never checked.
+      //
+      // Reported from wherever the NPC ends the turn, not from where it stood
+      // when the check ran. A chaser steps along the very line it just traced,
+      // so reporting the old cell leaves the drawn beam trailing a segment
+      // behind the monster. The shortened line is still an unobstructed
+      // sightline — it is a sub-segment of one — so the report stays true and
+      // now matches the board being looked at.
+      final npcId = 'spirit_${npcPos.x}_${npcPos.y}';
+      final sightTarget = state.avatar.position;
+      final reportSight = behaviorType == 'toward_avatar' &&
+          sight == true &&
+          (behaviorDef['requiresLineOfSight'] as bool? ?? false) &&
+          sightTarget != null;
+      void reportSightFrom(Position pos) {
+        if (reportSight) {
           events.add(GameEvent.lineOfSightDetected(
-            npcPos,
-            avatarPos,
+            pos,
+            sightTarget,
             'avatar',
-            'spirit_${npcPos.x}_${npcPos.y}',
+            npcId,
             npcEntity.kind,
           ));
         }
@@ -104,7 +116,10 @@ class FollowerNpcsSystem extends GameSystem {
       // this one — so the first turn sees 0 and a frequency of N acts on turn 1,
       // then every Nth turn after it.
       final frequency = behaviorDef['frequency'] as int? ?? 1;
-      if (frequency > 1 && state.turnCount % frequency != 0) continue;
+      if (frequency > 1 && state.turnCount % frequency != 0) {
+        reportSightFrom(npcPos);
+        continue;
+      }
 
       final solidBlocking = behaviorDef['solidBlocking'] as bool? ?? true;
 
@@ -120,8 +135,12 @@ class FollowerNpcsSystem extends GameSystem {
         sight: sight,
       );
 
-      if (nextPos == null || nextPos == npcPos) continue;
+      if (nextPos == null || nextPos == npcPos) {
+        reportSightFrom(npcPos);
+        continue;
+      }
 
+      reportSightFrom(nextPos);
       final caught = state.avatar.position == nextPos;
 
       // Remove from occupied set (old position) and add new
@@ -132,7 +151,6 @@ class FollowerNpcsSystem extends GameSystem {
       board.setEntity('actors', npcPos, null);
       board.setEntity('actors', nextPos, npcEntity);
 
-      final npcId = 'spirit_${npcPos.x}_${npcPos.y}';
       events.add(GameEvent.npcMoved(npcId, npcPos, nextPos));
 
       if (caught) {

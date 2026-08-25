@@ -264,12 +264,66 @@ void main() {
     expect(seen.first.payload['kind'], 'avatar');
     expect(seen.first.payload['sourceKind'], 'watcher');
     expect(seen.first.payload['position'], engine.state.avatar.position);
-    // The source is where the watcher stood when it looked, not where it landed.
     expect(seen.first.payload['sourcePosition'],
         isNot(equals(seen.first.payload['position'])));
 
     // Out of the line, nothing is reported.
     expect(sightings(engine.executeTurn(_move('up'))), isEmpty);
+  });
+
+  test('the sightline is reported from where the NPC lands', () {
+    // The beam is drawn on the board the turn ends with. A chaser steps along
+    // the very line it just traced, so reporting the cell it looked from leaves
+    // the drawn beam trailing one segment behind the monster. The shortened
+    // line is a sub-segment of the same unobstructed sightline, so it is no
+    // less true.
+    final game = _makeGame({
+      'type': 'toward_avatar',
+      'requiresLineOfSight': true,
+    });
+    final engine = _engineFor(
+      game,
+      _levelJson(avatar: [0, 1], watcher: [3, 1]),
+    );
+    final result = engine.executeTurn(_move('right'));
+
+    final seen = result.events
+        .where((e) => e.type == 'line_of_sight_detected')
+        .toList();
+    final moved =
+        result.events.where((e) => e.type == 'npc_moved').toList();
+    expect(seen, hasLength(1));
+    expect(moved, hasLength(1));
+    expect(seen.first.payload['sourcePosition'], moved.first.payload['toPosition']);
+    expect(seen.first.payload['sourcePosition'],
+        isNot(equals(moved.first.payload['fromPosition'])));
+    // The id still names the cell it started from, so the events correlate.
+    expect(seen.first.payload['sourceId'], moved.first.payload['npcId']);
+  });
+
+  test('a still NPC reports from where it stands', () {
+    final game = _makeGame({
+      'type': 'toward_avatar',
+      'requiresLineOfSight': true,
+      'frequency': 2,
+    });
+    final engine = _engineFor(
+      game,
+      _levelJson(avatar: [0, 1], watcher: [3, 1]),
+    );
+    // Turn one is the acting turn (the counter starts at zero); turn two is the
+    // one the gate skips. Bump the edge so the avatar holds still for both.
+    engine.executeTurn(_move('left'));
+    final resting = _watcherPosition(engine);
+    final result = engine.executeTurn(_move('left'));
+
+    final seen = result.events
+        .where((e) => e.type == 'line_of_sight_detected')
+        .toList();
+    expect(result.events.where((e) => e.type == 'npc_moved'), isEmpty);
+    // Sight is still reported on a skipped turn: it saw, it just did not act.
+    expect(seen, hasLength(1));
+    expect(seen.first.payload['sourcePosition'], resting);
   });
 
   test('a patrol never reports a sightline', () {
@@ -466,4 +520,11 @@ void main() {
     );
     expect(engine.state.turnCount, 1);
   });
+}
+
+Position? _watcherPosition(TurnEngine engine) {
+  for (final entry in engine.state.board.layers['actors']!.entries()) {
+    if (entry.value.kind == 'watcher') return entry.key;
+  }
+  return null;
 }

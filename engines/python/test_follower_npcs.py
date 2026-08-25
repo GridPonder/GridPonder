@@ -210,11 +210,62 @@ def test_sight_is_published_as_an_event():
     assert seen[0]["kind"] == "avatar"
     assert seen[0]["sourceKind"] == "watcher"
     assert seen[0]["position"] == engine.state.avatar.position
-    # The source is where the watcher stood when it looked, not where it landed.
     assert seen[0]["sourcePosition"] != seen[0]["position"]
 
     # Out of the line, nothing is reported.
     assert sightings(engine.execute_turn("move", {"direction": "up"})) == []
+
+
+def test_the_sightline_is_reported_from_where_the_npc_lands():
+    """The beam is drawn on the board the turn ends with.
+
+    A chaser steps along the very line it just traced, so reporting the cell it
+    looked from leaves the drawn beam trailing one segment behind the monster.
+    The shortened line is a sub-segment of the same unobstructed sightline, so
+    it is no less true.
+    """
+    game = _make_game({
+        "type": "toward_avatar",
+        "requiresLineOfSight": True,
+    })
+    engine = TurnEngine(game, _make_level(avatar=(0, 1), watcher=(3, 1)))
+    result = engine.execute_turn("move", {"direction": "right"})
+
+    seen = [e for e in result.events if e["type"] == "line_of_sight_detected"]
+    moved = [e for e in result.events if e["type"] == "npc_moved"]
+    assert len(seen) == 1 and len(moved) == 1, (seen, moved)
+    assert seen[0]["sourcePosition"] == moved[0]["toPosition"], seen[0]
+    assert seen[0]["sourcePosition"] != moved[0]["fromPosition"]
+    # The id still names the cell it started from, so the two events correlate.
+    assert seen[0]["sourceId"] == moved[0]["npcId"]
+
+
+def test_a_still_npc_reports_from_where_it_stands():
+    """Nothing moved, so there is no old position to confuse it with."""
+    game = _make_game({
+        "type": "toward_avatar",
+        "requiresLineOfSight": True,
+        "frequency": 2,
+    })
+    engine = TurnEngine(game, _make_level(avatar=(0, 1), watcher=(3, 1)))
+    # Turn one is the acting turn (the counter starts at zero); turn two is the
+    # one the gate skips. Bump the edge so the avatar holds still for both.
+    engine.execute_turn("move", {"direction": "left"})
+    resting = _watcher_position(engine)
+    result = engine.execute_turn("move", {"direction": "left"})
+
+    seen = [e for e in result.events if e["type"] == "line_of_sight_detected"]
+    assert [e for e in result.events if e["type"] == "npc_moved"] == [], result.events
+    # Sight is still reported on a skipped turn: it saw, it just did not act.
+    assert len(seen) == 1, seen
+    assert seen[0]["sourcePosition"] == resting, (seen[0], resting)
+
+
+def _watcher_position(engine):
+    for pos, entity in engine.state.board.layers["actors"].entries():
+        if entity.kind == "watcher":
+            return pos
+    return None
 
 
 def test_a_patrol_never_reports_a_sightline():
@@ -349,6 +400,8 @@ TESTS = [
     test_a_blocked_move_still_advances_the_turn,
     test_gaze_param_tracks_sight,
     test_sight_is_published_as_an_event,
+    test_the_sightline_is_reported_from_where_the_npc_lands,
+    test_a_still_npc_reports_from_where_it_stands,
     test_a_patrol_never_reports_a_sightline,
     test_rules_receive_npc_events,
     test_lethal_contact_governs_patrol_too,

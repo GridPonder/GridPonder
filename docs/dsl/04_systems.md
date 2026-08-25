@@ -624,13 +624,21 @@ settled, before goal evaluation)
 A behavior with `requiresLineOfSight` already computes the same relation the
 [`line_of_sight`](#213-line_of_sight) system detects, so it publishes it under
 the same event name rather than keeping it private. The event fires once per
-seeing NPC per turn, **before** the `frequency` gate — an NPC that only steps
-every other turn still reports what it can see on the turns it stands still,
-which is what a "this one has noticed you" indicator needs. `kind` is the
+seeing NPC per turn, and the `frequency` gate does not suppress it — an NPC that
+only steps every other turn still reports what it can see on the turns it stands
+still, which is what a "this one has noticed you" indicator needs. `kind` is the
 literal string `avatar`, since the avatar is not a board entity and has no
-entity kind; `sourcePosition` is where the NPC stood when it looked, not where
-it landed. Behaviors that never test a line (`patrol`, and `toward_avatar`
-without `requiresLineOfSight`) emit nothing, because they never checked.
+entity kind.
+
+`sourcePosition` is where the NPC **ends** the turn, not where it stood when the
+check ran, so a beam drawn from it lands on the board the player is looking at
+rather than trailing a segment behind a chaser that has already advanced along
+that line. The shortened line is a sub-segment of the same unobstructed
+sightline, so the report stays true. `sourceId` still names the cell the NPC
+started from, matching the `npcId` on that turn's `npc_moved`, so the two events
+can be correlated. Behaviors that never test a line (`patrol`, and
+`toward_avatar` without `requiresLineOfSight`) emit nothing, because they never
+checked.
 
 **Config:**
 

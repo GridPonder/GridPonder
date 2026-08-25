@@ -1373,7 +1373,13 @@ class _TargetCell extends StatelessWidget {
     if (layer == null || y >= layer.length) return null;
     final row = layer[y] as List?;
     if (row == null || x >= row.length) return null;
-    return row[x] as String?;
+    final cell = row[x];
+    // A target cell is either a bare kind or the full entry form the spec's own
+    // example uses, `{"kind": "...", "<param>": ...}`. Casting straight to
+    // String threw on the second one and took the whole goal panel down.
+    if (cell is String) return cell;
+    if (cell is Map) return cell['kind'] as String?;
+    return null;
   }
 
   bool _matches(String targetKind, String layerId) {

@@ -99,21 +99,33 @@ class FollowerNpcsSystem(GameSystem):
                         else "rest"
                     )
 
-                # Publish the sightline this system just computed, so rules can
-                # react to being seen exactly as they react to the standalone
-                # `line_of_sight` system. Only behaviors that actually test a
-                # line report one: an unconditional chaser never checked.
-                if (
-                    sight
-                    and behavior_def.get("requiresLineOfSight", False)
-                    and state.avatar.position is not None
-                ):
+            # Publish the sightline this system just computed, so rules can react
+            # to being seen exactly as they react to the standalone
+            # `line_of_sight` system. Only behaviors that actually test a line
+            # report one: an unconditional chaser never checked.
+            #
+            # Reported from wherever the NPC ends the turn, not from where it
+            # stood when the check ran. A chaser steps along the very line it
+            # just traced, so reporting the old cell leaves the drawn beam
+            # trailing a segment behind the monster. The shortened line is still
+            # an unobstructed sightline — it is a sub-segment of one — so the
+            # report stays true and now matches the board being looked at.
+            npc_id = f"spirit_{npc_pos.x}_{npc_pos.y}"
+            report_sight = (
+                behavior_type == "toward_avatar"
+                and bool(sight)
+                and behavior_def.get("requiresLineOfSight", False)
+                and state.avatar.position is not None
+            )
+
+            def _report_sight_from(pos: Pos) -> None:
+                if report_sight:
                     events.append(
                         ev.line_of_sight_detected(
-                            npc_pos,
+                            pos,
                             state.avatar.position,
                             "avatar",
-                            f"spirit_{npc_pos.x}_{npc_pos.y}",
+                            npc_id,
                             npc_entity.kind,
                         )
                     )
@@ -124,6 +136,7 @@ class FollowerNpcsSystem(GameSystem):
             # Nth turn after it.
             frequency = behavior_def.get("frequency", 1)
             if frequency > 1 and state.turn_count % frequency != 0:
+                _report_sight_from(npc_pos)
                 continue
 
             solid_blocking = behavior_def.get("solidBlocking", True)
@@ -141,8 +154,10 @@ class FollowerNpcsSystem(GameSystem):
             )
 
             if next_pos is None or next_pos == npc_pos:
+                _report_sight_from(npc_pos)
                 continue
 
+            _report_sight_from(next_pos)
             caught = state.avatar.position == next_pos
 
             occupied_after_move.discard(npc_pos)
@@ -151,7 +166,6 @@ class FollowerNpcsSystem(GameSystem):
             board.set_entity("actors", npc_pos, None)
             board.set_entity("actors", next_pos, npc_entity)
 
-            npc_id = f"spirit_{npc_pos.x}_{npc_pos.y}"
             events.append(ev.npc_moved(npc_id, npc_pos, next_pos))
 
             if caught:

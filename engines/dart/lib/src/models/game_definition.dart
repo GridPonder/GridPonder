@@ -75,13 +75,26 @@ class GameUiConfig {
   /// Whether to show the guide panel during play.
   final bool showGuide;
 
-  const GameUiConfig({this.showGoal = false, this.showGuide = false});
+  /// Whether a `board_match` goal draws its target as a miniature board.
+  ///
+  /// That drawing is the right answer for a game whose goal *is* a pattern, and
+  /// noise for one that uses `board_match` merely to say "this entity stands
+  /// here" — a two-row board with a single marked square explains nothing the
+  /// goal text does not. Turning it off falls back to the goal's description.
+  final bool showGoalPreview;
+
+  const GameUiConfig({
+    this.showGoal = false,
+    this.showGuide = false,
+    this.showGoalPreview = true,
+  });
 
   factory GameUiConfig.fromJson(Map<String, dynamic>? j) {
     if (j == null) return const GameUiConfig();
     return GameUiConfig(
       showGoal: (j['showGoal'] as bool?) ?? false,
       showGuide: (j['showGuide'] as bool?) ?? false,
+      showGoalPreview: (j['showGoalPreview'] as bool?) ?? true,
     );
   }
 }

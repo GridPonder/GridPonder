@@ -1782,7 +1782,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           return _buildSequenceGoal(sequence, matched);
         }
       }
-      if (goal.type == 'board_match') {
+      if (goal.type == 'board_match' &&
+          widget.packService.game.ui.showGoalPreview) {
         final targetLayers =
             goal.config['targetLayers'] as Map<String, dynamic>?;
         if (targetLayers != null) {
@@ -1796,12 +1797,25 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         }
       }
     }
-    // Fallback: show goal type as text
-    final goal = _levelDef.goals.first;
-    final goalText =
-        widget.packService.game.goalDescriptions[goal.id] ??
-        goal.type.replaceAll('_', ' ');
-    return Text(goalText, style: const TextStyle(fontSize: 12));
+    // Fallback: the goals as text. Every goal, not just the first — a level
+    // that has to be won on two conditions at once reads as the wrong puzzle
+    // when only one of them is named.
+    final descriptions = widget.packService.game.goalDescriptions;
+    final lines = [
+      for (final goal in _levelDef.goals)
+        descriptions[goal.id] ?? goal.type.replaceAll('_', ' '),
+    ];
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final line in lines)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(line, style: const TextStyle(fontSize: 12)),
+          ),
+      ],
+    );
   }
 
   Widget _buildSequenceGoal(List<int> sequence, int matched) {
