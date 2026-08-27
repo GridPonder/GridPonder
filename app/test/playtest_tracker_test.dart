@@ -94,6 +94,19 @@ void main() {
     );
   });
 
+  test('swallows an exception from send without propagating it', () async {
+    SharedPreferences.setMockInitialValues({});
+    final tracker = PlaytestTracker(
+      enabled: true,
+      send: (uri) async {
+        throw StateError('network is down');
+      },
+    );
+    // Tracking must fail silently — a thrown beacon must never surface to a
+    // caller, since no call site awaits track().
+    await expectLater(tracker.track('move', level: 'sp_001'), completes);
+  });
+
   test('persists the session id across tracker instances', () async {
     SharedPreferences.setMockInitialValues({
       'playtest_session_id': 'existing-id-123',

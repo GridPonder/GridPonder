@@ -49,14 +49,19 @@ class PlaytestTracker {
     String? pos,
   }) async {
     if (!enabled) return;
-    final session = await _ensureSessionId();
-    final params = <String, String>{'session': session, 'event': event};
-    if (level != null) params['level'] = level;
-    if (action != null) params['action'] = action;
-    if (outcome != null) params['outcome'] = outcome;
-    if (src != null) params['src'] = src;
-    if (n != null) params['n'] = '$n';
-    if (pos != null && pos.isNotEmpty) params['pos'] = pos;
-    await _send(Uri(path: '/track', queryParameters: params));
+    // Tracking must never affect gameplay: a failure here (SharedPreferences,
+    // the beacon send, anything) is swallowed rather than left to become an
+    // unhandled async error, since no call site awaits track().
+    try {
+      final session = await _ensureSessionId();
+      final params = <String, String>{'session': session, 'event': event};
+      if (level != null) params['level'] = level;
+      if (action != null) params['action'] = action;
+      if (outcome != null) params['outcome'] = outcome;
+      if (src != null) params['src'] = src;
+      if (n != null) params['n'] = '$n';
+      if (pos != null && pos.isNotEmpty) params['pos'] = pos;
+      await _send(Uri(path: '/track', queryParameters: params));
+    } catch (_) {}
   }
 }
