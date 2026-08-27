@@ -175,6 +175,21 @@ def _resolve_entity_name_anon(
     return "?"
 
 
+def _target_cell_kind(cell) -> str | None:
+    """Kind named by one `targetLayers` cell, or None for an unset one.
+
+    A cell is either a bare kind or the entry form the spec's own example uses,
+    `{"kind": "...", "<param>": ...}`. Indexing the second one for a fallback
+    symbol raised `KeyError: 0` and took the whole observation down with it.
+    """
+    if isinstance(cell, str):
+        return cell
+    if isinstance(cell, dict):
+        kind = cell.get("kind")
+        return kind if isinstance(kind, str) else None
+    return None
+
+
 def _render_target_grid(
     game_def, config: dict, kind_to_label: dict[str, str] | None = None
 ) -> str | None:
@@ -194,7 +209,8 @@ def _render_target_grid(
     grid = [["." for _ in range(width)] for _ in range(height)]
     for layer_rows in target_layers.values():
         for y, row in enumerate(layer_rows):
-            for x, kind_id in enumerate(row):
+            for x, cell in enumerate(row):
+                kind_id = _target_cell_kind(cell)
                 if kind_id is None:
                     continue
                 if kind_to_label is not None:
