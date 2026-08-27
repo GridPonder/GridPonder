@@ -398,7 +398,7 @@ Pairs with a [`balance`](#balance) goal: fails the moment equal shares become im
 { "type": "balance_unreachable", "config": { "goalId": "balance_goal" } }
 ```
 
-> **Soundness under [`claim.overwrite`](04_systems.md#214-claim-overwrite).** Both conditions above share an over-claim test: an owner past its equal share is treated as dead, because claims are permanent and it can never come back down. That premise fails when cells can be repainted — an over-share owner can be brought back down by losing cells.
+> **Soundness under [`claim.overwrite`](04_systems.md#215-claim-overwrite).** Both conditions above share an over-claim test: an owner past its equal share is treated as dead, because claims are permanent and it can never come back down. That premise fails when cells can be repainted — an over-share owner can be brought back down by losing cells.
 >
 > The engine therefore suppresses **the over-claim test in both conditions** when the current board actually carries repaintable cells: `overwrite.mode: "always"`, or `"tagged"` with at least one tagged cell present on the board. The check is board-level, not config-level, so a pack may declare a `tagged` policy game-wide and still get the full over-claim test on every board that places no tagged cells.
 >

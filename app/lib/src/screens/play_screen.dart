@@ -1782,26 +1782,48 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           return _buildSequenceGoal(sequence, matched);
         }
       }
-      if (goal.type == 'board_match') {
-        final targetLayers =
-            goal.config['targetLayers'] as Map<String, dynamic>?;
-        if (targetLayers != null) {
-          return Center(
+    }
+
+    // Every goal, not just the first: a level won on two conditions at once
+    // reads as the wrong puzzle when only one of them is named.
+    final descriptions = widget.packService.game.goalDescriptions;
+    final showPreview = widget.packService.game.ui.showGoalPreview;
+    Map<String, dynamic>? preview;
+    final lines = <String>[];
+    for (final goal in _levelDef.goals) {
+      final targetLayers = goal.config['targetLayers'] as Map<String, dynamic>?;
+      // Only the goal actually drawn is left out of the text; a second
+      // `board_match` has nowhere to go, so it is named instead.
+      if (goal.type == 'board_match' &&
+          showPreview &&
+          targetLayers != null &&
+          preview == null) {
+        preview = targetLayers;
+        continue;
+      }
+      lines.add(descriptions[goal.id] ?? goal.type.replaceAll('_', ' '));
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (preview != null)
+          Center(
             child: TargetBoardRenderer(
-              targetLayers: targetLayers,
+              targetLayers: preview,
               currentState: state,
               palette: widget.packService.theme?.palette,
             ),
-          );
-        }
-      }
-    }
-    // Fallback: show goal type as text
-    final goal = _levelDef.goals.first;
-    final goalText =
-        widget.packService.game.goalDescriptions[goal.id] ??
-        goal.type.replaceAll('_', ' ');
-    return Text(goalText, style: const TextStyle(fontSize: 12));
+          ),
+        if (preview != null && lines.isNotEmpty) const SizedBox(height: 6),
+        for (final line in lines)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(line, style: const TextStyle(fontSize: 12)),
+          ),
+      ],
+    );
   }
 
   Widget _buildSequenceGoal(List<int> sequence, int matched) {

@@ -53,20 +53,25 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 |-------|------|---------|-------------|
 | `directions` | array of strings | `["up","down","left","right"]` | Allowed movement directions. |
 | `solidHandling` | string | `"block"` | What happens when moving into a solid cell: `"block"` (reject move) or `"delegate"` (let later systems handle, e.g. push or consume). |
+| `solidLayers` | array of strings | `["objects"]` | Layers checked for a `solid` blocker, in order; the first match wins. Packs that place blockers elsewhere — NPCs on `actors`, for instance — have to list that layer explicitly. |
 | `moveAction` | string | `"move"` | Which action id triggers navigation. |
 | `validGroundTags` | array of strings | `[]` | When non-empty, the target's ground cell must carry one of these tags. Empty keeps the void-only check, so packs that omit the field are unaffected. |
 | `groundLayer` | string | `"ground"` | Layer checked by `validGroundTags`. |
+| `faceOnBlockedMove` | boolean | `false` | Turn `avatar.facing` to the attempted direction even when the step is refused. Off by default for a reason beyond compatibility: `facing` is part of state identity, so a blocked move stops being a no-op and becomes a fresh search node — solvers expand what used to collapse, and the benchmark harness's repeated-state detector no longer recognises an agent bouncing off a wall. Turn it on only where leaning on an obstacle is a real move. |
 
 **Behavior:**
 1. Compute target position from direction.
 2. Check bounds — reject if out of grid.
 3. Check ground layer — reject if `void`.
 4. If `validGroundTags` is non-empty, reject unless the `groundLayer` cell at the target carries one of those tags. This is how a game makes some non-void terrain unwalkable — landed debris, deep water, a roof you may stand beside but not on.
-5. Check `solid` tag on objects layer:
+5. Check the `solid` tag on each layer in `solidLayers`, in order:
    - `"block"`: reject move.
    - `"delegate"`: mark the move as pending. Emit `move_blocked` with the target position and blocker kind. Later phases (push) or rules (`resolve_move` effect) may complete or reject the pending move.
 6. If not blocked, move avatar to target. Emit `avatar_exited` for old position, `avatar_entered` for new position.
-7. Update `avatar.facing` to the movement direction.
+7. Update `avatar.facing` to the movement direction. With `faceOnBlockedMove`
+   the turn also happens on a move that never lands, since a blocked move still
+   spends the turn and turning is the only feedback that anything happened —
+   at the cost described in the field's row above.
 
 ---
 
@@ -85,6 +90,8 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `pushableTags` | array of strings | `["pushable"]` | Tags identifying pushable entities. |
 | `validTargetTags` | array of strings | `["walkable"]` | Tags the destination ground must have. Also allows `null` (empty objects layer) cells. |
 | `chainPush` | boolean | `false` | Whether pushing into another pushable triggers a chain push. |
+| `blockingLayers` | array of strings | `[]` | Layers **besides `objects`** that stop a push, checked at both the push and chain destinations. Empty keeps the old behaviour, where only the objects and ground layers were consulted and a pushable travelled straight through an NPC on `actors`. Listing `objects` has no effect: the push logic owns that layer, including chain-push semantics a generic check would break. |
+| `blockingTags` | array of strings | `["solid"]` | Tags that block a push on `blockingLayers`. Empty means any entity on those layers blocks. |
 | `toolInteractions` | array | `[]` | List of item-based destruction interactions. Each entry: `{ "item": "<kind>", "targetTag": "<tag>", "consumeItem": false, "animation": "<name>" }`. When the avatar holds the specified item and moves into an entity with the specified tag, the entity is destroyed and the avatar enters the vacated cell. `consumeItem` (default `false`) controls whether the item is removed from inventory. `animation` (optional) names an animation defined on the target entity kind to play before removal. Applies before pushable logic — works on any solid entity, not just pushable ones. |
 
 **Behavior:**
@@ -92,9 +99,9 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
    a. Check `toolInteractions` in order. If any interaction matches (avatar holds the required item, entity has the required tag), destroy entity, optionally consume item, play animation if configured, move avatar. Skip remaining push logic.
    b. If entity is not pushable, movement fails.
    c. Compute push destination (one cell further in movement direction).
-   c. Check push destination: must be in bounds, ground must have a `validTargetTags` tag, objects layer must be empty (or have matching tag if `chainPush`).
-   d. If valid: move pushed object, then move avatar into vacated cell.
-   e. If invalid: movement fails, avatar stays.
+   d. Check push destination: must be in bounds, ground must have a `validTargetTags` tag, no `blockingTags` match on any `blockingLayers` layer, and the objects layer must be empty (or have a matching tag if `chainPush`, in which case the chain destination is checked the same way).
+   e. If valid: move pushed object, then move avatar into vacated cell.
+   f. If invalid: movement fails, avatar stays.
 2. Emit `object_pushed`, `object_placed` for pushed object; standard avatar events.
 
 ---
@@ -441,7 +448,7 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 |-------|------|-------------|
 | `layer` | string | Territory layer to write claims into. Must be declared in the game's `layers` array. |
 | `map` | object | Mover's entity kind → claim-mark entity kind written to `claim.layer`. |
-| `overwrite` | object | Optional. Policy for entering a cell that is already owned. Defaults to `{mode: "never"}` — the pre-0.8 behaviour. See [Claim overwrite](#214-claim-overwrite). |
+| `overwrite` | object | Optional. Policy for entering a cell that is already owned. Defaults to `{mode: "never"}` — the pre-0.8 behaviour. See [Claim overwrite](#215-claim-overwrite). |
 
 Example config:
 ```json
@@ -461,7 +468,7 @@ Example config:
 2. Group actors into **buckets** by effective direction. Buckets resolve in the fixed canonical order `up, down, left, right`. Within a bucket, sort front-first: by the projection of `position` onto that bucket's direction, descending; ties are broken by the other-axis coordinate, then by kind — fully deterministic. When every actor uses `identity` there is exactly one bucket and this is identical to pre-0.8 ordering.
 3. Seed the `occupied` set with every actor's current position.
 4. For each actor in order: if its target cell is out of bounds, tagged `wallTag` on `groundLayer`, or still in `occupied`, the actor stays and emits `actor_blocked`. Otherwise it moves — `occupied` is updated live (old cell freed, new cell claimed) before the next actor resolves, the actor is relocated on `actorLayer`, and `actor_moved` + `actor_entered` are emitted.
-5. If `claim` is configured and the actor moved, apply the claim policy — see [Claim overwrite](#214-claim-overwrite). Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
+5. If `claim` is configured and the actor moved, apply the claim policy — see [Claim overwrite](#215-claim-overwrite). Claiming applies only to cells reached by a move this turn — never to a blocked actor, and never to an actor's starting cell (seed the level's territory layer directly for those).
 
 **Mirrored actors.** `directionTransforms` lets one input drive actors in different directions at once — mirrored/opposed avatars, tug-of-war pairs, reflection puzzles. Two actors that target each other's cells (a mutual swap) both stay put; this falls out of the live `occupied` set and needs no special case. `actor_moved` / `actor_entered` always report the **action's** direction, not the effective one.
 
@@ -513,7 +520,7 @@ Example config:
 1. On `selectAction`, if the tapped cell contains an actor entity, store its kind and position in `selectedVariable` and `selectedPositionVariable`, then emit `actor_selected`. If `budgets` is configured, initialise `budgetVariable` from it the first time an actor is selected.
 2. On `moveAction`, reject with `action_vetoed` if no actor is selected, the selected actor is missing, or its remaining budget is 0.
 3. Compute the selected actor's target cell. If the target is out of bounds, tagged `wallTag` on `groundLayer`, or occupied by another actor, the actor stays and emits `actor_blocked`.
-4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, apply the claim policy to the destination cell (see [Claim overwrite](#214-claim-overwrite)), and decrement that actor's remaining budget when budgets are configured.
+4. Otherwise relocate only the selected actor, emit `actor_moved` + `actor_entered`, apply the claim policy to the destination cell (see [Claim overwrite](#215-claim-overwrite)), and decrement that actor's remaining budget when budgets are configured.
 
 <a name="reactive-actors"></a>
 **Reactive actors (opposition).** `reactiveKinds` turns named kinds into an
@@ -603,7 +610,115 @@ embedding any of those effects in the system.
 
 ---
 
-### 2.14 Claim overwrite
+### 2.14 `follower_npcs`
+
+**Purpose:** Move autonomous entities once per turn according to a declared,
+deterministic step rule. The system owns motion only — reacting to a move is
+left to rules and lose conditions.
+
+**Phase:** `npc_resolution` (after the player's action and all cascades have
+settled, before goal evaluation)
+
+**Events emitted:** `npc_moved`, `avatar_caught`, `line_of_sight_detected`
+
+A behavior with `requiresLineOfSight` already computes the same relation the
+[`line_of_sight`](#213-line_of_sight) system detects, so it publishes it under
+the same event name rather than keeping it private. The event fires once per
+seeing NPC per turn, and the `frequency` gate does not suppress it — an NPC that
+only steps every other turn still reports what it can see on the turns it stands
+still, which is what a "this one has noticed you" indicator needs. `kind` is the
+literal string `avatar`, since the avatar is not a board entity and has no
+entity kind.
+
+`sourcePosition` is where the NPC **ends** the turn, not where it stood when the
+check ran, so a beam drawn from it lands on the board the player is looking at
+rather than trailing a segment behind a chaser that has already advanced along
+that line. The shortened line is a sub-segment of the same unobstructed
+sightline, so the report stays true. `sourceId` still names the cell the NPC
+started from, matching the `npcId` on that turn's `npc_moved`, so the two events
+can be correlated. Behaviors that never test a line (`patrol`, and
+`toward_avatar` without `requiresLineOfSight`) emit nothing, because they never
+checked.
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `npcTags` | array of strings | `["npc"]` | An entity on the `actors` layer is an NPC when it carries one of these tags. |
+| `behaviors` | object | `{}` | Named behavior definitions. An NPC selects one by its `behavior` param; an NPC with no `behavior`, or one naming a missing definition, never moves. |
+| `contactVariable` | string | `"caught"` | State variable incremented when a `lethalContact` NPC steps onto the avatar. Pair it with a `variable_threshold` lose condition. |
+
+**Behavior definition fields:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `type` | string | — | `toward_avatar`, `toward_tag`, `toward_color`, `patrol`, or `clockwise`. |
+| `frequency` | integer | `1` | Act only when `turnCount % frequency == 0`. The counter is incremented after this phase, so the first turn always acts. |
+| `solidBlocking` | boolean | `true` | Whether entities tagged `solid` on the `objects` layer block the NPC. |
+| `targetTag` | string | — | `toward_tag` only: seek the nearest entity with this tag on the `objects` or `markers` layer. |
+| `targetColor` | string | — | `toward_color` only: seek the nearest entity whose `color` param matches, on the `objects` or `actors` layer. |
+| `requiresLineOfSight` | boolean | `false` | `toward_avatar` only: move only while the avatar is visible, using the same relation [`line_of_sight`](#213-line_of_sight) detects. Losing sight freezes the NPC where it stands. |
+| `blockingLayers` | array of strings | `["objects"]` | `requiresLineOfSight` only: layers checked for sight blockers. |
+| `blockingTags` | array of strings | `["solid"]` | `requiresLineOfSight` only: tags that break the sightline. Empty means every entity on those layers blocks. |
+| `multiCellObjectsBlock` | boolean | `true` | `requiresLineOfSight` only: whether a multi-cell object standing between the NPC and the avatar breaks the sightline. Both systems trace the line through one shared implementation, so this means here exactly what it means for [`line_of_sight`](#213-line_of_sight); the two used to answer differently for the same pair of cells. |
+| `lethalContact` | boolean | `false` | Allow the NPC to step onto the avatar. On contact it increments `contactVariable` and emits `avatar_caught`. When `false` the avatar's cell is impassable, so a seeking NPC with no other distance-reducing step stands still and a `patrol` or `clockwise` NPC turns around — which makes the avatar's body a usable, movable blocker. Applies to every behavior, so a patrolling hazard has to declare its lethality rather than inherit it. |
+| `gazeParam` | string | — | `toward_avatar` only: entity param to write each turn with the cardinal direction of the avatar while the NPC can see it, or `rest` when it cannot. Pair it with [`spriteParam`](02_game.md#entity-kinds) to give the NPC a per-direction look. Refreshed before the `frequency` gate and whether or not a step happens, since gaze is about seeing rather than moving. A behavior without `requiresLineOfSight` always counts as seeing the avatar, so it never rests. Levels should seed the param to match their opening geometry — the system only writes it during a turn, so the first frame shows whatever the level authored. |
+
+**Behavior:**
+1. Collect NPCs from the `actors` layer in row-major order. The board is
+   mutated as they resolve, so a later NPC sees earlier moves this turn.
+2. Skip an NPC whose `frequency` gate does not admit this turn.
+3. Compute one candidate step:
+   - `toward_avatar`, `toward_tag`, `toward_color` — the first passable cardinal
+     step that strictly reduces Manhattan distance to the target, trying the
+     dominant axis first (x on ties) and then up, down, left, right.
+   - `patrol` — the cell ahead of `facing`; when blocked, reverse `facing` and
+     take that cell instead.
+   - `clockwise` — the cell ahead of `facing`, rotating `facing` clockwise
+     (right → down → left → up) until a passable cell is found.
+   Both circuit behaviors write the resulting `facing` back onto the entity, so
+   heading is persistent state.
+4. A cell is impassable when out of bounds, `void` ground, occupied by another
+   NPC's post-move position, blocked by a `solid` object under
+   `solidBlocking`, or occupied by the avatar unless `lethalContact` is set.
+   Every behavior shares this one test, so passability cannot drift between
+   them.
+5. Move the NPC and emit `npc_moved`. On lethal contact also bump
+   `contactVariable` and emit `avatar_caught`.
+
+Example:
+
+```json
+{
+  "id": "npcs",
+  "type": "follower_npcs",
+  "config": {
+    "contactVariable": "caught",
+    "behaviors": {
+      "hunt": {
+        "type": "toward_avatar",
+        "requiresLineOfSight": true,
+        "lethalContact": true,
+        "blockingLayers": ["objects", "actors"]
+      },
+      "sweep": { "type": "patrol", "frequency": 2 }
+    }
+  }
+}
+```
+
+**Reuse:** guards, chasers, patrols, scripted hazards, and creatures that seek a
+resource rather than the player. Sight-gated motion makes the avatar's position
+the only control channel, so an NPC can be steered rather than merely avoided.
+
+> **Blocking the avatar.** An NPC is on the `actors` layer, which
+> [`avatar_navigation`](#21-avatar_navigation) does not consult by default. To
+> stop the player from walking through an NPC, tag the NPC `solid` and set
+> `solidLayers: ["objects", "actors"]` on the navigation system.
+
+---
+
+### 2.15 Claim overwrite
 
 Shared by `coupled_actors` and `individual_actors` — both resolve claims identically.
 
@@ -853,6 +968,7 @@ changes lane in free fall.
 | Anchor Point | `anchor_point` | `action_resolution` | configurable |
 | Coupled Actors | `coupled_actors` | `action_resolution` | `move` (configurable via `moveAction`) |
 | Individual Actors | `individual_actors` | `action_resolution` | `tap_cell` + `move` (configurable) |
+| Follower NPCs | `follower_npcs` | `npc_resolution` | (automatic once per turn) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 

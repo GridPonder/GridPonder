@@ -1,0 +1,43 @@
+{
+  "id": "follower_npcs_smoke_06",
+  "title": "Follower NPCs Sight Blocked By Actor",
+  "board": {
+    "size": [5, 4],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 3], "kind": "flag"}
+        ]
+      },
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 2], "kind": "statue"},
+          {"position": [4, 1], "kind": "watcher", "behavior": "stalk_shielded"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0]}
+  },
+  "goals": [
+    {
+      "id": "reach_flag",
+      "type": "reach_target",
+      "config": {"targetKind": "flag"}
+    }
+  ],
+  "loseConditions": [],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
+    ]
+  }
+}

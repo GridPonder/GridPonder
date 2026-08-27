@@ -1,0 +1,67 @@
+{
+  "layers": [
+    { "id": "ground", "occupancy": "exactly_one", "default": "empty" },
+    { "id": "objects", "occupancy": "zero_or_one" },
+    { "id": "actors", "occupancy": "zero_or_one" }
+  ],
+  "entityKinds": {
+    "empty": { "layer": "ground", "tags": ["walkable"], "symbol": "." },
+    "void": { "layer": "ground", "tags": [], "symbol": "#" },
+    "flag": { "layer": "objects", "tags": ["goal"], "symbol": "F" },
+    "beacon": { "layer": "objects", "tags": [], "symbol": "B" },
+    "crate": { "layer": "objects", "tags": ["solid"], "symbol": "X" },
+    "watcher": { "layer": "actors", "tags": ["npc"], "symbol": "W" },
+    "statue": { "layer": "actors", "tags": ["solid"], "symbol": "M" },
+    "chaser": { "layer": "actors", "tags": ["npc"], "symbol": "C" },
+    "patroller": { "layer": "actors", "tags": ["npc"], "symbol": "P" },
+    "orbiter": { "layer": "actors", "tags": ["npc"], "symbol": "K" },
+    "plodder": { "layer": "actors", "tags": ["npc"], "symbol": "S" },
+    "seeker": { "layer": "actors", "tags": ["npc"], "symbol": "T" }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": { "direction": { "type": "direction", "values": ["up", "down", "left", "right"] } }
+    }
+  ],
+  "systems": [
+    {
+      "id": "navigation",
+      "type": "avatar_navigation",
+      "config": {}
+    },
+    {
+      "id": "npcs",
+      "type": "follower_npcs",
+      "config": {
+        "npcTags": ["npc"],
+        "behaviors": {
+          "chase": { "type": "toward_avatar" },
+          "sweep": { "type": "patrol" },
+          "orbit": { "type": "clockwise" },
+          "slow_sweep": { "type": "patrol", "frequency": 2 },
+          "seek_goal": { "type": "toward_tag", "targetTag": "goal" },
+          "seek_blue": { "type": "toward_color", "targetColor": "blue" },
+          "stalk": { "type": "toward_avatar", "requiresLineOfSight": true },
+          "hunt": {
+            "type": "toward_avatar",
+            "requiresLineOfSight": true,
+            "lethalContact": true
+          },
+          "stalk_shielded": {
+            "type": "toward_avatar",
+            "requiresLineOfSight": true,
+            "blockingLayers": ["objects", "actors"]
+          }
+        }
+      }
+    }
+  ],
+  "rules": [],
+  "defaults": {
+    "avatar": { "enabled": true },
+    "maxCascadeDepth": 1
+  },
+  "ui": { "showGoal": true },
+  "levelSequence": []
+}

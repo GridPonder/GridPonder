@@ -3,6 +3,7 @@ import '../models/event.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
+import 'sight.dart';
 
 /// Detects unobstructed horizontal or vertical sightlines.
 ///
@@ -73,7 +74,7 @@ class LineOfSightSystem extends GameSystem {
       Position? matchedPosition;
       for (final source in sources) {
         if (multiCellObjectsBlock &&
-            _coveredByOtherMultiCellObject(
+            coveredByOtherMultiCellObject(
               target,
               source.multiCellObjectId,
               state,
@@ -81,7 +82,7 @@ class LineOfSightSystem extends GameSystem {
           continue;
         }
         for (final sourcePosition in source.positions) {
-          if (_hasClearLine(
+          if (hasClearLine(
             sourcePosition,
             target,
             source.multiCellObjectId,
@@ -176,59 +177,6 @@ class LineOfSightSystem extends GameSystem {
   ) {
     if (kinds.isNotEmpty && !kinds.contains(kind)) return false;
     return tags.isEmpty || tags.any((tag) => game.hasTag(kind, tag));
-  }
-
-  bool _coveredByOtherMultiCellObject(
-    Position target,
-    String? sourceMultiCellObjectId,
-    LevelState state,
-  ) {
-    for (final object in state.board.multiCellObjects) {
-      if (object.id != sourceMultiCellObjectId &&
-          object.cells.contains(target)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  bool _hasClearLine(
-    Position source,
-    Position target,
-    String? sourceMultiCellObjectId,
-    LevelState state,
-    GameDefinition game,
-    List<String> blockingLayers,
-    List<String> blockingTags,
-    bool multiCellObjectsBlock,
-  ) {
-    if (source == target) return false;
-    if (source.x != target.x && source.y != target.y) return false;
-
-    final dx = source.x == target.x ? 0 : (target.x > source.x ? 1 : -1);
-    final dy = source.y == target.y ? 0 : (target.y > source.y ? 1 : -1);
-    var position = Position(source.x + dx, source.y + dy);
-    while (position != target) {
-      if (state.board.isVoid(position)) return false;
-      if (multiCellObjectsBlock &&
-          _coveredByOtherMultiCellObject(
-            position,
-            sourceMultiCellObjectId,
-            state,
-          )) {
-        return false;
-      }
-      for (final layerId in blockingLayers) {
-        final entity = state.board.getEntity(layerId, position);
-        if (entity == null) continue;
-        if (blockingTags.isEmpty ||
-            blockingTags.any((tag) => game.hasTag(entity.kind, tag))) {
-          return false;
-        }
-      }
-      position = Position(position.x + dx, position.y + dy);
-    }
-    return true;
   }
 }
 

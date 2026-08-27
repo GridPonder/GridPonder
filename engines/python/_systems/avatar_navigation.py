@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class AvatarNavigationSystem(GameSystem):
@@ -35,15 +35,16 @@ class AvatarNavigationSystem(GameSystem):
         dx, dy = dir_delta(dir_str)
         target = Pos(pos.x + dx, pos.y + dy)
 
+        # Only the moves that never land; a successful step turns further down.
+        if config.get("faceOnBlockedMove") is True:
+            state.avatar.facing = dir_str
+
         if not board.is_in_bounds(target):
             return []
         if board.is_void(target):
             return []
 
-        # Optional stricter ground test: the destination's ground cell must carry
-        # one of these tags. Empty (the default) keeps the void-only check, so
-        # every pack that omits the field behaves exactly as before.
-        valid_ground_tags = config.get("validGroundTags", [])
+        valid_ground_tags = config_list(config, "validGroundTags", [])
         if valid_ground_tags:
             ground_layer = config.get("groundLayer", "ground")
             ground_entity = board.get_entity(ground_layer, target)
@@ -53,9 +54,15 @@ class AvatarNavigationSystem(GameSystem):
                 return []
 
         solid_handling = config.get("solidHandling", "block")
-        entity_at_target = board.get_entity("objects", target)
+        solid_layers = config_list(config, "solidLayers", ["objects"])
+        entity_at_target = None
+        for layer_id in solid_layers:
+            candidate = board.get_entity(str(layer_id), target)
+            if candidate is not None and game.has_tag(candidate.kind, "solid"):
+                entity_at_target = candidate
+                break
 
-        if entity_at_target is not None and game.has_tag(entity_at_target.kind, "solid"):
+        if entity_at_target is not None:
             if solid_handling == "block":
                 return []
             elif solid_handling == "delegate":

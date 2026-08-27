@@ -4,7 +4,7 @@ from __future__ import annotations
 from .. import _events as ev
 from .._game_def import GameDef
 from .._models import GameState, Pos, dir_delta
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class SlidingBlocksSystem(GameSystem):
@@ -122,7 +122,7 @@ def _is_valid_destination(
     ground_layer = str(config.get("groundLayer", "ground"))
     ground = state.board.get_entity(ground_layer, pos)
     valid_ground_tags = [
-        str(tag) for tag in config.get("validGroundTags", ["walkable"])
+        str(tag) for tag in config_list(config, "validGroundTags", ["walkable"])
     ]
     if ground is None or not any(
         game.has_tag(ground.kind, tag) for tag in valid_ground_tags
@@ -136,17 +136,17 @@ def _is_valid_destination(
             return False
 
     blocking_layers = [
-        str(layer) for layer in config.get("blockingLayers", ["objects"])
+        str(layer) for layer in config_list(config, "blockingLayers", ["objects"])
     ]
     blocking_tags = [
-        str(tag) for tag in config.get("blockingTags", ["solid"])
+        str(tag) for tag in config_list(config, "blockingTags", ["solid"])
     ]
     coverable_tags = [
-        str(tag) for tag in config.get("coverableTags", [])
+        str(tag) for tag in config_list(config, "coverableTags", [])
     ]
     coverable_blocked_roles = {
         str(role)
-        for role in config.get("coverableBlockedRoles", [])
+        for role in config_list(config, "coverableBlockedRoles", [])
     }
     moving_role = moving_block.params.get("role")
 
@@ -181,13 +181,13 @@ def _can_escape(
     config: dict,
 ) -> bool:
     escape_roles = {
-        str(role) for role in config.get("escapeRoles", [])
+        str(role) for role in config_list(config, "escapeRoles", [])
     }
     role = block.params.get("role")
     if role is None or str(role) not in escape_roles:
         return False
 
-    exit_tags = [str(tag) for tag in config.get("exitTags", ["exit"])]
+    exit_tags = [str(tag) for tag in config_list(config, "exitTags", ["exit"])]
     if not exit_tags:
         return True
 

@@ -135,9 +135,14 @@ An entity was removed from the objects layer (by any mechanism: pickup, destruct
 | `kind` | string | Entity kind that was removed. |
 
 ### `line_of_sight_detected`
-The `line_of_sight` system found a clear horizontal or vertical relation
-between a configured source and target. Detection is read-only; rules decide
-what effect it has.
+A clear horizontal or vertical relation was found between a source and a
+target. Detection is read-only; rules decide what effect it has.
+
+Two systems emit it. The [`line_of_sight`](04_systems.md#213-line_of_sight)
+system relates two board entities. [`follower_npcs`](04_systems.md#214-follower_npcs)
+emits it for a `requiresLineOfSight` behavior that can see the avatar, so a game
+whose watcher is an NPC can react to being seen the same way — there, `kind` is
+the literal string `avatar`, since the avatar is not a board entity.
 
 | Payload | Type | Description |
 |---------|------|-------------|
@@ -217,6 +222,28 @@ An entity settled after gravity/motion.
 A UI animates the travel from `fromPosition` to `position` using `fromKind`,
 so an entity that transforms on impact is not drawn transformed in mid-air.
 Cells of one rigid component settle in the same batch and so animate together.
+
+> **Resolved after the NPC phase.** `npc_resolution` (phase 6) runs after the
+> cascade pass in phase 5, so the engine gives rules a second pass over the NPC
+> events once that phase completes. Rules on `npc_moved` and `avatar_caught`
+> therefore fire in the same turn the NPC acted, before goal and lose
+> evaluation — which is how a level can, for example, unseal a door the moment an
+> NPC steps onto a plate. `follower_npcs` still writes `contactVariable` itself
+> rather than depending on a rule, so a lose condition works with no rules at
+> all.
+
+### `avatar_caught`
+
+Emitted by [`follower_npcs`](04_systems.md#214-follower_npcs) when an NPC whose
+behavior sets `lethalContact` steps onto the avatar's cell. The system also
+increments its `contactVariable`, so a `variable_threshold` lose condition fires
+on the same turn without needing a rule.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `position` | `[x, y]` | Cell where contact happened. |
+| `npcKind` | string | Entity kind of the NPC that made contact. |
+| `npcId` | string | NPC identifier (derived from its pre-move position). |
 
 ### `npc_moved`
 An NPC moved during NPC resolution.
@@ -415,6 +442,7 @@ Change an entity at a position to a different kind. If `animation` is specified,
 ```json
 { "transform": { "position": [3, 2], "layer": "ground", "toKind": "bridge" } }
 { "transform": { "position": [3, 2], "layer": "ground", "toKind": "bridge", "animation": "dissolving" } }
+{ "transform": { "position": "$event.position", "layer": "ground", "fromKind": "cracked", "toKind": "void" } }
 ```
 
 | Field | Type | Required | Description |
@@ -422,7 +450,15 @@ Change an entity at a position to a different kind. If `animation` is specified,
 | `position` | `[x, y]` or ref | **yes** | Cell to transform. |
 | `layer` | string | **yes** | Layer to modify. |
 | `toKind` | string | **yes** | New entity kind. |
+| `fromKind` | string or array | no | Only transform when the cell already holds this kind (or one of these). No match, no effect and no event. |
 | `animation` | string | no | Animation name from the source entity kind's `animations` map. Played before transform. |
+
+`fromKind` exists because conditions cannot inspect a `$event` position — only
+effects can read one. Without it, a rule keyed on an event has to transform the
+cell blindly, which forces every cell the rule might ever touch to be authored
+as the same kind. With it, a rule such as "the floor gives way under whatever
+walks off it" applies to the cracked tiles and leaves solid ground alone, so the
+art and the rule agree without a per-cell repair rule propping them up.
 
 ### `move_entity`
 Move an entity from one position to another.

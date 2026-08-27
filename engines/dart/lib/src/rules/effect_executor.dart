@@ -125,6 +125,14 @@ class EffectExecutor {
     if (toKind == null) return const [];
     final existing = state.board.getEntity(layerId, pos);
     final fromKind = existing?.kind ?? '';
+    // Optional source filter. Conditions cannot inspect a `$event` position, so
+    // without this a rule keyed on an event can only transform a cell blindly —
+    // which forces every cell a rule might touch to be authored as the same kind.
+    final wanted = data['fromKind'];
+    if (wanted != null) {
+      final allowed = wanted is List ? wanted : [wanted];
+      if (!allowed.map((k) => '${r(k)}').contains(fromKind)) return const [];
+    }
     final animName = data['animation'] as String?;
     state.board.setEntity(layerId, pos, EntityInstance(toKind));
     return [

@@ -40,12 +40,14 @@ class AvatarNavigationSystem extends GameSystem {
     final board = state.board;
     final target = pos.moved(direction);
 
+    // Only the moves that never land; a successful step turns further down.
+    if (config['faceOnBlockedMove'] == true) {
+      state.avatar = state.avatar.copyWith(facing: direction);
+    }
+
     if (!board.isInBounds(target)) return const [];
     if (board.isVoid(target)) return const [];
 
-    // Optional stricter ground test: the destination's ground cell must carry
-    // one of these tags. Empty (the default) keeps the void-only check, so
-    // every pack that omits the field behaves exactly as before.
     final validGroundTags = (config['validGroundTags'] as List? ?? const [])
         .map((value) => value.toString())
         .toList();
@@ -58,13 +60,19 @@ class AvatarNavigationSystem extends GameSystem {
 
     final solidHandling = config['solidHandling'] as String? ?? 'block';
 
-    final objectsLayer = board.layers['objects'];
+    final solidLayers = (config['solidLayers'] as List<dynamic>? ?? ['objects'])
+        .map((l) => l.toString())
+        .toList();
     EntityInstance? entityAtTarget;
-    if (objectsLayer != null) {
-      entityAtTarget = objectsLayer.getAt(target);
+    for (final layerName in solidLayers) {
+      final candidate = board.layers[layerName]?.getAt(target);
+      if (candidate != null && game.hasTag(candidate.kind, 'solid')) {
+        entityAtTarget = candidate;
+        break;
+      }
     }
 
-    if (entityAtTarget != null && game.hasTag(entityAtTarget.kind, 'solid')) {
+    if (entityAtTarget != null) {
       if (solidHandling == 'block') {
         return const [];
       } else if (solidHandling == 'delegate') {
