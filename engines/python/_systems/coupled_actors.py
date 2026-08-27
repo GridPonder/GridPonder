@@ -38,7 +38,7 @@ from __future__ import annotations
 from .._models import Pos, GameState, dir_delta, transform_delta, CARDINALS, Entity
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 from ._claim import apply_claim
 from ._excavate import read_excavate, is_diggable, cut, backfill
 from ._runtime_var import read_int_variable
@@ -61,10 +61,12 @@ def _tape_direction(tape: dict, state: GameState) -> str | None:
     domain solver. ``cycle`` is checked with ``is True`` (not truthy) so a
     typo like ``"cycle": 1`` behaves as non-cycling rather than cycling.
     """
-    program = tape.get("program") or []
+    program = config_list(tape, "program", [])
     if not program:
         return None
-    idx_var = tape.get("indexVariable", "tapeIndex")
+    idx_var = tape.get("indexVariable")
+    if idx_var is None:
+        idx_var = "tapeIndex"
     idx = read_int_variable(state, idx_var)
     if idx < 0:
         idx = 0
@@ -96,7 +98,7 @@ class CoupledActorsSystem(GameSystem):
             # working copy and discards it on veto.
             direction = _tape_direction(tape, state)
 
-        allowed = config.get("directions", list(CARDINALS))
+        allowed = config_list(config, "directions", list(CARDINALS))
         if not direction or direction not in allowed:
             return []
 
