@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class AvatarNavigationSystem(GameSystem):
@@ -35,21 +35,16 @@ class AvatarNavigationSystem(GameSystem):
         dx, dy = dir_delta(dir_str)
         target = Pos(pos.x + dx, pos.y + dy)
 
-        # Turn to face the attempted direction even when the step is refused.
-        # A blocked move still spends the turn, so without this the player gets
-        # no signal that anything happened — and leaning on an obstacle is a
-        # deliberate way to let a turn pass.
-        state.avatar.facing = dir_str
+        # Only the moves that never land; a successful step turns further down.
+        if config.get("faceOnBlockedMove") is True:
+            state.avatar.facing = dir_str
 
         if not board.is_in_bounds(target):
             return []
         if board.is_void(target):
             return []
 
-        # Optional stricter ground test: the destination's ground cell must carry
-        # one of these tags. Empty (the default) keeps the void-only check, so
-        # every pack that omits the field behaves exactly as before.
-        valid_ground_tags = config.get("validGroundTags", [])
+        valid_ground_tags = config_list(config, "validGroundTags", [])
         if valid_ground_tags:
             ground_layer = config.get("groundLayer", "ground")
             ground_entity = board.get_entity(ground_layer, target)
@@ -59,10 +54,7 @@ class AvatarNavigationSystem(GameSystem):
                 return []
 
         solid_handling = config.get("solidHandling", "block")
-        # Layers checked for a `solid` blocker, in order. Defaults to objects
-        # only, so packs that place blockers on other layers (NPCs on `actors`,
-        # for instance) have to opt in.
-        solid_layers = config.get("solidLayers", ["objects"])
+        solid_layers = config_list(config, "solidLayers", ["objects"])
         entity_at_target = None
         for layer_id in solid_layers:
             candidate = board.get_entity(str(layer_id), target)

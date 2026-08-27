@@ -57,6 +57,7 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `moveAction` | string | `"move"` | Which action id triggers navigation. |
 | `validGroundTags` | array of strings | `[]` | When non-empty, the target's ground cell must carry one of these tags. Empty keeps the void-only check, so packs that omit the field are unaffected. |
 | `groundLayer` | string | `"ground"` | Layer checked by `validGroundTags`. |
+| `faceOnBlockedMove` | boolean | `false` | Turn `avatar.facing` to the attempted direction even when the step is refused. Off by default for a reason beyond compatibility: `facing` is part of state identity, so a blocked move stops being a no-op and becomes a fresh search node — solvers expand what used to collapse, and the benchmark harness's repeated-state detector no longer recognises an agent bouncing off a wall. Turn it on only where leaning on an obstacle is a real move. |
 
 **Behavior:**
 1. Compute target position from direction.
@@ -67,11 +68,10 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
    - `"block"`: reject move.
    - `"delegate"`: mark the move as pending. Emit `move_blocked` with the target position and blocker kind. Later phases (push) or rules (`resolve_move` effect) may complete or reject the pending move.
 6. If not blocked, move avatar to target. Emit `avatar_exited` for old position, `avatar_entered` for new position.
-7. Update `avatar.facing` to the attempted direction **whether or not the step
-   succeeded**. A blocked move still spends the turn, so turning is the only
-   feedback that anything happened — which matters wherever leaning on an
-   obstacle is a deliberate way to let a turn pass. Note `facing` participates in
-   state identity, so a blocked move is not a true no-op.
+7. Update `avatar.facing` to the movement direction. With `faceOnBlockedMove`
+   the turn also happens on a move that never lands, since a blocked move still
+   spends the turn and turning is the only feedback that anything happened —
+   at the cost described in the field's row above.
 
 ---
 
@@ -660,6 +660,7 @@ checked.
 | `requiresLineOfSight` | boolean | `false` | `toward_avatar` only: move only while the avatar is visible, using the same relation [`line_of_sight`](#213-line_of_sight) detects. Losing sight freezes the NPC where it stands. |
 | `blockingLayers` | array of strings | `["objects"]` | `requiresLineOfSight` only: layers checked for sight blockers. |
 | `blockingTags` | array of strings | `["solid"]` | `requiresLineOfSight` only: tags that break the sightline. Empty means every entity on those layers blocks. |
+| `multiCellObjectsBlock` | boolean | `true` | `requiresLineOfSight` only: whether a multi-cell object standing between the NPC and the avatar breaks the sightline. Both systems trace the line through one shared implementation, so this means here exactly what it means for [`line_of_sight`](#213-line_of_sight); the two used to answer differently for the same pair of cells. |
 | `lethalContact` | boolean | `false` | Allow the NPC to step onto the avatar. On contact it increments `contactVariable` and emits `avatar_caught`. When `false` the avatar's cell is impassable, so a seeking NPC with no other distance-reducing step stands still and a `patrol` or `clockwise` NPC turns around — which makes the avatar's body a usable, movable blocker. Applies to every behavior, so a patrolling hazard has to declare its lethality rather than inherit it. |
 | `gazeParam` | string | — | `toward_avatar` only: entity param to write each turn with the cardinal direction of the avatar while the NPC can see it, or `rest` when it cannot. Pair it with [`spriteParam`](02_game.md#entity-kinds) to give the NPC a per-direction look. Refreshed before the `frequency` gate and whether or not a step happens, since gaze is about seeing rather than moving. A behavior without `requiresLineOfSight` always counts as seeing the avatar, so it never rests. Levels should seed the param to match their opening geometry — the system only writes it during a turn, so the first frame shows whatever the level authored. |
 

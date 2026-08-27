@@ -175,6 +175,7 @@ void main() {
         {'type': 'toward_avatar', 'requiresLineOfSight': true},
         navConfig: {
           'solidLayers': ['objects', 'actors'],
+          'faceOnBlockedMove': true,
         },
       );
       final engine = _engineFor(
@@ -188,8 +189,35 @@ void main() {
 
       expect(engine.state.avatar.position!.x, 1);
       expect(result.events.any((e) => e.type == 'avatar_entered'), isFalse);
-      // Facing still turns, so the player can see the blocked move registered.
+      // Opted in, so facing turns and the blocked move registers for the player.
       expect(engine.state.avatar.facing.toJson(), 'right');
+    });
+
+    test('a blocked move leaves facing alone by default', () {
+      // `facing` is part of state identity, so turning on a refused move makes
+      // it a fresh search node instead of a no-op. Packs pay that on request.
+      final game = _makeGame(
+        {'type': 'toward_avatar', 'requiresLineOfSight': true},
+        navConfig: {
+          'solidLayers': ['objects', 'actors'],
+        },
+      );
+      final engine = _engineFor(
+        game,
+        _levelJson(avatar: [1, 1], watcher: [2, 1]),
+      );
+      engine.executeTurn(_move('down')); // settle facing away
+      expect(engine.state.avatar.facing.toJson(), 'down');
+      engine.executeTurn(_move('up')); // back to the start cell
+      final positionBefore = engine.state.avatar.position;
+
+      engine.executeTurn(_move('right')); // into the watcher
+
+      // Nothing about the avatar changed, which is what lets the solver treat
+      // the turn as a no-op. (The state-identity key itself is Python-side, so
+      // test_follower_npcs.py asserts on it directly.)
+      expect(engine.state.avatar.facing.toJson(), 'up');
+      expect(engine.state.avatar.position, positionBefore);
     });
 
     test('an NPC does not block the avatar by default', () {

@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class PushObjectsSystem(GameSystem):
@@ -22,19 +22,14 @@ class PushObjectsSystem(GameSystem):
             return []
 
         config = game.system_config(self.id)
-        pushable_tags = [t for t in config.get("pushableTags", ["pushable"])]
-        valid_target_tags = [t for t in config.get("validTargetTags", ["walkable"])]
+        pushable_tags = [t for t in config_list(config, "pushableTags", ["pushable"])]
+        valid_target_tags = [t for t in config_list(config, "validTargetTags", ["walkable"])]
         chain_push = config.get("chainPush", False)
-        # Layers besides `objects` that stop a push, matching the pairing used by
-        # `sliding_blocks` and `line_of_sight`. Defaults to none, so packs that
-        # keep NPCs on `actors` have to opt in — without it a crate is pushed
-        # straight through a monster, since only objects and ground were ever
-        # consulted. `objects` is dropped because the push logic below already
-        # owns that layer, with chain-push semantics a generic check would break.
-        blocking_layers = [str(l) for l in config.get("blockingLayers", [])
+        # `objects` is dropped: the push logic below already owns that layer.
+        blocking_layers = [str(l) for l in config_list(config, "blockingLayers", [])
                            if str(l) != "objects"]
-        blocking_tags = [str(t) for t in config.get("blockingTags", ["solid"])]
-        tool_interactions = config.get("toolInteractions", [])
+        blocking_tags = [str(t) for t in config_list(config, "blockingTags", ["solid"])]
+        tool_interactions = config_list(config, "toolInteractions", [])
 
         board = state.board
         objects_layer = board.layers.get("objects")
@@ -90,7 +85,6 @@ class PushObjectsSystem(GameSystem):
                 entity = layer.get(pos)
                 if entity is None:
                     continue
-                # No tags configured means every entity on the layer blocks.
                 if blocking_tags and not any(
                     game.has_tag(entity.kind, tag) for tag in blocking_tags
                 ):

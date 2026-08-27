@@ -6,6 +6,7 @@ import '../models/game_state.dart';
 import '../models/position.dart';
 import '../models/direction.dart';
 import '../models/entity.dart';
+import 'sight.dart';
 
 class FollowerNpcsSystem extends GameSystem {
   const FollowerNpcsSystem({required super.id}) : super(type: 'follower_npcs');
@@ -82,17 +83,8 @@ class FollowerNpcsSystem extends GameSystem {
         }
       }
 
-      // Publish the sightline this system just computed, so rules can react to
-      // being seen exactly as they react to the standalone line_of_sight
-      // system. Only behaviors that actually test a line report one: an
-      // unconditional chaser never checked.
-      //
-      // Reported from wherever the NPC ends the turn, not from where it stood
-      // when the check ran. A chaser steps along the very line it just traced,
-      // so reporting the old cell leaves the drawn beam trailing a segment
-      // behind the monster. The shortened line is still an unobstructed
-      // sightline — it is a sub-segment of one — so the report stays true and
-      // now matches the board being looked at.
+      // Reported from wherever the NPC ends the turn, not from where it
+      // looked: a chaser steps along the line it just traced.
       final npcId = 'spirit_${npcPos.x}_${npcPos.y}';
       final sightTarget = state.avatar.position;
       final reportSight = behaviorType == 'toward_avatar' &&
@@ -349,49 +341,6 @@ class FollowerNpcsSystem extends GameSystem {
     return (a.x - b.x).abs() + (a.y - b.y).abs();
   }
 
-  /// The same relation the line_of_sight system detects.
-  ///
-  /// Source and target must share a row or column, differ in position, and
-  /// every strictly-intermediate cell must be clear. Void ground breaks the
-  /// line, as does any entity on a blocking layer carrying a blocking tag — an
-  /// empty tag list means every entity on those layers blocks.
-  bool _hasLineOfSight({
-    required Position from,
-    required Position to,
-    required Board board,
-    required GameDefinition game,
-    required List<String> blockingLayers,
-    required List<String> blockingTags,
-  }) {
-    if (from == to) return false;
-    if (from.x != to.x && from.y != to.y) return false;
-
-    final between = <Position>[];
-    if (from.x == to.x) {
-      final step = to.y > from.y ? 1 : -1;
-      for (var y = from.y + step; y != to.y; y += step) {
-        between.add(Position(from.x, y));
-      }
-    } else {
-      final step = to.x > from.x ? 1 : -1;
-      for (var x = from.x + step; x != to.x; x += step) {
-        between.add(Position(x, from.y));
-      }
-    }
-
-    for (final pos in between) {
-      if (board.isVoid(pos)) return false;
-      for (final layerName in blockingLayers) {
-        final entity = board.layers[layerName]?.getAt(pos);
-        if (entity == null) continue;
-        if (blockingTags.isEmpty ||
-            blockingTags.any((tag) => game.hasTag(entity.kind, tag))) {
-          return false;
-        }
-      }
-    }
-    return true;
-  }
 
   /// Whether this behavior currently considers the avatar visible. A behavior
   /// without `requiresLineOfSight` chases unconditionally, so it always counts
@@ -415,13 +364,15 @@ class FollowerNpcsSystem extends GameSystem {
         (behaviorDef['blockingTags'] as List<dynamic>? ?? ['solid'])
             .map((t) => t.toString())
             .toList();
-    return _hasLineOfSight(
-      from: npcPos,
-      to: avatarPos,
-      board: board,
-      game: game,
-      blockingLayers: blockingLayers,
-      blockingTags: blockingTags,
+    return hasClearLine(
+      npcPos,
+      avatarPos,
+      null,
+      state,
+      game,
+      blockingLayers,
+      blockingTags,
+      behaviorDef['multiCellObjectsBlock'] as bool? ?? true,
     );
   }
 

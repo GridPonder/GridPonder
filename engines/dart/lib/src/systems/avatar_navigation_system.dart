@@ -40,18 +40,14 @@ class AvatarNavigationSystem extends GameSystem {
     final board = state.board;
     final target = pos.moved(direction);
 
-    // Turn to face the attempted direction even when the step is refused. A
-    // blocked move still spends the turn, so without this the player gets no
-    // signal that anything happened — and leaning on an obstacle is a
-    // deliberate way to let a turn pass.
-    state.avatar = state.avatar.copyWith(facing: direction);
+    // Only the moves that never land; a successful step turns further down.
+    if (config['faceOnBlockedMove'] == true) {
+      state.avatar = state.avatar.copyWith(facing: direction);
+    }
 
     if (!board.isInBounds(target)) return const [];
     if (board.isVoid(target)) return const [];
 
-    // Optional stricter ground test: the destination's ground cell must carry
-    // one of these tags. Empty (the default) keeps the void-only check, so
-    // every pack that omits the field behaves exactly as before.
     final validGroundTags = (config['validGroundTags'] as List? ?? const [])
         .map((value) => value.toString())
         .toList();
@@ -64,9 +60,6 @@ class AvatarNavigationSystem extends GameSystem {
 
     final solidHandling = config['solidHandling'] as String? ?? 'block';
 
-    // Layers checked for a `solid` blocker, in order. Defaults to objects only,
-    // so packs that place blockers on other layers (NPCs on `actors`, for
-    // instance) have to opt in.
     final solidLayers = (config['solidLayers'] as List<dynamic>? ?? ['objects'])
         .map((l) => l.toString())
         .toList();

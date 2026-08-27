@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class RegionTransformSystem(GameSystem):
@@ -33,7 +33,7 @@ class RegionTransformSystem(GameSystem):
         if overlay is None:
             return []
 
-        affected_layers = [str(l) for l in config.get("affectedLayers", ["objects"])]
+        affected_layers = [str(l) for l in config_list(config, "affectedLayers", ["objects"])]
         board = state.board
         ox, oy = overlay.x, overlay.y
         ow, oh = overlay.width, overlay.height

@@ -116,7 +116,10 @@ def test_contact_variable_name_is_configurable():
 def test_npc_blocks_the_avatar_when_actors_layer_is_solid():
     game = _make_game(
         {"type": "toward_avatar", "requiresLineOfSight": True},
-        extra_nav_config={"solidLayers": ["objects", "actors"]},
+        extra_nav_config={
+            "solidLayers": ["objects", "actors"],
+            "faceOnBlockedMove": True,
+        },
     )
     engine = TurnEngine(game, _make_level(avatar=(1, 1), watcher=(2, 1)))
 
@@ -127,8 +130,30 @@ def test_npc_blocks_the_avatar_when_actors_layer_is_solid():
 
     assert engine.state.avatar.position.x == 1, engine.state.avatar.position
     assert not any(e["type"] == "avatar_entered" for e in result.events), result.events
-    # Facing still turns, so the player can see the blocked move registered.
+    # Opted in, so facing turns and the player can see the blocked move register.
     assert engine.state.avatar.facing == "right", engine.state.avatar.facing
+
+
+def test_a_blocked_move_leaves_facing_alone_by_default():
+    """`facing` is part of state identity, so turning on a refused move makes it
+    a fresh search node instead of a no-op. Packs pay that only on request."""
+    game = _make_game(
+        {"type": "toward_avatar", "requiresLineOfSight": True},
+        extra_nav_config={"solidLayers": ["objects", "actors"]},
+    )
+    engine = TurnEngine(game, _make_level(avatar=(1, 1), watcher=(2, 1)))
+    engine.execute_turn("move", {"direction": "down"})   # settle facing away
+    facing_before = engine.state.avatar.facing
+    engine.execute_turn("move", {"direction": "up"})     # back to the start cell
+    before = engine.state_key()
+
+    engine.execute_turn("move", {"direction": "right"})  # into the watcher
+
+    assert engine.state.avatar.facing == "up", engine.state.avatar.facing
+    assert facing_before == "down", facing_before
+    # The watcher cannot close (its only step is the avatar's cell), so the
+    # whole turn has to collapse back onto the state it started from.
+    assert engine.state_key() == before
 
 
 def test_npc_does_not_block_the_avatar_by_default():
@@ -396,6 +421,7 @@ TESTS = [
     test_contact_is_refused_without_lethal_contact,
     test_contact_variable_name_is_configurable,
     test_npc_blocks_the_avatar_when_actors_layer_is_solid,
+    test_a_blocked_move_leaves_facing_alone_by_default,
     test_npc_does_not_block_the_avatar_by_default,
     test_a_blocked_move_still_advances_the_turn,
     test_gaze_param_tracks_sight,

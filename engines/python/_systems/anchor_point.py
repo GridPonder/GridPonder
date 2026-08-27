@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class AnchorPointSystem(GameSystem):
@@ -63,7 +63,7 @@ class AnchorPointSystem(GameSystem):
             return []
 
         # Attempt teleport to marker position.
-        blocked_by_tags = config.get("blockedByTags", ["solid"])
+        blocked_by_tags = config_list(config, "blockedByTags", ["solid"])
         objects_layer = state.board.layers.get("objects")
         if objects_layer is not None:
             obj = objects_layer.get(marker_pos)

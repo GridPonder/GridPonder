@@ -10,7 +10,8 @@ from dataclasses import dataclass
 from .. import _events as ev
 from .._game_def import GameDef
 from .._models import GameState, Pos
-from ._base import GameSystem
+from ._base import GameSystem, config_list
+from ._sight import covered_by_other_multi_cell_object, has_clear_line
 
 
 @dataclass(frozen=True)
@@ -55,13 +56,13 @@ class LineOfSightSystem(GameSystem):
         if target_layer is None:
             return []
 
-        target_kinds = {str(value) for value in config.get("targetKinds", [])}
-        target_tags = {str(value) for value in config.get("targetTags", [])}
+        target_kinds = {str(value) for value in config_list(config, "targetKinds", [])}
+        target_tags = {str(value) for value in config_list(config, "targetTags", [])}
         blocking_layers = [
-            str(value) for value in config.get("blockingLayers", ["objects"])
+            str(value) for value in config_list(config, "blockingLayers", ["objects"])
         ]
         blocking_tags = {
-            str(value) for value in config.get("blockingTags", ["solid"])
+            str(value) for value in config_list(config, "blockingTags", ["solid"])
         }
         multi_cell_objects_block = bool(config.get("multiCellObjectsBlock", True))
         max_matches = int(config.get("maxMatches", 1))
@@ -77,14 +78,14 @@ class LineOfSightSystem(GameSystem):
 
             match: tuple[_SightSource, Pos] | None = None
             for source in sources:
-                if multi_cell_objects_block and _covered_by_other_multi_cell_object(
+                if multi_cell_objects_block and covered_by_other_multi_cell_object(
                     target,
                     source.multi_cell_object_id,
                     state,
                 ):
                     continue
                 for source_position in source.positions:
-                    if _has_clear_line(
+                    if has_clear_line(
                         source_position,
                         target,
                         source.multi_cell_object_id,
@@ -117,9 +118,9 @@ class LineOfSightSystem(GameSystem):
 
 
 def _sources(state: GameState, game: GameDef, config: dict) -> list[_SightSource]:
-    source_kinds = {str(value) for value in config.get("sourceKinds", [])}
-    source_tags = {str(value) for value in config.get("sourceTags", [])}
-    source_roles = {str(value) for value in config.get("sourceRoles", [])}
+    source_kinds = {str(value) for value in config_list(config, "sourceKinds", [])}
+    source_tags = {str(value) for value in config_list(config, "sourceTags", [])}
+    source_roles = {str(value) for value in config_list(config, "sourceRoles", [])}
     source_layer_id = config.get("sourceLayer")
 
     if source_layer_id is not None:
@@ -170,53 +171,3 @@ def _matches_kind_and_tags(
     if kinds and kind not in kinds:
         return False
     return not tags or any(game.has_tag(kind, tag) for tag in tags)
-
-
-def _covered_by_other_multi_cell_object(
-    position: Pos,
-    source_multi_cell_object_id: str | None,
-    state: GameState,
-) -> bool:
-    return any(
-        item.id != source_multi_cell_object_id and position in item.cells
-        for item in state.board.multi_cell_objects
-    )
-
-
-def _has_clear_line(
-    source: Pos,
-    target: Pos,
-    source_multi_cell_object_id: str | None,
-    state: GameState,
-    game: GameDef,
-    blocking_layers: list[str],
-    blocking_tags: set[str],
-    multi_cell_objects_block: bool,
-) -> bool:
-    if source == target:
-        return False
-    if source.x != target.x and source.y != target.y:
-        return False
-
-    dx = 0 if source.x == target.x else (1 if target.x > source.x else -1)
-    dy = 0 if source.y == target.y else (1 if target.y > source.y else -1)
-    position = Pos(source.x + dx, source.y + dy)
-    while position != target:
-        if state.board.is_void(position):
-            return False
-        if multi_cell_objects_block and _covered_by_other_multi_cell_object(
-            position,
-            source_multi_cell_object_id,
-            state,
-        ):
-            return False
-        for layer_id in blocking_layers:
-            entity = state.board.get_entity(layer_id, position)
-            if entity is None:
-                continue
-            if not blocking_tags or any(
-                game.has_tag(entity.kind, tag) for tag in blocking_tags
-            ):
-                return False
-        position = Pos(position.x + dx, position.y + dy)
-    return True

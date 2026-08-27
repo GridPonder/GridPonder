@@ -1,8 +1,7 @@
 """push_objects.blockingLayers — layers besides `objects` that stop a push.
 
-Only the objects and ground layers were ever consulted, so a pack that keeps
-its NPCs on `actors` had crates pushed straight through them. Pairs with
-`blockingTags` the same way `sliding_blocks` and `line_of_sight` do.
+Without it a crate travels straight through an NPC on `actors`, since only the
+objects and ground layers were ever consulted.
 
 Run from the repo root:  python engines/python/test_push_blocking_layers.py
 """

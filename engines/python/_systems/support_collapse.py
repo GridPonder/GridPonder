@@ -7,7 +7,7 @@ from typing import Optional
 from .._game_def import GameDef
 from .._models import Entity, GameState, Pos, dir_delta
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 _CARDINALS = [Pos(0, -1), Pos(0, 1), Pos(-1, 0), Pos(1, 0)]
 _DIAGONALS = _CARDINALS + [Pos(-1, -1), Pos(1, -1), Pos(-1, 1), Pos(1, 1)]
@@ -93,7 +93,7 @@ class SupportCollapseSystem(GameSystem):
             return [ev.action_vetoed()]
 
         entity = layer.get(target)
-        severable = cfg.get("severableTags", ["severable"])
+        severable = config_list(cfg, "severableTags", ["severable"])
         if entity is None or not any(
             game.has_tag(entity.kind, tag) for tag in severable
         ):
@@ -110,7 +110,7 @@ class SupportCollapseSystem(GameSystem):
         self, trigger_events: list[dict], state: GameState, game: GameDef
     ) -> list[dict]:
         cfg = self._cfg(game)
-        triggers = set(cfg.get("triggerEvents", []))
+        triggers = set(config_list(cfg, "triggerEvents", []))
         if not triggers:
             return []
         if not any(e.get("type") in triggers for e in trigger_events):
@@ -125,8 +125,8 @@ class SupportCollapseSystem(GameSystem):
             return []
         board = state.board
 
-        root_tags = cfg.get("rootTags", ["support_root"])
-        member_tags = cfg.get("memberTags", ["supported"])
+        root_tags = config_list(cfg, "rootTags", ["support_root"])
+        member_tags = config_list(cfg, "memberTags", ["supported"])
         deltas = _DIAGONALS if cfg.get("connectivity") == "diagonal" else _CARDINALS
 
         def is_root(pos: Pos) -> bool:
@@ -193,8 +193,8 @@ class SupportCollapseSystem(GameSystem):
 
         dx, dy = dir_delta(cfg.get("direction", "down"))
         step = Pos(dx, dy)
-        rest_layers = cfg.get("restLayers", [layer_id])
-        rest_tags = cfg.get("restTags", ["solid"])
+        rest_layers = config_list(cfg, "restLayers", [layer_id])
+        rest_tags = config_list(cfg, "restTags", ["solid"])
         settle = {k: str(v) for k, v in cfg.get("settleTransform", {}).items()}
         deflect = {str(k): str(v) for k, v in (cfg.get("deflect") or {}).items()}
 

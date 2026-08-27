@@ -1,15 +1,12 @@
 """FollowerNpcsSystem — see docs/dsl/04_systems.md."""
 from __future__ import annotations
-from collections import deque
-from typing import Any, Optional
+from typing import Optional
 
-from .._models import (
-    Pos, Entity, GameState, PendingMove, OverlayCursor,
-    dir_delta, dir_opposite, is_cardinal, CARDINALS,
-)
+from .._models import Pos, Entity, GameState, dir_opposite
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
+from ._sight import has_clear_line
 
 # Cardinal scan order used when ranking candidate steps.
 _CARDINAL_ORDER = ("up", "down", "left", "right")
@@ -50,7 +47,7 @@ class FollowerNpcsSystem(GameSystem):
 
     def execute_npc_resolution(self, state: GameState, game: GameDef) -> list[dict]:
         config = game.system_config(self.id)
-        npc_tags = [str(t) for t in config.get("npcTags", ["npc"])]
+        npc_tags = [str(t) for t in config_list(config, "npcTags", ["npc"])]
         behaviors = config.get("behaviors", {}) or {}
         contact_variable = config.get("contactVariable", "caught")
 
@@ -99,17 +96,8 @@ class FollowerNpcsSystem(GameSystem):
                         else "rest"
                     )
 
-            # Publish the sightline this system just computed, so rules can react
-            # to being seen exactly as they react to the standalone
-            # `line_of_sight` system. Only behaviors that actually test a line
-            # report one: an unconditional chaser never checked.
-            #
             # Reported from wherever the NPC ends the turn, not from where it
-            # stood when the check ran. A chaser steps along the very line it
-            # just traced, so reporting the old cell leaves the drawn beam
-            # trailing a segment behind the monster. The shortened line is still
-            # an unobstructed sightline — it is a sub-segment of one — so the
-            # report stays true and now matches the board being looked at.
+            # looked: a chaser steps along the line it just traced.
             npc_id = f"spirit_{npc_pos.x}_{npc_pos.y}"
             report_sight = (
                 behavior_type == "toward_avatar"
@@ -304,64 +292,21 @@ class FollowerNpcsSystem(GameSystem):
         if not behavior_def.get("requiresLineOfSight", False):
             return True
         blocking_layers = [
-            str(l) for l in behavior_def.get("blockingLayers", ["objects"])
+            str(l) for l in config_list(behavior_def, "blockingLayers", ["objects"])
         ]
-        blocking_tags = [
-            str(t) for t in behavior_def.get("blockingTags", ["solid"])
-        ]
-        return self._has_line_of_sight(
-            npc_pos, avatar_pos, state, game, blocking_layers, blocking_tags,
+        blocking_tags = {
+            str(t) for t in config_list(behavior_def, "blockingTags", ["solid"])
+        }
+        return has_clear_line(
+            npc_pos,
+            avatar_pos,
+            None,
+            state,
+            game,
+            blocking_layers,
+            blocking_tags,
+            bool(behavior_def.get("multiCellObjectsBlock", True)),
         )
-
-    def _has_line_of_sight(
-        self,
-        from_pos: Pos,
-        to_pos: Pos,
-        state: GameState,
-        game: GameDef,
-        blocking_layers: list,
-        blocking_tags: list,
-    ) -> bool:
-        """Same relation the line_of_sight system detects.
-
-        Source and target must share a row or column, differ in position, and
-        every strictly-intermediate cell must be clear. Void ground breaks the
-        line, as does any entity on a blocking layer carrying a blocking tag —
-        an empty tag list means every entity on those layers blocks.
-        """
-        if from_pos == to_pos:
-            return False
-        if from_pos.x != to_pos.x and from_pos.y != to_pos.y:
-            return False
-
-        if from_pos.x == to_pos.x:
-            step = 1 if to_pos.y > from_pos.y else -1
-            between = [
-                Pos(from_pos.x, y)
-                for y in range(from_pos.y + step, to_pos.y, step)
-            ]
-        else:
-            step = 1 if to_pos.x > from_pos.x else -1
-            between = [
-                Pos(x, from_pos.y)
-                for x in range(from_pos.x + step, to_pos.x, step)
-            ]
-
-        board = state.board
-        for pos in between:
-            if board.is_void(pos):
-                return False
-            for layer_id in blocking_layers:
-                entity = board.get_entity(layer_id, pos)
-                if entity is None:
-                    continue
-                if not blocking_tags or any(
-                    game.has_tag(entity.kind, tag) for tag in blocking_tags
-                ):
-                    return False
-        return True
-
-    # -- stepping -----------------------------------------------------------
 
     def _ranked_step(
         self,
