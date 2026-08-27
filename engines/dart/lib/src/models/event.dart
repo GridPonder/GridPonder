@@ -79,6 +79,18 @@ class GameEvent {
         'layer': layer,
       });
 
+  /// An `excavate` backfill that did *not* happen, because a mover ended the
+  /// turn on the vacated cell and carried the spoil out.
+  ///
+  /// Emitted in place of `cellTransformed`, so a game can react to the
+  /// corridor surviving — which is otherwise an *absence* of an event and has
+  /// nothing to hang a rule or an effect off.
+  static GameEvent spoilHauled(Position pos, String layer) =>
+      GameEvent('spoil_hauled', {
+        'position': pos,
+        'layer': layer,
+      });
+
   static GameEvent inventoryChanged(String? oldItem, String? newItem) =>
       GameEvent('inventory_changed', {'oldItem': oldItem, 'newItem': newItem});
 

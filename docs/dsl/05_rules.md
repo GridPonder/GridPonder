@@ -109,6 +109,55 @@ Avatar attempted to move but was blocked by a solid entity (when `avatar_navigat
 
 Rules can react to this event to implement tool-based interactions (e.g., torch burns burnable, pickaxe breaks breakable). Use the `resolve_move` effect to complete the avatar's pending movement after removing the blocker.
 
+### `actor_moved`
+Emitted by `coupled_actors` / `individual_actors` for each actor that moved.
+
+| Payload | Type | Description |
+|-------|------|-------------|
+| `kind` | string | The actor's entity kind. |
+| `position` | `[x, y]` | Cell the actor moved into. |
+| `fromPosition` | `[x, y]` | Cell the actor left. |
+| `direction` | string | The **action's** direction, not the actor's effective one. |
+
+### `actor_entered`
+Emitted immediately after `actor_moved`, with the same payload. Two events fire
+for one move so a rule can distinguish "something left that cell" from
+"something arrived at this cell" without inspecting positions.
+
+Because `where` conditions such as `position_has_tag` read the event's
+`position`, this is the hook for anything that reacts to an actor arriving on a
+cell — pickups, pressure plates, traps. A pickup that retags the actor is
+expressible with no engine support at all:
+
+```json
+{
+  "id": "take_drill",
+  "on": "actor_entered",
+  "where": { "all_of": [
+    { "event": { "kind": "digger" } },
+    { "position_has_tag": { "layer": "tools", "tag": "grants_drill" } }
+  ]},
+  "then": [
+    { "transform": { "position": "$event.position", "layer": "actors", "toKind": "digger_drill" } },
+    { "destroy": { "position": "$event.position", "layer": "tools" } }
+  ]
+}
+```
+
+Carrying the held item in the actor's **entity kind** keeps it inside board
+state, so `to_key()`, undo, `previewTurn` and solver deduplication all keep
+working with no extra handling. Replacing the `destroy` with a `transform` of
+the item entity turns the same rule into a swap that drops the old item in
+place.
+
+### `actor_blocked`
+Emitted for each actor that could not move.
+
+| Payload | Type | Description |
+|-------|------|-------------|
+| `kind` | string | The actor's entity kind. |
+| `position` | `[x, y]` | Cell the actor stayed in. |
+
 ### `tiles_slid`
 Tiles slid during a slide-merge action.
 
@@ -170,6 +219,18 @@ A cell's entity was replaced with a different entity.
 | `fromKind` | string | Previous kind. |
 | `toKind` | string | New kind. |
 | `layer` | string | Which layer changed. |
+
+### `spoil_hauled`
+An `excavate` backfill that did **not** happen, because a mover ended the turn
+on the excavator's vacated cell and carried the spoil out. Emitted in place of
+the `cell_transformed` that would otherwise have fired, so a game can react to
+a corridor *surviving* — which is otherwise an absence of an event and has
+nothing to hang a rule or an effect off.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell that stayed open. |
+| `layer` | string | Layer the backfill would have been written to. |
 
 ### `inventory_changed`
 Avatar inventory changed.

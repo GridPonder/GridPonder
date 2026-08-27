@@ -9,8 +9,10 @@ class ActionParamDef {
   final String type;
   final List<String>? values;
   const ActionParamDef({required this.type, this.values});
-  factory ActionParamDef.fromJson(Map<String, dynamic> j) =>
-      ActionParamDef(type: j['type'] as String, values: j['values'] != null ? List<String>.from(j['values'] as List) : null);
+  factory ActionParamDef.fromJson(Map<String, dynamic> j) => ActionParamDef(
+      type: j['type'] as String,
+      values:
+          j['values'] != null ? List<String>.from(j['values'] as List) : null);
 }
 
 /// A declared action type in game.json.
@@ -56,7 +58,8 @@ class SequenceEntry {
   final String? text;
   final String? image;
 
-  const SequenceEntry({required this.type, this.ref, this.title, this.text, this.image});
+  const SequenceEntry(
+      {required this.type, this.ref, this.title, this.text, this.image});
 
   factory SequenceEntry.fromJson(Map<String, dynamic> j) => SequenceEntry(
         type: j['type'] as String,
@@ -67,6 +70,41 @@ class SequenceEntry {
       );
 }
 
+/// One live value from `state.variables` surfaced to the player as a chip.
+///
+/// Generic on purpose: any pack with a runtime counter worth showing (an edit
+/// budget, a score, a `sonar` distance reading) can declare one without the
+/// app having to learn that pack's vocabulary.
+class GameReadout {
+  /// Name of the variable in `state.variables` to display.
+  final String variable;
+
+  /// Short label shown beside the value.
+  final String label;
+
+  /// Optional palette key used to tint the chip, so a reading can be
+  /// colour-matched to the entity it describes.
+  final String? color;
+
+  /// Optional sentinel: when the variable equals this, the chip shows a dash
+  /// instead of the raw number — e.g. `sonar`'s `-1` for "no target".
+  final int? blankWhen;
+
+  const GameReadout({
+    required this.variable,
+    required this.label,
+    this.color,
+    this.blankWhen,
+  });
+
+  factory GameReadout.fromJson(Map<String, dynamic> j) => GameReadout(
+        variable: j['variable'] as String? ?? '',
+        label: j['label'] as String? ?? '',
+        color: j['color'] as String?,
+        blankWhen: (j['blankWhen'] as num?)?.toInt(),
+      );
+}
+
 /// UI display configuration for a game.
 class GameUiConfig {
   /// Whether to show the goal panel during play.
@@ -74,6 +112,9 @@ class GameUiConfig {
 
   /// Whether to show the guide panel during play.
   final bool showGuide;
+
+  /// Live variable chips shown during play, in declaration order.
+  final List<GameReadout> readouts;
 
   /// Whether a `board_match` goal draws its target as a miniature board.
   ///
@@ -86,14 +127,22 @@ class GameUiConfig {
   const GameUiConfig({
     this.showGoal = false,
     this.showGuide = false,
+    this.readouts = const [],
     this.showGoalPreview = true,
   });
 
   factory GameUiConfig.fromJson(Map<String, dynamic>? j) {
     if (j == null) return const GameUiConfig();
+    final raw = j['readouts'];
     return GameUiConfig(
       showGoal: (j['showGoal'] as bool?) ?? false,
       showGuide: (j['showGuide'] as bool?) ?? false,
+      readouts: raw is! List
+          ? const []
+          : [
+              for (final r in raw)
+                if (r is Map<String, dynamic>) GameReadout.fromJson(r),
+            ].where((r) => r.variable.isNotEmpty).toList(),
       showGoalPreview: (j['showGoalPreview'] as bool?) ?? true,
     );
   }
@@ -137,6 +186,7 @@ class GameDefinition {
   final List<SequenceEntry> levelSequence;
   final GameDefaults defaults;
   final GameUiConfig ui;
+
   /// Per-game goal-text overrides keyed by goal id. See goal_descriptions
   /// in the Python engine for parity. Lets a pack supply a precise
   /// mechanical description in place of the renderer's generic auto-generated text.
@@ -164,16 +214,15 @@ class GameDefinition {
     String description = '',
   }) {
     final rawKinds = j['entityKinds'] as Map<String, dynamic>? ?? {};
-    final entityKinds = rawKinds.map(
-        (k, v) => MapEntry(k, EntityKindDef.fromJson(k, v as Map<String, dynamic>)));
+    final entityKinds = rawKinds.map((k, v) =>
+        MapEntry(k, EntityKindDef.fromJson(k, v as Map<String, dynamic>)));
 
     // Validate text symbols are unique within this game.
     final seen = <String, String>{}; // symbol -> kindId
     for (final kind in entityKinds.values) {
       final sym = kind.symbol;
       if (seen.containsKey(sym)) {
-        throw FormatException(
-            'Duplicate symbol "$sym" on entity kinds '
+        throw FormatException('Duplicate symbol "$sym" on entity kinds '
             '"${seen[sym]}" and "${kind.id}" in game "$id"');
       }
       seen[sym] = kind.id;
