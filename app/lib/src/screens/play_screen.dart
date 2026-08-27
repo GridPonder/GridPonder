@@ -201,7 +201,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       outcome: 'accepted',
       src: source,
       n: _engine.undoDepth,
-      pos: _trackedPositions(),
+      pos: _tracker.enabled ? _trackedPositions() : null,
     );
     _syncSelectedMultiCellObject();
 
