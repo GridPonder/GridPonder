@@ -155,6 +155,30 @@ class SlidingBlocksTest(unittest.TestCase):
 
         self.assertNotEqual(engine.state.to_key(), moved.to_key())
 
+    def test_state_key_freezes_nested_multi_cell_params(self) -> None:
+        engine = TurnEngine(
+            _game(),
+            _level(
+                "state_key_nested_params",
+                _single_block_board(
+                    extra_blocks=[
+                        {
+                            "id": "pipe",
+                            "kind": "pipe",
+                            "cells": [{"position": [2, 0]}],
+                            "params": {
+                                "exitPosition": [2, 1],
+                                "queue": [7, 5],
+                                "metadata": {"stages": [1, 2]},
+                            },
+                        }
+                    ]
+                ),
+            ),
+        )
+
+        hash(engine.state_key())
+
     def _assert_veto_is_transactional(self, save_history: bool) -> None:
         engine = TurnEngine(
             _game(),

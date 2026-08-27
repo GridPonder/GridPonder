@@ -1,0 +1,42 @@
+{
+  "id": "follower_npcs_smoke_07",
+  "title": "Follower NPCs Narrow Escape",
+  "board": {
+    "size": [7, 3],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [5, 2], "kind": "flag"}
+        ]
+      },
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [0, 1], "kind": "watcher", "behavior": "hunt"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [6, 1]}
+  },
+  "goals": [
+    {
+      "id": "reach_flag",
+      "type": "reach_target",
+      "config": {"targetKind": "flag"}
+    }
+  ],
+  "loseConditions": [
+    {"type": "variable_threshold", "config": {"variable": "caught", "target": 1, "comparison": "gte"}}
+  ],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "down"}
+    ]
+  }
+}

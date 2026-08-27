@@ -116,10 +116,19 @@ class GameUiConfig {
   /// Live variable chips shown during play, in declaration order.
   final List<GameReadout> readouts;
 
+  /// Whether a `board_match` goal draws its target as a miniature board.
+  ///
+  /// That drawing is the right answer for a game whose goal *is* a pattern, and
+  /// noise for one that uses `board_match` merely to say "this entity stands
+  /// here" — a two-row board with a single marked square explains nothing the
+  /// goal text does not. Turning it off falls back to the goal's description.
+  final bool showGoalPreview;
+
   const GameUiConfig({
     this.showGoal = false,
     this.showGuide = false,
     this.readouts = const [],
+    this.showGoalPreview = true,
   });
 
   factory GameUiConfig.fromJson(Map<String, dynamic>? j) {
@@ -134,6 +143,7 @@ class GameUiConfig {
               for (final r in raw)
                 if (r is Map<String, dynamic>) GameReadout.fromJson(r),
             ].where((r) => r.variable.isNotEmpty).toList(),
+      showGoalPreview: (j['showGoalPreview'] as bool?) ?? true,
     );
   }
 }

@@ -180,6 +180,32 @@ void main() {
     }
   });
 
+  // --- follower_npcs_smoke (throwaway follower_npcs fixture) ---
+  group('follower_npcs_smoke gold paths', () {
+    late LoadedPack pack;
+    setUpAll(
+      () => pack = _loadPack('../python/_fixtures/follower_npcs_smoke'),
+    );
+
+    for (final levelId in const [
+      'follower_npcs_smoke_01',
+      'follower_npcs_smoke_02',
+      'follower_npcs_smoke_03',
+      'follower_npcs_smoke_04',
+      'follower_npcs_smoke_05',
+      'follower_npcs_smoke_06',
+      'follower_npcs_smoke_07',
+    ]) {
+      test(
+        levelId,
+        () => _replayAndExpectWin(
+          _engineForLevel(pack, levelId),
+          _goldPath(pack, levelId),
+        ),
+      );
+    }
+  });
+
   group('undo/reset', () {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/carrot_quest'));

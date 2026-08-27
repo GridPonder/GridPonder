@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class PushObjectsSystem(GameSystem):
@@ -22,10 +22,14 @@ class PushObjectsSystem(GameSystem):
             return []
 
         config = game.system_config(self.id)
-        pushable_tags = [t for t in config.get("pushableTags", ["pushable"])]
-        valid_target_tags = [t for t in config.get("validTargetTags", ["walkable"])]
+        pushable_tags = [t for t in config_list(config, "pushableTags", ["pushable"])]
+        valid_target_tags = [t for t in config_list(config, "validTargetTags", ["walkable"])]
         chain_push = config.get("chainPush", False)
-        tool_interactions = config.get("toolInteractions", [])
+        # `objects` is dropped: the push logic below already owns that layer.
+        blocking_layers = [str(l) for l in config_list(config, "blockingLayers", [])
+                           if str(l) != "objects"]
+        blocking_tags = [str(t) for t in config_list(config, "blockingTags", ["solid"])]
+        tool_interactions = config_list(config, "toolInteractions", [])
 
         board = state.board
         objects_layer = board.layers.get("objects")
@@ -73,6 +77,24 @@ class PushObjectsSystem(GameSystem):
         if not board.is_in_bounds(push_dest) or board.is_void(push_dest):
             return []
 
+        def _blocked_by_other_layer(pos: Pos) -> bool:
+            for layer_id in blocking_layers:
+                layer = board.layers.get(layer_id)
+                if layer is None:
+                    continue
+                entity = layer.get(pos)
+                if entity is None:
+                    continue
+                if blocking_tags and not any(
+                    game.has_tag(entity.kind, tag) for tag in blocking_tags
+                ):
+                    continue
+                return True
+            return False
+
+        if _blocked_by_other_layer(push_dest):
+            return []
+
         entity_at_push_dest = objects_layer.get(push_dest)
 
         if entity_at_push_dest is not None:
@@ -85,6 +107,8 @@ class PushObjectsSystem(GameSystem):
             if not board.is_in_bounds(chain_dest) or board.is_void(chain_dest):
                 return []
             if objects_layer.get(chain_dest) is not None:
+                return []
+            if _blocked_by_other_layer(chain_dest):
                 return []
             if not _valid_ground(ground_layer, chain_dest, valid_target_tags, game):
                 return []

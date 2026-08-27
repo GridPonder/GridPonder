@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class FloodFillSystem(GameSystem):
@@ -24,7 +24,7 @@ class FloodFillSystem(GameSystem):
         affected_layer = config.get("affectedLayer", "objects")
         match_by = config.get("matchBy", "color")
         source_mode = config.get("sourcePosition", "avatar")
-        color_cycle = config.get("colorCycle", ["red", "blue", "green", "yellow", "purple", "orange"])
+        color_cycle = config_list(config, "colorCycle", ["red", "blue", "green", "yellow", "purple", "orange"])
         kind_transform = {k: str(v) for k, v in config.get("kindTransform", {}).items()}
 
         board = state.board

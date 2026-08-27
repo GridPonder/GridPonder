@@ -10,6 +10,9 @@ class ValidationError {
 
 /// Validates a loaded pack for structural integrity.
 class PackValidator {
+  static final RegExp _tagPattern =
+      RegExp(r'^[a-z0-9]+(?:-[a-z0-9]+)*$');
+
   static List<ValidationError> validate(LoadedPack pack) {
     final errors = <ValidationError>[];
     final game = pack.game;
@@ -18,6 +21,23 @@ class PackValidator {
     if (!pack.manifest.dslVersion.startsWith('0.')) {
       errors.add(const ValidationError(
           'manifest.dslVersion', 'Engine supports DSL v0.x only'));
+    }
+
+    if (pack.manifest.tags.length > 12) {
+      errors.add(const ValidationError(
+          'manifest.tags', 'A pack may declare at most 12 game tags'));
+    }
+    if (pack.manifest.tags.toSet().length != pack.manifest.tags.length) {
+      errors.add(const ValidationError(
+          'manifest.tags', 'Game tags must be unique'));
+    }
+    for (final tag in pack.manifest.tags) {
+      if (tag.length > 48 || !_tagPattern.hasMatch(tag)) {
+        errors.add(ValidationError(
+            'manifest.tags',
+            'Invalid game tag "$tag"; use lowercase kebab-case with at most '
+                '48 characters'));
+      }
     }
 
     // Check all level sequence refs resolve

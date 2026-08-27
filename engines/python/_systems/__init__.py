@@ -62,17 +62,40 @@ _REGISTRY: dict[str, SystemFactory] = {
 }
 
 
+def supported_system_types() -> frozenset[str]:
+    return frozenset(_REGISTRY)
+
+
+def unsupported_system_types(game: GameDef) -> list[str]:
+    return sorted(
+        {
+            system["type"]
+            for system in game.systems
+            if system.get("enabled", True) and system["type"] not in _REGISTRY
+        }
+    )
+
+
 def instantiate_systems(game: GameDef, overrides: Optional[dict] = None) -> list[GameSystem]:
     effective_game = game.with_system_overrides(overrides)
+    unsupported = unsupported_system_types(effective_game)
+    if unsupported:
+        raise ValueError(
+            "Unsupported enabled game system type(s): " + ", ".join(unsupported)
+        )
     systems = []
     for sys_def in effective_game.systems:
         if not sys_def.get("enabled", True):
             continue
-        factory = _REGISTRY.get(sys_def["type"])
-        if factory is not None:
-            config = effective_game.system_config(sys_def["id"])
-            systems.append(factory(sys_def["id"], config))
+        factory = _REGISTRY[sys_def["type"]]
+        config = effective_game.system_config(sys_def["id"])
+        systems.append(factory(sys_def["id"], config))
     return systems
 
 
-__all__ = ["GameSystem", "instantiate_systems"]
+__all__ = [
+    "GameSystem",
+    "instantiate_systems",
+    "supported_system_types",
+    "unsupported_system_types",
+]

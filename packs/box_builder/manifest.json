@@ -5,6 +5,7 @@
   "title": "The Box That Pip Built",
   "shortDescription": "Push fragments together to assemble complete boxes.",
   "description": "Move one step per turn. Walk into a box fragment to push it one cell in your direction. When two fragments touch face-to-face, those touching sides join, and a joined cluster moves as a single piece \u2014 so you can push it from any of its outer sides. A fragment is complete when all four of its sides are joined (to another fragment or to the board edge). Win by maneuvering every fragment onto a target cell so each one ends up complete. Rocks block movement; pick up a pickaxe and walk into a rock to break it.",
+  "tags": ["assembly", "object-manipulation", "spatial-planning"],
   "coverImage": "assets/rabbit_built_box.png",
   "version": "1.0.0",
   "minEngineVersion": "0.7.0",

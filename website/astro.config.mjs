@@ -4,4 +4,5 @@ import tailwind from '@astrojs/tailwind';
 export default defineConfig({
   integrations: [tailwind()],
   site: 'https://gridponder.org',
+  base: process.env.GRIDPONDER_REPORT_BASE ?? '/',
 });

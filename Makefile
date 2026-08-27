@@ -3,7 +3,14 @@ SFTP_USER = stu135248240
 SFTP_REMOTE = .
 
 .PHONY: build-game build-site build deploy deploy-site ship setup-deploy \
-        benchmark benchmark-suite benchmark-build benchmark-agg
+        benchmark benchmark-suite benchmark-build benchmark-agg \
+        benchmark-study-validate benchmark-study-dry benchmark-study-report \
+        build-study-site
+
+PYTHON ?= python3
+STUDY_MANIFEST ?= tools/benchmark/studies/final-study.local.yaml
+STUDY_PACKS ?= packs
+STUDY_RUN_DIR ?= tools/benchmark/results/study/final
 
 ## Install deploy tooling (lftp)
 setup-deploy:
@@ -73,3 +80,29 @@ benchmark: benchmark-build
 ## Aggregate run results into leaderboard.json (commit the result, then make ship)
 benchmark-agg:
 	cd tools/benchmark && python aggregate.py
+
+## Validate the frozen nested-panel study and authored instruction stream
+benchmark-study-validate:
+	@test -f "$(STUDY_MANIFEST)" || (echo "Missing STUDY_MANIFEST=$(STUDY_MANIFEST)" && exit 1)
+	$(PYTHON) tools/benchmark/preflight.py \
+	  --packs-dir "$(STUDY_PACKS)" \
+	  --study-manifest "$(STUDY_MANIFEST)"
+
+## Print the exact deduplicated episode/session workload without model calls
+benchmark-study-dry:
+	@test -f "$(STUDY_MANIFEST)" || (echo "Missing STUDY_MANIFEST=$(STUDY_MANIFEST)" && exit 1)
+	$(PYTHON) tools/benchmark/run_study.py \
+	  --packs-dir "$(STUDY_PACKS)" \
+	  --manifest "$(STUDY_MANIFEST)" \
+	  --dry-run
+
+## Generate matched study JSON and the self-contained detailed report
+benchmark-study-report:
+	$(PYTHON) tools/benchmark/study_report.py \
+	  --results-dir "$(STUDY_RUN_DIR)" \
+	  --output tools/benchmark/study-leaderboard.json
+
+## Build the website with the optional nested-study analysis page enabled
+build-study-site: sync-covers
+	cd website && npm install && \
+	  GRIDPONDER_STUDY_DATA=../tools/benchmark/study-leaderboard.json npm run build

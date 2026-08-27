@@ -160,6 +160,13 @@ class GameEvent {
         'fromKind': fromKind ?? kind,
       });
 
+  static GameEvent avatarCaught(Position pos, String npcKind, String npcId) =>
+      GameEvent('avatar_caught', {
+        'position': pos,
+        'npcKind': npcKind,
+        'npcId': npcId,
+      });
+
   static GameEvent npcMoved(String npcId, Position from, Position to) =>
       GameEvent('npc_moved', {
         'npcId': npcId,

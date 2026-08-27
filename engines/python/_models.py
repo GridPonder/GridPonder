@@ -125,7 +125,7 @@ class Entity:
     def to_key(self) -> tuple:
         if not self.params:
             return (self.kind,)
-        return (self.kind, tuple(sorted(self.params.items())))
+        return (self.kind, _freeze_value(self.params))
 
     @classmethod
     def from_json(cls, j) -> "Entity":
@@ -519,7 +519,7 @@ class GameState:
                 m.id,
                 m.kind,
                 tuple((p.x, p.y) for p in m.cells),
-                tuple(sorted(m.params.items())),
+                _freeze_value(m.params),
             )
             for m in self.board.multi_cell_objects
         )
@@ -532,8 +532,8 @@ class GameState:
 def _freeze_value(value):
     if isinstance(value, dict):
         return tuple((k, _freeze_value(v)) for k, v in sorted(value.items()))
-    if isinstance(value, list):
+    if isinstance(value, (list, tuple)):
         return tuple(_freeze_value(v) for v in value)
     if isinstance(value, set):
-        return tuple(sorted(_freeze_value(v) for v in value))
+        return frozenset(_freeze_value(v) for v in value)
     return value

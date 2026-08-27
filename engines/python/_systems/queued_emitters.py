@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class QueuedEmittersSystem(GameSystem):
@@ -32,7 +32,7 @@ class QueuedEmittersSystem(GameSystem):
             exit_dir = mco.params.get("exitDirection")
             spawn_pos = Pos(exit_pos.x + dir_delta(exit_dir)[0], exit_pos.y + dir_delta(exit_dir)[1]) if exit_dir else exit_pos
 
-            queue = mco.params.get("queue", [])
+            queue = config_list(mco.params, "queue", [])
 
             exit2_raw = mco.params.get("exit2Position")
             if exit2_raw is not None:

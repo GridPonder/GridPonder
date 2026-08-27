@@ -180,6 +180,16 @@ For games with directional movement, the avatar should use a **sprite map** keye
 }
 ```
 
+> **What the renderer actually honours today.** The Flutter renderer resolves
+> `sprites.idle.<direction>` by the avatar's current facing, falling back to the
+> flat `avatar.sprite`, and finally to the shared base-pack sprites when a pack
+> declares no avatar art at all. `{"mirror": "<direction>"}` resolves to the
+> named direction's path drawn flipped horizontally, one hop only. Animated
+> entries render their **first frame**: nothing drives a per-frame ticker for the
+> avatar. The `moving` and `pushing` states above are parsed but never requested —
+> no system emits an avatar state — and `visible` is not consulted. Treat those
+> three as specified-but-unimplemented rather than available.
+
 #### Sprite map structure
 
 | Level | Key | Value |

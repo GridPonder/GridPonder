@@ -1,0 +1,65 @@
+schema_version: 1
+description: >
+  Initial GridPonder game-level taxonomy. Freeze this file before model
+  canaries and extend it only through a reviewed corpus revision.
+tags:
+  assembly:
+    label: Assembly
+    definition: Build or join components into a required structure.
+  capture:
+    label: Capture
+    definition: Convert, bracket, or control pieces through positional relations.
+  circuit-reasoning:
+    label: Circuit reasoning
+    definition: Route or diagnose signals through serial or parallel networks.
+  constraint-satisfaction:
+    label: Constraint satisfaction
+    definition: Satisfy several interacting global or local constraints.
+  coverage:
+    label: Coverage
+    definition: Visit, claim, color, or fill an entire target region.
+  irreversible-actions:
+    label: Irreversible actions
+    definition: Actions permanently remove options or alter later reachability.
+  long-horizon-planning:
+    label: Long-horizon planning
+    definition: Solutions require coordinating decisions across many dependent steps.
+  merging:
+    label: Merging
+    definition: Combine pieces or values under local collision rules.
+  multi-agent-coordination:
+    label: Multi-agent coordination
+    definition: Coordinate multiple controllable actors or coupled pieces.
+  navigation:
+    label: Navigation
+    definition: Move an actor through obstacles to reach spatial goals.
+  object-manipulation:
+    label: Object manipulation
+    definition: Push, pull, carry, cut, or otherwise reposition objects.
+  partial-observability:
+    label: Partial observability
+    definition: Relevant state or consequences are initially hidden or revealed indirectly.
+  pattern-transformation:
+    label: Pattern transformation
+    definition: Transform a board arrangement to match a target pattern.
+  physics:
+    label: Physics
+    definition: Reason about falling, support, sliding, or other simulated dynamics.
+  resource-use:
+    label: Resource use
+    definition: Acquire and deploy consumable or stateful tools at appropriate times.
+  routing:
+    label: Routing
+    definition: Establish paths for objects, agents, power, or signals.
+  simultaneous-movement:
+    label: Simultaneous movement
+    definition: One action moves or transforms multiple entities together.
+  spatial-planning:
+    label: Spatial planning
+    definition: Plan geometric arrangements, access, ordering, or maneuvering.
+  state-transformation:
+    label: State transformation
+    definition: Repeatedly transform discrete board state under global rules.
+  territory-control:
+    label: Territory control
+    definition: Claim, balance, or protect regions of the board.
