@@ -15,6 +15,24 @@ void main() {
     expect(sent, isFalse);
   });
 
+  test('is a true no-op with production defaults (no --dart-define)', () async {
+    final defaultTracker = PlaytestTracker();
+    expect(defaultTracker.enabled, isFalse);
+
+    SharedPreferences.setMockInitialValues({});
+    var sent = false;
+    final tracker = PlaytestTracker(
+      send: (uri) async {
+        sent = true;
+      },
+    );
+    await tracker.track('move', level: 'sp_001');
+    expect(sent, isFalse);
+
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('playtest_session_id'), isNull);
+  });
+
   test('sends an event with the expected query params when enabled', () async {
     SharedPreferences.setMockInitialValues({});
     Uri? captured;
