@@ -7,6 +7,7 @@ import 'package:gridponder_engine/engine.dart';
 import 'package:llm_dart/llm_dart.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
+import '../services/playtest_tracker.dart';
 import '../services/progress_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/board_renderer.dart'
@@ -55,6 +56,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   late LevelDefinition _levelDef;
   late TurnEngine _engine;
   late HintService _hintService;
+  final _tracker = PlaytestTracker();
 
   /// Dry-run results for the actions available from where the avatar stands,
   /// memoised against the board position they describe. See
@@ -168,6 +170,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _selectedMultiCellObjectId = null;
     _lineOfSightFeedbacks = const [];
     _movingSprites.value = const [];
+    _tracker.track('level_start', level: levelId);
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -178,10 +181,28 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// Runs [action] through the engine and plays its full animation queue.
   /// Used by user input ([_onAction]) and replay paths ([_onSolve],
   /// [_playHint]) so all entry points show the same animations.
-  Future<void> _runAction(GameAction action) async {
+  Future<void> _runAction(GameAction action, {String source = 'user'}) async {
     final preState = _engine.state.copy();
     final result = _engine.executeTurn(action);
-    if (!result.accepted) return;
+    if (!result.accepted) {
+      _tracker.track(
+        'move',
+        level: _levelDef.id,
+        action: action.actionId,
+        outcome: 'rejected',
+        src: source,
+      );
+      return;
+    }
+    _tracker.track(
+      'move',
+      level: _levelDef.id,
+      action: action.actionId,
+      outcome: 'accepted',
+      src: source,
+      n: _engine.undoDepth,
+      pos: _trackedPositions(),
+    );
     _syncSelectedMultiCellObject();
 
     // Record the chosen colour for any colour-pick action (any action that
@@ -321,6 +342,41 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     if (!mounted) return;
     setState(() => _animating = false);
+  }
+
+  /// The cells the player's pieces occupy right now, as `x.y` joined by commas
+  /// (e.g. `"2.1,6.3"`). Empty when the pack has neither.
+  ///
+  /// A pack moves either a level `avatar` (keystone, relay_lanterns) or entities
+  /// on a system's `actorLayer` (spoil, pincer, three_kingdoms), so both are
+  /// collected. `actorLayer` defaults to `"actors"` in the DSL, so a board with an
+  /// `actors` layer is used when no system names one explicitly.
+  String _trackedPositions() {
+    final board = _engine.state.board;
+    final cells = <Position>{};
+
+    final avatarPos = _engine.state.avatar.position;
+    if (avatarPos != null) cells.add(avatarPos);
+
+    var layerIds = <String>{
+      for (final s in widget.packService.game.systems)
+        if (s.enabled && s.config['actorLayer'] is String)
+          s.config['actorLayer'] as String,
+    };
+    if (layerIds.isEmpty && board.layers.containsKey('actors')) {
+      layerIds = {'actors'};
+    }
+    for (final id in layerIds) {
+      final layer = board.layers[id];
+      if (layer == null) continue;
+      for (final entry in layer.entries()) {
+        cells.add(entry.key);
+      }
+    }
+
+    final sorted = cells.toList()
+      ..sort((a, b) => a.y != b.y ? a.y.compareTo(b.y) : a.x.compareTo(b.x));
+    return sorted.map((p) => '${p.x}.${p.y}').join(',');
   }
 
   /// Plays any theme-declared sprite-strip effects triggered by this turn's
@@ -727,6 +783,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _lastFloodColor = null;
       _syncSelectedMultiCellObject();
     });
+    _tracker.track('undo', level: _levelDef.id);
   }
 
   void _onReset() {
@@ -740,6 +797,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
+    _tracker.track('reset', level: _levelDef.id);
   }
 
   /// Advance to the next sequence entry. If it's a level, load it.
@@ -1044,6 +1102,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       if (!proceed) return;
     }
 
+    _tracker.track('hint_requested', level: _levelDef.id);
     await _playHint(idx);
   }
 
@@ -1139,7 +1198,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     await Future.delayed(Duration.zero);
     for (int i = 0; i < goldPath.length; i++) {
       if (!mounted) return;
-      await _runAction(goldPath[i]);
+      await _runAction(goldPath[i], source: 'solve');
       await Future.delayed(const Duration(milliseconds: 300));
     }
   }
@@ -1161,7 +1220,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
       if (!mounted) return;
-      await _runAction(goldPath[i]);
+      await _runAction(goldPath[i], source: 'hint');
       await Future.delayed(const Duration(milliseconds: 300));
     }
   }
@@ -1510,11 +1569,14 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     // Record win the first time it is detected (post-frame to avoid
     // calling async work inside a synchronous build call).
-    if (state.isWon && !_wonHandled && widget.progress != null) {
+    if (state.isWon && !_wonHandled) {
       _wonHandled = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.progress!.markCompleted(levelId);
-      });
+      _tracker.track('level_complete', level: levelId);
+      if (widget.progress != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.progress!.markCompleted(levelId);
+        });
+      }
     }
     final hintStatuses = _hintService.statuses;
     final hintAvailable = _hintService.hasAnyAvailable && !_aiRunning;
