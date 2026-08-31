@@ -23,6 +23,11 @@ class PortalsSystem(GameSystem):
             "tags": [str(t) for t in tags_raw],
             "matchKey": cfg.get("matchKey", "channel"),
             "endMovement": cfg.get("endMovement", True),
+            "actorLayer": cfg.get("actorLayer"),
+            "actorPositionVariable": cfg.get("actorPositionVariable"),
+            "trailClearing": cfg.get("trailClearing", []),
+            "clearTrailAtPortalCells": cfg.get("clearTrailAtPortalCells", False),
+            "exitFoodLayers": cfg.get("exitFoodLayers", []),
         }
 
     def execute_movement_resolution(self, state: GameState, game: GameDef) -> list[dict]:
@@ -63,6 +68,49 @@ class PortalsSystem(GameSystem):
                 events.extend(self._try_teleport_avatar(state, game, avatar_pos, cfg["tags"], cfg["matchKey"], cfg["endMovement"]))
                 break
 
+        # Actor portal check (supports individual_actors system)
+        actor_layer_id = cfg.get("actorLayer")
+        if actor_layer_id:
+            actor_layer = state.board.layers.get(actor_layer_id)
+            if actor_layer is not None:
+                for e in trigger_events:
+                    if e["type"] != "actor_entered":
+                        continue
+                    entered_raw = e.get("position")
+                    ep = (entered_raw if isinstance(entered_raw, Pos)
+                          else Pos.from_json(entered_raw)) if entered_raw else None
+                    if ep is None:
+                        continue
+                    from_raw = e.get("fromPosition")
+                    from_pos = (from_raw if isinstance(from_raw, Pos)
+                                else Pos.from_json(from_raw)) if from_raw else None
+                    portal = self._portal_at(state.board, ep, cfg["tags"], game)
+                    if portal is None:
+                        continue
+                    channel = portal[0].param(cfg["matchKey"])
+                    if channel is None:
+                        continue
+                    exit_pos = self._find_exit_portal(
+                        state.board, ep, portal[0].kind, channel, cfg["matchKey"])
+                    if exit_pos is None:
+                        continue
+                    if from_pos == exit_pos:
+                        continue  # bounce guard
+                    actor = actor_layer.get(ep)
+                    if actor is None:
+                        continue
+                    state.board.set_entity(actor_layer_id, ep, None)
+                    state.board.set_entity(actor_layer_id, exit_pos, actor)
+                    actor_pos_var = cfg.get("actorPositionVariable")
+                    if actor_pos_var is not None:
+                        state.variables[actor_pos_var] = [exit_pos.x, exit_pos.y]
+                    self._clear_actor_trail(state, cfg, actor.kind)
+                    self._collect_exit_food(state, game, cfg, exit_pos, actor.kind)
+
+        # Keep portal cells free of trail tiles so they remain permanently usable.
+        if cfg.get("clearTrailAtPortalCells") and cfg.get("trailClearing"):
+            self._clear_trails_at_portal_positions(state, cfg, game)
+
         # Object portal check
         arrived = {
             (e.get("position") if isinstance(e.get("position"), Pos) else Pos.from_json(e["position"]))
@@ -74,6 +122,88 @@ class PortalsSystem(GameSystem):
             events.extend(self._try_teleport_objects(state, game, cfg, arrived))
 
         return events
+
+    def _clear_trails_at_portal_positions(self, state: GameState, cfg: dict, game: GameDef) -> None:
+        """Erase trail tiles on portal cells so they stay permanently traversable.
+
+        Budget is not restored — the move that placed the trail is already paid.
+        """
+        for layer in state.board.layers.values():
+            for pos, entity in layer.entries():
+                if not any(game.has_tag(entity.kind, t) for t in cfg["tags"]):
+                    continue
+                for tc in cfg.get("trailClearing", []):
+                    trail_layer_id = tc.get("trailLayer")
+                    trail_kind = tc.get("trailKind")
+                    restore_kind = tc.get("restoreKind")
+                    trail_layer = state.board.layers.get(trail_layer_id)
+                    if trail_layer is None:
+                        continue
+                    trail_cell = trail_layer.get(pos)
+                    if trail_cell is not None and trail_cell.kind == trail_kind:
+                        new_ent = Entity(restore_kind) if restore_kind else None
+                        state.board.set_entity(trail_layer_id, pos, new_ent)
+
+    def _clear_actor_trail(self, state, cfg: dict, actor_kind: str) -> None:
+        """Clear all trail tiles for the teleporting actor and restore its budget."""
+        for tc in cfg.get("trailClearing", []):
+            if tc.get("actorKind") != actor_kind:
+                continue
+            trail_layer_id = tc.get("trailLayer")
+            trail_kind = tc.get("trailKind")
+            restore_kind = tc.get("restoreKind")
+            budget_var = tc.get("budgetVariable")
+            layer = state.board.layers.get(trail_layer_id)
+            if layer is None:
+                break
+            to_restore = [
+                pos for pos, ent in layer.entries()
+                if ent.kind == trail_kind
+            ]
+            for pos in to_restore:
+                new_ent = Entity(restore_kind) if restore_kind else None
+                state.board.set_entity(trail_layer_id, pos, new_ent)
+            if to_restore and budget_var is not None:
+                current = state.variables.get(budget_var, 0)
+                state.variables[budget_var] = (current if isinstance(current, int) else 0) + len(to_restore)
+            break
+
+    def _collect_exit_food(self, state, game, cfg: dict, exit_pos: Pos, actor_kind: str) -> None:
+        """Award food sitting on the portal's exit cell.
+
+        Teleporting relocates the actor without emitting a fresh
+        actor_entered event for the exit cell, so eat_food_* rules never see
+        the landing and the actor silently overlaps the food without
+        collecting it — same class of bug as the water terrain_skip system,
+        fixed the same way here.
+        """
+        for food_check in cfg.get("exitFoodLayers", []):
+            layer_id = food_check.get("layer")
+            food_tag = food_check.get("foodTag", "food")
+            amount_prefix = food_check.get("amountTagPrefix", "food_v")
+            budget_prefix = food_check.get("budgetVariablePrefix", "moveBudget_")
+            if not layer_id:
+                continue
+            exit_entity = state.board.get_entity(layer_id, exit_pos)
+            if exit_entity is None:
+                continue
+            kind_def = game.entity_kinds.get(exit_entity.kind, {})
+            entity_tags = kind_def.get("tags", []) if isinstance(kind_def, dict) else getattr(kind_def, "tags", [])
+            if food_tag not in entity_tags:
+                continue
+            amount = None
+            for t in entity_tags:
+                if t.startswith(amount_prefix) and t[len(amount_prefix):].isdigit():
+                    amount = int(t[len(amount_prefix):])
+                    break
+            if amount is None:
+                continue
+            color = actor_kind.rsplit("_", 1)[-1]
+            budget_var = f"{budget_prefix}{color}"
+            current = state.variables.get(budget_var, 0)
+            state.variables[budget_var] = (current if isinstance(current, int) else 0) + amount
+            state.board.set_entity(layer_id, exit_pos, None)
+            break
 
     def _try_teleport_avatar(self, state, game, avatar_pos, teleport_tags, match_key, end_movement):
         board = state.board
@@ -145,4 +275,3 @@ class PortalsSystem(GameSystem):
                 if ch is not None and str(ch) == str(channel):
                     return pos
         return None
-

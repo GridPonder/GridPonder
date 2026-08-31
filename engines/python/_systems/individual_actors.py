@@ -30,11 +30,14 @@ class IndividualActorsSystem(GameSystem):
         config = game.system_config(self.id)
         select_action = config.get("selectAction", "tap_cell")
         move_action = config.get("moveAction", "move")
+        interact_action = config.get("interactAction")
 
         if action.get("actionId") == select_action:
             return self._select(action, state, game, config)
         if action.get("actionId") == move_action:
             return self._move(action, state, game, config)
+        if interact_action and action.get("actionId") == interact_action:
+            return self._interact(action, state, game, config)
         return []
 
     def _select(self, action: dict, state: GameState, game: GameDef, config: dict) -> list[dict]:
@@ -118,6 +121,20 @@ class IndividualActorsSystem(GameSystem):
             or board.has_tag_at(ground_layer_id, target, wall_tag, game.entity_kinds)
             or target in occupied
         )
+        if not blocked:
+            extra_by_kind = config.get("extraBlockLayersByKind", {})
+            for layer_cfg in extra_by_kind.get(selected_kind, []):
+                layer_id = layer_cfg.get("layer")
+                exclude_tags = layer_cfg.get("excludeTags", [])
+                extra_layer = board.layers.get(layer_id)
+                if extra_layer:
+                    entity_at = extra_layer.get(target)
+                    if entity_at:
+                        kind_def = game.entity_kinds.get(entity_at.kind, {})
+                        entity_tags = kind_def.get("tags", [])
+                        if not any(t in entity_tags for t in exclude_tags):
+                            blocked = True
+                            break
         if blocked:
             return [ev.actor_blocked(entity.kind, pos)]
 
@@ -141,6 +158,25 @@ class IndividualActorsSystem(GameSystem):
             state, game, config, (dx, dy), actor_layer_id, ground_layer_id, wall_tag)
 
         return events
+
+    def _interact(self, action: dict, state: GameState, game: GameDef, config: dict) -> list[dict]:
+        selected_key = config.get("selectedVariable", "selectedActorKind")
+        selected_position_key = config.get("selectedPositionVariable", "selectedActorPosition")
+        selected_kind = state.variables.get(selected_key)
+        if not selected_kind:
+            return [ev.action_vetoed()]
+
+        selected_position = _parse_position(state.variables.get(selected_position_key))
+        if selected_position is None:
+            return [ev.action_vetoed()]
+
+        actor_layer_id = config.get("actorLayer", "actors")
+        actor_layer = state.board.layers.get(actor_layer_id)
+        entity = actor_layer.get(selected_position) if actor_layer else None
+        if entity is None or entity.kind != selected_kind:
+            return [ev.action_vetoed()]
+
+        return [ev.actor_interacted(selected_kind, selected_position)]
 
     def _react(self, state: GameState, game: GameDef, config: dict,
                delta: tuple[int, int], actor_layer_id: str,

@@ -30,6 +30,7 @@ from .sided_box import SidedBoxSystem
 from .sliding_blocks import SlidingBlocksSystem
 from .slide_merge import SlideMergeSystem
 from .support_collapse import SupportCollapseSystem
+from .terrain_skip import TerrainSkipSystem
 from .tile_teleport import TileTeleportSystem
 
 
@@ -55,6 +56,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "follower_npcs": lambda sys_id, _: FollowerNpcsSystem(sys_id),
     "coupled_actors": lambda sys_id, _: CoupledActorsSystem(sys_id),
     "individual_actors": lambda sys_id, _: IndividualActorsSystem(sys_id),
+    "terrain_skip": lambda sys_id, _: TerrainSkipSystem(sys_id),
 }
 
 

@@ -115,4 +115,10 @@ class TurnEngine {
 
   /// All accepted actions in order (supports undo).
   List<GameAction> get actionHistory => List.unmodifiable(_actionHistory);
+
+  /// State snapshots taken *before* each accepted action, oldest first — the
+  /// undo stack. Does not include the current [state]. Lets a renderer
+  /// reconstruct how an actor actually traveled across the board (e.g. to
+  /// draw a connected trail sprite) rather than only seeing where it is now.
+  List<LevelState> get history => List.unmodifiable(_history);
 }

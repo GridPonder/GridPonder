@@ -26,12 +26,16 @@ class IndividualActorsSystem extends GameSystem {
     final config = game.systemConfig(id, {});
     final selectAction = config['selectAction'] as String? ?? 'tap_cell';
     final moveAction = config['moveAction'] as String? ?? 'move';
+    final interactAction = config['interactAction'] as String?;
 
     if (action.actionId == selectAction) {
       return _select(action, state, game, config);
     }
     if (action.actionId == moveAction) {
       return _move(action, state, game, config);
+    }
+    if (interactAction != null && action.actionId == interactAction) {
+      return _interact(action, state, game, config);
     }
     return const [];
   }
@@ -132,9 +136,37 @@ class IndividualActorsSystem extends GameSystem {
     if (pos == null || entity == null) return [GameEvent.actionVetoed()];
 
     final target = Position(pos.x + delta.x, pos.y + delta.y);
-    final blocked = !board.isInBounds(target) ||
+    var blocked = !board.isInBounds(target) ||
         board.hasTagAt(groundLayerId, target, wallTag, game.entityKinds) ||
         occupied.contains(target);
+
+    if (!blocked) {
+      final extraByKind =
+          config['extraBlockLayersByKind'] as Map<String, dynamic>?;
+      final actorBlockConfigs =
+          extraByKind?[selectedKind] as List<dynamic>?;
+      if (actorBlockConfigs != null) {
+        for (final layerCfg in actorBlockConfigs) {
+          final cfg = layerCfg as Map<String, dynamic>;
+          final layerId = cfg['layer'] as String?;
+          final excludeTags = (cfg['excludeTags'] as List<dynamic>?)
+                  ?.map((t) => t.toString())
+                  .toList() ??
+              <String>[];
+          if (layerId != null) {
+            final entityAt = board.getEntity(layerId, target);
+            if (entityAt != null) {
+              final kindDef = game.getKind(entityAt.kind);
+              final entityTags = kindDef?.tags ?? <String>[];
+              if (!excludeTags.any((t) => entityTags.contains(t))) {
+                blocked = true;
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
 
     if (blocked) {
       return [GameEvent.actorBlocked(entity.kind, pos)];
@@ -166,6 +198,32 @@ class IndividualActorsSystem extends GameSystem {
         state, game, config, delta, actorLayerId, groundLayerId, wallTag));
 
     return events;
+  }
+
+  List<GameEvent> _interact(
+    GameAction action,
+    LevelState state,
+    GameDefinition game,
+    Map<String, dynamic> config,
+  ) {
+    final selectedKey =
+        config['selectedVariable'] as String? ?? 'selectedActorKind';
+    final selectedPositionKey = config['selectedPositionVariable'] as String? ??
+        'selectedActorPosition';
+    final selectedKind = state.variables[selectedKey] as String?;
+    if (selectedKind == null) return [GameEvent.actionVetoed()];
+
+    final selectedPosition =
+        _parsePosition(state.variables[selectedPositionKey]);
+    if (selectedPosition == null) return [GameEvent.actionVetoed()];
+
+    final actorLayerId = config['actorLayer'] as String? ?? 'actors';
+    final entity = state.board.getEntity(actorLayerId, selectedPosition);
+    if (entity == null || entity.kind != selectedKind) {
+      return [GameEvent.actionVetoed()];
+    }
+
+    return [GameEvent.actorInteracted(selectedKind, selectedPosition)];
   }
 
   /// Moves every reactive-kind actor in response to a successful player move.

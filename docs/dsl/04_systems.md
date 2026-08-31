@@ -168,6 +168,10 @@ those mechanics are needed.
 | `matchKey` | string | `"channel"` | Entity parameter used to match portal pairs. |
 | `endMovement` | boolean | `true` | Whether teleport ends the move (avatar lands on exit portal). |
 | `teleportObjects` | boolean | `false` | Whether pushed objects can also teleport through portals. |
+| `actorLayer` | string | — | When set, actors on this layer are also teleported on `actor_entered` events. |
+| `actorPositionVariable` | string | — | Runtime variable updated to the actor's new position after teleport. |
+| `trailClearing` | array | `[]` | Per-actor-kind trail clearing on teleport. Each entry: `{ "actorKind": "<kind>", "trailLayer": "<layer>", "trailKind": "<kind>", "restoreKind": "<kind>", "budgetVariable": "<var>" }`. When an actor of `actorKind` teleports, all tiles of `trailKind` on `trailLayer` are replaced with `restoreKind` (or removed if omitted) and the count of cleared tiles is added to `budgetVariable`. Use this for snake-like games where body trail should disappear on portal entry and the snake's length budget is restored. |
+| `clearTrailAtPortalCells` | boolean | `false` | When `true` and `trailClearing` is configured, each cascade pass erases any trail tile found on a portal cell (without restoring budget). This keeps portal cells permanently traversable — neither the entering snake's step-off trail nor a previous snake's trail can block them. Enables bidirectional, multi-snake reuse of the same portal pair. |
 
 **Behavior:**
 1. When avatar enters a cell with a `teleportTags` entity:
@@ -176,6 +180,8 @@ those mechanics are needed.
    c. Move avatar to paired portal position.
    d. If `endMovement`: turn continues from portal position. If `false`: avatar continues moving in original direction.
 2. If `teleportObjects` and an object is pushed onto a portal: teleport object similarly.
+3. If `actorLayer` is set, actors on that layer that receive an `actor_entered` event at a portal cell are teleported to the matching exit portal. After relocation, `trailClearing` is applied: for each matching entry, all tiles of `trailKind` on `trailLayer` are cleared to `restoreKind` and the cleared count is added to `budgetVariable`. This makes a snake's body vanish when it enters a portal and restores the full length budget to spend as it exits.
+4. If `clearTrailAtPortalCells` is `true`, each cascade pass additionally scans all portal cells and removes any trail tile from the configured `trailClearing` layers. The normal move budget cost for stepping off the portal still applies; only the trail tile is suppressed. This ensures portals remain open for re-entry regardless of how many actors have passed through them.
 
 ---
 
@@ -833,6 +839,52 @@ changes lane in free fall.
 
 ---
 
+### 2.17 `terrain_skip`
+
+**Purpose:** Transport an actor across a contiguous block of tagged terrain in one step. When an actor steps onto a cell carrying `terrainTag`, it is immediately moved to the first non-terrain cell beyond the far edge of that region in the direction of travel. No additional events are emitted, so trail/budget rules do not fire a second time for the transit.
+
+**Phase:** `cascade_resolution`, triggered by `actor_entered` events.
+
+**Events emitted:** none (actor is relocated silently)
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `terrainTag` | string | `"water"` | Ground tag identifying the terrain to skip. |
+| `groundLayer` | string | `"ground"` | Layer checked for `terrainTag`. |
+| `actorLayer` | string | — | Layer holding the moving actors. |
+| `actorPositionVariable` | string | — | Runtime variable updated to the actor's new position after transport. |
+| `exitPortal` | object | — | When set, chains the transport through a `portals`-system portal found sitting on the exit cell: `{ "tags": ["teleport"], "matchKey": "channel" }`. Needed because this system's relocation is silent (no `actor_entered` fires for the exit cell), so the `portals` system can never see a landing there on its own — without this, an actor whose water-skip exit happens to be a portal tile gets stranded on it instead of teleporting through. |
+
+**Behavior:**
+1. On `actor_entered`, check whether the actor's new position carries `terrainTag` on `groundLayer`.
+2. Walk forward in the movement direction through all contiguous `terrainTag` cells in the same row/column.
+3. Exit position = one step beyond the last terrain cell in that direction.
+4. Validate exit: in-bounds, not void, `groundLayer` cell is walkable, `actorLayer` cell is empty.
+5. If valid: relocate actor to exit, update `actorPositionVariable`. If invalid: do nothing (actor remains on terrain). If `exitPortal` is configured and the exit cell carries a matching portal tag, the final position is instead the paired portal (same kind, matching `exitPortal.matchKey` value) — exit-hazard/exit-food checks then run against that final position, not the portal tile itself.
+
+The entry move still costs the normal trail/budget (rules fire for the `actor_entered` that lands the actor on terrain). Add a `not: position_has_tag` guard to trail rules to make the transport fully free if desired.
+
+**Example config:**
+```json
+{
+  "id": "water_mover",
+  "type": "terrain_skip",
+  "config": {
+    "terrainTag": "water",
+    "groundLayer": "ground",
+    "actorLayer": "snakes",
+    "actorPositionVariable": "selectedSnakePosition",
+    "exitPortal": { "tags": ["teleport"], "matchKey": "channel" }
+  }
+}
+```
+
+**Reuse:** Game-agnostic — any game with lanes, current channels, slip-streams, or wormhole corridors can use it. The `terrainTag` field distinguishes different terrain types within the same game, and the system fires once per cascade pass so chained transports resolve cleanly across multiple passes.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -853,6 +905,7 @@ changes lane in free fall.
 | Anchor Point | `anchor_point` | `action_resolution` | configurable |
 | Coupled Actors | `coupled_actors` | `action_resolution` | `move` (configurable via `moveAction`) |
 | Individual Actors | `individual_actors` | `action_resolution` | `tap_cell` + `move` (configurable) |
+| Terrain Skip | `terrain_skip` | `cascade_resolution` | event-triggered actor transport across tagged terrain |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 

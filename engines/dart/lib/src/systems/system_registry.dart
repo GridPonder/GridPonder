@@ -18,6 +18,7 @@ import 'sided_box_system.dart';
 import 'sliding_blocks_system.dart';
 import 'slide_merge_system.dart';
 import 'support_collapse_system.dart';
+import 'terrain_skip_system.dart';
 import 'tile_teleport_system.dart';
 
 /// Creates a GameSystem instance from a SystemDef.
@@ -45,6 +46,7 @@ class SystemRegistry {
     'support_collapse': (id, config) =>
         SupportCollapseSystem(id: id, config: config),
     'flood_fill': (id, _) => FloodFillSystem(id: id),
+    'terrain_skip': (id, _) => TerrainSkipSystem(id: id),
     'tile_teleport': (id, _) => TileTeleportSystem(id: id),
     'ice_slide': (id, _) => IceSlideSystem(id: id),
   };
