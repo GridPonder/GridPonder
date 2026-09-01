@@ -241,7 +241,7 @@ Avatar inventory changed.
 | `newItem` | string or null | New inventory slot. |
 
 ### `object_pushed`
-An object was pushed by the avatar.
+An object was pushed by the avatar or an object-moving system.
 
 | Payload | Type | Description |
 |---------|------|-------------|
@@ -249,6 +249,47 @@ An object was pushed by the avatar.
 | `fromPosition` | `[x, y]` | Original position. |
 | `toPosition` | `[x, y]` | New position. |
 | `direction` | string | Push direction. |
+
+### `elastic_block_inflated`
+An `elastic_block` expanded by one or more complete leading-edge lines.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `id` | string | Multi-cell object id. |
+| `kind` | string | Multi-cell object kind. |
+| `fromCells` | array of `[x, y]` | Footprint before inflation. |
+| `toCells` | array of `[x, y]` | Footprint after inflation. |
+| `addedCells` | array of `[x, y]` | Cells added to the footprint. |
+| `direction` | string | Inflated edge direction. |
+| `distance` | integer | Number of complete lines added. |
+
+### `elastic_block_collapsed`
+An obstructed `elastic_block` press removed trailing slices while keeping the
+leading edge fixed.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `id` | string | Multi-cell object id. |
+| `kind` | string | Multi-cell object kind. |
+| `fromCells` | array of `[x, y]` | Footprint before collapse. |
+| `toCells` | array of `[x, y]` | Footprint after collapse. |
+| `direction` | string | Edge against which the object collapsed. |
+
+### `target_completed`
+An `elastic_block` footprint exactly matched an unfinished configured target.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `targetId` | string | Configured target id. |
+
+### `target_consumed`
+A completed elastic-block target was fully vacated and applied its permanent
+board transformation.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `targetId` | string | Configured target id. |
+| `mode` | string | `"none"`, `"void"`, or `"wall"`. |
 
 ### `tiles_merged`
 Two tiles merged during slide.
