@@ -155,11 +155,19 @@ class CellEffectDef {
   /// Draw scale relative to one board cell (1.0 = exactly one cell).
   final double scale;
 
+  /// Optional payload filter. When present the effect only plays for events
+  /// whose payload matches every key here (compared as strings), which is how
+  /// two effects can share one event type — e.g. `cell_transformed` with
+  /// `{"toKind": "floor"}` for a cut and `{"toKind": "rubble"}` for a
+  /// backfill. Absent means "any event of this type".
+  final Map<String, String>? when;
+
   const CellEffectDef({
     required this.sheet,
     this.frames = 1,
     this.durationMs = 300,
     this.scale = 1.0,
+    this.when,
   });
 
   factory CellEffectDef.fromJson(Map<String, dynamic> j) => CellEffectDef(
@@ -167,7 +175,19 @@ class CellEffectDef {
         frames: (j['frames'] as num?)?.toInt() ?? 1,
         durationMs: (j['durationMs'] as num?)?.toInt() ?? 300,
         scale: (j['scale'] as num?)?.toDouble() ?? 1.0,
+        when: (j['when'] as Map?)
+            ?.map((k, v) => MapEntry(k.toString(), v.toString())),
       );
+
+  /// Whether this effect should play for [payload].
+  bool matches(Map<String, dynamic> payload) {
+    final filter = when;
+    if (filter == null) return true;
+    for (final entry in filter.entries) {
+      if (payload[entry.key]?.toString() != entry.value) return false;
+    }
+    return true;
+  }
 }
 
 /// Full theme definition.
@@ -179,10 +199,14 @@ class ThemeDef {
   final BoardStyleDef? boardStyle;
   final AvatarThemeDef? avatar;
 
-  /// Optional event-driven cell effects: engine event type → sprite-strip
-  /// animation played at that event's position. E.g. `cell_transformed` to
+  /// Optional event-driven cell effects: engine event type → the sprite-strip
+  /// animations played at that event's position. E.g. `cell_transformed` to
   /// flash a burst wherever a capture flipped a cell.
-  final Map<String, CellEffectDef> effects;
+  ///
+  /// A type may map to a single object or to a list; both parse to a list, so
+  /// several effects can share one event type and discriminate with their
+  /// `when` filter. The first matching entry wins.
+  final Map<String, List<CellEffectDef>> effects;
 
   /// Optional named-colour palette: maps colour names (e.g. "red", "teal")
   /// to CSS hex strings. Used by the renderer when an entity or action
@@ -217,10 +241,17 @@ class ThemeDef {
             : null,
         palette: ((j['palette'] as Map?) ?? const {})
             .map((k, v) => MapEntry(k.toString(), v.toString())),
+        // Accepts either a single object or a list per event type, so packs
+        // written before multiple effects per type keep parsing unchanged.
         effects: ((j['effects'] as Map?) ?? const {}).map(
           (k, v) => MapEntry(
             k.toString(),
-            CellEffectDef.fromJson(v as Map<String, dynamic>),
+            v is List
+                ? [
+                    for (final e in v)
+                      if (e is Map<String, dynamic>) CellEffectDef.fromJson(e),
+                  ]
+                : [CellEffectDef.fromJson(v as Map<String, dynamic>)],
           ),
         ),
       );

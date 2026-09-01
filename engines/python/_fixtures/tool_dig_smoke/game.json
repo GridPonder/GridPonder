@@ -1,0 +1,81 @@
+{
+  "layers": [
+    { "id": "ground", "occupancy": "exactly_one", "default": "empty" },
+    { "id": "tools", "occupancy": "zero_or_one" },
+    { "id": "actors", "occupancy": "zero_or_one" }
+  ],
+  "entityKinds": {
+    "empty": { "layer": "ground", "tags": ["walkable"], "symbol": ".", "display": { "type": "tile", "color": "floor" } },
+    "rubble": { "layer": "ground", "tags": ["solid"], "symbol": "%", "display": { "type": "tile", "color": "rubble" } },
+    "hard": { "layer": "ground", "tags": ["solid", "diggable_hard"], "symbol": "H", "display": { "type": "tile", "color": "rock" } },
+    "tool_drill": { "layer": "tools", "tags": ["grants_drill"], "symbol": "T", "display": { "type": "fill", "color": "seam_a" } },
+    "tool_spade": { "layer": "tools", "tags": ["grants_spade"], "symbol": "P", "display": { "type": "fill", "color": "seam_b" } },
+    "digger": { "layer": "actors", "tags": ["actor"], "symbol": "1", "display": { "type": "circle", "color": "digger_a" } },
+    "digger_drill": { "layer": "actors", "tags": ["actor"], "symbol": "Q", "display": { "type": "circle", "color": "digger_a" } },
+    "digger_spade": { "layer": "actors", "tags": ["actor"], "symbol": "Z", "display": { "type": "circle", "color": "digger_b" } }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": {
+        "direction": { "type": "direction", "values": ["up", "down", "left", "right"] }
+      }
+    }
+  ],
+  "systems": [
+    {
+      "id": "crew",
+      "type": "coupled_actors",
+      "config": {
+        "actorLayer": "actors",
+        "groundLayer": "ground",
+        "wallTag": "solid",
+        "directions": ["up", "down", "left", "right"],
+        "excavate": {
+          "diggableTag": "diggable",
+          "clearedKind": "empty",
+          "backfillKind": "rubble",
+          "extraDiggableTags": {
+            "digger_drill": ["diggable_hard"]
+          }
+        }
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "bare_takes_drill",
+      "on": "actor_entered",
+      "where": {
+        "all_of": [
+          { "event": { "kind": "digger" } },
+          { "position_has_tag": { "layer": "tools", "tag": "grants_drill" } }
+        ]
+      },
+      "then": [
+        { "transform": { "position": "$event.position", "layer": "actors", "toKind": "digger_drill" } },
+        { "destroy": { "position": "$event.position", "layer": "tools" } }
+      ]
+    },
+    {
+      "id": "drill_swaps_for_spade",
+      "on": "actor_entered",
+      "where": {
+        "all_of": [
+          { "event": { "kind": "digger_drill" } },
+          { "position_has_tag": { "layer": "tools", "tag": "grants_spade" } }
+        ]
+      },
+      "then": [
+        { "transform": { "position": "$event.position", "layer": "actors", "toKind": "digger_spade" } },
+        { "transform": { "position": "$event.position", "layer": "tools", "toKind": "tool_drill" } }
+      ]
+    }
+  ],
+  "levelSequence": [{ "type": "level", "ref": "td_001" }],
+  "defaults": {
+    "avatar": { "enabled": false },
+    "maxCascadeDepth": 1
+  },
+  "ui": { "showGoal": true, "showGuide": true }
+}

@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class SlideMergeSystem(GameSystem):
@@ -25,8 +25,8 @@ class SlideMergeSystem(GameSystem):
             return []
         dx, dy = dir_delta(dir_str)
 
-        mergeable_tags = config.get("mergeableTags", ["mergeable"])
-        blocker_tags = config.get("blockerTags", ["solid"])
+        mergeable_tags = config_list(config, "mergeableTags", ["mergeable"])
+        blocker_tags = config_list(config, "blockerTags", ["solid"])
         merge_pred = config.get("mergePredicate", "equal_value")
         merge_result_mode = config.get("mergeResult", "sum")
         merge_limit = config.get("mergeLimit", 1)

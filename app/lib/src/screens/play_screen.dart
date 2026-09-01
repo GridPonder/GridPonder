@@ -7,6 +7,7 @@ import 'package:gridponder_engine/engine.dart';
 import 'package:llm_dart/llm_dart.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
+import '../services/playtest_tracker.dart';
 import '../services/progress_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/board_renderer.dart'
@@ -55,6 +56,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   late LevelDefinition _levelDef;
   late TurnEngine _engine;
   late HintService _hintService;
+  final _tracker = PlaytestTracker();
 
   /// Dry-run results for the actions available from where the avatar stands,
   /// memoised against the board position they describe. See
@@ -168,6 +170,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _selectedMultiCellObjectId = null;
     _lineOfSightFeedbacks = const [];
     _movingSprites.value = const [];
+    _tracker.track('level_start', level: levelId);
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -178,10 +181,28 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// Runs [action] through the engine and plays its full animation queue.
   /// Used by user input ([_onAction]) and replay paths ([_onSolve],
   /// [_playHint]) so all entry points show the same animations.
-  Future<void> _runAction(GameAction action) async {
+  Future<void> _runAction(GameAction action, {String source = 'user'}) async {
     final preState = _engine.state.copy();
     final result = _engine.executeTurn(action);
-    if (!result.accepted) return;
+    if (!result.accepted) {
+      _tracker.track(
+        'move',
+        level: _levelDef.id,
+        action: action.actionId,
+        outcome: 'rejected',
+        src: source,
+      );
+      return;
+    }
+    _tracker.track(
+      'move',
+      level: _levelDef.id,
+      action: action.actionId,
+      outcome: 'accepted',
+      src: source,
+      n: _engine.undoDepth,
+      pos: _tracker.enabled ? _trackedPositions() : null,
+    );
     _syncSelectedMultiCellObject();
 
     // Record the chosen colour for any colour-pick action (any action that
@@ -323,6 +344,41 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() => _animating = false);
   }
 
+  /// The cells the player's pieces occupy right now, as `x.y` joined by commas
+  /// (e.g. `"2.1,6.3"`). Empty when the pack has neither.
+  ///
+  /// A pack moves either a level `avatar` (keystone, relay_lanterns) or entities
+  /// on a system's `actorLayer` (spoil, pincer, three_kingdoms), so both are
+  /// collected. `actorLayer` defaults to `"actors"` in the DSL, so a board with an
+  /// `actors` layer is used when no system names one explicitly.
+  String _trackedPositions() {
+    final board = _engine.state.board;
+    final cells = <Position>{};
+
+    final avatarPos = _engine.state.avatar.position;
+    if (avatarPos != null) cells.add(avatarPos);
+
+    var layerIds = <String>{
+      for (final s in widget.packService.game.systems)
+        if (s.enabled && s.config['actorLayer'] is String)
+          s.config['actorLayer'] as String,
+    };
+    if (layerIds.isEmpty && board.layers.containsKey('actors')) {
+      layerIds = {'actors'};
+    }
+    for (final id in layerIds) {
+      final layer = board.layers[id];
+      if (layer == null) continue;
+      for (final entry in layer.entries()) {
+        cells.add(entry.key);
+      }
+    }
+
+    final sorted = cells.toList()
+      ..sort((a, b) => a.y != b.y ? a.y.compareTo(b.y) : a.x.compareTo(b.x));
+    return sorted.map((p) => '${p.x}.${p.y}').join(',');
+  }
+
   /// Plays any theme-declared sprite-strip effects triggered by this turn's
   /// events — e.g. a burst on every `cell_transformed`. Purely presentational:
   /// packs opt in through `theme.json`'s `effects` block, and a pack that
@@ -334,7 +390,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final targets = <CellEffectPlayback>[];
     CellEffectDef? active;
     for (final event in events) {
-      final def = effects[event.type];
+      final candidates = effects[event.type];
+      if (candidates == null) continue;
+      // First matching `when` filter wins, so several effects can share one
+      // event type — a cut and a backfill are both `cell_transformed`.
+      CellEffectDef? def;
+      for (final candidate in candidates) {
+        if (candidate.matches(event.payload)) {
+          def = candidate;
+          break;
+        }
+      }
       if (def == null) continue;
       final pos = event.position;
       if (pos == null) continue;
@@ -717,6 +783,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _lastFloodColor = null;
       _syncSelectedMultiCellObject();
     });
+    _tracker.track('undo', level: _levelDef.id);
   }
 
   void _onReset() {
@@ -730,6 +797,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
+    _tracker.track('reset', level: _levelDef.id);
   }
 
   /// Advance to the next sequence entry. If it's a level, load it.
@@ -1034,6 +1102,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       if (!proceed) return;
     }
 
+    _tracker.track('hint_requested', level: _levelDef.id);
     await _playHint(idx);
   }
 
@@ -1129,7 +1198,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     await Future.delayed(Duration.zero);
     for (int i = 0; i < goldPath.length; i++) {
       if (!mounted) return;
-      await _runAction(goldPath[i]);
+      await _runAction(goldPath[i], source: 'solve');
       await Future.delayed(const Duration(milliseconds: 300));
     }
   }
@@ -1151,7 +1220,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     for (int i = 0; i < stopCount && i < goldPath.length; i++) {
       if (!mounted) return;
-      await _runAction(goldPath[i]);
+      await _runAction(goldPath[i], source: 'hint');
       await Future.delayed(const Duration(milliseconds: 300));
     }
   }
@@ -1500,11 +1569,14 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     // Record win the first time it is detected (post-frame to avoid
     // calling async work inside a synchronous build call).
-    if (state.isWon && !_wonHandled && widget.progress != null) {
+    if (state.isWon && !_wonHandled) {
       _wonHandled = true;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) widget.progress!.markCompleted(levelId);
-      });
+      _tracker.track('level_complete', level: levelId);
+      if (widget.progress != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) widget.progress!.markCompleted(levelId);
+        });
+      }
     }
     final hintStatuses = _hintService.statuses;
     final hintAvailable = _hintService.hasAnyAvailable && !_aiRunning;
@@ -1710,22 +1782,101 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final ui = widget.packService.game.ui;
     final showGoal = ui.showGoal && _levelDef.goals.isNotEmpty;
     final showGuide = ui.showGuide && (_levelDef.guide?.isNotEmpty ?? false);
+    final readouts = ui.readouts
+        .where((r) => state.variables.containsKey(r.variable))
+        .toList();
 
-    if (!showGoal && !showGuide) return const SizedBox.shrink();
+    if (!showGoal && !showGuide && readouts.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 2, 16, 4),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            if (showGoal) ...[
-              Expanded(child: _buildGoalPanel(state)),
-              if (showGuide) const SizedBox(width: 10),
-            ],
-            if (showGuide) Expanded(child: _buildGuidePanel()),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (readouts.isNotEmpty) ...[
+            _buildReadoutStrip(state, readouts),
+            if (showGoal || showGuide) const SizedBox(height: 6),
           ],
-        ),
+          if (showGoal || showGuide)
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  if (showGoal) ...[
+                    Expanded(child: _buildGoalPanel(state)),
+                    if (showGuide) const SizedBox(width: 10),
+                  ],
+                  if (showGuide) Expanded(child: _buildGuidePanel()),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// A row of live `state.variables` chips declared by `game.json`'s
+  /// `ui.readouts`. Pack-agnostic: the app never learns what a given variable
+  /// means, only how to draw a labelled number.
+  Widget _buildReadoutStrip(LevelState state, List<GameReadout> readouts) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 6,
+      alignment: WrapAlignment.center,
+      children: [
+        for (final r in readouts)
+          _buildReadoutChip(r, state.variables[r.variable]),
+      ],
+    );
+  }
+
+  Widget _buildReadoutChip(GameReadout readout, Object? rawValue) {
+    final number = (rawValue is num) ? rawValue.toInt() : null;
+    final blank = number == null || number == readout.blankWhen;
+    final tint = readout.color == null
+        ? Theme.of(context).colorScheme.primary
+        : cellNamedColor(
+            readout.color!,
+            palette: widget.packService.theme?.palette,
+          );
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.14),
+        border: Border.all(color: tint.withValues(alpha: 0.55)),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 10,
+            height: 10,
+            decoration: BoxDecoration(shape: BoxShape.circle, color: tint),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            readout.label,
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade700,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            blank ? '—' : '$number',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+              fontFeatures: const [FontFeature.tabularFigures()],
+              color: tint,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1783,26 +1934,48 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           return _buildSequenceGoal(sequence, matched);
         }
       }
-      if (goal.type == 'board_match') {
-        final targetLayers =
-            goal.config['targetLayers'] as Map<String, dynamic>?;
-        if (targetLayers != null) {
-          return Center(
+    }
+
+    // Every goal, not just the first: a level won on two conditions at once
+    // reads as the wrong puzzle when only one of them is named.
+    final descriptions = widget.packService.game.goalDescriptions;
+    final showPreview = widget.packService.game.ui.showGoalPreview;
+    Map<String, dynamic>? preview;
+    final lines = <String>[];
+    for (final goal in _levelDef.goals) {
+      final targetLayers = goal.config['targetLayers'] as Map<String, dynamic>?;
+      // Only the goal actually drawn is left out of the text; a second
+      // `board_match` has nowhere to go, so it is named instead.
+      if (goal.type == 'board_match' &&
+          showPreview &&
+          targetLayers != null &&
+          preview == null) {
+        preview = targetLayers;
+        continue;
+      }
+      lines.add(descriptions[goal.id] ?? goal.type.replaceAll('_', ' '));
+    }
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (preview != null)
+          Center(
             child: TargetBoardRenderer(
-              targetLayers: targetLayers,
+              targetLayers: preview,
               currentState: state,
               palette: widget.packService.theme?.palette,
             ),
-          );
-        }
-      }
-    }
-    // Fallback: show goal type as text
-    final goal = _levelDef.goals.first;
-    final goalText =
-        widget.packService.game.goalDescriptions[goal.id] ??
-        goal.type.replaceAll('_', ' ');
-    return Text(goalText, style: const TextStyle(fontSize: 12));
+          ),
+        if (preview != null && lines.isNotEmpty) const SizedBox(height: 6),
+        for (final line in lines)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 2),
+            child: Text(line, style: const TextStyle(fontSize: 12)),
+          ),
+      ],
+    );
   }
 
   Widget _buildSequenceGoal(List<int> sequence, int matched) {

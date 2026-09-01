@@ -6,6 +6,7 @@ import '../models/game_state.dart';
 import '../models/position.dart';
 import '../models/direction.dart';
 import '../models/entity.dart';
+import 'sight.dart';
 
 class FollowerNpcsSystem extends GameSystem {
   const FollowerNpcsSystem({required super.id}) : super(type: 'follower_npcs');
@@ -22,6 +23,9 @@ class FollowerNpcsSystem extends GameSystem {
 
     final behaviorsConfig =
         config['behaviors'] as Map<String, dynamic>? ?? {};
+
+    final contactVariable =
+        config['contactVariable'] as String? ?? 'caught';
 
     final board = state.board;
     final actorsLayer = board.layers['actors'];
@@ -59,10 +63,55 @@ class FollowerNpcsSystem extends GameSystem {
       final behaviorType = behaviorDef['type'] as String?;
       if (behaviorType == null) continue;
 
-      // Frequency check
+      // Gaze is about seeing, not moving, so it is refreshed before the
+      // frequency gate and regardless of whether a step happens.
+      bool? sight;
+      if (behaviorType == 'toward_avatar') {
+        sight = _avatarInSight(
+          npcPos: npcPos,
+          behaviorDef: behaviorDef,
+          state: state,
+          board: board,
+          game: game,
+        );
+        final gazeParam = behaviorDef['gazeParam'] as String?;
+        if (gazeParam != null) {
+          final avatarPos = state.avatar.position;
+          npcEntity.params[gazeParam] = (sight && avatarPos != null)
+              ? _cardinalTowardTarget(npcPos, avatarPos).toJson()
+              : 'rest';
+        }
+      }
+
+      // Reported from wherever the NPC ends the turn, not from where it
+      // looked: a chaser steps along the line it just traced.
+      final npcId = 'spirit_${npcPos.x}_${npcPos.y}';
+      final sightTarget = state.avatar.position;
+      final reportSight = behaviorType == 'toward_avatar' &&
+          sight == true &&
+          (behaviorDef['requiresLineOfSight'] as bool? ?? false) &&
+          sightTarget != null;
+      void reportSightFrom(Position pos) {
+        if (reportSight) {
+          events.add(GameEvent.lineOfSightDetected(
+            pos,
+            sightTarget,
+            'avatar',
+            npcId,
+            npcEntity.kind,
+          ));
+        }
+      }
+
+      // Frequency check. The turn counter lives on the state, not in the
+      // variables map, and is incremented in the goal-evaluation phase after
+      // this one — so the first turn sees 0 and a frequency of N acts on turn 1,
+      // then every Nth turn after it.
       final frequency = behaviorDef['frequency'] as int? ?? 1;
-      final turnCount = state.variables['turnCount'] as int? ?? 0;
-      if (frequency > 1 && turnCount % frequency != 0) continue;
+      if (frequency > 1 && state.turnCount % frequency != 0) {
+        reportSightFrom(npcPos);
+        continue;
+      }
 
       final solidBlocking = behaviorDef['solidBlocking'] as bool? ?? true;
 
@@ -75,9 +124,16 @@ class FollowerNpcsSystem extends GameSystem {
         game: game,
         solidBlocking: solidBlocking,
         occupiedAfterMove: occupiedAfterMove,
+        sight: sight,
       );
 
-      if (nextPos == null || nextPos == npcPos) continue;
+      if (nextPos == null || nextPos == npcPos) {
+        reportSightFrom(npcPos);
+        continue;
+      }
+
+      reportSightFrom(nextPos);
+      final caught = state.avatar.position == nextPos;
 
       // Remove from occupied set (old position) and add new
       occupiedAfterMove.remove(npcPos);
@@ -87,8 +143,16 @@ class FollowerNpcsSystem extends GameSystem {
       board.setEntity('actors', npcPos, null);
       board.setEntity('actors', nextPos, npcEntity);
 
-      final npcId = 'spirit_${npcPos.x}_${npcPos.y}';
       events.add(GameEvent.npcMoved(npcId, npcPos, nextPos));
+
+      if (caught) {
+        // Goal and lose evaluation both run in the phase after this one, so
+        // bumping the counter here is enough for a variable_threshold lose
+        // condition to fire on the same turn.
+        final current = (state.variables[contactVariable] as num?) ?? 0;
+        state.variables[contactVariable] = current.toInt() + 1;
+        events.add(GameEvent.avatarCaught(nextPos, npcEntity.kind, npcId));
+      }
     }
 
     return events;
@@ -103,18 +167,27 @@ class FollowerNpcsSystem extends GameSystem {
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    bool? sight,
   }) {
     final board = state.board;
+
+    // One flag governs every behavior: without it the avatar's cell is
+    // impassable, so an NPC with no other option stands still or, for the
+    // circuit behaviors, turns around.
+    final lethalContact = behaviorDef['lethalContact'] as bool? ?? false;
+    final blockAvatar = !lethalContact;
 
     switch (behaviorType) {
       case 'toward_avatar':
         return _behaviorTowardAvatar(
           npcPos: npcPos,
+          behaviorDef: behaviorDef,
           state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          sight: sight,
         );
 
       case 'toward_tag':
@@ -123,10 +196,12 @@ class FollowerNpcsSystem extends GameSystem {
         return _behaviorTowardTag(
           npcPos: npcPos,
           targetTag: targetTag,
+          state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          blockAvatar: blockAvatar,
         );
 
       case 'toward_color':
@@ -135,30 +210,36 @@ class FollowerNpcsSystem extends GameSystem {
         return _behaviorTowardColor(
           npcPos: npcPos,
           targetColor: targetColor,
+          state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          blockAvatar: blockAvatar,
         );
 
       case 'clockwise':
         return _behaviorClockwise(
           npcPos: npcPos,
           npcEntity: npcEntity,
+          state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          blockAvatar: blockAvatar,
         );
 
       case 'patrol':
         return _behaviorPatrol(
           npcPos: npcPos,
           npcEntity: npcEntity,
+          state: state,
           board: board,
           game: game,
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
+          blockAvatar: blockAvatar,
         );
 
       default:
@@ -173,12 +254,14 @@ class FollowerNpcsSystem extends GameSystem {
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
     required LevelState state,
+    bool blockAvatar = true,
   }) {
     if (!board.isInBounds(pos)) return false;
     if (board.isVoid(pos)) return false;
 
-    // Can't overlap with avatar
-    if (state.avatar.position == pos) return false;
+    // Can't overlap with the avatar unless the behavior treats contact as
+    // lethal, in which case stepping onto the avatar is the point.
+    if (blockAvatar && state.avatar.position == pos) return false;
 
     // Can't overlap with other NPCs
     if (occupiedAfterMove.contains(pos)) return false;
@@ -215,6 +298,7 @@ class FollowerNpcsSystem extends GameSystem {
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
     required LevelState state,
+    bool blockAvatar = true,
   }) {
     final cardinalDirs = [
       Direction.up,
@@ -242,6 +326,7 @@ class FollowerNpcsSystem extends GameSystem {
           solidBlocking: solidBlocking,
           occupiedAfterMove: occupiedAfterMove,
           state: state,
+          blockAvatar: blockAvatar,
         )) {
           bestDist = dist;
           best = candidate;
@@ -256,16 +341,65 @@ class FollowerNpcsSystem extends GameSystem {
     return (a.x - b.x).abs() + (a.y - b.y).abs();
   }
 
+
+  /// Whether this behavior currently considers the avatar visible. A behavior
+  /// without `requiresLineOfSight` chases unconditionally, so it always counts
+  /// as seeing the avatar.
+  bool _avatarInSight({
+    required Position npcPos,
+    required Map<String, dynamic> behaviorDef,
+    required LevelState state,
+    required Board board,
+    required GameDefinition game,
+  }) {
+    final avatarPos = state.avatar.position;
+    if (avatarPos == null) return false;
+    if (!(behaviorDef['requiresLineOfSight'] as bool? ?? false)) return true;
+
+    final blockingLayers =
+        (behaviorDef['blockingLayers'] as List<dynamic>? ?? ['objects'])
+            .map((l) => l.toString())
+            .toList();
+    final blockingTags =
+        (behaviorDef['blockingTags'] as List<dynamic>? ?? ['solid'])
+            .map((t) => t.toString())
+            .toList();
+    return hasClearLine(
+      npcPos,
+      avatarPos,
+      null,
+      state,
+      game,
+      blockingLayers,
+      blockingTags,
+      behaviorDef['multiCellObjectsBlock'] as bool? ?? true,
+    );
+  }
+
   Position? _behaviorTowardAvatar({
     required Position npcPos,
+    required Map<String, dynamic> behaviorDef,
     required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    bool? sight,
   }) {
     final avatarPos = state.avatar.position;
     if (avatarPos == null) return null;
+
+    final lethalContact = behaviorDef['lethalContact'] as bool? ?? false;
+
+    final visible = sight ??
+        _avatarInSight(
+          npcPos: npcPos,
+          behaviorDef: behaviorDef,
+          state: state,
+          board: board,
+          game: game,
+        );
+    if (!visible) return null;
 
     return _stepToward(
       npcPos: npcPos,
@@ -275,16 +409,19 @@ class FollowerNpcsSystem extends GameSystem {
       solidBlocking: solidBlocking,
       occupiedAfterMove: occupiedAfterMove,
       state: state,
+      blockAvatar: !lethalContact,
     );
   }
 
   Position? _behaviorTowardTag({
     required Position npcPos,
     required String targetTag,
+    required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    required bool blockAvatar,
   }) {
     // Find nearest entity with targetTag in objects/markers layers
     Position? nearestTarget;
@@ -306,9 +443,6 @@ class FollowerNpcsSystem extends GameSystem {
 
     if (nearestTarget == null) return null;
 
-    // Create a dummy state-like object isn't possible, so we pass a minimal check
-    // We need a LevelState to call _canMoveTo, but we only have board here.
-    // Use a direct inline check instead.
     final cardinalDirs = [
       Direction.up,
       Direction.down,
@@ -328,17 +462,16 @@ class FollowerNpcsSystem extends GameSystem {
     for (final dir in ordered) {
       final candidate = npcPos.moved(dir);
       final dist = _manhattan(candidate, nearestTarget);
-      if (dist < bestDist) {
-        if (!board.isInBounds(candidate)) continue;
-        if (board.isVoid(candidate)) continue;
-        if (occupiedAfterMove.contains(candidate)) continue;
-        if (solidBlocking) {
-          final objectsLayer = board.layers['objects'];
-          if (objectsLayer != null) {
-            final entity = objectsLayer.getAt(candidate);
-            if (entity != null && game.hasTag(entity.kind, 'solid')) continue;
-          }
-        }
+      if (dist < bestDist &&
+          _canMoveTo(
+            pos: candidate,
+            board: board,
+            game: game,
+            solidBlocking: solidBlocking,
+            occupiedAfterMove: occupiedAfterMove,
+            state: state,
+            blockAvatar: blockAvatar,
+          )) {
         bestDist = dist;
         best = candidate;
       }
@@ -350,10 +483,12 @@ class FollowerNpcsSystem extends GameSystem {
   Position? _behaviorTowardColor({
     required Position npcPos,
     required String targetColor,
+    required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    required bool blockAvatar,
   }) {
     // Find nearest entity in objects/actors layers where param("color") == targetColor
     Position? nearestTarget;
@@ -395,17 +530,16 @@ class FollowerNpcsSystem extends GameSystem {
     for (final dir in ordered) {
       final candidate = npcPos.moved(dir);
       final dist = _manhattan(candidate, nearestTarget);
-      if (dist < bestDist) {
-        if (!board.isInBounds(candidate)) continue;
-        if (board.isVoid(candidate)) continue;
-        if (occupiedAfterMove.contains(candidate)) continue;
-        if (solidBlocking) {
-          final objectsLayer = board.layers['objects'];
-          if (objectsLayer != null) {
-            final entity = objectsLayer.getAt(candidate);
-            if (entity != null && game.hasTag(entity.kind, 'solid')) continue;
-          }
-        }
+      if (dist < bestDist &&
+          _canMoveTo(
+            pos: candidate,
+            board: board,
+            game: game,
+            solidBlocking: solidBlocking,
+            occupiedAfterMove: occupiedAfterMove,
+            state: state,
+            blockAvatar: blockAvatar,
+          )) {
         bestDist = dist;
         best = candidate;
       }
@@ -431,10 +565,12 @@ class FollowerNpcsSystem extends GameSystem {
   Position? _behaviorClockwise({
     required Position npcPos,
     required EntityInstance npcEntity,
+    required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    required bool blockAvatar,
   }) {
     final facingStr = npcEntity.param('facing')?.toString() ?? 'right';
     Direction facing;
@@ -447,10 +583,15 @@ class FollowerNpcsSystem extends GameSystem {
     // Try current facing first, then rotate clockwise until a valid move is found
     for (var i = 0; i < _clockwiseOrder.length; i++) {
       final candidate = npcPos.moved(facing);
-      final isValid = board.isInBounds(candidate) &&
-          !board.isVoid(candidate) &&
-          !occupiedAfterMove.contains(candidate) &&
-          (!solidBlocking || _noSolidObject(board, game, candidate));
+      final isValid = _canMoveTo(
+        pos: candidate,
+        board: board,
+        game: game,
+        solidBlocking: solidBlocking,
+        occupiedAfterMove: occupiedAfterMove,
+        state: state,
+        blockAvatar: blockAvatar,
+      );
       if (isValid) {
         // Update NPC facing param (mutate params map directly)
         npcEntity.params['facing'] = facing.toJson();
@@ -465,10 +606,12 @@ class FollowerNpcsSystem extends GameSystem {
   Position? _behaviorPatrol({
     required Position npcPos,
     required EntityInstance npcEntity,
+    required LevelState state,
     required Board board,
     required GameDefinition game,
     required bool solidBlocking,
     required Set<Position> occupiedAfterMove,
+    required bool blockAvatar,
   }) {
     final facingStr = npcEntity.param('facing')?.toString() ?? 'right';
     Direction facing;
@@ -479,22 +622,30 @@ class FollowerNpcsSystem extends GameSystem {
     }
 
     final candidate = npcPos.moved(facing);
-    final isValid = board.isInBounds(candidate) &&
-        !board.isVoid(candidate) &&
-        !occupiedAfterMove.contains(candidate) &&
-        (!solidBlocking || _noSolidObject(board, game, candidate));
-
-    if (isValid) {
+    if (_canMoveTo(
+      pos: candidate,
+      board: board,
+      game: game,
+      solidBlocking: solidBlocking,
+      occupiedAfterMove: occupiedAfterMove,
+      state: state,
+      blockAvatar: blockAvatar,
+    )) {
       return candidate;
     }
 
     // Reverse direction on obstacle
     final reversed = _reverseDirection(facing);
     final reversedCandidate = npcPos.moved(reversed);
-    final reversedValid = board.isInBounds(reversedCandidate) &&
-        !board.isVoid(reversedCandidate) &&
-        !occupiedAfterMove.contains(reversedCandidate) &&
-        (!solidBlocking || _noSolidObject(board, game, reversedCandidate));
+    final reversedValid = _canMoveTo(
+      pos: reversedCandidate,
+      board: board,
+      game: game,
+      solidBlocking: solidBlocking,
+      occupiedAfterMove: occupiedAfterMove,
+      state: state,
+      blockAvatar: blockAvatar,
+    );
 
     if (reversedValid) {
       npcEntity.params['facing'] = reversed.toJson();
@@ -502,14 +653,6 @@ class FollowerNpcsSystem extends GameSystem {
     }
 
     return null;
-  }
-
-  bool _noSolidObject(Board board, GameDefinition game, Position pos) {
-    final objectsLayer = board.layers['objects'];
-    if (objectsLayer == null) return true;
-    final entity = objectsLayer.getAt(pos);
-    if (entity == null) return true;
-    return !game.hasTag(entity.kind, 'solid');
   }
 
   Direction _reverseDirection(Direction dir) {

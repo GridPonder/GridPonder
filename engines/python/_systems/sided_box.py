@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 _SIDE_U, _SIDE_R, _SIDE_D, _SIDE_L = 1, 2, 4, 8
@@ -44,8 +44,8 @@ class SidedBoxSystem(GameSystem):
 
         sided_tag = config.get("sidedTag", "sided")
         sides_param = config.get("sidesParam", "sides")
-        valid_ground_tags = config.get("validGroundTags", ["walkable"])
-        tool_interactions = config.get("toolInteractions", [])
+        valid_ground_tags = config_list(config, "validGroundTags", ["walkable"])
+        tool_interactions = config_list(config, "toolInteractions", [])
 
         objects_layer = board.layers.get("objects")
         ground_layer = board.layers.get("ground")

@@ -105,6 +105,14 @@ def _transform(data: dict, r, state: GameState) -> list[dict]:
         return []
     existing = state.board.get_entity(layer_id, pos)
     from_kind = existing.kind if existing else ""
+    # Optional source filter. Conditions cannot inspect a `$event` position, so
+    # without this a rule keyed on an event can only transform a cell blindly —
+    # which forces every cell a rule might touch to be authored as the same kind.
+    wanted = data.get("fromKind")
+    if wanted is not None:
+        allowed = wanted if isinstance(wanted, list) else [wanted]
+        if from_kind not in [str(r(k)) for k in allowed]:
+            return []
     anim = data.get("animation")
     state.board.set_entity(layer_id, pos, Entity(to_kind))
     events = [ev.cell_transformed(pos, from_kind, to_kind, layer_id)]

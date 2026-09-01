@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class PortalsSystem(GameSystem):
@@ -18,7 +18,7 @@ class PortalsSystem(GameSystem):
 
     def _config(self, game: GameDef) -> dict:
         cfg = game.system_config(self.id)
-        tags_raw = cfg.get("teleportTags", ["teleport"])
+        tags_raw = config_list(cfg, "teleportTags", ["teleport"])
         return {
             "tags": [str(t) for t in tags_raw],
             "matchKey": cfg.get("matchKey", "channel"),

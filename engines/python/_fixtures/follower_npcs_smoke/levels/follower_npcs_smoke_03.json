@@ -1,0 +1,39 @@
+{
+  "id": "follower_npcs_smoke_03",
+  "title": "Follower NPCs Colour Seek",
+  "board": {
+    "size": [5, 3],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [4, 1], "kind": "flag"},
+          {"position": [0, 2], "kind": "beacon", "color": "blue"}
+        ]
+      },
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 0], "kind": "seeker", "behavior": "seek_blue"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [2, 1]}
+  },
+  "goals": [
+    {
+      "id": "reach_flag",
+      "type": "reach_target",
+      "config": {"targetKind": "flag"}
+    }
+  ],
+  "loseConditions": [],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
+    ]
+  }
+}

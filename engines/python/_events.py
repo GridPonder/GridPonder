@@ -87,6 +87,17 @@ def cell_transformed(pos: Pos, from_kind: str, to_kind: str, layer: str) -> dict
     }
 
 
+def spoil_hauled(pos: Pos, layer: str) -> dict:
+    """An `excavate` backfill that did *not* happen, because a mover ended the
+    turn on the vacated cell and carried the spoil out.
+
+    Emitted in place of `cell_transformed`, so a game can react to the corridor
+    surviving — which is otherwise an *absence* of an event and has nothing to
+    hang a rule or an effect off.
+    """
+    return {"type": "spoil_hauled", "position": pos, "layer": layer}
+
+
 def inventory_changed(old_item: str | None, new_item: str | None) -> dict:
     return {"type": "inventory_changed", "oldItem": old_item, "newItem": new_item}
 
@@ -275,6 +286,24 @@ def boxes_merged(pos: Pos, result_sides: int, a_sides: int, b_sides: int) -> dic
 
 def region_transformed(op_type: str) -> dict:
     return {"type": "region_transformed", "opType": op_type}
+
+
+def avatar_caught(pos: Pos, npc_kind: str, npc_id: str) -> dict:
+    return {
+        "type": "avatar_caught",
+        "position": pos,
+        "npcKind": npc_kind,
+        "npcId": npc_id,
+    }
+
+
+def npc_moved(npc_id: str, from_pos: Pos, to_pos: Pos) -> dict:
+    return {
+        "type": "npc_moved",
+        "npcId": npc_id,
+        "fromPosition": from_pos,
+        "toPosition": to_pos,
+    }
 
 
 # ---------------------------------------------------------------------------

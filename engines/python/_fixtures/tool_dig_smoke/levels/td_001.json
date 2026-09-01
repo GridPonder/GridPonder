@@ -1,0 +1,65 @@
+{
+  "id": "td_001",
+  "title": "Fetch, Cut, Swap",
+  "guide": "Fixture level. Walk back for the drill, cut the hard seam, then trade the drill for the spade.",
+  "board": {
+    "size": [8, 1],
+    "layers": {
+      "ground": {
+        "format": "sparse",
+        "entries": [
+          {"position": [4, 0], "kind": "hard"}
+        ]
+      },
+      "tools": {
+        "format": "sparse",
+        "entries": [
+          {"position": [1, 0], "kind": "tool_drill"},
+          {"position": [6, 0], "kind": "tool_spade"}
+        ]
+      },
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 0], "kind": "digger"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": false}
+  },
+  "goals": [
+    {
+      "id": "armed_and_arrived",
+      "type": "board_match",
+      "config": {
+        "matchMode": "exact_non_null",
+        "targetLayers": {
+          "actors": [
+            [null, null, null, null, null, null, "digger_spade", null]
+          ],
+          "tools": [
+            [null, null, null, null, null, null, "tool_drill", null]
+          ]
+        }
+      }
+    }
+  ],
+  "loseConditions": [],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "left"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
+    ],
+    "hintStops": [1]
+  },
+  "metadata": {
+    "ahaMoment": "The drill lies behind the digger, so arming yourself means walking away from the objective first.",
+    "designNotes": "Engine fixture for excavate.extraDiggableTags plus pickup/swap rules. Turn 1 (left) picks up the drill at (1,0) and consumes it. Turn 4 cuts the hard seam at (4,0) — legal only because digger_drill is granted diggable_hard — and backfills (3,0) to rubble, proving the grant does not disturb ordinary spoil handling. Turn 6 enters (6,0) holding the drill and the spade is there, so the digger becomes digger_spade and the tool entity becomes tool_drill: the goal asserts both halves of the swap, which is the only way the drop is observable. The negative case (an ungranted mover blocked by the same terrain) is covered by the unit tests in test_coupled_actors.py rather than here."
+  }
+}

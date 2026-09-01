@@ -1417,6 +1417,14 @@ class _Cell extends StatelessWidget {
     final type = display['type'] as String?;
     final color = _resolveDisplayColor(display['color'], entity);
     switch (type) {
+      // An entity that occupies state without being drawn. Used by games that
+      // hide an objective the player must locate by other means (see the
+      // `sonar` system): the cell still holds the entity, the renderer simply
+      // has nothing to say about it. Distinct from omitting `display`
+      // altogether, which falls through to the procedural palette and paints
+      // an unknown kind bright pink.
+      case 'none':
+        return const SizedBox.shrink();
       case 'tile':
         return Container(
           margin: EdgeInsets.all(cellSize * 0.1),
@@ -1694,7 +1702,22 @@ class TargetBoardRenderer extends StatelessWidget {
   /// `packService.theme?.palette` from the caller; null falls back to
   /// the renderer's built-in palette.
   final Map<String, String>? palette;
-  static const double _cellSize = 24.0;
+
+  // This is a compact goal reference, not the main play surface, so its cell
+  // size is capped independently of the real board's dimensions. Without a
+  // budget a large board (e.g. 25x13) renders at full _maxCellSize and this
+  // "banner" grows to rival the main board itself, starving it of the screen
+  // space _buildGoalGuidePanel's parent Column never reserves for it.
+  //
+  // No LayoutBuilder here: _buildGoalGuidePanel wraps this in IntrinsicHeight
+  // to line it up with the guide panel beside it, and IntrinsicHeight queries
+  // its children's intrinsic dimensions during layout. LayoutBuilder's render
+  // object does not support that query and throws, which took down every
+  // level with a board_match goal, not just the ones with large boards.
+  static const double _maxCellSize = 24.0;
+  static const double _minCellSize = 6.0;
+  static const double _maxBannerHeight = 96.0;
+  static const double _maxBannerWidth = 200.0;
 
   const TargetBoardRenderer({
     super.key,
@@ -1711,24 +1734,30 @@ class TargetBoardRenderer extends StatelessWidget {
     final cols = rows > 0 ? (firstLayer[0] as List).length : 0;
     if (rows == 0 || cols == 0) return const SizedBox.shrink();
 
+    double cellSize = _maxCellSize;
+    cellSize = min(cellSize, _maxBannerHeight / rows);
+    cellSize = min(cellSize, _maxBannerWidth / cols);
+    cellSize = max(cellSize, _minCellSize);
+
     return SizedBox(
-      width: _cellSize * cols,
-      height: _cellSize * rows,
+      width: cellSize * cols,
+      height: cellSize * rows,
       child: Stack(
         children: [
           for (int y = 0; y < rows; y++)
             for (int x = 0; x < cols; x++)
               Positioned(
-                left: x * _cellSize,
-                top: y * _cellSize,
-                width: _cellSize,
-                height: _cellSize,
+                left: x * cellSize,
+                top: y * cellSize,
+                width: cellSize,
+                height: cellSize,
                 child: _TargetCell(
                   x: x,
                   y: y,
                   targetLayers: targetLayers,
                   currentState: currentState,
                   palette: palette,
+                  cellSize: cellSize,
                 ),
               ),
         ],
@@ -1742,11 +1771,13 @@ class _TargetCell extends StatelessWidget {
   final Map<String, dynamic> targetLayers;
   final LevelState? currentState;
   final Map<String, String>? palette;
+  final double cellSize;
 
   const _TargetCell({
     required this.x,
     required this.y,
     required this.targetLayers,
+    required this.cellSize,
     this.currentState,
     this.palette,
   });
@@ -1756,7 +1787,13 @@ class _TargetCell extends StatelessWidget {
     if (layer == null || y >= layer.length) return null;
     final row = layer[y] as List?;
     if (row == null || x >= row.length) return null;
-    return row[x] as String?;
+    final cell = row[x];
+    // A target cell is either a bare kind or the full entry form the spec's own
+    // example uses, `{"kind": "...", "<param>": ...}`. Casting straight to
+    // String threw on the second one and took the whole goal panel down.
+    if (cell is String) return cell;
+    if (cell is Map) return cell['kind'] as String?;
+    return null;
   }
 
   bool _matches(String targetKind, String layerId) {
@@ -1765,8 +1802,6 @@ class _TargetCell extends StatelessWidget {
     final entity = cs.board.getEntity(layerId, Position(x, y));
     return entity?.kind == targetKind;
   }
-
-  static const double _cellSize = 24.0;
 
   @override
   Widget build(BuildContext context) {
@@ -1800,10 +1835,10 @@ class _TargetCell extends StatelessWidget {
     final color = _cellColor(kind);
     final label = kind.startsWith('num_') ? kind.substring(4) : null;
     return Container(
-      margin: const EdgeInsets.all(_cellSize * 0.1),
+      margin: EdgeInsets.all(cellSize * 0.1),
       decoration: BoxDecoration(
         color: color,
-        borderRadius: BorderRadius.circular(_cellSize * 0.1),
+        borderRadius: BorderRadius.circular(cellSize * 0.1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.2),
@@ -1816,8 +1851,8 @@ class _TargetCell extends StatelessWidget {
           ? Center(
               child: Text(
                 label,
-                style: const TextStyle(
-                  fontSize: _cellSize * 0.42,
+                style: TextStyle(
+                  fontSize: cellSize * 0.42,
                   fontWeight: FontWeight.bold,
                   color: Colors.white,
                 ),

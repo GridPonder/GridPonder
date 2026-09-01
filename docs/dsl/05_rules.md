@@ -109,6 +109,55 @@ Avatar attempted to move but was blocked by a solid entity (when `avatar_navigat
 
 Rules can react to this event to implement tool-based interactions (e.g., torch burns burnable, pickaxe breaks breakable). Use the `resolve_move` effect to complete the avatar's pending movement after removing the blocker.
 
+### `actor_moved`
+Emitted by `coupled_actors` / `individual_actors` for each actor that moved.
+
+| Payload | Type | Description |
+|-------|------|-------------|
+| `kind` | string | The actor's entity kind. |
+| `position` | `[x, y]` | Cell the actor moved into. |
+| `fromPosition` | `[x, y]` | Cell the actor left. |
+| `direction` | string | The **action's** direction, not the actor's effective one. |
+
+### `actor_entered`
+Emitted immediately after `actor_moved`, with the same payload. Two events fire
+for one move so a rule can distinguish "something left that cell" from
+"something arrived at this cell" without inspecting positions.
+
+Because `where` conditions such as `position_has_tag` read the event's
+`position`, this is the hook for anything that reacts to an actor arriving on a
+cell — pickups, pressure plates, traps. A pickup that retags the actor is
+expressible with no engine support at all:
+
+```json
+{
+  "id": "take_drill",
+  "on": "actor_entered",
+  "where": { "all_of": [
+    { "event": { "kind": "digger" } },
+    { "position_has_tag": { "layer": "tools", "tag": "grants_drill" } }
+  ]},
+  "then": [
+    { "transform": { "position": "$event.position", "layer": "actors", "toKind": "digger_drill" } },
+    { "destroy": { "position": "$event.position", "layer": "tools" } }
+  ]
+}
+```
+
+Carrying the held item in the actor's **entity kind** keeps it inside board
+state, so `to_key()`, undo, `previewTurn` and solver deduplication all keep
+working with no extra handling. Replacing the `destroy` with a `transform` of
+the item entity turns the same rule into a swap that drops the old item in
+place.
+
+### `actor_blocked`
+Emitted for each actor that could not move.
+
+| Payload | Type | Description |
+|-------|------|-------------|
+| `kind` | string | The actor's entity kind. |
+| `position` | `[x, y]` | Cell the actor stayed in. |
+
 ### `tiles_slid`
 Tiles slid during a slide-merge action.
 
@@ -135,9 +184,14 @@ An entity was removed from the objects layer (by any mechanism: pickup, destruct
 | `kind` | string | Entity kind that was removed. |
 
 ### `line_of_sight_detected`
-The `line_of_sight` system found a clear horizontal or vertical relation
-between a configured source and target. Detection is read-only; rules decide
-what effect it has.
+A clear horizontal or vertical relation was found between a source and a
+target. Detection is read-only; rules decide what effect it has.
+
+Two systems emit it. The [`line_of_sight`](04_systems.md#213-line_of_sight)
+system relates two board entities. [`follower_npcs`](04_systems.md#214-follower_npcs)
+emits it for a `requiresLineOfSight` behavior that can see the avatar, so a game
+whose watcher is an NPC can react to being seen the same way — there, `kind` is
+the literal string `avatar`, since the avatar is not a board entity.
 
 | Payload | Type | Description |
 |---------|------|-------------|
@@ -165,6 +219,18 @@ A cell's entity was replaced with a different entity.
 | `fromKind` | string | Previous kind. |
 | `toKind` | string | New kind. |
 | `layer` | string | Which layer changed. |
+
+### `spoil_hauled`
+An `excavate` backfill that did **not** happen, because a mover ended the turn
+on the excavator's vacated cell and carried the spoil out. Emitted in place of
+the `cell_transformed` that would otherwise have fired, so a game can react to
+a corridor *surviving* — which is otherwise an absence of an event and has
+nothing to hang a rule or an effect off.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell that stayed open. |
+| `layer` | string | Layer the backfill would have been written to. |
 
 ### `inventory_changed`
 Avatar inventory changed.
@@ -217,6 +283,28 @@ An entity settled after gravity/motion.
 A UI animates the travel from `fromPosition` to `position` using `fromKind`,
 so an entity that transforms on impact is not drawn transformed in mid-air.
 Cells of one rigid component settle in the same batch and so animate together.
+
+> **Resolved after the NPC phase.** `npc_resolution` (phase 6) runs after the
+> cascade pass in phase 5, so the engine gives rules a second pass over the NPC
+> events once that phase completes. Rules on `npc_moved` and `avatar_caught`
+> therefore fire in the same turn the NPC acted, before goal and lose
+> evaluation — which is how a level can, for example, unseal a door the moment an
+> NPC steps onto a plate. `follower_npcs` still writes `contactVariable` itself
+> rather than depending on a rule, so a lose condition works with no rules at
+> all.
+
+### `avatar_caught`
+
+Emitted by [`follower_npcs`](04_systems.md#214-follower_npcs) when an NPC whose
+behavior sets `lethalContact` steps onto the avatar's cell. The system also
+increments its `contactVariable`, so a `variable_threshold` lose condition fires
+on the same turn without needing a rule.
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `position` | `[x, y]` | Cell where contact happened. |
+| `npcKind` | string | Entity kind of the NPC that made contact. |
+| `npcId` | string | NPC identifier (derived from its pre-move position). |
 
 ### `npc_moved`
 An NPC moved during NPC resolution.
@@ -415,6 +503,7 @@ Change an entity at a position to a different kind. If `animation` is specified,
 ```json
 { "transform": { "position": [3, 2], "layer": "ground", "toKind": "bridge" } }
 { "transform": { "position": [3, 2], "layer": "ground", "toKind": "bridge", "animation": "dissolving" } }
+{ "transform": { "position": "$event.position", "layer": "ground", "fromKind": "cracked", "toKind": "void" } }
 ```
 
 | Field | Type | Required | Description |
@@ -422,7 +511,15 @@ Change an entity at a position to a different kind. If `animation` is specified,
 | `position` | `[x, y]` or ref | **yes** | Cell to transform. |
 | `layer` | string | **yes** | Layer to modify. |
 | `toKind` | string | **yes** | New entity kind. |
+| `fromKind` | string or array | no | Only transform when the cell already holds this kind (or one of these). No match, no effect and no event. |
 | `animation` | string | no | Animation name from the source entity kind's `animations` map. Played before transform. |
+
+`fromKind` exists because conditions cannot inspect a `$event` position — only
+effects can read one. Without it, a rule keyed on an event has to transform the
+cell blindly, which forces every cell the rule might ever touch to be authored
+as the same kind. With it, a rule such as "the floor gives way under whatever
+walks off it" applies to the cracked tiles and leaves solid ground alone, so the
+art and the rule agree without a per-cell repair rule propping them up.
 
 ### `move_entity`
 Move an entity from one position to another.

@@ -1,18 +1,431 @@
 """FollowerNpcsSystem — see docs/dsl/04_systems.md."""
 from __future__ import annotations
-from collections import deque
-from typing import Any, Optional
+from typing import Optional
 
-from .._models import (
-    Pos, Entity, GameState, PendingMove, OverlayCursor,
-    dir_delta, dir_opposite, is_cardinal, CARDINALS,
-)
+from .._models import Pos, Entity, GameState, dir_opposite
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
+from ._sight import has_clear_line
+
+# Cardinal scan order used when ranking candidate steps.
+_CARDINAL_ORDER = ("up", "down", "left", "right")
+
+# Clockwise rotation order: right -> down -> left -> up -> right
+_CLOCKWISE_ORDER = ("right", "down", "left", "up")
+
+_DIR_KEYS = frozenset({
+    "up", "down", "left", "right",
+    "up_left", "up_right", "down_left", "down_right",
+})
+
+
+def _manhattan(a: Pos, b: Pos) -> int:
+    return abs(a.x - b.x) + abs(a.y - b.y)
+
+
+def _cardinal_toward(from_pos: Pos, target: Pos) -> str:
+    """Dominant-axis step direction, x-axis preferred on ties."""
+    dx = target.x - from_pos.x
+    dy = target.y - from_pos.y
+    if abs(dx) >= abs(dy):
+        return "right" if dx > 0 else "left"
+    return "down" if dy > 0 else "up"
+
+
+def _rotate_clockwise(current: str) -> str:
+    try:
+        idx = _CLOCKWISE_ORDER.index(current)
+    except ValueError:
+        return "right"
+    return _CLOCKWISE_ORDER[(idx + 1) % len(_CLOCKWISE_ORDER)]
 
 
 class FollowerNpcsSystem(GameSystem):
     def __init__(self, sys_id: str):
         super().__init__(sys_id, "follower_npcs")
 
+    def execute_npc_resolution(self, state: GameState, game: GameDef) -> list[dict]:
+        config = game.system_config(self.id)
+        npc_tags = [str(t) for t in config_list(config, "npcTags", ["npc"])]
+        behaviors = config.get("behaviors", {}) or {}
+        contact_variable = config.get("contactVariable", "caught")
+
+        board = state.board
+        actors = board.layers.get("actors")
+        if actors is None:
+            return []
+
+        # Collect NPC positions first so the board can be mutated while iterating.
+        npc_entries = [
+            (pos, entity)
+            for pos, entity in actors.entries()
+            if any(game.has_tag(entity.kind, tag) for tag in npc_tags)
+        ]
+
+        # Cells occupied by NPCs after this turn's moves, seeded with every NPC
+        # that has not moved yet, so two NPCs cannot land on the same cell.
+        occupied_after_move: set[Pos] = {pos for pos, _ in npc_entries}
+
+        events: list[dict] = []
+
+        for npc_pos, npc_entity in npc_entries:
+            behavior_name = npc_entity.param("behavior")
+            if behavior_name is None:
+                continue
+            behavior_def = behaviors.get(str(behavior_name))
+            if not isinstance(behavior_def, dict):
+                continue
+            behavior_type = behavior_def.get("type")
+            if behavior_type is None:
+                continue
+
+            # Gaze is about seeing, not moving, so it is refreshed before the
+            # frequency gate and regardless of whether a step happens.
+            sight = None
+            if behavior_type == "toward_avatar":
+                sight = self._avatar_in_sight(
+                    npc_pos, behavior_def, state, game,
+                )
+                gaze_param = behavior_def.get("gazeParam")
+                if gaze_param:
+                    avatar_pos = state.avatar.position
+                    npc_entity.params[str(gaze_param)] = (
+                        _cardinal_toward(npc_pos, avatar_pos)
+                        if sight and avatar_pos is not None
+                        else "rest"
+                    )
+
+            # Reported from wherever the NPC ends the turn, not from where it
+            # looked: a chaser steps along the line it just traced.
+            npc_id = f"spirit_{npc_pos.x}_{npc_pos.y}"
+            report_sight = (
+                behavior_type == "toward_avatar"
+                and bool(sight)
+                and behavior_def.get("requiresLineOfSight", False)
+                and state.avatar.position is not None
+            )
+
+            def _report_sight_from(pos: Pos) -> None:
+                if report_sight:
+                    events.append(
+                        ev.line_of_sight_detected(
+                            pos,
+                            state.avatar.position,
+                            "avatar",
+                            npc_id,
+                            npc_entity.kind,
+                        )
+                    )
+
+            # The turn counter lives on the state, not in the variables map, and
+            # is incremented in the goal-evaluation phase after this one — so the
+            # first turn sees 0 and a frequency of N acts on turn 1, then every
+            # Nth turn after it.
+            frequency = behavior_def.get("frequency", 1)
+            if frequency > 1 and state.turn_count % frequency != 0:
+                _report_sight_from(npc_pos)
+                continue
+
+            solid_blocking = behavior_def.get("solidBlocking", True)
+
+            next_pos = self._compute_next_position(
+                npc_pos=npc_pos,
+                npc_entity=npc_entity,
+                behavior_type=behavior_type,
+                behavior_def=behavior_def,
+                state=state,
+                game=game,
+                solid_blocking=solid_blocking,
+                occupied_after_move=occupied_after_move,
+                sight=sight,
+            )
+
+            if next_pos is None or next_pos == npc_pos:
+                _report_sight_from(npc_pos)
+                continue
+
+            _report_sight_from(next_pos)
+            caught = state.avatar.position == next_pos
+
+            occupied_after_move.discard(npc_pos)
+            occupied_after_move.add(next_pos)
+
+            board.set_entity("actors", npc_pos, None)
+            board.set_entity("actors", next_pos, npc_entity)
+
+            events.append(ev.npc_moved(npc_id, npc_pos, next_pos))
+
+            if caught:
+                # Goal and lose evaluation both run in the phase after this one,
+                # so bumping the counter here is enough for a variable_threshold
+                # lose condition to fire on the same turn.
+                current = state.variables.get(contact_variable, 0)
+                state.variables[contact_variable] = int(current) + 1
+                events.append(
+                    ev.avatar_caught(next_pos, npc_entity.kind, npc_id)
+                )
+
+        return events
+
+    # -- behavior dispatch ---------------------------------------------------
+
+    def _compute_next_position(
+        self,
+        npc_pos: Pos,
+        npc_entity: Entity,
+        behavior_type: str,
+        behavior_def: dict,
+        state: GameState,
+        game: GameDef,
+        solid_blocking: bool,
+        occupied_after_move: set,
+        sight: Optional[bool] = None,
+    ) -> Optional[Pos]:
+        # One flag governs every behavior: without it the avatar's cell is
+        # impassable, so an NPC with no other option stands still or, for the
+        # circuit behaviors, turns around.
+        lethal_contact = behavior_def.get("lethalContact", False)
+        block_avatar = not lethal_contact
+
+        if behavior_type == "toward_avatar":
+            avatar_pos = state.avatar.position
+            if avatar_pos is None:
+                return None
+            if sight is None:
+                sight = self._avatar_in_sight(npc_pos, behavior_def, state, game)
+            if not sight:
+                return None
+            return self._ranked_step(
+                npc_pos, avatar_pos, state, game, solid_blocking,
+                occupied_after_move, block_avatar=block_avatar,
+            )
+
+        if behavior_type == "toward_tag":
+            target_tag = behavior_def.get("targetTag")
+            if target_tag is None:
+                return None
+            target = self._nearest_tagged(
+                npc_pos, str(target_tag), ("objects", "markers"), state, game,
+            )
+            if target is None:
+                return None
+            return self._ranked_step(
+                npc_pos, target, state, game, solid_blocking,
+                occupied_after_move, block_avatar=block_avatar,
+            )
+
+        if behavior_type == "toward_color":
+            target_color = behavior_def.get("targetColor")
+            if target_color is None:
+                return None
+            target = self._nearest_colored(
+                npc_pos, str(target_color), ("objects", "actors"), state,
+            )
+            if target is None:
+                return None
+            return self._ranked_step(
+                npc_pos, target, state, game, solid_blocking,
+                occupied_after_move, block_avatar=block_avatar,
+            )
+
+        if behavior_type == "clockwise":
+            return self._behavior_clockwise(
+                npc_pos, npc_entity, state, game, solid_blocking,
+                occupied_after_move, block_avatar,
+            )
+
+        if behavior_type == "patrol":
+            return self._behavior_patrol(
+                npc_pos, npc_entity, state, game, solid_blocking,
+                occupied_after_move, block_avatar,
+            )
+
+        return None
+
+    # -- passability --------------------------------------------------------
+
+    def _no_solid_object(self, state: GameState, game: GameDef, pos: Pos) -> bool:
+        entity = state.board.get_entity("objects", pos)
+        if entity is None:
+            return True
+        return not game.has_tag(entity.kind, "solid")
+
+    def _can_move_to(
+        self,
+        pos: Pos,
+        state: GameState,
+        game: GameDef,
+        solid_blocking: bool,
+        occupied_after_move: set,
+        block_avatar: bool,
+    ) -> bool:
+        board = state.board
+        if not board.is_in_bounds(pos):
+            return False
+        if board.is_void(pos):
+            return False
+        # NOTE: only the avatar-seeking path refuses to enter the avatar's cell.
+        # The Dart implementation omits this check in the tag/color/clockwise/
+        # patrol branches, so the port keeps the asymmetry to stay in parity.
+        if block_avatar and state.avatar.position == pos:
+            return False
+        if pos in occupied_after_move:
+            return False
+        if solid_blocking and not self._no_solid_object(state, game, pos):
+            return False
+        return True
+
+    # -- sight --------------------------------------------------------------
+
+    def _avatar_in_sight(
+        self, npc_pos: Pos, behavior_def: dict, state: GameState, game: GameDef,
+    ) -> bool:
+        """Whether this behavior currently considers the avatar visible.
+
+        A behavior without `requiresLineOfSight` chases unconditionally, so it
+        always counts as seeing the avatar.
+        """
+        avatar_pos = state.avatar.position
+        if avatar_pos is None:
+            return False
+        if not behavior_def.get("requiresLineOfSight", False):
+            return True
+        blocking_layers = [
+            str(l) for l in config_list(behavior_def, "blockingLayers", ["objects"])
+        ]
+        blocking_tags = {
+            str(t) for t in config_list(behavior_def, "blockingTags", ["solid"])
+        }
+        return has_clear_line(
+            npc_pos,
+            avatar_pos,
+            None,
+            state,
+            game,
+            blocking_layers,
+            blocking_tags,
+            bool(behavior_def.get("multiCellObjectsBlock", True)),
+        )
+
+    def _ranked_step(
+        self,
+        npc_pos: Pos,
+        target: Pos,
+        state: GameState,
+        game: GameDef,
+        solid_blocking: bool,
+        occupied_after_move: set,
+        block_avatar: bool,
+    ) -> Optional[Pos]:
+        """First passable step that strictly reduces Manhattan distance.
+
+        Directions are tried with the dominant axis first, then the remaining
+        cardinals in fixed order. Because every distance-reducing cardinal step
+        reduces the distance by exactly one, the first accepted candidate also
+        ends up being the best one.
+        """
+        preferred = _cardinal_toward(npc_pos, target)
+        ordered = [preferred] + [d for d in _CARDINAL_ORDER if d != preferred]
+
+        best: Optional[Pos] = None
+        best_dist = _manhattan(npc_pos, target)
+
+        for direction in ordered:
+            candidate = npc_pos.moved(direction)
+            dist = _manhattan(candidate, target)
+            if dist >= best_dist:
+                continue
+            if self._can_move_to(
+                candidate, state, game, solid_blocking, occupied_after_move,
+                block_avatar,
+            ):
+                best_dist = dist
+                best = candidate
+
+        return best
+
+    # -- target search ------------------------------------------------------
+
+    def _nearest_tagged(
+        self, npc_pos: Pos, tag: str, layer_ids: tuple, state: GameState, game: GameDef,
+    ) -> Optional[Pos]:
+        nearest: Optional[Pos] = None
+        nearest_dist = 999999
+        for layer_id in layer_ids:
+            layer = state.board.layers.get(layer_id)
+            if layer is None:
+                continue
+            for pos, entity in layer.entries():
+                if not game.has_tag(entity.kind, tag):
+                    continue
+                dist = _manhattan(npc_pos, pos)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest = pos
+        return nearest
+
+    def _nearest_colored(
+        self, npc_pos: Pos, color: str, layer_ids: tuple, state: GameState,
+    ) -> Optional[Pos]:
+        nearest: Optional[Pos] = None
+        nearest_dist = 999999
+        for layer_id in layer_ids:
+            layer = state.board.layers.get(layer_id)
+            if layer is None:
+                continue
+            for pos, entity in layer.entries():
+                if str(entity.param("color")) != color:
+                    continue
+                dist = _manhattan(npc_pos, pos)
+                if dist < nearest_dist:
+                    nearest_dist = dist
+                    nearest = pos
+        return nearest
+
+    # -- circuit behaviors --------------------------------------------------
+
+    def _facing_of(self, npc_entity: Entity) -> str:
+        facing = npc_entity.param("facing")
+        facing = "right" if facing is None else str(facing)
+        return facing if facing in _DIR_KEYS else "right"
+
+    def _behavior_clockwise(
+        self, npc_pos, npc_entity, state, game, solid_blocking,
+        occupied_after_move, block_avatar=True,
+    ) -> Optional[Pos]:
+        facing = self._facing_of(npc_entity)
+        for _ in range(len(_CLOCKWISE_ORDER)):
+            candidate = npc_pos.moved(facing)
+            if self._can_move_to(
+                candidate, state, game, solid_blocking, occupied_after_move,
+                block_avatar=block_avatar,
+            ):
+                npc_entity.params["facing"] = facing
+                return candidate
+            facing = _rotate_clockwise(facing)
+        return None
+
+    def _behavior_patrol(
+        self, npc_pos, npc_entity, state, game, solid_blocking,
+        occupied_after_move, block_avatar=True,
+    ) -> Optional[Pos]:
+        facing = self._facing_of(npc_entity)
+
+        candidate = npc_pos.moved(facing)
+        if self._can_move_to(
+            candidate, state, game, solid_blocking, occupied_after_move,
+            block_avatar=block_avatar,
+        ):
+            return candidate
+
+        reversed_facing = dir_opposite(facing)
+        reversed_candidate = npc_pos.moved(reversed_facing)
+        if self._can_move_to(
+            reversed_candidate, state, game, solid_blocking, occupied_after_move,
+            block_avatar=block_avatar,
+        ):
+            npc_entity.params["facing"] = reversed_facing
+            return reversed_candidate
+
+        return None

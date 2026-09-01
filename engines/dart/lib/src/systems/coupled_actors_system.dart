@@ -1,4 +1,5 @@
 import '../engine/game_system.dart';
+import '../models/direction.dart';
 import '../models/direction_transform.dart';
 import '../models/entity.dart';
 import '../models/event.dart';
@@ -7,6 +8,8 @@ import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
 import 'claim_policy.dart';
+import 'excavate_policy.dart';
+import 'runtime_variable.dart';
 
 /// One actor resolved for this turn, with the effective direction it travels
 /// in after its `directionTransforms` entry is applied.
@@ -16,6 +19,34 @@ class _Mover {
   final Position eff;
 
   const _Mover(this.pos, this.entity, this.eff);
+}
+
+/// Next instruction from the tape, advancing the stored index.
+///
+/// A negative stored index (e.g. from a rewind rule using
+/// `increment_variable` with a negative amount) is clamped to 0 rather than
+/// wrapping — a rewind-past-the-start is inert, not surprising.
+///
+/// Returns null when a non-cycling programme is exhausted, which stops the
+/// world stepping. A cycling programme wraps, so its index stays bounded by
+/// the programme length — that keeps the joint state space finite for a
+/// domain solver. `cycle` is compared with `!= true` (not truthy) so a typo
+/// like `"cycle": 1` behaves as non-cycling rather than cycling.
+String? _tapeDirection(Map<String, dynamic> tape, LevelState state) {
+  final program = (tape['program'] as List<dynamic>? ?? const [])
+      .map((d) => d.toString())
+      .toList();
+  if (program.isEmpty) return null;
+
+  final idxVar = tape['indexVariable'] as String? ?? 'tapeIndex';
+  var idx = readIntVariable(state, idxVar);
+  if (idx < 0) idx = 0;
+  if (idx >= program.length) {
+    if (tape['cycle'] != true) return null;
+    idx %= program.length;
+  }
+  state.variables[idxVar] = idx + 1;
+  return program[idx];
 }
 
 /// CoupledActorsSystem — see docs/dsl/04_systems.md.
@@ -37,6 +68,23 @@ class _Mover {
 /// if the cell is currently empty there; an already-owned territory cell is
 /// never overwritten. Claiming applies only to cells reached by a move this
 /// turn, not to blocked/staying actors or to actors' initial cells.
+///
+/// Optionally, a `tape` config block (`{"program": [...], "cycle": bool,
+/// "indexVariable": String}`) drives the system from a stored programme
+/// instead of from the action's direction. The index lives in
+/// `state.variables`, so it is part of the state key and undo, preview and
+/// solver dedup all work unchanged. With `cycle` false the world stops
+/// stepping once the programme is exhausted; with `cycle` true it repeats
+/// forever and the index stays bounded. `cycle` is read strictly — only the
+/// boolean `true` cycles, so a non-boolean value (e.g. `"cycle": 1`) behaves
+/// as `false`.
+///
+/// Optionally, an `excavate` config block (`{"diggableTag": String,
+/// "clearedKind": String, "backfillKind": String}`) lets actors cut through
+/// terrain that would otherwise block them: the target cell is reduced to
+/// `clearedKind`, the actor takes it, and the cell it left is backfilled with
+/// `backfillKind` unless another actor ends the turn standing there. See
+/// `excavate_policy.dart` for the semantics and the tolerance contract.
 class CoupledActorsSystem extends GameSystem {
   const CoupledActorsSystem({required super.id})
       : super(type: 'coupled_actors');
@@ -59,29 +107,43 @@ class CoupledActorsSystem extends GameSystem {
     GameDefinition game,
   ) {
     final config = game.systemConfig(id, {});
+    final tape = config['tape'] as Map<String, dynamic>?;
 
-    final moveAction = config['moveAction'] as String? ?? 'move';
-    if (action.actionId != moveAction) return const [];
+    final String? directionStr;
+    if (tape == null) {
+      final moveAction = config['moveAction'] as String? ?? 'move';
+      if (action.actionId != moveAction) return const [];
+      directionStr = action.directionStr;
+    } else {
+      // Tape-driven: the direction comes from the programme, so *any* accepted
+      // action steps the world. A vetoed turn cannot leak the advanced index,
+      // because the turn engine runs the whole turn on a working copy.
+      directionStr = _tapeDirection(tape, state);
+    }
 
     final allowedRaw =
         config['directions'] as List<dynamic>? ?? _defaultDirections;
     final allowed = allowedRaw.map((d) => d.toString()).toList();
 
-    final directionStr = action.directionStr;
     if (directionStr == null || !allowed.contains(directionStr)) {
       return const [];
     }
 
-    final direction = action.direction;
-    if (direction == null) return const [];
-
-    final delta = direction.offset;
+    // Not a safety guarantee: `allowed` is pack-authored (`directions`
+    // config, and — under a `tape` — the tape's own `program`), so a pack
+    // that lists an unparseable name in both throws `FormatException` here.
+    // That matches the pre-tape `action.direction` path, which threw
+    // identically; Python's `dir_delta` instead returns `(0, 0)` for the
+    // same input and refuses silently, so a bogus direction name is not
+    // symmetric across engines today.
+    final delta = Direction.fromJson(directionStr).offset;
     if (delta.x == 0 && delta.y == 0) return const [];
 
     final actorLayerId = config['actorLayer'] as String? ?? 'actors';
     final groundLayerId = config['groundLayer'] as String? ?? 'ground';
     final wallTag = config['wallTag'] as String? ?? 'solid';
     final claim = config['claim'] as Map<String, dynamic>?;
+    final excavate = ExcavatePolicy.read(config);
 
     final board = state.board;
     final actorLayer = board.layers[actorLayerId];
@@ -128,19 +190,31 @@ class CoupledActorsSystem extends GameSystem {
 
     final occupied = {for (final e in actors) e.key};
     final events = <GameEvent>[];
+    final pendingBackfill = <Position>[];
 
     for (final mover in ordered) {
       final pos = mover.pos;
       final entity = mover.entity;
       final target = Position(pos.x + mover.eff.x, pos.y + mover.eff.y);
 
-      final blocked = !board.isInBounds(target) ||
-          board.hasTagAt(groundLayerId, target, wallTag, game.entityKinds) ||
-          occupied.contains(target);
+      final inBounds = board.isInBounds(target);
+      final solid = inBounds &&
+          board.hasTagAt(groundLayerId, target, wallTag, game.entityKinds);
+      // Only a cell that is *both* solid and diggable is excavated, so
+      // walking open ground stays an ordinary move and never backfills.
+      final digging = solid &&
+          isDiggable(board, game, groundLayerId, target, excavate, entity.kind);
+      final blocked =
+          !inBounds || (solid && !digging) || occupied.contains(target);
 
       if (blocked) {
         events.add(GameEvent.actorBlocked(entity.kind, pos));
         continue;
+      }
+
+      if (digging) {
+        events.add(cut(board, groundLayerId, target, excavate!));
+        pendingBackfill.add(pos);
       }
 
       occupied.remove(pos);
@@ -155,6 +229,13 @@ class CoupledActorsSystem extends GameSystem {
           applyClaim(board, game, claim, groundLayerId, target, entity.kind);
       if (claimEvent != null) events.add(claimEvent);
     }
+
+    // After every actor has resolved: `occupied` is now the final positions
+    // for the turn, which is exactly what decides whether a trailing partner
+    // hauled each excavator's spoil out.
+    events.addAll(
+      backfill(board, groundLayerId, pendingBackfill, occupied, excavate),
+    );
 
     return events;
   }

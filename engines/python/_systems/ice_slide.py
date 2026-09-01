@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class IceSlideSystem(GameSystem):
@@ -58,8 +58,8 @@ class IceSlideSystem(GameSystem):
         if push_sys is None:
             return []
         push_cfg = push_sys.get("config", {})
-        pushable_tags = push_cfg.get("pushableTags", ["pushable"])
-        valid_target_tags = push_cfg.get("validTargetTags", ["walkable"])
+        pushable_tags = config_list(push_cfg, "pushableTags", ["pushable"])
+        valid_target_tags = config_list(push_cfg, "validTargetTags", ["walkable"])
         if not any(game.has_tag(obj.kind, t) for t in pushable_tags):
             return []
         dx, dy = dir_delta(dir_str)

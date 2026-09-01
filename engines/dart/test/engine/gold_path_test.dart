@@ -6,8 +6,7 @@ import 'package:test/test.dart';
 
 /// Helpers for loading a pack from disk and replaying a gold path.
 LoadedPack _loadPack(String packDir) {
-  final manifestStr =
-      File('$packDir/manifest.json').readAsStringSync();
+  final manifestStr = File('$packDir/manifest.json').readAsStringSync();
   final gameStr = File('$packDir/game.json').readAsStringSync();
 
   final levelsDir = Directory('$packDir/levels');
@@ -40,8 +39,7 @@ void _replayAndExpectWin(TurnEngine engine, List<GameAction> path) {
     if (engine.isWon) break;
     engine.executeTurn(action);
   }
-  expect(engine.isWon, isTrue,
-      reason: 'Should be won after gold path');
+  expect(engine.isWon, isTrue, reason: 'Should be won after gold path');
   expect(engine.isLost, isFalse);
 }
 
@@ -52,11 +50,27 @@ void main() {
     setUpAll(() => pack = _loadPack('../../packs/carrot_quest'));
 
     for (final id in [
-      'fw_001','fw_002','fw_003','fw_004','fw_005','fw_006','pw_001','pw_003','fw_007',
-      'fw_ice_002','fw_ice_003','fw_ice_005','fw_ice_006','fw_ice_007','fw_ice_008',
+      'fw_001',
+      'fw_002',
+      'fw_003',
+      'fw_004',
+      'fw_005',
+      'fw_006',
+      'pw_001',
+      'pw_003',
+      'fw_007',
+      'fw_ice_002',
+      'fw_ice_003',
+      'fw_ice_005',
+      'fw_ice_006',
+      'fw_ice_007',
+      'fw_ice_008',
       'fw_ice_011',
     ]) {
-      test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
+      test(
+          id,
+          () => _replayAndExpectWin(
+              _engineForLevel(pack, id), _goldPath(pack, id)));
     }
   });
 
@@ -65,8 +79,28 @@ void main() {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/number_cells'));
 
-    for (final id in ['nc_001','nc_002','nc_003','nc_004','nc_005','nc_006','nc_007','nc_008','nc_009','nc_010','nc_011','nc_012','nc_013','nc_014','nc_015','nc_019']) {
-      test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
+    for (final id in [
+      'nc_001',
+      'nc_002',
+      'nc_003',
+      'nc_004',
+      'nc_005',
+      'nc_006',
+      'nc_007',
+      'nc_008',
+      'nc_009',
+      'nc_010',
+      'nc_011',
+      'nc_012',
+      'nc_013',
+      'nc_014',
+      'nc_015',
+      'nc_019'
+    ]) {
+      test(
+          id,
+          () => _replayAndExpectWin(
+              _engineForLevel(pack, id), _goldPath(pack, id)));
     }
   });
 
@@ -75,8 +109,11 @@ void main() {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/rotate_flip'));
 
-    for (final id in ['rf_001','rf_002']) {
-      test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
+    for (final id in ['rf_001', 'rf_002']) {
+      test(
+          id,
+          () => _replayAndExpectWin(
+              _engineForLevel(pack, id), _goldPath(pack, id)));
     }
   });
 
@@ -85,9 +122,18 @@ void main() {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/flood_colors'));
 
-    test('fl_001', () => _replayAndExpectWin(_engineForLevel(pack, 'fl_001'), _goldPath(pack, 'fl_001')));
-    test('fl_002', () => _replayAndExpectWin(_engineForLevel(pack, 'fl_002'), _goldPath(pack, 'fl_002')));
-    test('fl_003', () => _replayAndExpectWin(_engineForLevel(pack, 'fl_003'), _goldPath(pack, 'fl_003')));
+    test(
+        'fl_001',
+        () => _replayAndExpectWin(
+            _engineForLevel(pack, 'fl_001'), _goldPath(pack, 'fl_001')));
+    test(
+        'fl_002',
+        () => _replayAndExpectWin(
+            _engineForLevel(pack, 'fl_002'), _goldPath(pack, 'fl_002')));
+    test(
+        'fl_003',
+        () => _replayAndExpectWin(
+            _engineForLevel(pack, 'fl_003'), _goldPath(pack, 'fl_003')));
   });
 
   // --- diagonal_swipes ---
@@ -95,8 +141,11 @@ void main() {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/diagonal_swipes'));
 
-    for (final id in ['ds_001','ds_002']) {
-      test(id, () => _replayAndExpectWin(_engineForLevel(pack, id), _goldPath(pack, id)));
+    for (final id in ['ds_001', 'ds_002']) {
+      test(
+          id,
+          () => _replayAndExpectWin(
+              _engineForLevel(pack, id), _goldPath(pack, id)));
     }
   });
 
@@ -116,6 +165,47 @@ void main() {
     );
   });
 
+  // --- tool_dig_smoke (engine fixture: tool-gated excavation + pickup/swap) ---
+  group('tool_dig_smoke gold paths', () {
+    late LoadedPack pack;
+    setUpAll(
+      () => pack = _loadPack('../python/_fixtures/tool_dig_smoke'),
+    );
+
+    for (final id in ['td_001']) {
+      test(
+          id,
+          () => _replayAndExpectWin(
+              _engineForLevel(pack, id), _goldPath(pack, id)));
+    }
+  });
+
+  // --- follower_npcs_smoke (throwaway follower_npcs fixture) ---
+  group('follower_npcs_smoke gold paths', () {
+    late LoadedPack pack;
+    setUpAll(
+      () => pack = _loadPack('../python/_fixtures/follower_npcs_smoke'),
+    );
+
+    for (final levelId in const [
+      'follower_npcs_smoke_01',
+      'follower_npcs_smoke_02',
+      'follower_npcs_smoke_03',
+      'follower_npcs_smoke_04',
+      'follower_npcs_smoke_05',
+      'follower_npcs_smoke_06',
+      'follower_npcs_smoke_07',
+    ]) {
+      test(
+        levelId,
+        () => _replayAndExpectWin(
+          _engineForLevel(pack, levelId),
+          _goldPath(pack, levelId),
+        ),
+      );
+    }
+  });
+
   group('undo/reset', () {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/carrot_quest'));
@@ -123,9 +213,11 @@ void main() {
       final engine = _engineForLevel(pack, 'fw_001');
       final initialState = engine.state;
       engine.executeTurn(GameAction('move', {'direction': 'right'}));
-      expect(engine.state.avatar.position, isNot(equals(initialState.avatar.position)));
+      expect(engine.state.avatar.position,
+          isNot(equals(initialState.avatar.position)));
       expect(engine.undo(), isTrue);
-      expect(engine.state.avatar.position, equals(initialState.avatar.position));
+      expect(
+          engine.state.avatar.position, equals(initialState.avatar.position));
     });
 
     test('reset restores initial state', () {

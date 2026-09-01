@@ -37,6 +37,18 @@ Visual presentation and input bindings are defined separately in `theme.json` â€
 | `rules` | array | no | Game-level rules (shared across levels). |
 | `levelSequence` | array | **yes** | Ordered list of levels and story screens. |
 | `defaults` | object | no | Default values for level fields. |
+| `ui` | object | no | Which in-play panels the app shows. See [UI](#ui). |
+| `goalDescriptions` | object | no | One sentence per goal id, shown in the goal panel. |
+
+---
+
+## UI
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `showGoal` | boolean | `false` | Show the goal panel during play. |
+| `showGuide` | boolean | `false` | Show the level's `guide` text during play. |
+| `showGoalPreview` | boolean | `true` | Whether a `board_match` goal is drawn as a miniature target board. Turn it off for a game that uses `board_match` to say "this entity stands here" rather than to specify a pattern â€” a two-row board with one marked square explains less than the sentence does. The panel then falls back to `goalDescriptions`, listing every goal the level has. |
 
 ---
 

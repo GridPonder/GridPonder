@@ -160,6 +160,47 @@ def test_a_pack_that_wrote_its_own_description_still_gets_it():
     assert text == "Split the map three ways."
 
 
+# ── board_match target cells ──────────────────────────────────────────────
+
+def _board_match(cell) -> dict:
+    """A one-row board_match goal whose single set cell is `cell`."""
+    return {"goals": [{
+        "id": "match_goal",
+        "type": "board_match",
+        "config": {"targetLayers": {"territory": [[None, cell, None]]}},
+    }]}
+
+
+def test_board_match_accepts_a_bare_kind():
+    text = _render(_board_match("terr_wei"))
+    assert "match the target pattern" in text, text
+    grid = text.splitlines()[-1]
+    assert len(grid) == 3 and grid[0] == grid[2] == "." and grid[1] != ".", grid
+
+
+def test_board_match_accepts_the_entry_form():
+    """`{"kind": ...}` is the form the spec's own example uses.
+
+    The renderer indexed the cell for a fallback symbol, so this raised
+    `KeyError: 0` and took the whole observation with it — which meant any pack
+    writing a target cell this way could not be benchmarked at all.
+    """
+    assert _render(_board_match({"kind": "terr_wei"})) == _render(
+        _board_match("terr_wei"))
+
+
+def test_board_match_entry_form_survives_anonymous_mode():
+    """Where it actually bit: clear mode short-circuits on goalDescriptions."""
+    text = _render(_board_match({"kind": "terr_wei"}), anon=True)
+    assert "match the target pattern" in text, text
+    assert "terr_wei" not in text, text
+
+
+def test_board_match_ignores_a_cell_naming_no_kind():
+    assert _render(_board_match({"color": "red"})).splitlines()[-1] == "...", \
+        _render(_board_match({"color": "red"}))
+
+
 def run_all() -> bool:
     import traceback
 

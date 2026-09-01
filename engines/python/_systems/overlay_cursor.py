@@ -9,7 +9,7 @@ from .._models import (
 )
 from .._game_def import GameDef
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 class OverlayCursorSystem(GameSystem):
@@ -34,7 +34,7 @@ class OverlayCursorSystem(GameSystem):
             ny = ap.y if ap else overlay.y
             return [ev.overlay_moved([nx, ny])]
 
-        size = config.get("size", [2, 2])
+        size = config_list(config, "size", [2, 2])
         ow = size[0] if size else 2
         oh = size[1] if len(size) > 1 else 2
         constrained = config.get("boundsConstrained", True)

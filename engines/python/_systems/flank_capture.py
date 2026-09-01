@@ -34,7 +34,7 @@ from __future__ import annotations
 from .._game_def import GameDef
 from .._models import CARDINALS, Entity, GameState, Pos
 from .. import _events as ev
-from ._base import GameSystem
+from ._base import GameSystem, config_list
 
 
 # Axis unit steps. A "line through B" is the full row (horizontal) and/or full
@@ -60,7 +60,7 @@ class FlankCaptureSystem(GameSystem):
 
         triggers = {
             str(value)
-            for value in config.get("triggerEvents", ["actor_moved"])
+            for value in config_list(config, "triggerEvents", ["actor_moved"])
         }
         dests = _dest_cells(trigger_events, triggers)
         if not dests:

@@ -1,0 +1,44 @@
+{
+  "id": "follower_npcs_smoke_05",
+  "title": "Follower NPCs Sight Gate",
+  "board": {
+    "size": [5, 5],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [3, 3], "kind": "crate"},
+          {"position": [3, 4], "kind": "flag"}
+        ]
+      },
+      "actors": {
+        "format": "sparse",
+        "entries": [
+          {"position": [4, 1], "kind": "watcher", "behavior": "stalk"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0]}
+  },
+  "goals": [
+    {
+      "id": "reach_flag",
+      "type": "reach_target",
+      "config": {"targetKind": "flag"}
+    }
+  ],
+  "loseConditions": [],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"}
+    ]
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "dslVersion": "0.8",
+  "packVersion": 1,
+  "gameId": "tool_dig_smoke",
+  "title": "Tool Dig Smoke",
+  "shortDescription": "Fixture: tool-gated excavation, pickup and swap.",
+  "description": "Engine fixture, never shipped. One digger walks back for a drill, cuts terrain only a drill holder can cut, then swaps the drill for a spade and leaves the drill behind. Exercises excavate.extraDiggableTags together with pickup and swap rules on actor_entered.",
+  "version": "1.0.0",
+  "minEngineVersion": "0.8.0"
+}
