@@ -150,17 +150,18 @@ Map<String, List<Position>> computeHeadPaths(
   return result;
 }
 
-int _manhattan(Position a, Position b) =>
-    (a.x - b.x).abs() + (a.y - b.y).abs();
-
-/// Direction from [from] to an orthogonally-adjacent [to].
-String _dirName(Position from, Position to) {
+/// Direction from [from] to [to] when the two share a row or column —
+/// adjacent (the common case) or many cells apart, which happens when a
+/// system like `terrain_skip` relocates an actor several cells in one
+/// straight hop. Returns null when they aren't colinear (or are the same
+/// cell), since no single connector direction describes that.
+String? _dirName(Position from, Position to) {
   final dx = to.x - from.x;
   final dy = to.y - from.y;
-  if (dx == 1) return 'right';
-  if (dx == -1) return 'left';
-  if (dy == 1) return 'down';
-  return 'up';
+  if (dx == 0 && dy == 0) return null;
+  if (dy == 0) return dx > 0 ? 'right' : 'left';
+  if (dx == 0) return dy > 0 ? 'down' : 'up';
+  return null;
 }
 
 /// Maps the set of directions a body cell connects to onto a sprite-name
@@ -206,17 +207,23 @@ String? connectedBodySpritePath(
 
   final path = headPaths[headKind];
   if (path == null) return null;
-  final idx = path.indexOf(pos);
+  // A cell can appear more than once in the path — e.g. a `terrain_skip`
+  // lets a snake re-enter a cell it passed straight through earlier,
+  // without marking a trail there the first time (no `visited_*` transform
+  // fires for a skip-triggering departure). The trail sprite standing there
+  // now belongs to the most recent visit, so its neighbors must come from
+  // that occurrence, not an earlier stale pass-through.
+  final idx = path.lastIndexOf(pos);
   if (idx == -1) return null;
 
   final dirs = <String>{};
   if (idx > 0) {
-    final prev = path[idx - 1];
-    if (_manhattan(pos, prev) == 1) dirs.add(_dirName(pos, prev));
+    final dir = _dirName(pos, path[idx - 1]);
+    if (dir != null) dirs.add(dir);
   }
   if (idx < path.length - 1) {
-    final next = path[idx + 1];
-    if (_manhattan(pos, next) == 1) dirs.add(_dirName(pos, next));
+    final dir = _dirName(pos, path[idx + 1]);
+    if (dir != null) dirs.add(dir);
   }
 
   final suffix = _connectedBodySuffix(dirs);
@@ -250,9 +257,10 @@ String? connectedHeadSpritePath(
   if (path.last != pos) return null;
 
   final prev = path[path.length - 2];
-  if (_manhattan(pos, prev) != 1) return null;
+  final dir = _dirName(pos, prev);
+  if (dir == null) return null;
 
-  return '${spriteBase}_${_dirName(pos, prev)}.png';
+  return '${spriteBase}_$dir.png';
 }
 
 ({bool visible, String? path, bool mirrorHorizontally})
