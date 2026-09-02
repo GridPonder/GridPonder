@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show max, sin, sqrt, pi;
+import 'dart:math' show max, min, sin, sqrt, pi;
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +20,7 @@ import '../widgets/board_renderer.dart'
         TargetBoardRenderer,
         cellNamedColor,
         elasticBlockRect,
+        elasticBlockRectTween,
         elasticPushObjectTravel;
 import '../widgets/controls_widget.dart';
 
@@ -258,6 +259,14 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final pushEvents = result.events
         .where((e) => e.type == 'object_pushed')
         .toList();
+    final elasticMotionEvent = result.events
+        .where(
+          (event) =>
+              event.type == 'elastic_block_inflated' ||
+              event.type == 'elastic_block_collapsed',
+        )
+        .firstOrNull;
+    var elasticMotionPlayed = false;
     if (pushEvents.isNotEmpty) {
       final trackedPushEvents = pushEvents
           .where((event) => event.payload['originPosition'] != null)
@@ -271,6 +280,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           trackedPushEvents,
           inflationEvent: inflationEvent,
         );
+        elasticMotionPlayed = inflationEvent != null;
       }
 
       final pushByKind = <String, List<GameEvent>>{};
@@ -285,6 +295,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           await _playObjectSlide(preState, entry.key, entry.value);
         }
       }
+    }
+    if (!elasticMotionPlayed && elasticMotionEvent != null) {
+      await _playElasticBlockMotion(preState, elasticMotionEvent);
     }
 
     // Clear slide overrides: _playObjectSlide already cleared _preAnimState and
@@ -707,6 +720,95 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       x: mover.from.x + (mover.to.x - mover.from.x) * ratio,
       y: mover.from.y + (mover.to.y - mover.from.y) * ratio,
     );
+  }
+
+  Future<void> _playElasticBlockMotion(
+    LevelState preState,
+    GameEvent event,
+  ) async {
+    List<Position> positionsFrom(dynamic raw) {
+      if (raw is! List) return const [];
+      return [
+        for (final item in raw)
+          if (item is Position)
+            item
+          else if (item is List)
+            Position.fromJson(item),
+      ];
+    }
+
+    Rect bounds(Iterable<Position> cells) {
+      final list = cells.toList();
+      final left = list.map((cell) => cell.x).reduce(min).toDouble();
+      final right = list.map((cell) => cell.x).reduce(max).toDouble() + 1;
+      final top = list.map((cell) => cell.y).reduce(min).toDouble();
+      final bottom = list.map((cell) => cell.y).reduce(max).toDouble() + 1;
+      return Rect.fromLTRB(left, top, right, bottom);
+    }
+
+    final fromCells = positionsFrom(event.payload['fromCells']);
+    final toCells = positionsFrom(event.payload['toCells']);
+    final blockId = event.payload['id'] as String?;
+    final block = blockId == null
+        ? null
+        : preState.board.getMultiCellObject(blockId);
+    if (block == null || fromCells.isEmpty || toCells.isEmpty) return;
+
+    final start = bounds(fromCells);
+    final end = bounds(toCells);
+    final span = [
+      (start.left - end.left).abs(),
+      (start.top - end.top).abs(),
+      (start.right - end.right).abs(),
+      (start.bottom - end.bottom).abs(),
+    ].reduce(max);
+    if (span <= 0) return;
+
+    final animState = preState.copy();
+    animState.board.multiCellObjects.removeWhere(
+      (object) => object.id == block.id,
+    );
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = animState;
+      _animOverlays = null;
+    });
+
+    final selected =
+        block.id == _selectedMultiCellObjectId ||
+        _selectedMultiCellObjectForRenderer(preState) == block.id;
+    final travelMs = (85 * span).round().clamp(120, 600);
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: travelMs),
+    );
+    void emit() {
+      final rect = elasticBlockRectTween(start, end, controller.value);
+      _movingMultiCellObjects.value = [
+        MovingMultiCellObject(
+          object: block.copy(),
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          selected: selected,
+        ),
+      ];
+    }
+
+    controller.addListener(emit);
+    emit();
+    try {
+      await controller.forward();
+    } finally {
+      controller.dispose();
+    }
+    if (!mounted) {
+      _movingMultiCellObjects.value = const [];
+      return;
+    }
+    setState(() => _preAnimState = null);
+    _movingMultiCellObjects.value = const [];
   }
 
   /// Animates `entity_move` steps as real motion: each entity is lifted out of

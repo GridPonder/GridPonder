@@ -159,4 +159,15 @@ void main() {
       const Rect.fromLTRB(2, 2.25, 4, 5),
     );
   });
+
+  test('elastic block collapse interpolates the trailing edge', () {
+    const start = Rect.fromLTRB(1, 2, 7, 5);
+    const end = Rect.fromLTRB(6, 2, 7, 5);
+
+    expect(
+      elasticBlockRectTween(start, end, 0.5),
+      const Rect.fromLTRB(3.5, 2, 7, 5),
+    );
+    expect(elasticBlockRectTween(start, end, 1), end);
+  });
 }

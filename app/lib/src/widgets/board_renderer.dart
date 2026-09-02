@@ -153,6 +153,20 @@ Rect elasticBlockRect(Rect start, String direction, double travelled) {
   };
 }
 
+/// Interpolates all four edges of an elastic block. Inflation moves one edge
+/// outward; collapse moves the opposite edge inward, so the same interpolation
+/// covers both motions without snapping between whole-cell footprints.
+Rect elasticBlockRectTween(Rect start, Rect end, double progress) {
+  final t = progress.clamp(0.0, 1.0);
+  double tween(double from, double to) => from + (to - from) * t;
+  return Rect.fromLTRB(
+    tween(start.left, end.left),
+    tween(start.top, end.top),
+    tween(start.right, end.right),
+    tween(start.bottom, end.bottom),
+  );
+}
+
 /// Resolves the sprite path for an entity instance, including optional
 /// direction-aware motion sprites declared under `motion.sprites`.
 String? resolveEntitySpritePath(
