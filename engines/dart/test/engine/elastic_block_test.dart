@@ -281,6 +281,53 @@ void main() {
     );
   });
 
+  test('chainPush moves adjacent crates together', () {
+    final game = _game(config: const {'chainPush': true});
+    final engine = TurnEngine(
+      game,
+      _level(
+        game,
+        const [
+          [0, 0]
+        ],
+        size: const [5, 1],
+        objects: const [
+          {
+            'position': [1, 0],
+            'kind': 'crate'
+          },
+          {
+            'position': [2, 0],
+            'kind': 'crate'
+          },
+        ],
+      ),
+    );
+
+    final result =
+        engine.executeTurn(const GameAction('move', {'direction': 'right'}));
+
+    expect(result.accepted, isTrue);
+    expect(_positions(engine), {
+      const Position(0, 0),
+      const Position(1, 0),
+      const Position(2, 0),
+    });
+    expect(
+      engine.state.board.getEntity('objects', const Position(3, 0))?.kind,
+      'crate',
+    );
+    expect(
+      engine.state.board.getEntity('objects', const Position(4, 0))?.kind,
+      'crate',
+    );
+    final origins = result.events
+        .where((event) => event.type == 'object_pushed')
+        .map((event) => event.payload['originPosition'])
+        .toSet();
+    expect(origins, {const Position(1, 0), const Position(2, 0)});
+  });
+
   test('push does not overwrite a nonblocking entity', () {
     final game = _game();
     final engine = TurnEngine(

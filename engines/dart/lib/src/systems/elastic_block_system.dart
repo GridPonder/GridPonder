@@ -47,6 +47,7 @@ class ElasticBlockSystem extends GameSystem {
 
     final block = blocks.single;
     final oldCells = block.cells.toList();
+    final pushOrigins = <Position, Position>{};
     var nextLine = _leadingLine(oldCells, direction, 1);
     var pushes = _linePushes(
       nextLine,
@@ -92,7 +93,7 @@ class ElasticBlockSystem extends GameSystem {
       final addedCells = <Position>[];
       var distance = 0;
       while (pushes != null) {
-        _applyPushes(pushes, state, direction, events);
+        _applyPushes(pushes, state, direction, events, pushOrigins);
         addedCells.addAll(nextLine);
         block.cells.addAll(nextLine);
         distance += 1;
@@ -206,23 +207,81 @@ class ElasticBlockSystem extends GameSystem {
       if (!pushableTags.any((tag) => game.hasTag(blocker.entity.kind, tag))) {
         return null;
       }
-      final destination = position + actionOffset(direction);
-      if (!_pushDestinationClear(
-          destination, blocker.layer, block, state, game, config)) {
-        return null;
-      }
-      pushes.add(_Push(
-        blocker.layer,
+      final chain = _pushChain(
+        blocker,
         position,
-        destination,
-        blocker.entity,
-      ));
+        direction,
+        block,
+        state,
+        game,
+        config,
+      );
+      if (chain == null) return null;
+      pushes.addAll(chain);
     }
-    if (pushes.map((push) => push.destination).toSet().length !=
-        pushes.length) {
+    final uniquePushes = <String, _Push>{
+      for (final push in pushes)
+        '${push.layer}:${push.source.x},${push.source.y}': push,
+    }.values.toList();
+    if (uniquePushes.map((push) => push.destination).toSet().length !=
+        uniquePushes.length) {
       return null;
     }
-    return pushes;
+    return uniquePushes;
+  }
+
+  List<_Push>? _pushChain(
+    _BlockingEntity blocker,
+    Position source,
+    String direction,
+    MultiCellObjectInstance block,
+    LevelState state,
+    GameDefinition game,
+    Map<String, dynamic> config,
+  ) {
+    final destination = source + actionOffset(direction);
+    if (!_validGround(destination, state, game, config)) return null;
+    if (state.board.multiCellObjects.any(
+        (other) => other.id != block.id && other.cells.contains(destination))) {
+      return null;
+    }
+
+    final destinationEntity = state.board.getEntity(blocker.layer, destination);
+    final tail = <_Push>[];
+    if (destinationEntity != null) {
+      if (config['chainPush'] != true) return null;
+      final pushableTags =
+          (config['pushableTags'] as List? ?? const ['pushable'])
+              .map((value) => value.toString());
+      if (!pushableTags
+          .any((tag) => game.hasTag(destinationEntity.kind, tag))) {
+        return null;
+      }
+      final destinationBlockers =
+          _blockingEntities(destination, state, game, config);
+      if (destinationBlockers.length != 1 ||
+          destinationBlockers.single.layer != blocker.layer) {
+        return null;
+      }
+      final chained = _pushChain(
+        destinationBlockers.single,
+        destination,
+        direction,
+        block,
+        state,
+        game,
+        config,
+      );
+      if (chained == null) return null;
+      tail.addAll(chained);
+    } else if (_blockingEntities(destination, state, game, config).isNotEmpty) {
+      return null;
+    }
+
+    return [
+      ...tail,
+      _Push(blocker.layer, source, destination, blocker.entity),
+    ];
   }
 
   bool _validGround(Position position, LevelState state, GameDefinition game,
@@ -255,32 +314,28 @@ class ElasticBlockSystem extends GameSystem {
     return found;
   }
 
-  bool _pushDestinationClear(
-    Position position,
-    String pushLayer,
-    MultiCellObjectInstance block,
+  void _applyPushes(
+    List<_Push> pushes,
     LevelState state,
-    GameDefinition game,
-    Map<String, dynamic> config,
+    String direction,
+    List<GameEvent> events,
+    Map<Position, Position> pushOrigins,
   ) {
-    if (!_validGround(position, state, game, config)) return false;
-    if (state.board.multiCellObjects.any(
-        (other) => other.id != block.id && other.cells.contains(position))) {
-      return false;
-    }
-    if (state.board.getEntity(pushLayer, position) != null) return false;
-    return _blockingEntities(position, state, game, config).isEmpty;
-  }
-
-  void _applyPushes(List<_Push> pushes, LevelState state, String direction,
-      List<GameEvent> events) {
     for (final push in pushes) {
       state.board.setEntity(push.layer, push.source, null);
     }
     for (final push in pushes) {
       state.board.setEntity(push.layer, push.destination, push.entity);
-      events.add(GameEvent.objectPushed(
-          push.entity.kind, push.source, push.destination, direction));
+      final origin = pushOrigins.remove(push.source) ?? push.source;
+      pushOrigins[push.destination] = origin;
+      events.add(GameEvent('object_pushed', {
+        'kind': push.entity.kind,
+        'fromPosition': push.source,
+        'toPosition': push.destination,
+        'originPosition': origin,
+        'layer': push.layer,
+        'direction': direction,
+      }));
     }
   }
 

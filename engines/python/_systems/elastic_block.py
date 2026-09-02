@@ -68,6 +68,7 @@ class ElasticBlockSystem(GameSystem):
 
         block = blocks[0]
         old_cells = list(block.cells)
+        push_origins: dict[Pos, Pos] = {}
         next_line = _leading_line(old_cells, direction, 1)
         pushes = _line_pushes(next_line, direction, block, state, game, config)
         events: list[dict] = []
@@ -96,7 +97,7 @@ class ElasticBlockSystem(GameSystem):
             added_cells: list[Pos] = []
             distance = 0
             while pushes is not None:
-                _apply_pushes(pushes, state, direction, events)
+                _apply_pushes(pushes, state, direction, events, push_origins)
                 added_cells.extend(next_line)
                 block.cells.extend(next_line)
                 distance += 1
@@ -203,18 +204,71 @@ def _line_pushes(
         ]
         if not any(game.has_tag(entity.kind, tag) for tag in pushable_tags):
             return None
-        dx, dy = dir_delta(direction)
-        destination = Pos(pos.x + dx, pos.y + dy)
-        if not _push_destination_clear(
-            destination, layer, block, state, game, config
-        ):
+        chain = _push_chain(
+            layer, entity, pos, direction, block, state, game, config
+        )
+        if chain is None:
             return None
-        pushes.append(_Push(layer, pos, destination, entity))
+        pushes.extend(chain)
 
+    pushes = list({(push.layer, push.source): push for push in pushes}.values())
     destinations = [push.destination for push in pushes]
     if len(set(destinations)) != len(destinations):
         return None
     return pushes
+
+
+def _push_chain(
+    layer: str,
+    entity: Entity,
+    source: Pos,
+    direction: str,
+    block: MultiCellObject,
+    state: GameState,
+    game: GameDef,
+    config: dict,
+) -> list[_Push] | None:
+    dx, dy = dir_delta(direction)
+    destination = Pos(source.x + dx, source.y + dy)
+    if not _valid_ground(destination, state, game, config):
+        return None
+    if any(
+        destination in other.cells
+        for other in state.board.multi_cell_objects
+        if other.id != block.id
+    ):
+        return None
+
+    destination_entity = state.board.get_entity(layer, destination)
+    tail: list[_Push] = []
+    if destination_entity is not None:
+        if config.get("chainPush") is not True:
+            return None
+        pushable_tags = [
+            str(tag) for tag in config_list(config, "pushableTags", ["pushable"])
+        ]
+        if not any(game.has_tag(destination_entity.kind, tag) for tag in pushable_tags):
+            return None
+        blockers = _blocking_entities(destination, state, game, config)
+        if len(blockers) != 1 or blockers[0][0] != layer:
+            return None
+        chained = _push_chain(
+            layer,
+            destination_entity,
+            destination,
+            direction,
+            block,
+            state,
+            game,
+            config,
+        )
+        if chained is None:
+            return None
+        tail.extend(chained)
+    elif _blocking_entities(destination, state, game, config):
+        return None
+
+    return [*tail, _Push(layer, source, destination, entity)]
 
 
 def _valid_ground(pos: Pos, state: GameState, game: GameDef, config: dict) -> bool:
@@ -247,41 +301,25 @@ def _blocking_entities(
     return found
 
 
-def _push_destination_clear(
-    pos: Pos,
-    push_layer: str,
-    block: MultiCellObject,
-    state: GameState,
-    game: GameDef,
-    config: dict,
-) -> bool:
-    if not _valid_ground(pos, state, game, config):
-        return False
-    if any(
-        pos in other.cells
-        for other in state.board.multi_cell_objects
-        if other.id != block.id
-    ):
-        return False
-    if state.board.get_entity(push_layer, pos) is not None:
-        return False
-    if _blocking_entities(pos, state, game, config):
-        return False
-    return True
-
-
 def _apply_pushes(
-    pushes: list[_Push], state: GameState, direction: str, events: list[dict]
+    pushes: list[_Push],
+    state: GameState,
+    direction: str,
+    events: list[dict],
+    push_origins: dict[Pos, Pos],
 ) -> None:
     for push in pushes:
         state.board.set_entity(push.layer, push.source, None)
     for push in pushes:
         state.board.set_entity(push.layer, push.destination, push.entity)
-        events.append(
-            ev.object_pushed(
-                push.entity.kind, push.source, push.destination, direction
-            )
+        origin = push_origins.pop(push.source, push.source)
+        push_origins[push.destination] = origin
+        event = ev.object_pushed(
+            push.entity.kind, push.source, push.destination, direction
         )
+        event["originPosition"] = origin
+        event["layer"] = push.layer
+        events.append(event)
 
 
 def _target_cells(state: GameState, layer_id: str, marker_kind: str) -> set[Pos]:

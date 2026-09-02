@@ -171,6 +171,32 @@ class ElasticBlockTest(unittest.TestCase):
         self.assertEqual(engine.state.board.get_entity("objects", Pos(1, 0)).kind, "crate")
         self.assertEqual(engine.state.board.get_entity("objects", Pos(2, 0)).kind, "crate")
 
+    def test_chain_push_moves_adjacent_crates_together(self) -> None:
+        engine = TurnEngine(
+            _game({"chainPush": True}),
+            _level(
+                [[0, 0]],
+                size=[5, 1],
+                objects=[
+                    {"position": [1, 0], "kind": "crate"},
+                    {"position": [2, 0], "kind": "crate"},
+                ],
+            ),
+        )
+
+        result = engine.execute_turn("move", {"direction": "right"})
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(_positions(engine), {Pos(0, 0), Pos(1, 0), Pos(2, 0)})
+        self.assertEqual(engine.state.board.get_entity("objects", Pos(3, 0)).kind, "crate")
+        self.assertEqual(engine.state.board.get_entity("objects", Pos(4, 0)).kind, "crate")
+        origins = {
+            event["originPosition"]
+            for event in result.events
+            if event["type"] == "object_pushed"
+        }
+        self.assertEqual(origins, {Pos(1, 0), Pos(2, 0)})
+
     def test_push_does_not_overwrite_nonblocking_entity(self) -> None:
         engine = TurnEngine(
             _game(),
