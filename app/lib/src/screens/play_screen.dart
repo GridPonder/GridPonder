@@ -89,6 +89,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   Position? _panStartCell;
   String? _selectedMultiCellObjectId;
   static const double _swipeThreshold = 18.0;
+  static const int _elasticCellTravelMs = 57;
+  static const int _elasticMinTravelMs = 80;
+  static const int _elasticMaxTravelMs = 400;
 
   // Periodic timer to refresh hint dot availability
   Timer? _hintRefreshTimer;
@@ -650,7 +653,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _animOverlays = null;
     });
 
-    final travelMs = (85 * span).round().clamp(120, 600);
+    final travelMs = (_elasticCellTravelMs * span).round().clamp(
+      _elasticMinTravelMs,
+      _elasticMaxTravelMs,
+    );
     final controller = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: travelMs),
@@ -777,7 +783,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final selected =
         block.id == _selectedMultiCellObjectId ||
         _selectedMultiCellObjectForRenderer(preState) == block.id;
-    final travelMs = (85 * span).round().clamp(120, 600);
+    final travelMs = (_elasticCellTravelMs * span).round().clamp(
+      _elasticMinTravelMs,
+      _elasticMaxTravelMs,
+    );
     final controller = AnimationController(
       vsync: this,
       duration: Duration(milliseconds: travelMs),
