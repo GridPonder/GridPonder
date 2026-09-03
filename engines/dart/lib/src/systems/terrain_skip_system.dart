@@ -69,34 +69,30 @@ class TerrainSkipSystem extends GameSystem {
       // Exit = one step beyond the last terrain cell.
       final exitPos = scan.moved(direction);
 
-      // Validate exit: in-bounds, not void, walkable ground, actor layer empty.
-      bool exitValid = state.board.isInBounds(exitPos) && !state.board.isVoid(exitPos);
+      bool exitValid = _validateLanding(
+          state, game, exitPos, cfg.groundLayer, actorLayerId, cfg.exitBlockLayers);
+
+      // If the water-crossing exit lands directly on a portal, chain through
+      // to its paired exit. A silent relocation like this never emits an
+      // actor_entered event, so the portals system — which only reacts to
+      // that event — can never see the landing and would otherwise leave the
+      // actor stranded on the portal tile. Landing on the *near* side of a
+      // portal via a normal move already works today because that step is a
+      // real actor_entered event.
+      //
+      // The chained destination gets exactly the same validation as the
+      // direct exit: it's reached by a jump nothing else has checked, so an
+      // occupied/blocked/out-of-bounds paired exit must bounce the actor
+      // back too, not silently overwrite whatever is already there.
+      var finalPos = exitPos;
       if (exitValid) {
-        final exitGround = state.board.getEntity(cfg.groundLayer, exitPos);
-        if (exitGround != null && !game.hasTag(exitGround.kind, 'walkable')) {
-          exitValid = false;
-        }
-      }
-      if (exitValid && state.board.getEntity(actorLayerId, exitPos) != null) {
-        exitValid = false;
-      }
-      if (exitValid) {
-        for (final layerCheck in cfg.exitBlockLayers) {
-          final layerId = layerCheck['layer'] as String?;
-          final blockTags = (layerCheck['blockTags'] as List<dynamic>?)
-                  ?.map((t) => t.toString())
-                  .toList() ??
-              <String>[];
-          if (layerId != null && blockTags.isNotEmpty) {
-            final exitEntity = state.board.getEntity(layerId, exitPos);
-            if (exitEntity != null) {
-              final kindDef = game.getKind(exitEntity.kind);
-              final entityTags = kindDef?.tags ?? <String>[];
-              if (blockTags.any((t) => entityTags.contains(t))) {
-                exitValid = false;
-                break;
-              }
-            }
+        final chained = _chainedPortalExit(state.board, exitPos, cfg.exitPortal, game);
+        if (chained != null) {
+          if (_validateLanding(
+              state, game, chained, cfg.groundLayer, actorLayerId, cfg.exitBlockLayers)) {
+            finalPos = chained;
+          } else {
+            exitValid = false;
           }
         }
       }
@@ -121,17 +117,6 @@ class TerrainSkipSystem extends GameSystem {
       // Clear actor trail and accumulate freed cells into budget.
       final actorKind = e.payload['kind'] as String? ?? actor.kind;
       _clearActorTrail(state, cfg, actorKind);
-
-      // If the water-crossing exit lands directly on a portal, chain through
-      // to its paired exit. A silent relocation like this never emits an
-      // actor_entered event, so the portals system — which only reacts to
-      // that event — can never see the landing and would otherwise leave the
-      // actor stranded on the portal tile. Landing on the *near* side of a
-      // portal via a normal move already works today because that step is a
-      // real actor_entered event.
-      final finalPos =
-          _chainedPortalExit(state.board, exitPos, cfg.exitPortal, game) ??
-              exitPos;
 
       // Relocate actor silently — no new events, so leave_trail / budget rules
       // do not fire a second time.
@@ -242,6 +227,41 @@ class TerrainSkipSystem extends GameSystem {
       return null;
     }
     return null;
+  }
+
+  /// Bounds, void, walkability, blocking-layer, and actor-occupancy checks
+  /// for a candidate landing cell. Used for both the direct terrain exit and,
+  /// if it chains through a portal, the portal's paired exit — the latter
+  /// needs exactly the same scrutiny, since nothing else in the engine
+  /// validates it (see the caller for why).
+  bool _validateLanding(
+    LevelState state,
+    GameDefinition game,
+    Position pos,
+    String groundLayerId,
+    String actorLayerId,
+    List<Map<String, dynamic>> exitBlockLayers,
+  ) {
+    if (!state.board.isInBounds(pos) || state.board.isVoid(pos)) return false;
+    final groundEnt = state.board.getEntity(groundLayerId, pos);
+    if (groundEnt != null && !game.hasTag(groundEnt.kind, 'walkable')) return false;
+    if (state.board.getEntity(actorLayerId, pos) != null) return false;
+    for (final layerCheck in exitBlockLayers) {
+      final layerId = layerCheck['layer'] as String?;
+      final blockTags = (layerCheck['blockTags'] as List<dynamic>?)
+              ?.map((t) => t.toString())
+              .toList() ??
+          <String>[];
+      if (layerId != null && blockTags.isNotEmpty) {
+        final exitEntity = state.board.getEntity(layerId, pos);
+        if (exitEntity != null) {
+          final kindDef = game.getKind(exitEntity.kind);
+          final entityTags = kindDef?.tags ?? <String>[];
+          if (blockTags.any((t) => entityTags.contains(t))) return false;
+        }
+      }
+    }
+    return true;
   }
 
   void _clearActorTrail(LevelState state, _TerrainSkipConfig cfg, String actorKind) {

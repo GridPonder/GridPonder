@@ -71,6 +71,38 @@ class TerrainSkipSystem(GameSystem):
             return None
         return None
 
+    def _validate_landing(
+        self, state: GameState, game: GameDef, pos: Pos, ground_layer_id: str,
+        actor_layer, exit_block_layers: list[dict],
+    ) -> bool:
+        """Bounds, void, walkability, blocking-layer, and actor-occupancy
+        checks for a candidate landing cell. Used for both the direct
+        terrain exit and, if it chains through a portal, the portal's paired
+        exit — the latter needs exactly the same scrutiny, since nothing
+        else in the engine validates it (see the caller for why).
+        """
+        if not state.board.is_in_bounds(pos) or state.board.is_void(pos):
+            return False
+        ground_ent = state.board.get_entity(ground_layer_id, pos)
+        if ground_ent is not None and not game.has_tag(ground_ent.kind, "walkable"):
+            return False
+        if actor_layer.get(pos) is not None:
+            return False
+        for layer_check in exit_block_layers:
+            layer_id = layer_check.get("layer")
+            block_tags = layer_check.get("blockTags", [])
+            if layer_id and block_tags:
+                exit_entity = state.board.get_entity(layer_id, pos)
+                if exit_entity is not None:
+                    kind_def = game.entity_kinds.get(exit_entity.kind, {})
+                    entity_tags = (
+                        kind_def.get("tags", []) if isinstance(kind_def, dict)
+                        else getattr(kind_def, "tags", [])
+                    )
+                    if any(t in entity_tags for t in block_tags):
+                        return False
+        return True
+
     def _clear_actor_trail(self, state: GameState, cfg: dict, actor_kind: str) -> None:
         for tc in cfg.get("trailClearing", []):
             if tc.get("actorKind") != actor_kind:
@@ -153,26 +185,26 @@ class TerrainSkipSystem(GameSystem):
             # Exit = one step beyond the last terrain cell.
             exit_pos = Pos(scan.x + dx, scan.y + dy)
 
-            # Validate exit.
-            exit_valid = state.board.is_in_bounds(exit_pos) and not state.board.is_void(exit_pos)
+            exit_valid = self._validate_landing(
+                state, game, exit_pos, ground_layer_id, actor_layer, cfg["exitBlockLayers"])
+
+            # If the water-crossing exit lands directly on a portal, chain
+            # through to its paired exit — see _chained_portal_exit. That
+            # chained destination gets exactly the same validation as the
+            # direct exit: it's reached by a jump nothing else has checked,
+            # so an occupied/blocked/out-of-bounds paired exit must bounce
+            # the actor back too, not silently overwrite whatever is there.
+            final_pos = exit_pos
             if exit_valid:
-                exit_ground = state.board.get_entity(ground_layer_id, exit_pos)
-                if exit_ground is not None and not game.has_tag(exit_ground.kind, "walkable"):
-                    exit_valid = False
-            if exit_valid and actor_layer.get(exit_pos) is not None:
-                exit_valid = False
-            if exit_valid:
-                for layer_check in cfg["exitBlockLayers"]:
-                    layer_id = layer_check.get("layer")
-                    block_tags = layer_check.get("blockTags", [])
-                    if layer_id and block_tags:
-                        exit_entity = state.board.get_entity(layer_id, exit_pos)
-                        if exit_entity is not None:
-                            kind_def = game.entity_kinds.get(exit_entity.kind, {})
-                            entity_tags = kind_def.get("tags", []) if isinstance(kind_def, dict) else getattr(kind_def, "tags", [])
-                            if any(t in entity_tags for t in block_tags):
-                                exit_valid = False
-                                break
+                chained = self._chained_portal_exit(
+                    state.board, exit_pos, cfg.get("exitPortal"), game)
+                if chained is not None:
+                    if self._validate_landing(
+                        state, game, chained, ground_layer_id, actor_layer, cfg["exitBlockLayers"]
+                    ):
+                        final_pos = chained
+                    else:
+                        exit_valid = False
 
             if not exit_valid:
                 # Bounce back: return actor to the cell it came from.
@@ -192,12 +224,6 @@ class TerrainSkipSystem(GameSystem):
             # Clear actor trail and accumulate freed cells into budget.
             actor_kind = e.get("kind") or actor.kind
             self._clear_actor_trail(state, cfg, actor_kind)
-
-            # If the water-crossing exit lands directly on a portal, chain
-            # through to its paired exit — see _chained_portal_exit.
-            final_pos = self._chained_portal_exit(
-                state.board, exit_pos, cfg.get("exitPortal"), game
-            ) or exit_pos
 
             # Relocate actor silently.
             state.board.set_entity(actor_layer_id, entered_pos, None)

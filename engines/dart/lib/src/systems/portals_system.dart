@@ -2,12 +2,61 @@ import '../engine/game_system.dart';
 import '../models/board.dart';
 import '../models/entity.dart';
 import '../models/event.dart';
+import '../models/game_action.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
+import '../models/layer.dart';
 import '../models/position.dart';
 
 class PortalsSystem extends GameSystem {
   const PortalsSystem({required super.id}) : super(type: 'portals');
+
+  // ---------------------------------------------------------------------------
+  // Phase 2 — veto a move that would land an actor on a door whose paired
+  // exit is already occupied by another actor.
+  //
+  // individual_actors resolves the move first (same phase, earlier in the
+  // systems list), so by the time this runs, a *successful* move has already
+  // updated the tracked position to the door cell just entered. Vetoing here
+  // discards the whole turn's working state, so the move never actually
+  // lands. One narrow edge case: if the actor was already resting on a
+  // paired door from an earlier turn and this turn's move is blocked for an
+  // unrelated reason (a rock, say), the position read here is that stale
+  // door position, and an exit that became occupied since would veto this
+  // turn too. The actor doesn't move either way, so the player sees no
+  // difference — only internal bookkeeping (blocked vs vetoed) differs,
+  // harmlessly.
+  // ---------------------------------------------------------------------------
+
+  @override
+  List<GameEvent> executeActionResolution(
+    GameAction action,
+    LevelState state,
+    GameDefinition game,
+  ) {
+    final cfg = _config(game);
+    if (action.actionId != cfg.moveActionId) return const [];
+    final actorLayerId = cfg.actorLayer;
+    final posVar = cfg.actorPositionVariable;
+    if (actorLayerId == null || posVar == null) return const [];
+    final actorLayer = state.board.layers[actorLayerId];
+    if (actorLayer == null) return const [];
+    final posRaw = state.variables[posVar];
+    if (posRaw == null) return const [];
+    final pos = posRaw is Position ? posRaw : Position.fromJson(posRaw);
+    final portal = _portalAt(state.board, pos, cfg.tags, game);
+    if (portal == null) return const [];
+    final channel = portal.entity.param(cfg.matchKey);
+    if (channel == null) return const [];
+    final exitPos =
+        _findExitPortal(state.board, pos, portal.entity.kind, channel, cfg.matchKey);
+    if (exitPos == null) return const [];
+    if (pos == exitPos) return const [];
+    if (!_actorExitValid(state, game, exitPos, actorLayer, cfg)) {
+      return [GameEvent.actionVetoed()];
+    }
+    return const [];
+  }
 
   // ---------------------------------------------------------------------------
   // Phase 3 — normal movement (avatar walks into portal; push resolves a normal
@@ -116,6 +165,13 @@ class PortalsSystem extends GameSystem {
           if (fromPos == exitPos) continue; // bounce guard
           final actor = state.board.getEntity(actorLayerId, enteredPos);
           if (actor == null) continue;
+          // The exit must be a genuinely valid landing cell — in bounds, not
+          // void, walkable, unblocked, and unoccupied — or the entering
+          // actor is left resting on the entry portal instead, same as a
+          // blocked ordinary move (this is the same class of bug reported
+          // for terrain_skip's chained-portal exit: a destination reached
+          // via a portal still needs the checks any other destination gets).
+          if (!_actorExitValid(state, game, exitPos, actorLayer, cfg)) continue;
           state.board.setEntity(actorLayerId, enteredPos, null);
           state.board.setEntity(actorLayerId, exitPos, actor);
           final actorPosVar = cfg.actorPositionVariable;
@@ -258,6 +314,42 @@ class PortalsSystem extends GameSystem {
   // Utilities
   // ---------------------------------------------------------------------------
 
+  /// Bounds, void, walkability, blocking-layer, and occupancy checks for a
+  /// candidate actor landing cell — shared by the action-veto check and the
+  /// actual cascade-resolution teleport, so a door's exit is validated the
+  /// same way regardless of which one reaches it first. Mirrors
+  /// terrain_skip's exit validation, which every portal-driven landing
+  /// should meet just as much as a terrain-skip landing does.
+  bool _actorExitValid(
+    LevelState state,
+    GameDefinition game,
+    Position pos,
+    BoardLayer actorLayer,
+    _PortalConfig cfg,
+  ) {
+    final board = state.board;
+    if (!board.isInBounds(pos) || board.isVoid(pos)) return false;
+    final groundEnt = board.getEntity(cfg.groundLayer, pos);
+    if (groundEnt != null && !game.hasTag(groundEnt.kind, 'walkable')) return false;
+    if (actorLayer.getAt(pos) != null) return false;
+    for (final layerCheck in cfg.exitBlockLayers) {
+      final layerId = layerCheck['layer'] as String?;
+      final blockTags = (layerCheck['blockTags'] as List<dynamic>?)
+              ?.map((t) => t.toString())
+              .toList() ??
+          const <String>[];
+      if (layerId != null && blockTags.isNotEmpty) {
+        final exitEntity = board.getEntity(layerId, pos);
+        if (exitEntity != null) {
+          final kindDef = game.getKind(exitEntity.kind);
+          final entityTags = kindDef?.tags ?? const <String>[];
+          if (blockTags.any((t) => entityTags.contains(t))) return false;
+        }
+      }
+    }
+    return true;
+  }
+
   /// Returns the first portal-tagged entity at [pos] across all board layers,
   /// or null if none exists.
   _PortalHit? _portalAt(Board board, Position pos,
@@ -384,6 +476,7 @@ class PortalsSystem extends GameSystem {
     final tagsRaw = config['teleportTags'] as List<dynamic>? ?? ['teleport'];
     final trailClearingRaw = config['trailClearing'] as List<dynamic>? ?? [];
     final exitFoodRaw = config['exitFoodLayers'] as List<dynamic>? ?? [];
+    final exitBlockRaw = config['exitBlockLayers'] as List<dynamic>? ?? [];
     return _PortalConfig(
       tags: tagsRaw.map((t) => t.toString()).toList(),
       matchKey: config['matchKey'] as String? ?? 'channel',
@@ -393,6 +486,9 @@ class PortalsSystem extends GameSystem {
           config['clearTrailAtPortalCells'] as bool? ?? false,
       actorLayer: config['actorLayer'] as String?,
       actorPositionVariable: config['actorPositionVariable'] as String?,
+      moveActionId: config['moveActionId'] as String? ?? 'move',
+      groundLayer: config['groundLayer'] as String? ?? 'ground',
+      exitBlockLayers: exitBlockRaw.cast<Map<String, dynamic>>().toList(),
       trailClearing: trailClearingRaw.map((e) {
         final m = e as Map<String, dynamic>;
         return _TrailClearConfig(
@@ -416,8 +512,11 @@ class _PortalConfig {
   final bool clearTrailAtPortalCells;
   final String? actorLayer;
   final String? actorPositionVariable;
+  final String moveActionId;
+  final String groundLayer;
   final List<_TrailClearConfig> trailClearing;
   final List<Map<String, dynamic>> exitFoodLayers;
+  final List<Map<String, dynamic>> exitBlockLayers;
   const _PortalConfig(
       {required this.tags,
       required this.matchKey,
@@ -426,8 +525,11 @@ class _PortalConfig {
       this.clearTrailAtPortalCells = false,
       this.actorLayer,
       this.actorPositionVariable,
+      this.moveActionId = 'move',
+      this.groundLayer = 'ground',
       this.trailClearing = const [],
-      this.exitFoodLayers = const []});
+      this.exitFoodLayers = const [],
+      this.exitBlockLayers = const []});
 }
 
 class _TrailClearConfig {

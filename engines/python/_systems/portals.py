@@ -28,7 +28,92 @@ class PortalsSystem(GameSystem):
             "trailClearing": cfg.get("trailClearing", []),
             "clearTrailAtPortalCells": cfg.get("clearTrailAtPortalCells", False),
             "exitFoodLayers": cfg.get("exitFoodLayers", []),
+            "moveActionId": cfg.get("moveActionId", "move"),
+            "groundLayer": cfg.get("groundLayer", "ground"),
+            "exitBlockLayers": cfg.get("exitBlockLayers", []),
         }
+
+    def _actor_exit_valid(
+        self, state: GameState, game: GameDef, pos: Pos, actor_layer, cfg: dict,
+    ) -> bool:
+        """Bounds, void, walkability, blocking-layer, and occupancy checks for
+        a candidate actor landing cell — shared by the direct action-veto
+        check and the actual cascade-resolution teleport, so a door's exit is
+        validated the same way regardless of which one reaches it first.
+        Mirrors terrain_skip's exit validation, which every portal-driven
+        landing should meet just as much as a terrain-skip landing does.
+        """
+        board = state.board
+        if not board.is_in_bounds(pos) or board.is_void(pos):
+            return False
+        ground_layer_id = cfg.get("groundLayer")
+        if ground_layer_id:
+            ground_ent = board.get_entity(ground_layer_id, pos)
+            if ground_ent is not None and not game.has_tag(ground_ent.kind, "walkable"):
+                return False
+        if actor_layer.get(pos) is not None:
+            return False
+        for layer_check in cfg.get("exitBlockLayers", []):
+            layer_id = layer_check.get("layer")
+            block_tags = layer_check.get("blockTags", [])
+            if layer_id and block_tags:
+                exit_entity = board.get_entity(layer_id, pos)
+                if exit_entity is not None:
+                    kind_def = game.entity_kinds.get(exit_entity.kind, {})
+                    entity_tags = (
+                        kind_def.get("tags", []) if isinstance(kind_def, dict)
+                        else getattr(kind_def, "tags", [])
+                    )
+                    if any(t in entity_tags for t in block_tags):
+                        return False
+        return True
+
+    def execute_action_resolution(self, action: dict, state: GameState, game: GameDef) -> list[dict]:
+        """Veto a move that would land an actor on a door whose paired exit
+        fails the same landing checks any other actor destination must meet:
+        in bounds, not void, walkable ground, no blocking object, and not
+        already occupied by another actor.
+
+        individual_actors resolves the move first (same phase, earlier in
+        the systems list), so by the time this runs, a *successful* move has
+        already updated the tracked position to the door cell just entered.
+        Vetoing here discards the whole turn's working state, so the move
+        never actually lands. One narrow edge case: if the actor was already
+        resting on a paired door from an earlier turn and this turn's move
+        is blocked for an unrelated reason (a rock, say), the position read
+        here is that stale door position, and an exit that became occupied
+        since would veto this turn too. The actor doesn't move either way,
+        so the player sees no difference — only internal bookkeeping
+        (whether it counts as "blocked" vs "vetoed") differs, harmlessly.
+        """
+        cfg = self._config(game)
+        if action.get("actionId") != cfg["moveActionId"]:
+            return []
+        actor_layer_id = cfg["actorLayer"]
+        pos_var = cfg["actorPositionVariable"]
+        if not actor_layer_id or not pos_var:
+            return []
+        actor_layer = state.board.layers.get(actor_layer_id)
+        if actor_layer is None:
+            return []
+        pos_raw = state.variables.get(pos_var)
+        if not pos_raw:
+            return []
+        pos = pos_raw if isinstance(pos_raw, Pos) else Pos.from_json(pos_raw)
+        portal = self._portal_at(state.board, pos, cfg["tags"], game)
+        if portal is None:
+            return []
+        channel = portal[0].param(cfg["matchKey"])
+        if channel is None:
+            return []
+        exit_pos = self._find_exit_portal(state.board, pos, portal[0].kind, channel, cfg["matchKey"])
+        if exit_pos is None:
+            return []
+        if pos == exit_pos:
+            return []
+        if not self._actor_exit_valid(state, game, exit_pos, actor_layer, cfg):
+            return [ev.action_vetoed()]
+        return []
 
     def execute_movement_resolution(self, state: GameState, game: GameDef) -> list[dict]:
         cfg = self._config(game)
@@ -98,6 +183,15 @@ class PortalsSystem(GameSystem):
                         continue  # bounce guard
                     actor = actor_layer.get(ep)
                     if actor is None:
+                        continue
+                    # The exit must be a genuinely valid landing cell — in
+                    # bounds, not void, walkable, unblocked, and unoccupied —
+                    # or the entering actor is left resting on the entry
+                    # portal instead, same as a blocked ordinary move (this is
+                    # the same class of bug reported for terrain_skip's
+                    # chained-portal exit: a destination reached via a portal
+                    # still needs the checks any other destination gets).
+                    if not self._actor_exit_valid(state, game, exit_pos, actor_layer, cfg):
                         continue
                     state.board.set_entity(actor_layer_id, ep, None)
                     state.board.set_entity(actor_layer_id, exit_pos, actor)
