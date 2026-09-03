@@ -130,12 +130,14 @@ class _ControlsWidgetState extends State<ControlsWidget> {
         'rotate' => Icons.rotate_right,
         'flip' => Icons.flip,
         'clone' => Icons.blur_on,
+        'drop_rock' => Icons.download,
         _ => Icons.play_arrow_outlined,
       };
       final label = switch (actionDef.id) {
         'rotate' => 'Rotate',
         'flip' => 'Flip',
         'clone' => 'Clone',
+        'drop_rock' => 'Drop',
         _ => actionDef.id,
       };
       return _CtrlBtn(

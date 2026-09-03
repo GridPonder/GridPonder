@@ -1720,6 +1720,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                             : const {},
                         hoveredPreviewTarget: _hoveredPreviewTarget,
                         movingSprites: _movingSprites,
+                        history: _engine.history,
                         onCellHover: (x, y) {
                           final pos = x == null || y == null
                               ? null

@@ -35,6 +35,7 @@ abstract class Condition {
   factory Condition.fromJson(Map<String, dynamic> j) {
     if (j.containsKey('position')) return PositionCondition.fromJson(j);
     if (j.containsKey('position_has_tag')) return PositionHasTagCondition.fromJson(j);
+    if (j.containsKey('from_position_has_tag')) return FromPositionHasTagCondition.fromJson(j);
     if (j.containsKey('event')) return EventCondition.fromJson(j);
     if (j.containsKey('cell')) return CellCondition.fromJson(j);
     if (j.containsKey('avatar')) return AvatarCondition.fromJson(j);
@@ -61,6 +62,25 @@ class PositionCondition implements Condition {
     if (ep == null) return false;
     final evtPos = ep is Position ? ep : Position.fromJson(ep);
     return evtPos == position;
+  }
+}
+
+/// The event fromPosition cell has a specific tag on a layer (used in `where`).
+class FromPositionHasTagCondition implements Condition {
+  final String layer;
+  final String tag;
+  FromPositionHasTagCondition(this.layer, this.tag);
+  factory FromPositionHasTagCondition.fromJson(Map<String, dynamic> j) {
+    final c = j['from_position_has_tag'] as Map<String, dynamic>;
+    return FromPositionHasTagCondition(c['layer'] as String, c['tag'] as String);
+  }
+
+  @override
+  bool evaluate(ConditionContext ctx) {
+    final fp = ctx.eventPayload['fromPosition'];
+    if (fp == null) return false;
+    final pos = fp is Position ? fp : Position.fromJson(fp);
+    return ctx.hasTagAt(layer, pos, tag);
   }
 }
 

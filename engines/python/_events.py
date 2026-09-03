@@ -235,6 +235,10 @@ def actor_selected(kind: str, pos: Pos) -> dict:
     return {"type": "actor_selected", "kind": kind, "position": pos}
 
 
+def actor_interacted(kind: str, pos: Pos) -> dict:
+    return {"type": "actor_interacted", "kind": kind, "position": pos}
+
+
 def cell_claimed(pos: Pos, layer: str, kind: str, owner_kind: str) -> dict:
     return {
         "type": "cell_claimed",

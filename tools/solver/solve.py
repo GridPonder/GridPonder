@@ -71,6 +71,7 @@ import games.rotate_flip as rf
 import games.box_builder as bb
 import games.carrot_quest as fa
 import games.twinseed as tw
+import games.snake_tunnel as st
 import engine_adapter as ea
 from search.astar import astar
 from search.events import format_event, violates_constraint
@@ -97,6 +98,8 @@ def _detect_game(level_path: Path) -> str:
             return "flood_colors"
         if part == "twinseed":
             return "twinseed"
+        if part == "snake_tunnel":
+            return "snake_tunnel"
     # Unknown packs with the standard pack layout use the generic DSL adapter.
     if (level_path.parent.parent / "game.json").is_file():
         return "generic"
@@ -752,6 +755,51 @@ def _solve_twinseed(
 
 
 # ---------------------------------------------------------------------------
+# Snake Tunnel solver
+# ---------------------------------------------------------------------------
+
+def _solve_snake_tunnel(
+    path: Path,
+    level_json: Dict[str, Any],
+    mode: str,
+    max_depth: int,
+    timeout: float,
+    trace: bool,
+    constraints: List[Dict],
+    mc_trials: int = 0,
+    mc_steps: int = 0,
+) -> None:
+    initial, info = st.load(level_json)
+    level_id = info.level_id or path.stem
+    tunnels_str = ", ".join(f"{k}@{v}" for k, v in info.tunnels.items())
+    print(f"Solving  {level_id}   (mode: {mode}, max depth: {max_depth})")
+    print(f"  Game:   Snake Tunnel")
+    print(f"  Tunnels: {tunnels_str}")
+    print()
+
+    gold_actions = ea.gold_path_actions(level_json) if level_json.get("solution", {}).get("goldPath") else None
+    optimal_len = len(gold_actions) if gold_actions else None
+
+    if mode == "astar":
+        sol = astar(initial, info, st, timeout, constraints, max_depth=max_depth)
+        _print_astar_result(sol, gold_actions, trace, initial, st, info)
+        if sol.path:
+            optimal_len = sol.cost
+    elif mode == "dfs":
+        solutions = _dfs_all(initial, info, st, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, st, info, mode=mode)
+    else:
+        solutions = _bfs_shortest(initial, info, st, max_depth, constraints=constraints)
+        _print_results(solutions, max_depth, gold_actions, trace, initial, st, info, mode=mode)
+
+    if mc_trials > 0:
+        steps = mc_steps or max(100, 3 * (optimal_len or 30))
+        print()
+        result = _monte_carlo(initial, info, st, mc_trials, steps)
+        _print_mc_results(result, optimal_len)
+
+
+# ---------------------------------------------------------------------------
 # Generic engine-backed solver (diagonal_swipes, flood_colors, …)
 # ---------------------------------------------------------------------------
 
@@ -849,6 +897,12 @@ def solve(
         return
 
     game = _detect_game(path)
+
+    # Snake Tunnel — custom adapter with A* heuristic
+    if game == "snake_tunnel":
+        _solve_snake_tunnel(path, level_json, mode, max_depth, timeout, trace,
+                            constraints, **mc_kw)
+        return
     if game == "rotate_flip":
         _solve_rotate_flip(path, level_json, mode, max_depth, timeout, trace,
                            constraints, **mc_kw)

@@ -109,6 +109,160 @@ String? resolveEntitySpritePath(
   return sprite.replaceAll('{$spriteParam}', value?.toString() ?? '0');
 }
 
+/// Finds the position of the first entity of [kind] on [layerId], or null.
+Position? _findKindPosition(Board board, String layerId, String kind) {
+  final layer = board.layers[layerId];
+  if (layer == null) return null;
+  for (final entry in layer.entries()) {
+    if (entry.value.kind == kind) return entry.key;
+  }
+  return null;
+}
+
+/// Reconstructs, for each of [headKinds], the ordered sequence of distinct
+/// positions that entity kind has occupied across [statesChronological]
+/// (oldest first, [state] itself last). This is what tells a *connected*
+/// body sprite apart from a merely-adjacent one: two trail cells only count
+/// as connected when they are consecutive in the actor's actual travel path,
+/// not just neighbors on the grid — a path can legally coil back within one
+/// cell of itself without the two strands being the same connection.
+Map<String, List<Position>> computeHeadPaths(
+  GameDefinition game,
+  List<LevelState> statesChronological,
+  Set<String> headKinds,
+) {
+  final result = <String, List<Position>>{};
+  for (final headKind in headKinds) {
+    final layerId = game.entityKinds[headKind]?.layer;
+    if (layerId == null) continue;
+    final path = <Position>[];
+    Position? prev;
+    for (final st in statesChronological) {
+      final pos = _findKindPosition(st.board, layerId, headKind);
+      if (pos == null) continue;
+      if (prev == null || pos != prev) {
+        path.add(pos);
+        prev = pos;
+      }
+    }
+    result[headKind] = path;
+  }
+  return result;
+}
+
+/// Direction from [from] to [to] when the two share a row or column —
+/// adjacent (the common case) or many cells apart, which happens when a
+/// system like `terrain_skip` relocates an actor several cells in one
+/// straight hop. Returns null when they aren't colinear (or are the same
+/// cell), since no single connector direction describes that.
+String? _dirName(Position from, Position to) {
+  final dx = to.x - from.x;
+  final dy = to.y - from.y;
+  if (dx == 0 && dy == 0) return null;
+  if (dy == 0) return dx > 0 ? 'right' : 'left';
+  if (dx == 0) return dy > 0 ? 'down' : 'up';
+  return null;
+}
+
+/// Maps the set of directions a body cell connects to onto a sprite-name
+/// suffix. Two opposite directions are a straight run; two adjacent
+/// directions are a corner named by the pair (`corner_tl` = connects up and
+/// left, i.e. a "top → left" turn); one direction (a path endpoint) reuses
+/// the straight sprite for whichever axis it lies on.
+String? _connectedBodySuffix(Set<String> dirs) {
+  if (dirs.length == 2) {
+    if (dirs.containsAll(const ['left', 'right'])) return 'h';
+    if (dirs.containsAll(const ['up', 'down'])) return 'v';
+    if (dirs.containsAll(const ['up', 'left'])) return 'corner_tl';
+    if (dirs.containsAll(const ['up', 'right'])) return 'corner_tr';
+    if (dirs.containsAll(const ['down', 'left'])) return 'corner_bl';
+    if (dirs.containsAll(const ['down', 'right'])) return 'corner_br';
+    return null;
+  }
+  if (dirs.length == 1) {
+    final d = dirs.first;
+    return (d == 'left' || d == 'right') ? 'h' : 'v';
+  }
+  return null;
+}
+
+/// Resolves a connected-body sprite for the entity at [pos] when [kindDef]
+/// declares a `connectedBody` block in its `display` data:
+/// `{"headKind": "snake_red", "spriteBase": "assets/sprites/body_connected/body_red"}`.
+/// Looks at which neighbors of [pos] are its actual predecessor/successor
+/// along that head kind's travel path in [headPaths] (see
+/// [computeHeadPaths]) and picks the straight/corner sprite that matches.
+/// Returns null when the kind isn't connected-body, or when no orientation
+/// can be determined — callers should fall back to the kind's normal sprite.
+String? connectedBodySpritePath(
+  EntityKindDef? kindDef,
+  Position pos,
+  Map<String, List<Position>> headPaths,
+) {
+  final cb = kindDef?.display?['connectedBody'];
+  if (cb is! Map) return null;
+  final headKind = cb['headKind'] as String?;
+  final spriteBase = cb['spriteBase'] as String?;
+  if (headKind == null || spriteBase == null) return null;
+
+  final path = headPaths[headKind];
+  if (path == null) return null;
+  // A cell can appear more than once in the path — e.g. a `terrain_skip`
+  // lets a snake re-enter a cell it passed straight through earlier,
+  // without marking a trail there the first time (no `visited_*` transform
+  // fires for a skip-triggering departure). The trail sprite standing there
+  // now belongs to the most recent visit, so its neighbors must come from
+  // that occurrence, not an earlier stale pass-through.
+  final idx = path.lastIndexOf(pos);
+  if (idx == -1) return null;
+
+  final dirs = <String>{};
+  if (idx > 0) {
+    final dir = _dirName(pos, path[idx - 1]);
+    if (dir != null) dirs.add(dir);
+  }
+  if (idx < path.length - 1) {
+    final dir = _dirName(pos, path[idx + 1]);
+    if (dir != null) dirs.add(dir);
+  }
+
+  final suffix = _connectedBodySuffix(dirs);
+  if (suffix == null) return null;
+  return '${spriteBase}_$suffix.png';
+}
+
+/// Resolves a connected-head sprite for the head entity at [pos] when
+/// [kindDef] declares a `connectedHead` block in its `display` data:
+/// `{"spriteBase": "assets/sprites/snake_red_01"}`. The head kind is looked
+/// up by its own entry in [headPaths] (it's the same map [computeHeadPaths]
+/// already built for the body): the entry immediately before the head's own
+/// position in its path is the first body segment, and its direction picks
+/// which of the four single-direction variants (`_up`/`_down`/`_left`/
+/// `_right`) to show. Returns null (fall back to the kind's plain static
+/// sprite) once the snake hasn't moved yet, or the trail was just cleared by
+/// a portal, since there is no neighbor to connect to.
+String? connectedHeadSpritePath(
+  EntityKindDef? kindDef,
+  EntityInstance entity,
+  Position pos,
+  Map<String, List<Position>> headPaths,
+) {
+  final ch = kindDef?.display?['connectedHead'];
+  if (ch is! Map) return null;
+  final spriteBase = ch['spriteBase'] as String?;
+  if (spriteBase == null) return null;
+
+  final path = headPaths[entity.kind];
+  if (path == null || path.length < 2) return null;
+  if (path.last != pos) return null;
+
+  final prev = path[path.length - 2];
+  final dir = _dirName(pos, prev);
+  if (dir == null) return null;
+
+  return '${spriteBase}_$dir.png';
+}
+
 ({bool visible, String? path, bool mirrorHorizontally})
 resolveAvatarSpriteChoice(AvatarThemeDef? theme, String direction) {
   if (theme?.visible == false) {
@@ -202,6 +356,14 @@ class BoardRenderer extends StatelessWidget {
   /// at frame rate without rebuilding the board underneath it.
   final ValueListenable<List<MovingSprite>>? movingSprites;
 
+  /// Accepted-move history, oldest first, *not* including [state] itself —
+  /// pass the owning `TurnEngine`'s `history`. Used to reconstruct each
+  /// `connectedBody` actor's actual travel path so trail sprites (e.g. the
+  /// snake's body) connect to their real neighbors in the path rather than
+  /// merely adjacent cells. Omit it (or leave empty) for packs that don't use
+  /// `connectedBody` — the board renders exactly as before.
+  final List<LevelState> history;
+
   /// Last known facing direction per actor kind. Used to render idle actor
   /// sprites after movement animation has finished.
   final Map<String, String> actorFacingByKind;
@@ -246,7 +408,30 @@ class BoardRenderer extends StatelessWidget {
     this.actionPreviews = const {},
     this.hoveredPreviewTarget,
     this.movingSprites,
+    this.history = const [],
   });
+
+  /// Per-headKind ordered travel path for every `connectedBody` kind the pack
+  /// declares (see [connectedBodySpritePath]). Cheap to recompute per build:
+  /// only scanned when at least one entity kind opts in, and history for this
+  /// genre of puzzle is at most a few hundred moves over a small board.
+  Map<String, List<Position>> _connectedBodyPaths() {
+    final headKinds = <String>{};
+    for (final kindDef in game.entityKinds.values) {
+      final cb = kindDef.display?['connectedBody'];
+      if (cb is Map && cb['headKind'] is String) {
+        headKinds.add(cb['headKind'] as String);
+      }
+      // A `connectedHead` kind is its own headKind: it needs its own path
+      // (predecessor/successor of *its own* position) to know which single
+      // direction its neck should point in.
+      if (kindDef.display?['connectedHead'] is Map) {
+        headKinds.add(kindDef.id);
+      }
+    }
+    if (headKinds.isEmpty) return const {};
+    return computeHeadPaths(game, [...history, state], headKinds);
+  }
 
   /// Wraps a cell so pointer movement over it can drive the action preview.
   /// A no-op wherever nothing is listening — touch input included.
@@ -307,6 +492,7 @@ class BoardRenderer extends StatelessWidget {
     final board = state.board;
     final cols = board.width;
     final rows = board.height;
+    final bodyPaths = _connectedBodyPaths();
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -369,6 +555,7 @@ class BoardRenderer extends StatelessWidget {
                           ),
                           actorFacingByKind: actorFacingByKind,
                           floodedColorOverride: floodedColorOverride,
+                          bodyPaths: bodyPaths,
                         ),
                       ),
                     ),
@@ -994,6 +1181,11 @@ class _Cell extends StatelessWidget {
   /// for entities in flight, which sit between cells and so belong to no cell.
   final EntityInstance? entityOverride;
 
+  /// Per-headKind ordered travel path, used to resolve `connectedBody`
+  /// sprites (see [connectedBodySpritePath]). Empty when the pack declares
+  /// no connected-body kinds.
+  final Map<String, List<Position>> bodyPaths;
+
   const _Cell({
     required this.x,
     required this.y,
@@ -1005,6 +1197,7 @@ class _Cell extends StatelessWidget {
     this.actorFacingByKind = const {},
     this.floodedColorOverride,
     this.entityOverride,
+    this.bodyPaths = const {},
   });
 
   @override
@@ -1082,22 +1275,66 @@ class _Cell extends StatelessWidget {
   Widget _layer(String layerId, Position pos) {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
-    return _entity(entity, layerId);
+
+    // When a kind declares "groundBeneath": true in its display block, render
+    // the layer's default entity sprite first so water shows through transparent
+    // areas of the sprite (e.g. circular body segments on the ground layer).
+    final kindDef = game.entityKinds[entity.kind];
+    if (kindDef?.display?['groundBeneath'] == true) {
+      final matching = game.layers.where((l) => l.id == layerId);
+      final defaultKind = matching.isEmpty ? null : matching.first.defaultKind;
+      if (defaultKind != null && defaultKind != entity.kind) {
+        final defKindDef = game.entityKinds[defaultKind];
+        final defSpritePath = resolveEntitySpritePath(
+          defKindDef,
+          EntityInstance(defaultKind),
+        );
+        if (defSpritePath != null) {
+          final defWidget = Image(
+            image: packService.resolvePackImage(defSpritePath),
+            width: cellSize,
+            height: cellSize,
+            fit: BoxFit.cover,
+            errorBuilder: (_, __, ___) => Image.asset(
+              packService.resolveSprite(defSpritePath),
+              width: cellSize,
+              height: cellSize,
+              fit: BoxFit.cover,
+            ),
+          );
+          return Stack(children: [defWidget, _entity(entity, layerId, pos)]);
+        }
+      }
+    }
+
+    return _entity(entity, layerId, pos);
   }
 
-  Widget _entity(EntityInstance entity, String? layerId) {
+  Widget _entity(EntityInstance entity, String? layerId, [Position? pos]) {
     final kindDef = game.entityKinds[entity.kind];
     final facingDirection = layerId == 'actors'
         ? actorFacingByKind[entity.kind]
         : null;
-    final spritePath = resolveEntitySpritePath(
-      kindDef,
-      entity,
-      facingDirection: facingDirection,
-    );
+    // A `connectedBody` kind (e.g. the snake's trail) picks its sprite from
+    // which of its neighbors are its actual predecessor/successor along the
+    // owning actor's travel path, so adjacent segments connect into one
+    // continuous shape instead of each showing an isolated static sprite. A
+    // `connectedHead` kind (the snake's own head) does the same trick in
+    // reverse, picking a `_up`/`_down`/`_left`/`_right` variant of the same
+    // static head art so it connects flush to the first body segment.
+    final spritePath =
+        (pos != null ? connectedBodySpritePath(kindDef, pos, bodyPaths) : null) ??
+        (pos != null
+            ? connectedHeadSpritePath(kindDef, entity, pos, bodyPaths)
+            : null) ??
+        resolveEntitySpritePath(
+          kindDef,
+          entity,
+          facingDirection: facingDirection,
+        );
     if (spritePath != null) {
       // Try pack-specific path first; fall back to gridponder-base for shared sprites.
-      return Image(
+      final spriteWidget = Image(
         image: packService.resolvePackImage(spritePath),
         width: cellSize,
         height: cellSize,
@@ -1110,6 +1347,15 @@ class _Cell extends StatelessWidget {
           errorBuilder: (_, __, ___) => _fallback(entity),
         ),
       );
+      // If the display block declares overlay:true, render it on top of the sprite.
+      final display = kindDef?.display;
+      if (display != null && display['overlay'] == true) {
+        final overlayWidget = _renderFromDisplay(display, entity);
+        if (overlayWidget != null) {
+          return Stack(children: [spriteWidget, overlayWidget]);
+        }
+      }
+      return spriteWidget;
     }
     return _fallback(entity);
   }
@@ -1217,6 +1463,120 @@ class _Cell extends StatelessWidget {
             ),
           ),
         );
+      // Colored circle with a text label centered inside — used to show a
+      // dynamic value (e.g. @variable:moveBudget) on an actor head.
+      // When overlay:true the sprite is kept; a small badge renders at
+      // the bottom-right corner instead of replacing the sprite.
+      case 'circle_label':
+        final c = color ?? _namedColor('green');
+        final labelText = _resolveDisplayString(display['label'], entity) ?? '';
+        final isOverlay = display['overlay'] == true;
+        if (isOverlay) {
+          return Align(
+            alignment: Alignment.bottomRight,
+            child: Container(
+              margin: EdgeInsets.all(cellSize * 0.04),
+              width: cellSize * 0.42,
+              height: cellSize * 0.42,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.black87,
+                border: Border.all(color: c, width: 1.5),
+              ),
+              alignment: Alignment.center,
+              child: Text(
+                labelText,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: cellSize * 0.26,
+                  shadows: const [Shadow(color: Colors.black, blurRadius: 2)],
+                ),
+              ),
+            ),
+          );
+        }
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Center(
+              child: Container(
+                width: cellSize * 0.72,
+                height: cellSize * 0.72,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: c,
+                  boxShadow: [
+                    BoxShadow(color: c, blurRadius: 6, spreadRadius: 1),
+                  ],
+                ),
+              ),
+            ),
+            if (labelText.isNotEmpty)
+              Text(
+                labelText,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: cellSize * 0.36,
+                  shadows: const [
+                    Shadow(color: Colors.black87, blurRadius: 3),
+                  ],
+                ),
+              ),
+          ],
+        );
+      // Dark circle with a colored border — represents a tunnel opening.
+      case 'ring':
+        final c = color ?? _namedColor('green');
+        return Center(
+          child: Container(
+            width: cellSize * 0.75,
+            height: cellSize * 0.75,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.black87,
+              border: Border.all(
+                color: c,
+                width: (cellSize * 0.1).clamp(2.0, 8.0),
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: c.withAlpha(140),
+                  blurRadius: 8,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+          ),
+        );
+      // Background fill with a centered circle on top — used for body segments
+      // that need to match the floor color around them.
+      case 'filled_circle':
+        final c = color ?? _namedColor('green');
+        final isOverlay = display['overlay'] == true;
+        final bgColor = isOverlay
+            ? Colors.transparent
+            : (_resolveDisplayColor(display['bgColor'], entity) ?? Colors.transparent);
+        return Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(color: bgColor),
+            Center(
+              child: Container(
+                width: cellSize * 0.52,
+                height: cellSize * 0.52,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isOverlay ? c.withOpacity(0.72) : c,
+                  boxShadow: [
+                    BoxShadow(color: c.withOpacity(0.6), blurRadius: 6, spreadRadius: 2),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        );
       case 'label':
         final labelText =
             _resolveDisplayString(display['label'], entity) ?? '?';
@@ -1236,6 +1596,32 @@ class _Cell extends StatelessWidget {
         final glyph = display['value'] as String? ?? '?';
         return Center(
           child: Text(glyph, style: TextStyle(fontSize: cellSize * 0.6)),
+        );
+      // Emoji icon stacked above a small text label — used for food items.
+      // The emoji provides the visual object; the label shows the value.
+      case 'emoji_label':
+        final emojiGlyph = display['emoji'] as String? ?? '';
+        final emojiLabel = _resolveDisplayString(display['label'], entity) ?? '';
+        return Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          mainAxisSize: MainAxisSize.max,
+          children: [
+            Text(
+              emojiGlyph,
+              style: TextStyle(fontSize: cellSize * 0.48, height: 1.1),
+            ),
+            if (emojiLabel.isNotEmpty)
+              Text(
+                emojiLabel,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: cellSize * 0.23,
+                  height: 1.0,
+                  shadows: const [Shadow(color: Colors.black87, blurRadius: 2)],
+                ),
+              ),
+          ],
         );
       case 'icon':
         return Container(
@@ -1290,6 +1676,11 @@ class _Cell extends StatelessWidget {
       return entity.kind.startsWith(prefix)
           ? entity.kind.substring(prefix.length)
           : null;
+    }
+    if (spec.startsWith('@variable:')) {
+      final key = spec.substring(10);
+      final v = state.variables[key];
+      return v?.toString();
     }
     return spec;
   }

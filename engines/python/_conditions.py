@@ -46,6 +46,17 @@ def evaluate(condition: Optional[dict], event: dict, state: GameState, game: Gam
             c["tag"],
         )
 
+    if "from_position_has_tag" in condition:
+        c = condition["from_position_has_tag"]
+        fp = event.get("fromPosition")
+        if fp is None:
+            return False
+        pos = fp if isinstance(fp, Pos) else Pos.from_json(fp)
+        return game.has_tag(
+            (state.board.get_entity(c["layer"], pos) or _dummy).kind,
+            c["tag"],
+        )
+
     if "position" in condition:
         pos = _event_pos(event)
         if pos is None:
