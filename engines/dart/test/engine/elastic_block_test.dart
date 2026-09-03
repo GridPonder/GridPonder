@@ -22,8 +22,13 @@ GameDefinition _game({Map<String, dynamic> config = const {}}) {
       },
       'crate': {
         'layer': 'objects',
-        'tags': ['solid', 'pushable'],
+        'tags': ['solid', 'pushable', 'chain_pushable'],
         'symbol': 'C',
+      },
+      'heavy_crate': {
+        'layer': 'objects',
+        'tags': ['solid', 'pushable'],
+        'symbol': 'H',
       },
       'coin': {'layer': 'objects', 'tags': [], 'symbol': 'O'},
       'target_a': {'layer': 'markers', 'tags': [], 'symbol': 'A'},
@@ -326,6 +331,76 @@ void main() {
         .map((event) => event.payload['originPosition'])
         .toSet();
     expect(origins, {const Position(1, 0), const Position(2, 0)});
+  });
+
+  test('pushable excluded from chainPushableTags moves only by itself', () {
+    final game = _game(
+      config: const {
+        'chainPush': true,
+        'chainPushableTags': ['chain_pushable'],
+      },
+    );
+    final soloEngine = TurnEngine(
+      game,
+      _level(
+        game,
+        const [
+          [0, 0]
+        ],
+        size: const [3, 1],
+        objects: const [
+          {
+            'position': [1, 0],
+            'kind': 'heavy_crate'
+          },
+        ],
+      ),
+    );
+
+    final soloResult = soloEngine.executeTurn(
+      const GameAction('move', {'direction': 'right'}),
+    );
+
+    expect(soloResult.accepted, isTrue);
+    expect(
+      soloEngine.state.board.getEntity('objects', const Position(2, 0))?.kind,
+      'heavy_crate',
+    );
+
+    final chainEngine = TurnEngine(
+      game,
+      _level(
+        game,
+        const [
+          [0, 0]
+        ],
+        size: const [4, 1],
+        objects: const [
+          {
+            'position': [1, 0],
+            'kind': 'crate'
+          },
+          {
+            'position': [2, 0],
+            'kind': 'heavy_crate'
+          },
+        ],
+      ),
+    );
+
+    final chainResult = chainEngine.executeTurn(
+      const GameAction('move', {'direction': 'right'}),
+    );
+
+    expect(chainResult.accepted, isFalse);
+    expect(
+      chainEngine.state.board.getEntity('objects', const Position(1, 0))?.kind,
+      'crate',
+    );
+    expect(
+      chainEngine.state.board.getEntity('objects', const Position(2, 0))?.kind,
+      'heavy_crate',
+    );
   });
 
   test('push does not overwrite a nonblocking entity', () {

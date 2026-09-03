@@ -24,7 +24,16 @@ def _game(config: dict | None = None) -> GameDef:
             "floor": {"layer": "ground", "tags": ["walkable"], "symbol": "."},
             "void": {"layer": "ground", "tags": [], "symbol": "#"},
             "wall": {"layer": "objects", "tags": ["solid"], "symbol": "W"},
-            "crate": {"layer": "objects", "tags": ["solid", "pushable"], "symbol": "C"},
+            "crate": {
+                "layer": "objects",
+                "tags": ["solid", "pushable", "chain_pushable"],
+                "symbol": "C",
+            },
+            "heavy_crate": {
+                "layer": "objects",
+                "tags": ["solid", "pushable"],
+                "symbol": "H",
+            },
             "coin": {"layer": "objects", "tags": [], "symbol": "O"},
             "target_a": {"layer": "markers", "tags": [], "symbol": "A"},
             "target_b": {"layer": "markers", "tags": [], "symbol": "T"},
@@ -196,6 +205,52 @@ class ElasticBlockTest(unittest.TestCase):
             if event["type"] == "object_pushed"
         }
         self.assertEqual(origins, {Pos(1, 0), Pos(2, 0)})
+
+    def test_pushable_excluded_from_chain_tags_moves_only_by_itself(self) -> None:
+        config = {
+            "chainPush": True,
+            "chainPushableTags": ["chain_pushable"],
+        }
+        solo_engine = TurnEngine(
+            _game(config),
+            _level(
+                [[0, 0]],
+                size=[3, 1],
+                objects=[{"position": [1, 0], "kind": "heavy_crate"}],
+            ),
+        )
+
+        solo_result = solo_engine.execute_turn("move", {"direction": "right"})
+
+        self.assertTrue(solo_result.accepted)
+        self.assertEqual(
+            solo_engine.state.board.get_entity("objects", Pos(2, 0)).kind,
+            "heavy_crate",
+        )
+
+        chain_engine = TurnEngine(
+            _game(config),
+            _level(
+                [[0, 0]],
+                size=[4, 1],
+                objects=[
+                    {"position": [1, 0], "kind": "crate"},
+                    {"position": [2, 0], "kind": "heavy_crate"},
+                ],
+            ),
+        )
+
+        chain_result = chain_engine.execute_turn("move", {"direction": "right"})
+
+        self.assertFalse(chain_result.accepted)
+        self.assertEqual(
+            chain_engine.state.board.get_entity("objects", Pos(1, 0)).kind,
+            "crate",
+        )
+        self.assertEqual(
+            chain_engine.state.board.get_entity("objects", Pos(2, 0)).kind,
+            "heavy_crate",
+        )
 
     def test_push_does_not_overwrite_nonblocking_entity(self) -> None:
         engine = TurnEngine(

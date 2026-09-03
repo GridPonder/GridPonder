@@ -257,6 +257,17 @@ class ElasticBlockSystem extends GameSystem {
           .any((tag) => game.hasTag(destinationEntity.kind, tag))) {
         return null;
       }
+      final chainPushableValues =
+          config['chainPushableTags'] as List? ?? pushableTags.toList();
+      final chainPushableTags =
+          chainPushableValues.map((value) => value.toString());
+      final sourceCanChain = chainPushableTags.any(
+        (tag) => game.hasTag(blocker.entity.kind, tag),
+      );
+      final destinationCanChain = chainPushableTags.any(
+        (tag) => game.hasTag(destinationEntity.kind, tag),
+      );
+      if (!sourceCanChain || !destinationCanChain) return null;
       final destinationBlockers =
           _blockingEntities(destination, state, game, config);
       if (destinationBlockers.length != 1 ||

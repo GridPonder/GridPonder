@@ -1307,7 +1307,9 @@ remains a solid axis-aligned rectangle.
 | `validGroundTags` | array of strings | `["walkable"]` | At least one required tag on every new block or pushed-object ground cell. |
 | `blockingLayers` | array of strings | `["objects"]` | Layers checked for solid obstacles and pushable entities. |
 | `blockingTags` | array of strings | `["solid"]` | Tags identifying blockers on `blockingLayers`. |
-| `pushableTags` | array of strings | `["pushable"]` | A sole blocker with one of these tags may be pushed by the advancing face. Chain pushing is not supported. |
+| `pushableTags` | array of strings | `["pushable"]` | Tags identifying blockers that the advancing face may push. |
+| `chainPush` | boolean | `false` | Allow aligned pushable entities to move together as a chain. |
+| `chainPushableTags` | array of strings | value of `pushableTags` | Tags required for every entity participating in a chain push. A pushable without one of these tags can still be pushed by itself. |
 | `targetLayer` | string | `"markers"` | Default layer containing target marker kinds. |
 | `targets` | array | `[]` | Target definitions described below. Empty disables target tracking and board mutation. |
 | `completedTargetIdsVariable` | string | `"completedTargetIds"` | Sorted list of target ids that have matched exactly. |

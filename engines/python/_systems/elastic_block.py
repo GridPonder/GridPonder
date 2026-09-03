@@ -249,6 +249,19 @@ def _push_chain(
         ]
         if not any(game.has_tag(destination_entity.kind, tag) for tag in pushable_tags):
             return None
+        chain_pushable_tags = [
+            str(tag)
+            for tag in config_list(config, "chainPushableTags", pushable_tags)
+        ]
+        source_can_chain = any(
+            game.has_tag(entity.kind, tag) for tag in chain_pushable_tags
+        )
+        destination_can_chain = any(
+            game.has_tag(destination_entity.kind, tag)
+            for tag in chain_pushable_tags
+        )
+        if not source_can_chain or not destination_can_chain:
+            return None
         blockers = _blocking_entities(destination, state, game, config)
         if len(blockers) != 1 or blockers[0][0] != layer:
             return None
