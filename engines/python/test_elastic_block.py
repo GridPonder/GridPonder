@@ -93,6 +93,69 @@ class ElasticBlockTest(unittest.TestCase):
 
         self.assertEqual(_positions(engine), {Pos(3, 0)})
 
+    def test_single_step_inflates_by_only_one_line(self) -> None:
+        engine = TurnEngine(
+            _game({"inflateMode": "single_step"}),
+            _level([[0, 0]], size=[4, 1]),
+        )
+
+        result = engine.execute_turn("move", {"direction": "right"})
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(_positions(engine), {Pos(0, 0), Pos(1, 0)})
+        event = next(
+            event
+            for event in result.events
+            if event["type"] == "elastic_block_inflated"
+        )
+        self.assertEqual(event["distance"], 1)
+
+    def test_custom_collapse_thickness_keeps_leading_slices(self) -> None:
+        engine = TurnEngine(
+            _game({"collapseThickness": 2}),
+            _level(
+                [[0, 0], [1, 0], [2, 0], [3, 0]],
+                size=[5, 1],
+                objects=[{"position": [4, 0], "kind": "wall"}],
+            ),
+        )
+
+        result = engine.execute_turn("move", {"direction": "right"})
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(_positions(engine), {Pos(2, 0), Pos(3, 0)})
+
+    def test_disabled_direction_and_collapse_are_rejected(self) -> None:
+        engine = TurnEngine(
+            _game({"directions": ["right"], "collapseWhenBlocked": False}),
+            _level(
+                [[0, 0], [1, 0], [2, 0]],
+                size=[4, 1],
+                objects=[{"position": [3, 0], "kind": "wall"}],
+            ),
+        )
+
+        self.assertFalse(
+            engine.execute_turn("move", {"direction": "left"}).accepted
+        )
+        self.assertFalse(
+            engine.execute_turn("move", {"direction": "right"}).accepted
+        )
+        self.assertEqual(_positions(engine), {Pos(0, 0), Pos(1, 0), Pos(2, 0)})
+        self.assertEqual(engine.state.action_count, 0)
+
+    def test_no_op_can_count_as_an_action_when_configured(self) -> None:
+        engine = TurnEngine(
+            _game({"rejectNoOpMoves": False}),
+            _level([[3, 0]], size=[4, 1]),
+        )
+
+        result = engine.execute_turn("move", {"direction": "right"})
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(_positions(engine), {Pos(3, 0)})
+        self.assertEqual(engine.state.action_count, 1)
+
     def test_partial_blocking_stops_the_whole_face(self) -> None:
         engine = TurnEngine(
             _game(),
@@ -126,7 +189,12 @@ class ElasticBlockTest(unittest.TestCase):
         self.assertTrue(result.accepted)
         self.assertEqual(_positions(engine), {Pos(0, 0), Pos(1, 0), Pos(2, 0)})
         self.assertEqual(engine.state.board.get_entity("objects", Pos(3, 0)).kind, "crate")
-        self.assertEqual([event["type"] for event in result.events].count("object_pushed"), 1)
+        pushed = [
+            event for event in result.events if event["type"] == "object_pushed"
+        ]
+        self.assertEqual(len(pushed), 1)
+        self.assertEqual(pushed[0]["layer"], "objects")
+        self.assertEqual(pushed[0]["originPosition"], Pos(2, 0))
 
     def test_blocked_press_collapses_against_leading_edge(self) -> None:
         engine = TurnEngine(

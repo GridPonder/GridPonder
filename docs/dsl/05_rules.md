@@ -249,6 +249,8 @@ An object was pushed by the avatar or an object-moving system.
 | `fromPosition` | `[x, y]` | Original position. |
 | `toPosition` | `[x, y]` | New position. |
 | `direction` | string | Push direction. |
+| `layer` | string | Optional layer containing the pushed entity. |
+| `originPosition` | `[x, y]` | Optional position before a multi-step push sequence began. |
 
 ### `elastic_block_inflated`
 An `elastic_block` expanded by one or more complete leading-edge lines.

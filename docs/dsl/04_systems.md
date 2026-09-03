@@ -1343,9 +1343,10 @@ rectangle. `onLeave` is `"none"`, `"void"`, or `"wall"`; the latter two use
    other multi-cell object, and contains no unpushable blocker.
 3. A pushable blocker is enterable only when its next cell in the pressed
    direction independently passes the same ground and collision checks. Two
-   aligned pushables therefore jam rather than chain-push. Move every accepted
-   pushable one cell, extend the leading edge by the whole line, and repeat for
-   `to_obstacle` mode.
+   aligned pushables jam when `chainPush` is false. When it is true, the entire
+   aligned chain moves only if every member matches `chainPushableTags` and the
+   cell beyond the chain is enterable. Move every accepted pushable one cell,
+   extend the leading edge by the whole line, and repeat for `to_obstacle` mode.
 4. If the first line is blocked, retain the leading `collapseThickness` slices
    and remove the trailing slices. The perpendicular extent does not change.
    If this changes no cells, follow `rejectNoOpMoves`.

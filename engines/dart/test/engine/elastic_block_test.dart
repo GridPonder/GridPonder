@@ -118,6 +118,128 @@ void main() {
     expect(_positions(engine), {const Position(3, 0)});
   });
 
+  test('single_step inflates by only one line', () {
+    final game = _game(config: const {'inflateMode': 'single_step'});
+    final engine = TurnEngine(
+      game,
+      _level(
+        game,
+        const [
+          [0, 0]
+        ],
+        size: const [4, 1],
+      ),
+    );
+
+    final result =
+        engine.executeTurn(const GameAction('move', {'direction': 'right'}));
+
+    expect(result.accepted, isTrue);
+    expect(
+      _positions(engine),
+      {const Position(0, 0), const Position(1, 0)},
+    );
+    final event = result.events
+        .singleWhere((event) => event.type == 'elastic_block_inflated');
+    expect(event.payload['distance'], 1);
+  });
+
+  test('custom collapseThickness keeps the leading slices', () {
+    final game = _game(config: const {'collapseThickness': 2});
+    final engine = TurnEngine(
+      game,
+      _level(
+        game,
+        const [
+          [0, 0],
+          [1, 0],
+          [2, 0],
+          [3, 0]
+        ],
+        size: const [5, 1],
+        objects: const [
+          {
+            'position': [4, 0],
+            'kind': 'wall'
+          },
+        ],
+      ),
+    );
+
+    final result =
+        engine.executeTurn(const GameAction('move', {'direction': 'right'}));
+
+    expect(result.accepted, isTrue);
+    expect(
+      _positions(engine),
+      {const Position(2, 0), const Position(3, 0)},
+    );
+  });
+
+  test('disabled direction and collapse are rejected', () {
+    final game = _game(config: const {
+      'directions': ['right'],
+      'collapseWhenBlocked': false,
+    });
+    final engine = TurnEngine(
+      game,
+      _level(
+        game,
+        const [
+          [0, 0],
+          [1, 0],
+          [2, 0]
+        ],
+        size: const [4, 1],
+        objects: const [
+          {
+            'position': [3, 0],
+            'kind': 'wall'
+          },
+        ],
+      ),
+    );
+
+    expect(
+      engine
+          .executeTurn(const GameAction('move', {'direction': 'left'}))
+          .accepted,
+      isFalse,
+    );
+    expect(
+      engine
+          .executeTurn(const GameAction('move', {'direction': 'right'}))
+          .accepted,
+      isFalse,
+    );
+    expect(
+      _positions(engine),
+      {const Position(0, 0), const Position(1, 0), const Position(2, 0)},
+    );
+    expect(engine.state.actionCount, 0);
+  });
+
+  test('no-op can count as an action when configured', () {
+    final game = _game(config: const {'rejectNoOpMoves': false});
+    final engine = TurnEngine(
+      game,
+      _level(
+        game,
+        const [
+          [3, 0]
+        ],
+        size: const [4, 1],
+      ),
+    );
+
+    final result =
+        engine.executeTurn(const GameAction('move', {'direction': 'right'}));
+
+    expect(result.accepted, isTrue);
+    expect(_positions(engine), {const Position(3, 0)});
+    expect(engine.state.actionCount, 1);
+  });
+
   test('partial blocking stops the whole face', () {
     final game = _game();
     final engine = TurnEngine(
@@ -186,8 +308,10 @@ void main() {
       engine.state.board.getEntity('objects', const Position(3, 0))?.kind,
       'crate',
     );
-    expect(result.events.where((event) => event.type == 'object_pushed').length,
-        1);
+    final pushed =
+        result.events.singleWhere((event) => event.type == 'object_pushed');
+    expect(pushed.payload['layer'], 'objects');
+    expect(pushed.payload['originPosition'], const Position(2, 0));
   });
 
   test('blocked press collapses against the leading edge', () {
