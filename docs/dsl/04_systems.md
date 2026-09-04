@@ -1280,6 +1280,89 @@ objectives, pursuit distance, "hot and cold" hint systems, or a scoring signal
 
 ---
 
+### 2.20 `elastic_block`
+
+**Purpose:** Control one rectangular `multiCellObject` whose footprint expands
+to the next obstacle or collapses against the obstructed edge. The object always
+remains a solid axis-aligned rectangle.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `elastic_block_inflated`, `elastic_block_collapsed`,
+`object_pushed`, `target_completed`, `target_consumed`, `cell_cleared`,
+`cell_transformed`, `variable_changed`, `action_vetoed`
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `objectKind` | string | `"elastic_block"` | Kind of the single `multiCellObject` controlled by the system. Exactly one matching rectangular object must exist. |
+| `moveAction` | string | `"move"` | Action id that carries the direction press. |
+| `directions` | array of strings | `["up","down","left","right"]` | Directions accepted from `moveAction`. |
+| `inflateMode` | string | `"to_obstacle"` | `"to_obstacle"` repeats until the next whole line is blocked; `"single_step"` adds at most one line. |
+| `collapseWhenBlocked` | boolean | `true` | Collapse toward the obstructed leading edge when the first new line cannot be entered. |
+| `collapseThickness` | integer | `1` | Thickness retained along the pressed axis after a collapse. Values below 1 are treated as 1. |
+| `rejectNoOpMoves` | boolean | `true` | Veto a blocked press that cannot collapse. The veto leaves state, counters, and undo history unchanged. |
+| `groundLayer` | string | `"ground"` | Layer checked for ground validity. |
+| `validGroundTags` | array of strings | `["walkable"]` | At least one required tag on every new block or pushed-object ground cell. |
+| `blockingLayers` | array of strings | `["objects"]` | Layers checked for solid obstacles and pushable entities. |
+| `blockingTags` | array of strings | `["solid"]` | Tags identifying blockers on `blockingLayers`. |
+| `pushableTags` | array of strings | `["pushable"]` | Tags identifying blockers that the advancing face may push. |
+| `chainPush` | boolean | `false` | Allow aligned pushable entities to move together as a chain. |
+| `chainPushableTags` | array of strings | value of `pushableTags` | Tags required for every entity participating in a chain push. A pushable without one of these tags can still be pushed by itself. |
+| `targetLayer` | string | `"markers"` | Default layer containing target marker kinds. |
+| `targets` | array | `[]` | Target definitions described below. Empty disables target tracking and board mutation. |
+| `completedTargetIdsVariable` | string | `"completedTargetIds"` | Sorted list of target ids that have matched exactly. |
+| `consumedTargetIdsVariable` | string | `"consumedTargetIds"` | Sorted list of completed targets whose rectangle has subsequently been fully vacated. |
+| `completedTargetsVariable` | string | `"completedTargetCount"` | Number of completed targets. Pair with a `variable_threshold` goal. |
+
+Each `targets` entry has this form:
+
+```json
+{
+  "id": "forge",
+  "markerKind": "target_forge",
+  "onLeave": "wall",
+  "wallKind": "wall"
+}
+```
+
+`id` defaults to `markerKind`. All cells of `markerKind` on `targetLayer` (or
+the entry's optional `markerLayer`) form that target. They must be one solid
+rectangle. `onLeave` is `"none"`, `"void"`, or `"wall"`; the latter two use
+`voidKind`/`groundLayer` or `wallKind`/`wallLayer`, defaulting to
+`void`/`ground` and `wall`/`objects`.
+
+**Behavior:**
+
+1. Resolve the one `multiCellObject` whose kind equals `objectKind`. Veto the
+   action when it is missing, duplicated, non-rectangular, or the direction is
+   invalid.
+2. Build the complete one-cell line beyond the pressed edge. A line is
+   enterable only when every cell is in bounds, has valid ground, contains no
+   other multi-cell object, and contains no unpushable blocker.
+3. A pushable blocker is enterable only when its next cell in the pressed
+   direction independently passes the same ground and collision checks. Two
+   aligned pushables jam when `chainPush` is false. When it is true, the entire
+   aligned chain moves only if every member matches `chainPushableTags` and the
+   cell beyond the chain is enterable. Move every accepted pushable one cell,
+   extend the leading edge by the whole line, and repeat for `to_obstacle` mode.
+4. If the first line is blocked, retain the leading `collapseThickness` slices
+   and remove the trailing slices. The perpendicular extent does not change.
+   If this changes no cells, follow `rejectNoOpMoves`.
+5. After an accepted inflation or collapse, compare the complete block cell set
+   with every unfinished target cell set. Exact equality permanently completes
+   a target and increments `completedTargetsVariable`; containment is not a
+   match.
+6. A completed target is consumed only after the block footprint is disjoint
+   from its full rectangle. Its markers are cleared, then `onLeave` optionally
+   changes every target cell to impassable ground or an unpushable wall. A
+   target never reactivates.
+
+The target state is stored in ordinary variables, so it participates in solver
+state identity and survives engine copies. Packs that only need deformation can
+leave `targets` empty and use another goal system.
+
 ---
 
 ## 3. System Summary Table
@@ -1289,6 +1372,7 @@ objectives, pursuit distance, "hot and cold" hint systems, or a scoring signal
 | Avatar Navigation | `avatar_navigation` | `action_resolution` | `move` |
 | Push Objects | `push_objects` | `movement_resolution` | (automatic on move into pushable) |
 | Sliding Blocks | `sliding_blocks` | `action_resolution` | `move(position, direction)` |
+| Elastic Block | `elastic_block` | `action_resolution` | `move(direction)` |
 | Line of Sight | `line_of_sight` | `cascade_resolution` | event-triggered detection |
 | Flank Capture | `flank_capture` | `cascade_resolution` | event-triggered bracket capture |
 | Support Collapse | `support_collapse` | `action_resolution` + `cascade_resolution` | configurable sever verb (`position` or `direction`) |
@@ -1328,6 +1412,10 @@ objectives, pursuit distance, "hot and cold" hint systems, or a scoring signal
 ### Direct sliding-block escape games
 `sliding_blocks` (with `multiCellObjects` and a `variable_threshold` escape goal);
 optionally add `line_of_sight` and rules for remote interactions.
+
+### Elastic-footprint games
+`elastic_block` (with one rectangular `multiCellObject`, optional pushable
+obstacles, and a `variable_threshold` completed-target goal).
 
 ### Transformation-style games (pattern matching)
 `overlay_cursor` + `region_transform` (rotate + flip ops) + `flood_fill`

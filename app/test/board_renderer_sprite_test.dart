@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gridponder_app/src/widgets/board_renderer.dart';
 import 'package:gridponder_engine/engine.dart';
@@ -116,5 +118,56 @@ void main() {
       'markers',
       'objects',
     ]);
+  });
+
+  test('elastic face reaches a crate before the crate starts moving', () {
+    expect(
+      elasticPushObjectTravel(
+        blockTravel: 1.5,
+        totalBlockDistance: 4,
+        objectDistance: 2,
+      ),
+      0,
+    );
+    expect(
+      elasticPushObjectTravel(
+        blockTravel: 2.5,
+        totalBlockDistance: 4,
+        objectDistance: 2,
+      ),
+      0.5,
+    );
+    expect(
+      elasticPushObjectTravel(
+        blockTravel: 4,
+        totalBlockDistance: 4,
+        objectDistance: 2,
+      ),
+      2,
+    );
+  });
+
+  test('elastic block grows only its leading edge', () {
+    const start = Rect.fromLTRB(2, 3, 4, 5);
+
+    expect(
+      elasticBlockRect(start, 'right', 1.25),
+      const Rect.fromLTRB(2, 3, 5.25, 5),
+    );
+    expect(
+      elasticBlockRect(start, 'up', 0.75),
+      const Rect.fromLTRB(2, 2.25, 4, 5),
+    );
+  });
+
+  test('elastic block collapse interpolates the trailing edge', () {
+    const start = Rect.fromLTRB(1, 2, 7, 5);
+    const end = Rect.fromLTRB(6, 2, 7, 5);
+
+    expect(
+      elasticBlockRectTween(start, end, 0.5),
+      const Rect.fromLTRB(3.5, 2, 7, 5),
+    );
+    expect(elasticBlockRectTween(start, end, 1), end);
   });
 }

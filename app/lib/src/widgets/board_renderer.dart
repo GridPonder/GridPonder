@@ -86,6 +86,87 @@ class MovingSprite {
   });
 }
 
+/// One rectangular multi-cell object changing its bounds at sub-cell
+/// precision. Elastic blocks use this while inflating so their leading edge
+/// stays physically attached to any crate it is pushing instead of snapping
+/// to its final footprint after the crate animation.
+class MovingMultiCellObject {
+  final MultiCellObjectInstance object;
+  final double left;
+  final double top;
+  final double width;
+  final double height;
+  final bool selected;
+
+  const MovingMultiCellObject({
+    required this.object,
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+    this.selected = false,
+  });
+}
+
+/// Distance a pushed object has travelled once the elastic face has advanced
+/// [blockTravel] cells. A shorter object journey means the block crossed empty
+/// space before making contact, so the object waits for that part of the
+/// animation instead of appearing to move by itself.
+double elasticPushObjectTravel({
+  required double blockTravel,
+  required double totalBlockDistance,
+  required double objectDistance,
+}) => (blockTravel - (totalBlockDistance - objectDistance)).clamp(
+  0.0,
+  objectDistance,
+);
+
+/// Fractional rectangle occupied by an elastic block while its leading edge
+/// grows [travelled] cells in [direction].
+Rect elasticBlockRect(Rect start, String direction, double travelled) {
+  return switch (direction) {
+    'left' => Rect.fromLTRB(
+      start.left - travelled,
+      start.top,
+      start.right,
+      start.bottom,
+    ),
+    'right' => Rect.fromLTRB(
+      start.left,
+      start.top,
+      start.right + travelled,
+      start.bottom,
+    ),
+    'up' => Rect.fromLTRB(
+      start.left,
+      start.top - travelled,
+      start.right,
+      start.bottom,
+    ),
+    'down' => Rect.fromLTRB(
+      start.left,
+      start.top,
+      start.right,
+      start.bottom + travelled,
+    ),
+    _ => start,
+  };
+}
+
+/// Interpolates all four edges of an elastic block. Inflation moves one edge
+/// outward; collapse moves the opposite edge inward, so the same interpolation
+/// covers both motions without snapping between whole-cell footprints.
+Rect elasticBlockRectTween(Rect start, Rect end, double progress) {
+  final t = progress.clamp(0.0, 1.0);
+  double tween(double from, double to) => from + (to - from) * t;
+  return Rect.fromLTRB(
+    tween(start.left, end.left),
+    tween(start.top, end.top),
+    tween(start.right, end.right),
+    tween(start.bottom, end.bottom),
+  );
+}
+
 /// Resolves the sprite path for an entity instance, including optional
 /// direction-aware motion sprites declared under `motion.sprites`.
 String? resolveEntitySpritePath(
@@ -364,6 +445,11 @@ class BoardRenderer extends StatelessWidget {
   /// `connectedBody` — the board renders exactly as before.
   final List<LevelState> history;
 
+  /// Rectangular multi-cell objects whose bounds are changing between cells.
+  /// Kept separate from [movingSprites] because these stretch rather than
+  /// translate as a one-cell sprite.
+  final ValueListenable<List<MovingMultiCellObject>>? movingMultiCellObjects;
+
   /// Last known facing direction per actor kind. Used to render idle actor
   /// sprites after movement animation has finished.
   final Map<String, String> actorFacingByKind;
@@ -409,6 +495,7 @@ class BoardRenderer extends StatelessWidget {
     this.hoveredPreviewTarget,
     this.movingSprites,
     this.history = const [],
+    this.movingMultiCellObjects,
   });
 
   /// Per-headKind ordered travel path for every `connectedBody` kind the pack
@@ -475,6 +562,39 @@ class BoardRenderer extends StatelessWidget {
               ),
               child: tile,
             ),
+    );
+  }
+
+  Widget _buildMovingMultiCellObject(
+    MovingMultiCellObject motion,
+    double cellSize,
+  ) {
+    final background =
+        _mcoDisplay(motion.object, cellSize) ??
+        ColoredBox(
+          color: cellNamedColor('grey', palette: packService.theme?.palette),
+        );
+    final borderWidth = (cellSize * 0.055).clamp(2.0, 4.0);
+    return Positioned(
+      left: motion.left * cellSize,
+      top: motion.top * cellSize,
+      width: motion.width * cellSize,
+      height: motion.height * cellSize,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          background,
+          if (motion.selected)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: const Color(0xFFFFC107),
+                  width: borderWidth,
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
@@ -577,6 +697,20 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               ),
+              if (movingMultiCellObjects case final objects?)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ValueListenableBuilder<List<MovingMultiCellObject>>(
+                      valueListenable: objects,
+                      builder: (context, inFlight, _) => Stack(
+                        children: [
+                          for (final object in inFlight)
+                            _buildMovingMultiCellObject(object, cellSize),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               // Entities in flight. Rebuilt on their own listenable so a fall
               // can be driven at frame rate without rebuilding every cell
               // underneath it.
@@ -702,7 +836,9 @@ class BoardRenderer extends StatelessWidget {
               _mcoFallback(pos, mco, exitPos, cellSize),
         );
       } else {
-        background = _mcoFallback(pos, mco, exitPos, cellSize);
+        background =
+            _mcoDisplay(mco, cellSize) ??
+            _mcoFallback(pos, mco, exitPos, cellSize);
       }
 
       // Queue value label rendered on top of the background.
@@ -725,7 +861,8 @@ class BoardRenderer extends StatelessWidget {
         children: [
           background,
           if (label != null) label,
-          if (selected) _selectedMcoCellOverlay(cellSize),
+          if (selected)
+            _selectedMcoCellOverlay(pos, mco.cells.toSet(), cellSize),
         ],
       );
 
@@ -739,22 +876,75 @@ class BoardRenderer extends StatelessWidget {
     }).toList();
   }
 
-  Widget _selectedMcoCellOverlay(double cellSize) {
+  Widget? _mcoDisplay(MultiCellObjectInstance mco, double cellSize) {
+    final display = game.entityKinds[mco.kind]?.display;
+    if (display == null) return null;
+    final colorSpec = display['color'];
+    Color? color;
+    if (colorSpec is String) {
+      if (colorSpec.startsWith('@param:')) {
+        final value = mco.params[colorSpec.substring(7)];
+        if (value is String) {
+          color = cellNamedColor(value, palette: packService.theme?.palette);
+        }
+      } else {
+        color = cellNamedColor(colorSpec, palette: packService.theme?.palette);
+      }
+    }
+    color ??= cellNamedColor('grey', palette: packService.theme?.palette);
+
+    return switch (display['type']) {
+      'fill' => ColoredBox(color: color),
+      'tile' => Container(
+        margin: EdgeInsets.all(cellSize * 0.1),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(cellSize * 0.1),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 2,
+              offset: Offset(1, 1),
+            ),
+          ],
+        ),
+      ),
+      'circle' => Center(
+        child: Container(
+          width: cellSize * 0.5,
+          height: cellSize * 0.5,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+        ),
+      ),
+      _ => null,
+    };
+  }
+
+  Widget _selectedMcoCellOverlay(
+    Position position,
+    Set<Position> footprint,
+    double cellSize,
+  ) {
     final borderWidth = (cellSize * 0.055).clamp(2.0, 4.0);
+    const color = Color(0xFFFFC107);
+    final side = BorderSide(color: color, width: borderWidth);
     return IgnorePointer(
       child: DecoratedBox(
         decoration: BoxDecoration(
-          border: Border.all(
-            color: const Color(0xFFFFC107),
-            width: borderWidth,
+          border: Border(
+            left: footprint.contains(Position(position.x - 1, position.y))
+                ? BorderSide.none
+                : side,
+            right: footprint.contains(Position(position.x + 1, position.y))
+                ? BorderSide.none
+                : side,
+            top: footprint.contains(Position(position.x, position.y - 1))
+                ? BorderSide.none
+                : side,
+            bottom: footprint.contains(Position(position.x, position.y + 1))
+                ? BorderSide.none
+                : side,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFFFFC107).withValues(alpha: 0.35),
-              blurRadius: borderWidth * 2.4,
-              spreadRadius: borderWidth * 0.25,
-            ),
-          ],
         ),
       ),
     );

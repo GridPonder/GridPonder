@@ -3,6 +3,7 @@ import '../models/game_definition.dart';
 import 'anchor_point_system.dart';
 import 'avatar_navigation_system.dart';
 import 'coupled_actors_system.dart';
+import 'elastic_block_system.dart';
 import 'flank_capture_system.dart';
 import 'flood_fill_system.dart';
 import 'ice_slide_system.dart';
@@ -32,6 +33,8 @@ class SystemRegistry {
     'anchor_point': (id, _) => AnchorPointSystem(id: id),
     'avatar_navigation': (id, _) => AvatarNavigationSystem(id: id),
     'coupled_actors': (id, _) => CoupledActorsSystem(id: id),
+    'elastic_block': (id, config) =>
+        ElasticBlockSystem(id: id, config: config),
     'individual_actors': (id, _) => IndividualActorsSystem(id: id),
     'push_objects': (id, _) => PushObjectsSystem(id: id),
     'portals': (id, _) => PortalsSystem(id: id),

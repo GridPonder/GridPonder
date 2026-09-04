@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:math' show max, sin, sqrt, pi;
+import 'dart:math' show max, min, sin, sqrt, pi;
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,9 +15,13 @@ import '../widgets/board_renderer.dart'
         BoardRenderer,
         CellEffectPlayback,
         LineOfSightFeedback,
+        MovingMultiCellObject,
         MovingSprite,
         TargetBoardRenderer,
-        cellNamedColor;
+        cellNamedColor,
+        elasticBlockRect,
+        elasticBlockRectTween,
+        elasticPushObjectTravel;
 import '../widgets/controls_widget.dart';
 
 /// One entity travelling from [from] to [to] during a turn's animation.
@@ -85,6 +89,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   Position? _panStartCell;
   String? _selectedMultiCellObjectId;
   static const double _swipeThreshold = 18.0;
+  static const int _elasticCellTravelMs = 57;
+  static const int _elasticMinTravelMs = 80;
+  static const int _elasticMaxTravelMs = 400;
 
   // Periodic timer to refresh hint dot availability
   Timer? _hintRefreshTimer;
@@ -101,6 +108,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   final ValueNotifier<List<MovingSprite>> _movingSprites = ValueNotifier(
     const [],
   );
+  final ValueNotifier<List<MovingMultiCellObject>> _movingMultiCellObjects =
+      ValueNotifier(const []);
   Map<String, String> _actorFacingByKind = {};
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
@@ -150,6 +159,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _hintRefreshTimer?.cancel();
     _agentSub?.cancel();
     _movingSprites.dispose();
+    _movingMultiCellObjects.dispose();
     super.dispose();
   }
 
@@ -171,6 +181,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _lineOfSightFeedbacks = const [];
     _movingSprites.value = const [];
     _tracker.track('level_start', level: levelId);
+    _movingMultiCellObjects.value = const [];
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -251,9 +262,34 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final pushEvents = result.events
         .where((e) => e.type == 'object_pushed')
         .toList();
+    final elasticMotionEvent = result.events
+        .where(
+          (event) =>
+              event.type == 'elastic_block_inflated' ||
+              event.type == 'elastic_block_collapsed',
+        )
+        .firstOrNull;
+    var elasticMotionPlayed = false;
     if (pushEvents.isNotEmpty) {
+      final trackedPushEvents = pushEvents
+          .where((event) => event.payload['originPosition'] != null)
+          .toList();
+      if (trackedPushEvents.isNotEmpty) {
+        final inflationEvent = result.events
+            .where((event) => event.type == 'elastic_block_inflated')
+            .firstOrNull;
+        await _playTrackedObjectPushes(
+          preState,
+          trackedPushEvents,
+          inflationEvent: inflationEvent,
+        );
+        elasticMotionPlayed = inflationEvent != null;
+      }
+
       final pushByKind = <String, List<GameEvent>>{};
-      for (final e in pushEvents) {
+      for (final e in pushEvents.where(
+        (event) => event.payload['originPosition'] == null,
+      )) {
         final k = e.payload['kind'] as String?;
         if (k != null) pushByKind.putIfAbsent(k, () => []).add(e);
       }
@@ -262,6 +298,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           await _playObjectSlide(preState, entry.key, entry.value);
         }
       }
+    }
+    if (!elasticMotionPlayed && elasticMotionEvent != null) {
+      await _playElasticBlockMotion(preState, elasticMotionEvent);
     }
 
     // Clear slide overrides: _playObjectSlide already cleared _preAnimState and
@@ -507,6 +546,278 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _preAnimState = null;
       _animOverlays = null;
     });
+  }
+
+  /// Animates every object pushed by an elastic face as one continuous move.
+  /// The engine supplies a stable origin for each object, so adjacent crates
+  /// and crates on different rows remain distinct even when they share a kind.
+  Future<void> _playTrackedObjectPushes(
+    LevelState preState,
+    List<GameEvent> pushEvents, {
+    GameEvent? inflationEvent,
+  }) async {
+    final tracks =
+        <
+          String,
+          ({
+            Position origin,
+            Position to,
+            String kind,
+            String layer,
+            String? direction,
+          })
+        >{};
+
+    Position positionFrom(dynamic raw) =>
+        raw is Position ? raw : Position.fromJson(raw);
+    for (final event in pushEvents) {
+      final rawOrigin = event.payload['originPosition'];
+      final rawTo = event.payload['toPosition'];
+      final kind = event.payload['kind'] as String?;
+      if (rawOrigin == null || rawTo == null || kind == null) continue;
+      final origin = positionFrom(rawOrigin);
+      final layer = event.payload['layer'] as String? ?? 'objects';
+      final key = '$layer:${origin.x},${origin.y}';
+      tracks[key] = (
+        origin: origin,
+        to: positionFrom(rawTo),
+        kind: kind,
+        layer: layer,
+        direction: event.payload['direction'] as String?,
+      );
+    }
+    if (tracks.isEmpty) return;
+
+    final movers = <_Mover>[];
+    for (final track in tracks.values) {
+      final entity =
+          preState.board.getEntity(track.layer, track.origin) ??
+          EntityInstance(track.kind, const {});
+      final dx = track.to.x - track.origin.x;
+      final dy = track.to.y - track.origin.y;
+      movers.add((
+        from: track.origin,
+        to: track.to,
+        entity: entity,
+        layer: track.layer,
+        direction: track.direction,
+        distance: max(dx.abs(), dy.abs()).toDouble(),
+        falling: false,
+      ));
+    }
+    final rawDistance = inflationEvent?.payload['distance'];
+    final inflationDistance = rawDistance is num ? rawDistance.toDouble() : 0.0;
+    final span = max(
+      inflationDistance,
+      movers.map((mover) => mover.distance).reduce(max),
+    );
+    if (span <= 0) return;
+
+    final blockId = inflationEvent?.payload['id'] as String?;
+    final direction = inflationEvent?.payload['direction'] as String?;
+    final block = blockId == null
+        ? null
+        : preState.board.getMultiCellObject(blockId);
+    final canAnimateBlock =
+        block != null &&
+        direction != null &&
+        inflationDistance > 0 &&
+        block.cells.isNotEmpty;
+
+    double minX(Iterable<Position> cells) =>
+        cells.map((cell) => cell.x).reduce((a, b) => a < b ? a : b).toDouble();
+    double maxX(Iterable<Position> cells) =>
+        cells.map((cell) => cell.x).reduce((a, b) => a > b ? a : b).toDouble();
+    double minY(Iterable<Position> cells) =>
+        cells.map((cell) => cell.y).reduce((a, b) => a < b ? a : b).toDouble();
+    double maxY(Iterable<Position> cells) =>
+        cells.map((cell) => cell.y).reduce((a, b) => a > b ? a : b).toDouble();
+
+    final startLeft = canAnimateBlock ? minX(block.cells) : 0.0;
+    final startRight = canAnimateBlock ? maxX(block.cells) + 1 : 0.0;
+    final startTop = canAnimateBlock ? minY(block.cells) : 0.0;
+    final startBottom = canAnimateBlock ? maxY(block.cells) + 1 : 0.0;
+
+    final animState = preState.copy();
+    for (final mover in movers) {
+      animState.board.setEntity(mover.layer, mover.from, null);
+    }
+    if (canAnimateBlock) {
+      animState.board.multiCellObjects.removeWhere(
+        (object) => object.id == block.id,
+      );
+    }
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = animState;
+      _animOverlays = null;
+    });
+
+    final travelMs = (_elasticCellTravelMs * span).round().clamp(
+      _elasticMinTravelMs,
+      _elasticMaxTravelMs,
+    );
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: travelMs),
+    );
+    void emit() {
+      final blockTravel = span * controller.value;
+      _movingSprites.value = [
+        for (final mover in movers)
+          _translatedSprite(
+            mover,
+            elasticPushObjectTravel(
+              blockTravel: blockTravel,
+              totalBlockDistance: span,
+              objectDistance: mover.distance,
+            ),
+          ),
+      ];
+      if (canAnimateBlock) {
+        final rect = elasticBlockRect(
+          Rect.fromLTRB(startLeft, startTop, startRight, startBottom),
+          direction,
+          blockTravel,
+        );
+        _movingMultiCellObjects.value = [
+          MovingMultiCellObject(
+            object: block.copy(),
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            selected:
+                block.id == _selectedMultiCellObjectId ||
+                _selectedMultiCellObjectForRenderer(preState) == block.id,
+          ),
+        ];
+      }
+    }
+
+    controller.addListener(emit);
+    emit();
+    try {
+      await controller.forward();
+    } finally {
+      controller.dispose();
+    }
+    if (!mounted) {
+      _movingSprites.value = const [];
+      _movingMultiCellObjects.value = const [];
+      return;
+    }
+    setState(() => _preAnimState = null);
+    _movingSprites.value = const [];
+    _movingMultiCellObjects.value = const [];
+  }
+
+  MovingSprite _translatedSprite(_Mover mover, double travelled) {
+    final entity = mover.direction == null
+        ? mover.entity
+        : EntityInstance(mover.entity.kind, {
+            ...mover.entity.params,
+            '_motionDirection': mover.direction,
+            '_motionFrame': travelled.floor(),
+          });
+    final ratio = mover.distance == 0 ? 0.0 : travelled / mover.distance;
+    return MovingSprite(
+      entity: entity,
+      x: mover.from.x + (mover.to.x - mover.from.x) * ratio,
+      y: mover.from.y + (mover.to.y - mover.from.y) * ratio,
+    );
+  }
+
+  Future<void> _playElasticBlockMotion(
+    LevelState preState,
+    GameEvent event,
+  ) async {
+    List<Position> positionsFrom(dynamic raw) {
+      if (raw is! List) return const [];
+      return [
+        for (final item in raw)
+          if (item is Position)
+            item
+          else if (item is List)
+            Position.fromJson(item),
+      ];
+    }
+
+    Rect bounds(Iterable<Position> cells) {
+      final list = cells.toList();
+      final left = list.map((cell) => cell.x).reduce(min).toDouble();
+      final right = list.map((cell) => cell.x).reduce(max).toDouble() + 1;
+      final top = list.map((cell) => cell.y).reduce(min).toDouble();
+      final bottom = list.map((cell) => cell.y).reduce(max).toDouble() + 1;
+      return Rect.fromLTRB(left, top, right, bottom);
+    }
+
+    final fromCells = positionsFrom(event.payload['fromCells']);
+    final toCells = positionsFrom(event.payload['toCells']);
+    final blockId = event.payload['id'] as String?;
+    final block = blockId == null
+        ? null
+        : preState.board.getMultiCellObject(blockId);
+    if (block == null || fromCells.isEmpty || toCells.isEmpty) return;
+
+    final start = bounds(fromCells);
+    final end = bounds(toCells);
+    final span = [
+      (start.left - end.left).abs(),
+      (start.top - end.top).abs(),
+      (start.right - end.right).abs(),
+      (start.bottom - end.bottom).abs(),
+    ].reduce(max);
+    if (span <= 0) return;
+
+    final animState = preState.copy();
+    animState.board.multiCellObjects.removeWhere(
+      (object) => object.id == block.id,
+    );
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = animState;
+      _animOverlays = null;
+    });
+
+    final selected =
+        block.id == _selectedMultiCellObjectId ||
+        _selectedMultiCellObjectForRenderer(preState) == block.id;
+    final travelMs = (_elasticCellTravelMs * span).round().clamp(
+      _elasticMinTravelMs,
+      _elasticMaxTravelMs,
+    );
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: travelMs),
+    );
+    void emit() {
+      final rect = elasticBlockRectTween(start, end, controller.value);
+      _movingMultiCellObjects.value = [
+        MovingMultiCellObject(
+          object: block.copy(),
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+          selected: selected,
+        ),
+      ];
+    }
+
+    controller.addListener(emit);
+    emit();
+    try {
+      await controller.forward();
+    } finally {
+      controller.dispose();
+    }
+    if (!mounted) {
+      _movingMultiCellObjects.value = const [];
+      return;
+    }
+    setState(() => _preAnimState = null);
+    _movingMultiCellObjects.value = const [];
   }
 
   /// Animates `entity_move` steps as real motion: each entity is lifted out of
@@ -905,6 +1216,24 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   bool get _hasMoveAction => _primaryMoveAction != null;
   bool get _moveActionNeedsPosition =>
       _primaryMoveAction?.params.containsKey('position') ?? false;
+
+  String? _selectedMultiCellObjectForRenderer(LevelState state) {
+    if (_moveActionNeedsPosition) return _selectedMultiCellObjectId;
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type != 'elastic_block' || !system.enabled) continue;
+      final objectKind =
+          system.config['objectKind'] as String? ?? 'elastic_block';
+      final controlled = state.board.multiCellObjects
+          .where((object) => object.kind == objectKind)
+          .toList();
+      if (controlled.length == 1) return controlled.single.id;
+    }
+    return null;
+  }
+
   bool get _hasCellTapGesture =>
       widget.packService.theme?.controls?.gestureMap.any(
         (binding) => binding.gesture == 'tap_cell',
@@ -1707,9 +2036,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                             (_hasCellTapGesture || _moveActionNeedsPosition)
                             ? _onCellTap
                             : null,
-                        selectedMultiCellObjectId: _moveActionNeedsPosition
-                            ? _selectedMultiCellObjectId
-                            : null,
+                        selectedMultiCellObjectId:
+                            _selectedMultiCellObjectForRenderer(state),
                         selectedActorPosition: _selectedActorPosition(state),
                         lineOfSightFeedbacks: _lineOfSightFeedbacks,
                         cellEffects: _cellEffects,
@@ -1721,6 +2049,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                         hoveredPreviewTarget: _hoveredPreviewTarget,
                         movingSprites: _movingSprites,
                         history: _engine.history,
+                        movingMultiCellObjects: _movingMultiCellObjects,
                         onCellHover: (x, y) {
                           final pos = x == null || y == null
                               ? null
