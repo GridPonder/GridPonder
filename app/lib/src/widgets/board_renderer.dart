@@ -468,6 +468,9 @@ class BoardRenderer extends StatelessWidget {
   /// UI-only selection state for an individually controlled actor.
   final Position? selectedActorPosition;
 
+  /// UI-only selection state for a directly manipulated board cell.
+  final Position? selectedCellPosition;
+
   /// Short-lived visual feedback for a line-of-sight detection event.
   final List<LineOfSightFeedback> lineOfSightFeedbacks;
 
@@ -488,6 +491,7 @@ class BoardRenderer extends StatelessWidget {
     this.avatarPositionOverride,
     this.selectedMultiCellObjectId,
     this.selectedActorPosition,
+    this.selectedCellPosition,
     this.lineOfSightFeedbacks = const [],
     this.cellEffects = const [],
     this.onCellHover,
@@ -744,10 +748,12 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               if (selectedActorPosition case final selectedPos?)
-                _buildSelectedActorRing(selectedPos, cellSize),
+                _buildSelectionRing(selectedPos, cellSize, 'selected-actor'),
               if (animationOverlays != null)
                 for (final entry in animationOverlays!.entries)
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
+              if (selectedCellPosition case final selectedPos?)
+                _buildSelectionRing(selectedPos, cellSize, 'selected-cell'),
               if (state.overlay != null)
                 _buildOverlay(state.overlay!, cellSize),
               if (lineOfSightFeedbacks.isNotEmpty)
@@ -1043,8 +1049,9 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _buildSelectedActorRing(Position pos, double cellSize) {
+  Widget _buildSelectionRing(Position pos, double cellSize, String keyPrefix) {
     return Positioned(
+      key: ValueKey('$keyPrefix-${pos.x}-${pos.y}'),
       left: pos.x * cellSize,
       top: pos.y * cellSize,
       width: cellSize,
@@ -1513,7 +1520,9 @@ class _Cell extends StatelessWidget {
     // reverse, picking a `_up`/`_down`/`_left`/`_right` variant of the same
     // static head art so it connects flush to the first body segment.
     final spritePath =
-        (pos != null ? connectedBodySpritePath(kindDef, pos, bodyPaths) : null) ??
+        (pos != null
+            ? connectedBodySpritePath(kindDef, pos, bodyPaths)
+            : null) ??
         (pos != null
             ? connectedHeadSpritePath(kindDef, entity, pos, bodyPaths)
             : null) ??
@@ -1709,9 +1718,7 @@ class _Cell extends StatelessWidget {
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: cellSize * 0.36,
-                  shadows: const [
-                    Shadow(color: Colors.black87, blurRadius: 3),
-                  ],
+                  shadows: const [Shadow(color: Colors.black87, blurRadius: 3)],
                 ),
               ),
           ],
@@ -1747,7 +1754,8 @@ class _Cell extends StatelessWidget {
         final isOverlay = display['overlay'] == true;
         final bgColor = isOverlay
             ? Colors.transparent
-            : (_resolveDisplayColor(display['bgColor'], entity) ?? Colors.transparent);
+            : (_resolveDisplayColor(display['bgColor'], entity) ??
+                  Colors.transparent);
         return Stack(
           alignment: Alignment.center,
           children: [
@@ -1760,7 +1768,11 @@ class _Cell extends StatelessWidget {
                   shape: BoxShape.circle,
                   color: isOverlay ? c.withOpacity(0.72) : c,
                   boxShadow: [
-                    BoxShadow(color: c.withOpacity(0.6), blurRadius: 6, spreadRadius: 2),
+                    BoxShadow(
+                      color: c.withOpacity(0.6),
+                      blurRadius: 6,
+                      spreadRadius: 2,
+                    ),
                   ],
                 ),
               ),
@@ -1791,7 +1803,8 @@ class _Cell extends StatelessWidget {
       // The emoji provides the visual object; the label shows the value.
       case 'emoji_label':
         final emojiGlyph = display['emoji'] as String? ?? '';
-        final emojiLabel = _resolveDisplayString(display['label'], entity) ?? '';
+        final emojiLabel =
+            _resolveDisplayString(display['label'], entity) ?? '';
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.max,

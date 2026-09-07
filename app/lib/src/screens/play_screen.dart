@@ -88,6 +88,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   Offset? _panStart;
   Position? _panStartCell;
   String? _selectedMultiCellObjectId;
+  Position? _selectedCellPosition;
   static const double _swipeThreshold = 18.0;
   static const int _elasticCellTravelMs = 57;
   static const int _elasticMinTravelMs = 80;
@@ -178,6 +179,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _actorFacingByKind = {};
     _wonHandled = false;
     _selectedMultiCellObjectId = null;
+    _selectedCellPosition = null;
     _lineOfSightFeedbacks = const [];
     _movingSprites.value = const [];
     _tracker.track('level_start', level: levelId);
@@ -1092,6 +1094,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() {
       _engine.undo();
       _lastFloodColor = null;
+      _selectedCellPosition = null;
       _syncSelectedMultiCellObject();
     });
     _tracker.track('undo', level: _levelDef.id);
@@ -1105,6 +1108,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _lastResponse = null;
       _lastFloodColor = null;
       _selectedMultiCellObjectId = null;
+      _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
@@ -1289,7 +1293,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         params[key] = value == 'tap_position' ? [x, y] : value;
       });
       if (binding.params != null) params.addAll(binding.params!);
-      _onAction(GameAction(binding.action, params));
+      final action = GameAction(binding.action, params);
+      if (binding.showSelection && _engine.previewTurn(action).accepted) {
+        setState(() => _selectedCellPosition = Position(x, y));
+      }
+      _onAction(action);
       break;
     }
     if (_moveActionNeedsPosition) {
@@ -1522,6 +1530,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() {
       _engine.reset();
       _selectedMultiCellObjectId = null;
+      _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
     });
     await Future.delayed(Duration.zero);
@@ -1540,6 +1549,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() {
       _engine.reset();
       _selectedMultiCellObjectId = null;
+      _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
@@ -1699,6 +1709,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _agentAttempt = 1;
       _currentAgent = agent;
       _selectedMultiCellObjectId = null;
+      _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
     });
 
@@ -2039,6 +2050,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                         selectedMultiCellObjectId:
                             _selectedMultiCellObjectForRenderer(state),
                         selectedActorPosition: _selectedActorPosition(state),
+                        selectedCellPosition: _selectedCellPosition,
                         lineOfSightFeedbacks: _lineOfSightFeedbacks,
                         cellEffects: _cellEffects,
                         floodedColorOverride: _lastFloodColor,
