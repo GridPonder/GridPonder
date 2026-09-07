@@ -293,6 +293,31 @@ board transformation.
 | `targetId` | string | Configured target id. |
 | `mode` | string | `"none"`, `"void"`, or `"wall"`. |
 
+### `tile_moved`
+A single entity moved between cells. Several events emitted in one phase are a
+simultaneous movement batch for renderers.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `fromPosition` | `[x, y]` | Original position. |
+| `position` | `[x, y]` | Destination position. |
+| `kind` | string | Moving entity kind. |
+| `params` | object | Entity parameters after movement. |
+| `layer` | string | Layer containing the entity. Defaults to `"objects"`. |
+
+### `routed_motion_failed`
+A routed mover could not complete the current simultaneous traffic tick. The
+board remains at its pre-tick positions; one event is emitted for each distinct
+mover/reason pair, followed by a `variable_changed` event for the configured
+failure counter.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `fromPosition` | `[x, y]` | Mover's unchanged position. |
+| `position` | `[x, y]` | Intended destination, or the source for a source-route error. |
+| `kind` | string | Mover entity kind. |
+| `reason` | string | `invalid_heading`, `invalid_source_route`, `left_board`, `disconnected_road`, `occupied`, `wrong_exit`, `same_destination`, `head_on`, or `blocked_by_mover`. |
+
 ### `tiles_merged`
 Two tiles merged during slide.
 

@@ -1365,6 +1365,95 @@ leave `targets` empty and use another goal system.
 
 ---
 
+### 2.21 `cell_rotation`
+
+**Purpose:** Replace one entity with the next kind in a configured cycle when
+the player selects its cell. This is a generic primitive for roads, mirrors,
+arrows, valves, and similar orientation states.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `cell_transformed`, `action_vetoed`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `rotateAction` | string | `"rotate_cell"` | Action id that carries a `position` parameter. |
+| `layer` | string | `"ground"` | Layer containing the rotatable entity. |
+| `cycles` | object | `{}` | Current kind → next kind map. Closed cycles are authored by mapping the final orientation back to the first. |
+| `blockingLayers` | array of strings | `["objects"]` | Layers checked before rotation. |
+| `blockingTags` | array of strings | `["routed_mover"]` | A blocker vetoes rotation when it has any listed tag. An empty list makes every entity on a blocking layer block. |
+
+An invalid position, a kind absent from `cycles`, an unknown next kind, or a
+blocked cell vetoes the entire action. A vetoed rotation does not advance the
+turn or trigger later systems.
+
+```json
+{
+  "id": "rotate_roads",
+  "type": "cell_rotation",
+  "config": {
+    "cycles": {
+      "road_h": "road_v",
+      "road_v": "road_h",
+      "corner_ne": "corner_se",
+      "corner_se": "corner_sw",
+      "corner_sw": "corner_nw",
+      "corner_nw": "corner_ne"
+    }
+  }
+}
+```
+
+### 2.22 `routed_motion`
+
+**Purpose:** Advance every tagged entity by one cell along deterministic route
+tiles after each accepted player action.
+
+**Phase:** `npc_resolution`
+
+**Events emitted:** `tile_moved`, `object_removed`,
+`routed_motion_failed`, `variable_changed`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `moverLayer` | string | `"objects"` | Layer holding routed movers. |
+| `moverTag` | string | `"routed_mover"` | Tag selecting movers. |
+| `routeLayer` | string | `"ground"` | Layer holding route tiles. |
+| `headingParam` | string | `"heading"` | Mover parameter containing its next cardinal direction. |
+| `colorParam` | string | `"color"` | Mover parameter matched against an exit. |
+| `exitLayer` | string | `"markers"` | Layer holding exits. |
+| `exitTag` | string | `"route_exit"` | Tag identifying exit entities. |
+| `exitColorParam` | string | value of `colorParam` | Exit parameter matched against the mover. |
+| `failureVariable` | string | `"routedMotionFailures"` | Counter incremented once when a traffic tick fails. |
+| `routes` | object | `{}` | Route kind → incoming side → outgoing direction. Each bidirectional path declares both directions. |
+
+All movers read one board snapshot and commit together. A tick fails atomically
+if a mover leaves the board, lacks a valid source or destination connection,
+enters a non-mover, reaches a wrong-colour exit, swaps head-on, shares a
+destination, or is blocked by a mover that cannot leave. No mover changes cells
+on a failed tick. A convoy may enter cells vacated by its leading vehicles in
+the same successful tick.
+
+When a mover reaches a matching exit it emits its final `tile_moved`, is removed
+instead of being stored at the destination, and emits `object_removed`. This
+allows an `all_cleared` goal on the mover's cargo tag.
+
+```json
+{
+  "id": "traffic",
+  "type": "routed_motion",
+  "config": {
+    "failureVariable": "crashes",
+    "routes": {
+      "road_h": {"left": "right", "right": "left"},
+      "corner_nw": {"left": "up", "up": "left"}
+    }
+  }
+}
+```
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -1390,6 +1479,8 @@ leave `targets` empty and use another goal system.
 | Terrain Edit | `terrain_edit` | `action_resolution` | `place` (configurable via `action`) |
 | Sonar | `sonar` | `npc_resolution` | (automatic every turn; writes distance readings to variables) |
 | Follower NPCs | `follower_npcs` | `npc_resolution` | (automatic once per turn) |
+| Cell Rotation | `cell_rotation` | `action_resolution` | `rotate_cell` (configurable) |
+| Routed Motion | `routed_motion` | `npc_resolution` | (automatic once per accepted turn) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 
@@ -1419,6 +1510,10 @@ obstacles, and a `variable_threshold` completed-target goal).
 
 ### Transformation-style games (pattern matching)
 `overlay_cursor` + `region_transform` (rotate + flip ops) + `flood_fill`
+
+### Live route-planning games
+`cell_rotation` + `routed_motion` with `all_cleared` on the mover tag and a
+`variable_threshold` lose condition on the configured failure counter.
 
 ### Hybrid games
 Any combination of the above. The system architecture supports free composition as long as there are no conflicting action handlers.

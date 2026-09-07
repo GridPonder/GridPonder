@@ -14,6 +14,7 @@ from .._game_def import GameDef
 from ._base import GameSystem
 from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
+from .cell_rotation import CellRotationSystem
 from .coupled_actors import CoupledActorsSystem
 from .elastic_block import ElasticBlockSystem
 from .flank_capture import FlankCaptureSystem
@@ -27,6 +28,7 @@ from .portals import PortalsSystem
 from .push_objects import PushObjectsSystem
 from .queued_emitters import QueuedEmittersSystem
 from .region_transform import RegionTransformSystem
+from .routed_motion import RoutedMotionSystem
 from .sided_box import SidedBoxSystem
 from .sliding_blocks import SlidingBlocksSystem
 from .slide_merge import SlideMergeSystem
@@ -42,6 +44,7 @@ SystemFactory = Callable[[str, dict], GameSystem]
 _REGISTRY: dict[str, SystemFactory] = {
     "anchor_point": lambda sys_id, _: AnchorPointSystem(sys_id),
     "avatar_navigation": lambda sys_id, _: AvatarNavigationSystem(sys_id),
+    "cell_rotation": lambda sys_id, _: CellRotationSystem(sys_id),
     "push_objects": lambda sys_id, _: PushObjectsSystem(sys_id),
     "portals": lambda sys_id, _: PortalsSystem(sys_id),
     "ice_slide": lambda sys_id, _: IceSlideSystem(sys_id),
@@ -49,6 +52,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "slide_merge": lambda sys_id, _: SlideMergeSystem(sys_id),
     "overlay_cursor": lambda sys_id, _: OverlayCursorSystem(sys_id),
     "region_transform": lambda sys_id, _: RegionTransformSystem(sys_id),
+    "routed_motion": lambda sys_id, _: RoutedMotionSystem(sys_id),
     "queued_emitters": lambda sys_id, _: QueuedEmittersSystem(sys_id),
     "tile_teleport": lambda sys_id, _: TileTeleportSystem(sys_id),
     "sided_box": lambda sys_id, _: SidedBoxSystem(sys_id),
