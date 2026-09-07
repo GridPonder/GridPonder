@@ -51,6 +51,25 @@ def object_removed(pos: Pos, kind: str, animation: str | None = None) -> dict:
     return e
 
 
+def entity_path_moved(
+    path: list[Pos],
+    kind: str,
+    params: dict | None = None,
+    layer: str = "objects",
+    delivered: bool = False,
+) -> dict:
+    """An entity followed an ordered multi-cell route in one turn."""
+    return {
+        "type": "entity_path_moved",
+        "position": path[-1],
+        "path": path,
+        "kind": kind,
+        "params": params or {},
+        "layer": layer,
+        "delivered": delivered,
+    }
+
+
 def line_of_sight_detected(
     source: Pos,
     target: Pos,

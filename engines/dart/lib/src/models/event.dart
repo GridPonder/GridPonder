@@ -127,6 +127,22 @@ class GameEvent {
         'layer': layer,
       });
 
+  /// One entity travelled through an ordered route during a single turn.
+  /// The complete path lets renderers preserve corners instead of drawing a
+  /// straight line from the first cell to the last one.
+  static GameEvent entityPathMoved(List<Position> path, String kind,
+          {Map<String, dynamic> params = const {},
+          String layer = 'objects',
+          bool delivered = false}) =>
+      GameEvent('entity_path_moved', {
+        'position': path.last,
+        'path': path,
+        'kind': kind,
+        'params': params,
+        'layer': layer,
+        'delivered': delivered,
+      });
+
   static GameEvent tilesSlid(String direction, int movedCount) =>
       GameEvent('tiles_slid', {
         'direction': direction,

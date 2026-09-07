@@ -35,6 +35,14 @@ typedef _Mover = ({
   bool falling,
 });
 
+typedef _PathMover = ({
+  List<Position> path,
+  EntityInstance entity,
+  String layer,
+  int stepDurationMs,
+  bool delivered,
+});
+
 class PlayScreen extends StatefulWidget {
   final PackService packService;
   final SettingsService settings;
@@ -315,13 +323,34 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       });
     }
 
+    // Path-following movement happens after action/cascade transforms. Replay
+    // those earlier cell changes into the held animation board so a vehicle
+    // visibly drives over the road orientation the player just created.
+    final pathPreState = preState.copy();
+    for (final event in result.events) {
+      if (event.type == 'entity_path_moved') break;
+      if (event.type != 'cell_transformed' || event.position == null) continue;
+      final layer = event.payload['layer'] as String?;
+      final toKind = event.payload['toKind'] as String?;
+      if (layer != null && toKind != null) {
+        pathPreState.board.setEntity(
+          layer,
+          event.position!,
+          EntityInstance(toKind),
+        );
+      }
+    }
+
     // Stage-aware playback for new motion primitives.
     // Group remaining animations by stage; play each stage to completion
     // before starting the next.
     final remaining =
         result.animations
             .where(
-              (s) => s.type == 'entity_move' || s.type == 'entity_animation',
+              (s) =>
+                  s.type == 'entity_move' ||
+                  s.type == 'entity_path' ||
+                  s.type == 'entity_animation',
             )
             .toList()
           ..sort((a, b) => a.stage.compareTo(b.stage));
@@ -344,11 +373,15 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     Future<void> flushStage() async {
       if (stageBuf.isEmpty) return;
       final moves = stageBuf.where((s) => s.type == 'entity_move').toList();
+      final paths = stageBuf.where((s) => s.type == 'entity_path').toList();
       final anims = stageBuf
           .where((s) => s.type == 'entity_animation')
           .toList();
       if (moves.isNotEmpty) {
         await _playSlideMotion(preState, moves, clearedCells: clearedCells);
+      }
+      if (paths.isNotEmpty) {
+        await _playPathMotion(pathPreState, paths, clearedCells: clearedCells);
       }
       for (final step in anims) {
         if (!mounted) return;
@@ -940,6 +973,118 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       }
     });
     _movingSprites.value = const [];
+  }
+
+  /// Animates movers along ordered adjacent-cell paths. Unlike a long
+  /// `entity_move`, this preserves every corner and updates the facing sprite
+  /// at each segment.
+  Future<void> _playPathMotion(
+    LevelState preState,
+    List<AnimationStep> paths, {
+    List<({String layer, Position position})> clearedCells = const [],
+  }) async {
+    final movers = <_PathMover>[];
+    for (final step in paths) {
+      final pathRaw = step.extra['path'];
+      if (pathRaw is! List || pathRaw.length < 2) continue;
+      final path = [
+        for (final raw in pathRaw)
+          if (raw is List) Position(raw[0] as int, raw[1] as int),
+      ];
+      if (path.length < 2) continue;
+      final paramsRaw = step.extra['params'];
+      final params = paramsRaw is Map
+          ? paramsRaw.cast<String, dynamic>()
+          : const <String, dynamic>{};
+      final rawStepDuration = step.extra['stepDurationMs'];
+      final stepDurationMs = rawStepDuration is int && rawStepDuration > 0
+          ? rawStepDuration.clamp(40, 400)
+          : 130;
+      movers.add((
+        path: path,
+        entity: EntityInstance(step.entityKind ?? '', params),
+        layer: step.extra['layer'] as String? ?? 'objects',
+        stepDurationMs: stepDurationMs,
+        delivered: step.extra['delivered'] as bool? ?? false,
+      ));
+    }
+    if (movers.isEmpty) return;
+
+    final totalMs = movers
+        .map((m) => (m.path.length - 1) * m.stepDurationMs)
+        .reduce(max);
+    final animState = preState.copy();
+    for (final mover in movers) {
+      animState.board.setEntity(mover.layer, mover.path.first, null);
+    }
+    for (final cleared in clearedCells) {
+      animState.board.setEntity(cleared.layer, cleared.position, null);
+    }
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = animState;
+      _animOverlays = null;
+    });
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: totalMs),
+    );
+    void emit() {
+      final elapsedMs = controller.value * totalMs;
+      _movingSprites.value = [
+        for (final mover in movers) _spriteAlongPath(mover, elapsedMs),
+      ];
+    }
+
+    controller.addListener(emit);
+    emit();
+    try {
+      await controller.forward();
+    } finally {
+      controller.dispose();
+    }
+
+    final postState = animState.copy();
+    for (final mover in movers) {
+      if (!mover.delivered &&
+          postState.board.getEntity(mover.layer, mover.path.last) == null) {
+        postState.board.setEntity(mover.layer, mover.path.last, mover.entity);
+      }
+    }
+    if (!mounted) {
+      _movingSprites.value = const [];
+      return;
+    }
+    setState(() => _preAnimState = postState);
+    _movingSprites.value = const [];
+  }
+
+  MovingSprite _spriteAlongPath(_PathMover mover, double elapsedMs) {
+    final segmentCount = mover.path.length - 1;
+    final progress = (elapsedMs / mover.stepDurationMs).clamp(
+      0.0,
+      segmentCount.toDouble(),
+    );
+    final segment = progress >= segmentCount
+        ? segmentCount - 1
+        : progress.floor();
+    final fraction = progress >= segmentCount ? 1.0 : progress - segment;
+    final from = mover.path[segment];
+    final to = mover.path[segment + 1];
+    final direction = _directionBetween(from, to);
+    final entity = direction == null
+        ? mover.entity
+        : EntityInstance(mover.entity.kind, {
+            ...mover.entity.params,
+            '_motionDirection': direction,
+            '_motionFrame': progress.floor(),
+          });
+    return MovingSprite(
+      entity: entity,
+      x: from.x + (to.x - from.x) * fraction,
+      y: from.y + (to.y - from.y) * fraction,
+    );
   }
 
   /// A one-cell drop, in milliseconds. Longer drops scale as its square root,

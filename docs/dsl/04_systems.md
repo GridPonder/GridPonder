@@ -1406,13 +1406,14 @@ turn or trigger later systems.
 
 ### 2.22 `routed_motion`
 
-**Purpose:** Advance every tagged entity by one cell along deterministic route
-tiles after each accepted player action.
+**Purpose:** Advance tagged entities along deterministic route tiles after each
+accepted player action. Movement can be one cell per turn or continue along the
+connected route until the mover reaches a break, exit, or closed cycle.
 
 **Phase:** `npc_resolution`
 
-**Events emitted:** `tile_moved`, `object_removed`,
-`routed_motion_failed`, `variable_changed`
+**Events emitted:** `tile_moved`, `entity_path_moved`, `object_removed`,
+`routed_motion_blocked`, `routed_motion_failed`, `variable_changed`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -1425,14 +1426,27 @@ tiles after each accepted player action.
 | `exitTag` | string | `"route_exit"` | Tag identifying exit entities. |
 | `exitColorParam` | string | value of `colorParam` | Exit parameter matched against the mover. |
 | `failureVariable` | string | `"routedMotionFailures"` | Counter incremented once when a traffic tick fails. |
+| `movementMode` | string | `"single_step"` | `"single_step"` advances one cell; `"until_blocked"` repeatedly advances through connected route cells in the same turn. |
+| `blockedBehavior` | string | `"fail"` | In `until_blocked` mode, `"stop"` leaves blocked movers safely in place and emits `routed_motion_blocked`; `"fail"` retains failure-counter behavior. |
+| `allowUTurns` | boolean | `true` | Whether a route may send a mover directly back toward the cell it just left. Set `false` for forward-only vehicles. |
+| `maxTravelSteps` | integer | board area × 4 × mover count | Positive safety bound for continuous microsteps. Repeated route state normally terminates first. |
 | `routes` | object | `{}` | Route kind → incoming side → outgoing direction. Each bidirectional path declares both directions. |
 
-All movers read one board snapshot and commit together. A tick fails atomically
-if a mover leaves the board, lacks a valid source or destination connection,
-enters a non-mover, reaches a wrong-colour exit, swaps head-on, shares a
-destination, or is blocked by a mover that cannot leave. No mover changes cells
-on a failed tick. A convoy may enter cells vacated by its leading vehicles in
-the same successful tick.
+In `single_step` mode, all movers read one board snapshot and commit together.
+A tick fails atomically if a mover leaves the board, lacks a valid source or
+destination connection, enters a non-mover, reaches a wrong-colour exit, swaps
+head-on, shares a destination, or is blocked by a mover that cannot leave. No
+mover changes cells on a failed tick. A convoy may enter cells vacated by its
+leading vehicles in the same successful tick.
+
+In `until_blocked` mode the same simultaneous collision checks run for each
+internal microstep. Movers with `blockedBehavior: "stop"` become inactive for
+the rest of that player turn when they meet a break, boundary, disallowed
+U-turn, wrong exit, or occupied destination; unrelated movers may continue.
+Their travelled cells are emitted as one ordered `entity_path_moved` event so
+renderers can animate corners faithfully. If the complete routed state repeats,
+the system has traversed a closed cycle: it emits `routed_motion_blocked` with
+reason `route_cycle` and ends the resolution instead of looping forever.
 
 When a mover reaches a matching exit it emits its final `tile_moved`, is removed
 instead of being stored at the destination, and emits `object_removed`. This
@@ -1443,7 +1457,9 @@ allows an `all_cleared` goal on the mover's cargo tag.
   "id": "traffic",
   "type": "routed_motion",
   "config": {
-    "failureVariable": "crashes",
+    "movementMode": "until_blocked",
+    "blockedBehavior": "stop",
+    "allowUTurns": false,
     "routes": {
       "road_h": {"left": "right", "right": "left"},
       "corner_nw": {"left": "up", "up": "left"}
@@ -1512,8 +1528,9 @@ obstacles, and a `variable_threshold` completed-target goal).
 `overlay_cursor` + `region_transform` (rotate + flip ops) + `flood_fill`
 
 ### Live route-planning games
-`cell_rotation` + `routed_motion` with `all_cleared` on the mover tag and a
-`variable_threshold` lose condition on the configured failure counter.
+`cell_rotation` + `routed_motion` with `all_cleared` on the mover tag. Use
+`max_actions` for stop-at-break route planning, or a `variable_threshold` on
+the failure counter for crash-style single-step traffic.
 
 ### Hybrid games
 Any combination of the above. The system architecture supports free composition as long as there are no conflicting action handlers.

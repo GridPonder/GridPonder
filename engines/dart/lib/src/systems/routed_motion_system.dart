@@ -6,7 +6,7 @@ import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
 
-/// Advances every tagged mover by one cell after each accepted player turn.
+/// Advances tagged movers along deterministic route tiles after each turn.
 ///
 /// All intents are computed from one snapshot and committed atomically, so
 /// list order cannot change collision outcomes.
@@ -28,6 +28,7 @@ class RoutedMotionSystem extends GameSystem {
         config['failureVariable'] as String? ?? 'routedMotionFailures';
     final rawRoutes =
         config['routes'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+    final movementMode = config['movementMode'] as String? ?? 'single_step';
 
     final moverLayer = state.board.layers[moverLayerId];
     if (moverLayer == null) return const [];
@@ -38,6 +39,27 @@ class RoutedMotionSystem extends GameSystem {
         .map((entry) => _Mover(entry.key, entry.value))
         .toList();
     if (movers.isEmpty) return const [];
+
+    if (movementMode == 'until_blocked') {
+      return _executeUntilBlocked(
+        state,
+        game,
+        movers,
+        moverLayerId: moverLayerId,
+        moverTag: moverTag,
+        routeLayerId: routeLayerId,
+        headingParam: headingParam,
+        colorParam: colorParam,
+        exitLayerId: exitLayerId,
+        exitTag: exitTag,
+        exitColorParam: exitColorParam,
+        failureVariable: failureVariable,
+        routes: rawRoutes,
+        blockedBehavior: config['blockedBehavior'] as String? ?? 'fail',
+        allowUTurns: config['allowUTurns'] as bool? ?? true,
+        maxTravelSteps: config['maxTravelSteps'] as int?,
+      );
+    }
 
     final moverByPosition = {for (final mover in movers) mover.position: mover};
     final intents = <_Intent>[];
@@ -176,6 +198,289 @@ class RoutedMotionSystem extends GameSystem {
     return events;
   }
 
+  List<GameEvent> _executeUntilBlocked(
+    LevelState state,
+    GameDefinition game,
+    List<_Mover> movers, {
+    required String moverLayerId,
+    required String moverTag,
+    required String routeLayerId,
+    required String headingParam,
+    required String colorParam,
+    required String exitLayerId,
+    required String exitTag,
+    required String exitColorParam,
+    required String failureVariable,
+    required Map<String, dynamic> routes,
+    required String blockedBehavior,
+    required bool allowUTurns,
+    required int? maxTravelSteps,
+  }) {
+    final moverLayer = state.board.layers[moverLayerId]!;
+    final flows = <_FlowMover>[
+      for (var i = 0; i < movers.length; i++)
+        _FlowMover(i, movers[i].position, movers[i].entity),
+    ];
+    final blockedEvents = <GameEvent>[];
+    final failureEvents = <_Failure>[];
+    final seenStates = <String>{};
+    final defaultLimit =
+        state.board.width * state.board.height * 4 * flows.length;
+    final travelLimit = maxTravelSteps != null && maxTravelSteps > 0
+        ? maxTravelSteps
+        : (defaultLimit > 0 ? defaultLimit : 1);
+    var rounds = 0;
+
+    while (flows.any((flow) => flow.active)) {
+      final signature = _flowSignature(flows, headingParam);
+      if (!seenStates.add(signature)) {
+        for (final flow in flows.where((flow) => flow.active)) {
+          flow.active = false;
+          blockedEvents.add(_blockedEvent(flow, flow.position, 'route_cycle'));
+        }
+        break;
+      }
+      if (rounds >= travelLimit) {
+        for (final flow in flows.where((flow) => flow.active)) {
+          flow.active = false;
+          blockedEvents.add(_blockedEvent(flow, flow.position, 'travel_limit'));
+        }
+        break;
+      }
+      rounds++;
+
+      final flowByPosition = {
+        for (final flow in flows.where((flow) => !flow.delivered))
+          flow.position: flow,
+      };
+      final intents = <_FlowMover, _FlowIntent>{};
+      final blocked = <_FlowMover, _Failure>{};
+
+      for (final flow in flows.where((flow) => flow.active)) {
+        final headingRaw = flow.entity.param(headingParam);
+        Direction heading;
+        try {
+          heading = Direction.fromJson(headingRaw?.toString() ?? '');
+        } on FormatException {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            flow.position,
+            'invalid_heading',
+          );
+          continue;
+        }
+        if (!heading.isCardinal) {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            flow.position,
+            'invalid_heading',
+          );
+          continue;
+        }
+
+        final sourceRoad = state.board.getEntity(routeLayerId, flow.position);
+        if (sourceRoad == null ||
+            !_hasExit(routes, sourceRoad.kind, heading.toJson())) {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            flow.position,
+            'invalid_source_route',
+          );
+          continue;
+        }
+
+        final target = Position(
+          flow.position.x + heading.offset.x,
+          flow.position.y + heading.offset.y,
+        );
+        if (!state.board.isInBounds(target)) {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            target,
+            'left_board',
+          );
+          continue;
+        }
+
+        final targetRoad = state.board.getEntity(routeLayerId, target);
+        final nextHeading = targetRoad == null
+            ? null
+            : _route(routes, targetRoad.kind, heading.opposite.toJson());
+        if (nextHeading == null || !_cardinalNames.contains(nextHeading)) {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            target,
+            'disconnected_road',
+          );
+          continue;
+        }
+        if (!allowUTurns && nextHeading == heading.opposite.toJson()) {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            target,
+            'u_turn',
+          );
+          continue;
+        }
+
+        final occupant = moverLayer.getAt(target);
+        if (occupant != null && !game.hasTag(occupant.kind, moverTag)) {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            target,
+            'occupied',
+          );
+          continue;
+        }
+
+        final exit = state.board.getEntity(exitLayerId, target);
+        final isExit = exit != null && game.hasTag(exit.kind, exitTag);
+        if (isExit &&
+            flow.entity.param(colorParam)?.toString() !=
+                exit.param(exitColorParam)?.toString()) {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            target,
+            'wrong_exit',
+          );
+          continue;
+        }
+
+        intents[flow] = _FlowIntent(flow, target, nextHeading, isExit);
+      }
+
+      final byTarget = <Position, List<_FlowIntent>>{};
+      for (final intent in intents.values) {
+        byTarget.putIfAbsent(intent.target, () => []).add(intent);
+      }
+      for (final entry in byTarget.entries) {
+        if (entry.value.length < 2) continue;
+        for (final intent in entry.value) {
+          blocked[intent.flow] = _Failure(
+            _Mover(intent.flow.position, intent.flow.entity),
+            entry.key,
+            'same_destination',
+          );
+        }
+      }
+
+      for (final intent in intents.values) {
+        final other = flowByPosition[intent.target];
+        final otherIntent = other == null ? null : intents[other];
+        if (otherIntent != null && otherIntent.target == intent.flow.position) {
+          blocked[intent.flow] = _Failure(
+            _Mover(intent.flow.position, intent.flow.entity),
+            intent.target,
+            'head_on',
+          );
+        }
+      }
+
+      var propagated = true;
+      while (propagated) {
+        propagated = false;
+        for (final intent in intents.values) {
+          if (blocked.containsKey(intent.flow)) continue;
+          final occupant = flowByPosition[intent.target];
+          if (occupant == null) continue;
+          if (!intents.containsKey(occupant) || blocked.containsKey(occupant)) {
+            blocked[intent.flow] = _Failure(
+              _Mover(intent.flow.position, intent.flow.entity),
+              intent.target,
+              'blocked_by_mover',
+            );
+            propagated = true;
+          }
+        }
+      }
+
+      if (blockedBehavior == 'fail' && blocked.isNotEmpty) {
+        failureEvents.addAll(blocked.values);
+        for (final flow in flows.where((flow) => flow.active)) {
+          flow.active = false;
+        }
+        break;
+      }
+
+      for (final entry in blocked.entries) {
+        entry.key.active = false;
+        blockedEvents.add(
+          _blockedEvent(entry.key, entry.value.target, entry.value.reason),
+        );
+      }
+
+      final moving = intents.values
+          .where((intent) => !blocked.containsKey(intent.flow))
+          .toList();
+      if (moving.isEmpty) break;
+
+      for (final intent in moving) {
+        moverLayer.setAt(intent.flow.position, null);
+      }
+      for (final intent in moving) {
+        final flow = intent.flow;
+        final params = Map<String, dynamic>.from(flow.entity.params)
+          ..[headingParam] = intent.nextHeading;
+        flow.position = intent.target;
+        flow.entity = EntityInstance(flow.entity.kind, params);
+        flow.path.add(intent.target);
+        if (intent.delivered) {
+          flow.delivered = true;
+          flow.active = false;
+        } else {
+          moverLayer.setAt(flow.position, flow.entity);
+        }
+      }
+    }
+
+    final events = <GameEvent>[
+      for (final flow in flows.where((flow) => flow.path.length > 1))
+        GameEvent.entityPathMoved(
+          flow.path,
+          flow.entity.kind,
+          params: flow.entity.params,
+          layer: moverLayerId,
+          delivered: flow.delivered,
+        ),
+      for (final flow in flows.where((flow) => flow.delivered))
+        GameEvent.objectRemoved(flow.position, flow.entity.kind),
+      ...blockedEvents,
+    ];
+
+    if (failureEvents.isNotEmpty) {
+      final oldValue = (state.variables[failureVariable] as num?)?.toInt() ?? 0;
+      final newValue = oldValue + 1;
+      state.variables[failureVariable] = newValue;
+      events.addAll([
+        for (final failure in _dedupeFailures(failureEvents))
+          GameEvent('routed_motion_failed', {
+            'position': failure.target,
+            'kind': failure.mover.entity.kind,
+            'fromPosition': failure.mover.position,
+            'reason': failure.reason,
+          }),
+        GameEvent.variableChanged(failureVariable, oldValue, newValue),
+      ]);
+    }
+    return events;
+  }
+
+  String _flowSignature(List<_FlowMover> flows, String headingParam) => flows
+      .where((flow) => !flow.delivered)
+      .map(
+        (flow) => '${flow.index}:${flow.position.x},${flow.position.y}:'
+            '${flow.entity.param(headingParam)}:${flow.active}',
+      )
+      .join('|');
+
+  GameEvent _blockedEvent(_FlowMover flow, Position target, String reason) =>
+      GameEvent('routed_motion_blocked', {
+        'position': target,
+        'kind': flow.entity.kind,
+        'fromPosition': flow.position,
+        'reason': reason,
+      });
+
   String? _route(
     Map<String, dynamic> routes,
     String roadKind,
@@ -231,4 +536,24 @@ class _Failure {
   final Position target;
   final String reason;
   const _Failure(this.mover, this.target, this.reason);
+}
+
+class _FlowMover {
+  final int index;
+  Position position;
+  EntityInstance entity;
+  final List<Position> path;
+  bool active = true;
+  bool delivered = false;
+
+  _FlowMover(this.index, this.position, this.entity) : path = [position];
+}
+
+class _FlowIntent {
+  final _FlowMover flow;
+  final Position target;
+  final String nextHeading;
+  final bool delivered;
+
+  const _FlowIntent(this.flow, this.target, this.nextHeading, this.delivered);
 }

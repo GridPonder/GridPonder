@@ -318,6 +318,29 @@ failure counter.
 | `kind` | string | Mover entity kind. |
 | `reason` | string | `invalid_heading`, `invalid_source_route`, `left_board`, `disconnected_road`, `occupied`, `wrong_exit`, `same_destination`, `head_on`, or `blocked_by_mover`. |
 
+### `entity_path_moved`
+A routed entity travelled through two or more cells during one accepted action.
+The path includes both its starting cell and final cell.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `path` | array of `[x, y]` | Ordered cells visited, including start and finish. |
+| `position` | `[x, y]` | Final path position. |
+| `kind` | string | Moving entity kind. |
+| `params` | object | Entity parameters after travel. |
+| `layer` | string | Layer containing the entity. |
+| `delivered` | boolean | Whether the entity left the board through a matching exit at the final cell. |
+
+### `routed_motion_blocked`
+A continuous routed mover stopped safely rather than failing the turn.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `fromPosition` | `[x, y]` | Cell where the mover remains. |
+| `position` | `[x, y]` | Cell it could not enter, or its current cell for a source/cycle stop. |
+| `kind` | string | Mover entity kind. |
+| `reason` | string | Failure reasons above, plus `u_turn`, `route_cycle`, or `travel_limit`. |
+
 ### `tiles_merged`
 Two tiles merged during slide.
 

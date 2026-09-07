@@ -8,9 +8,15 @@ const _routes = <String, dynamic>{
   'corner_se': {'right': 'down', 'down': 'right'},
   'corner_sw': {'down': 'left', 'left': 'down'},
   'corner_nw': {'left': 'up', 'up': 'left'},
+  'u_turn': {'left': 'left'},
 };
 
-GameDefinition _game() => GameDefinition.fromJson({
+GameDefinition _game({
+  String movementMode = 'single_step',
+  String blockedBehavior = 'fail',
+  bool allowUTurns = true,
+}) =>
+    GameDefinition.fromJson({
       'layers': [
         {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'void'},
         {'id': 'markers', 'occupancy': 'zero_or_one'},
@@ -47,6 +53,11 @@ GameDefinition _game() => GameDefinition.fromJson({
           'layer': 'ground',
           'tags': ['route'],
           'symbol': '4',
+        },
+        'u_turn': {
+          'layer': 'ground',
+          'tags': ['route'],
+          'symbol': 'U',
         },
         'truck': {
           'layer': 'objects',
@@ -87,7 +98,13 @@ GameDefinition _game() => GameDefinition.fromJson({
         {
           'id': 'traffic',
           'type': 'routed_motion',
-          'config': {'routes': _routes, 'failureVariable': 'crashes'},
+          'config': {
+            'routes': _routes,
+            'failureVariable': 'crashes',
+            'movementMode': movementMode,
+            'blockedBehavior': blockedBehavior,
+            'allowUTurns': allowUTurns,
+          },
         },
       ],
     }, id: 'routed_motion_test');
@@ -171,8 +188,11 @@ Map<String, dynamic> _prototypeLevel() => _levelJson(
       withGoal: true,
     );
 
-TurnEngine _engine(Map<String, dynamic> levelJson) {
-  final game = _game();
+TurnEngine _engine(
+  Map<String, dynamic> levelJson, {
+  GameDefinition? game,
+}) {
+  game ??= _game();
   return TurnEngine(game, LevelDefinition.fromJson(levelJson, game.layers));
 }
 
@@ -322,5 +342,239 @@ void main() {
         .map((event) => event['reason'])
         .toSet();
     expect(reasons, {'same_destination'});
+  });
+
+  group('until_blocked movement', () {
+    late GameDefinition flowGame;
+
+    setUp(() {
+      flowGame = _game(
+        movementMode: 'until_blocked',
+        blockedBehavior: 'stop',
+        allowUTurns: false,
+      );
+    });
+
+    test('follows a connected path to an exit in one action', () {
+      final engine = _engine(
+        _levelJson(
+          size: const [4, 1],
+          ground: [
+            for (var x = 0; x < 4; x++)
+              {
+                'position': [x, 0],
+                'kind': 'road_h'
+              },
+          ],
+          objects: [
+            {
+              'position': [0, 0],
+              'kind': 'truck',
+              'heading': 'right',
+              'color': 'red',
+            },
+          ],
+          markers: [
+            {
+              'position': [3, 0],
+              'kind': 'exit_red',
+              'color': 'red',
+            },
+          ],
+          withGoal: true,
+        ),
+        game: flowGame,
+      );
+
+      final result = engine.executeTurn(const GameAction('advance'));
+
+      expect(result.isWon, isTrue);
+      expect(engine.state.actionCount, 1);
+      expect(engine.state.board.layers['objects']!.entries(), isEmpty);
+      final pathEvent = result.events.singleWhere(
+        (event) => event.type == 'entity_path_moved',
+      );
+      expect(pathEvent.payload['path'], const [
+        Position(0, 0),
+        Position(1, 0),
+        Position(2, 0),
+        Position(3, 0),
+      ]);
+      final animation = result.animations.singleWhere(
+        (step) => step.type == 'entity_path',
+      );
+      expect(animation.extra['delivered'], isTrue);
+      expect(animation.extra['path'], const [
+        [0, 0],
+        [1, 0],
+        [2, 0],
+        [3, 0],
+      ]);
+    });
+
+    test('stops at the last connected cell without crashing', () {
+      final engine = _engine(
+        _levelJson(
+          size: const [3, 1],
+          ground: [
+            {
+              'position': [0, 0],
+              'kind': 'road_h'
+            },
+            {
+              'position': [1, 0],
+              'kind': 'road_h'
+            },
+            {
+              'position': [2, 0],
+              'kind': 'road_v'
+            },
+          ],
+          objects: [
+            {
+              'position': [0, 0],
+              'kind': 'truck',
+              'heading': 'right'
+            },
+          ],
+        ),
+        game: flowGame,
+      );
+
+      final result = engine.executeTurn(const GameAction('advance'));
+
+      expect(result.isLost, isFalse);
+      expect(engine.state.variables['crashes'], 0);
+      expect(
+        engine.state.board.getEntity('objects', const Position(1, 0)),
+        isNotNull,
+      );
+      expect(
+        result.events.any(
+          (event) =>
+              event.type == 'routed_motion_blocked' &&
+              event.payload['reason'] == 'disconnected_road',
+        ),
+        isTrue,
+      );
+    });
+
+    test('a closed loop runs one lap and terminates at repeated state', () {
+      final engine = _engine(
+        _levelJson(
+          size: const [2, 2],
+          ground: [
+            {
+              'position': [0, 0],
+              'kind': 'corner_se'
+            },
+            {
+              'position': [1, 0],
+              'kind': 'corner_sw'
+            },
+            {
+              'position': [1, 1],
+              'kind': 'corner_nw'
+            },
+            {
+              'position': [0, 1],
+              'kind': 'corner_ne'
+            },
+          ],
+          objects: [
+            {
+              'position': [0, 0],
+              'kind': 'truck',
+              'heading': 'right'
+            },
+          ],
+        ),
+        game: flowGame,
+      );
+
+      final result = engine.executeTurn(const GameAction('advance'));
+
+      final path = result.events
+          .singleWhere((event) => event.type == 'entity_path_moved')
+          .payload['path'];
+      expect(path, const [
+        Position(0, 0),
+        Position(1, 0),
+        Position(1, 1),
+        Position(0, 1),
+        Position(0, 0),
+      ]);
+      expect(
+        result.events.any(
+          (event) =>
+              event.type == 'routed_motion_blocked' &&
+              event.payload['reason'] == 'route_cycle',
+        ),
+        isTrue,
+      );
+    });
+
+    test('disallows a configured U-turn and undo restores a travelled path',
+        () {
+      final uTurnEngine = _engine(
+        _levelJson(
+          size: const [2, 1],
+          ground: [
+            {
+              'position': [0, 0],
+              'kind': 'road_h'
+            },
+            {
+              'position': [1, 0],
+              'kind': 'u_turn'
+            },
+          ],
+          objects: [
+            {
+              'position': [0, 0],
+              'kind': 'truck',
+              'heading': 'right'
+            },
+          ],
+        ),
+        game: flowGame,
+      );
+      uTurnEngine.executeTurn(const GameAction('advance'));
+      expect(
+        uTurnEngine.state.board.getEntity('objects', const Position(0, 0)),
+        isNotNull,
+      );
+
+      final pathEngine = _engine(
+        _levelJson(
+          size: const [3, 1],
+          ground: [
+            for (var x = 0; x < 3; x++)
+              {
+                'position': [x, 0],
+                'kind': 'road_h'
+              },
+          ],
+          objects: [
+            {
+              'position': [0, 0],
+              'kind': 'truck',
+              'heading': 'right'
+            },
+          ],
+        ),
+        game: flowGame,
+      );
+      pathEngine.executeTurn(const GameAction('advance'));
+      expect(
+        pathEngine.state.board.getEntity('objects', const Position(2, 0)),
+        isNotNull,
+      );
+      pathEngine.undo();
+      expect(
+        pathEngine.state.board.getEntity('objects', const Position(0, 0)),
+        isNotNull,
+      );
+    });
   });
 }
