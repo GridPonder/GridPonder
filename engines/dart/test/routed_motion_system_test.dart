@@ -15,6 +15,7 @@ GameDefinition _game({
   String movementMode = 'single_step',
   String blockedBehavior = 'fail',
   bool allowUTurns = true,
+  bool exitRequiresRoute = true,
 }) =>
     GameDefinition.fromJson({
       'layers': [
@@ -104,6 +105,7 @@ GameDefinition _game({
             'movementMode': movementMode,
             'blockedBehavior': blockedBehavior,
             'allowUTurns': allowUTurns,
+            'exitRequiresRoute': exitRequiresRoute,
           },
         },
       ],
@@ -410,6 +412,79 @@ void main() {
         [2, 0],
         [3, 0],
       ]);
+    });
+
+    test('matching exit can accept horizontal and vertical arrivals', () {
+      final game = _game(
+        movementMode: 'until_blocked',
+        blockedBehavior: 'stop',
+        allowUTurns: false,
+        exitRequiresRoute: false,
+      );
+      final cases = [
+        (
+          name: 'horizontal',
+          size: const [2, 1],
+          source: const Position(0, 0),
+          target: const Position(1, 0),
+          sourceRoad: 'road_h',
+          targetRoad: 'road_v',
+          heading: 'right',
+        ),
+        (
+          name: 'vertical',
+          size: const [1, 2],
+          source: const Position(0, 1),
+          target: const Position(0, 0),
+          sourceRoad: 'road_v',
+          targetRoad: 'road_h',
+          heading: 'up',
+        ),
+      ];
+
+      for (final scenario in cases) {
+        final engine = _engine(
+          _levelJson(
+            size: scenario.size,
+            ground: [
+              {
+                'position': [scenario.source.x, scenario.source.y],
+                'kind': scenario.sourceRoad,
+              },
+              {
+                'position': [scenario.target.x, scenario.target.y],
+                'kind': scenario.targetRoad,
+              },
+            ],
+            objects: [
+              {
+                'position': [scenario.source.x, scenario.source.y],
+                'kind': 'truck',
+                'heading': scenario.heading,
+                'color': 'red',
+              },
+            ],
+            markers: [
+              {
+                'position': [scenario.target.x, scenario.target.y],
+                'kind': 'exit_red',
+                'color': 'red',
+              },
+            ],
+            withGoal: true,
+          ),
+          game: game,
+        );
+
+        final result = engine.executeTurn(const GameAction('advance'));
+
+        expect(result.isWon, isTrue, reason: scenario.name);
+        expect(
+          engine.state.board.layers['objects']!.entries(),
+          isEmpty,
+          reason: scenario.name,
+        );
+      }
     });
 
     test('stops at the last connected cell without crashing', () {

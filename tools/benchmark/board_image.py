@@ -185,7 +185,12 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
     else:
         kind_def = game_def.entity_kinds.get(ground.kind, {})
         if not _paste_sprite(canvas, ground.kind, kind_def, ground.params, x0, y0, pack_dir, base_dir):
-            _procedural_ground(draw, ground.kind, x0, y0)
+            display = kind_def.get("display")
+            cx, cy = x0 + CELL_PX // 2, y0 + CELL_PX // 2
+            if not display or not _draw_from_display(
+                draw, display, ground.kind, ground.params, x0, y0, cx, cy
+            ):
+                _procedural_ground(draw, ground.kind, x0, y0)
 
     layer_ids = [layer["id"] for layer in game_def.layers if layer["id"] != "ground"]
     preferred = ["territory", "structures", "objects", "markers", "actors", "clone"]

@@ -316,7 +316,7 @@ failure counter.
 | `fromPosition` | `[x, y]` | Mover's unchanged position. |
 | `position` | `[x, y]` | Intended destination, or the source for a source-route error. |
 | `kind` | string | Mover entity kind. |
-| `reason` | string | `invalid_heading`, `invalid_source_route`, `left_board`, `disconnected_road`, `occupied`, `wrong_exit`, `same_destination`, `head_on`, or `blocked_by_mover`. |
+| `reason` | string | `invalid_heading`, `invalid_source_route`, `left_board`, `disconnected_road`, `closed_gate`, `occupied`, `wrong_exit`, `same_destination`, `head_on`, or `blocked_by_mover`. |
 
 ### `entity_path_moved`
 A routed entity travelled through two or more cells during one accepted action.

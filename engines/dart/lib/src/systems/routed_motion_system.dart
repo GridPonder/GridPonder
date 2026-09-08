@@ -24,6 +24,11 @@ class RoutedMotionSystem extends GameSystem {
     final exitLayerId = config['exitLayer'] as String? ?? 'markers';
     final exitTag = config['exitTag'] as String? ?? 'route_exit';
     final exitColorParam = config['exitColorParam'] as String? ?? colorParam;
+    final exitRequiresRoute = config['exitRequiresRoute'] as bool? ?? true;
+    final gateLayerId = config['gateLayer'] as String?;
+    final gateClosedTag = config['gateClosedTag'] as String? ?? 'route_closed';
+    final gateEntrySideParam =
+        config['gateEntrySideParam'] as String? ?? 'entrySide';
     final failureVariable =
         config['failureVariable'] as String? ?? 'routedMotionFailures';
     final rawRoutes =
@@ -53,6 +58,10 @@ class RoutedMotionSystem extends GameSystem {
         exitLayerId: exitLayerId,
         exitTag: exitTag,
         exitColorParam: exitColorParam,
+        exitRequiresRoute: exitRequiresRoute,
+        gateLayerId: gateLayerId,
+        gateClosedTag: gateClosedTag,
+        gateEntrySideParam: gateEntrySideParam,
         failureVariable: failureVariable,
         routes: rawRoutes,
         blockedBehavior: config['blockedBehavior'] as String? ?? 'fail',
@@ -95,12 +104,33 @@ class RoutedMotionSystem extends GameSystem {
         continue;
       }
 
+      final exit = state.board.getEntity(exitLayerId, target);
+      final isExit = exit != null && game.hasTag(exit.kind, exitTag);
+      final exitMatches = isExit &&
+          mover.entity.param(colorParam)?.toString() ==
+              exit.param(exitColorParam)?.toString();
+      final bypassTargetRoute = exitMatches && !exitRequiresRoute;
       final targetRoad = state.board.getEntity(routeLayerId, target);
-      final nextHeading = targetRoad == null
+      var nextHeading = targetRoad == null
           ? null
           : _route(rawRoutes, targetRoad.kind, heading.opposite.toJson());
-      if (nextHeading == null || !_cardinalNames.contains(nextHeading)) {
+      if (bypassTargetRoute) nextHeading = heading.toJson();
+      if (!bypassTargetRoute &&
+          (nextHeading == null || !_cardinalNames.contains(nextHeading))) {
         failures.add(_Failure(mover, target, 'disconnected_road'));
+        continue;
+      }
+
+      if (_gateIsClosed(
+        state,
+        game,
+        target,
+        heading.opposite.toJson(),
+        gateLayerId,
+        gateClosedTag,
+        gateEntrySideParam,
+      )) {
+        failures.add(_Failure(mover, target, 'closed_gate'));
         continue;
       }
 
@@ -110,8 +140,6 @@ class RoutedMotionSystem extends GameSystem {
         continue;
       }
 
-      final exit = state.board.getEntity(exitLayerId, target);
-      final isExit = exit != null && game.hasTag(exit.kind, exitTag);
       if (isExit &&
           mover.entity.param(colorParam)?.toString() !=
               exit.param(exitColorParam)?.toString()) {
@@ -119,7 +147,7 @@ class RoutedMotionSystem extends GameSystem {
         continue;
       }
 
-      intents.add(_Intent(mover, target, nextHeading, delivered: isExit));
+      intents.add(_Intent(mover, target, nextHeading!, delivered: isExit));
     }
 
     final intentsByTarget = <Position, List<_Intent>>{};
@@ -210,6 +238,10 @@ class RoutedMotionSystem extends GameSystem {
     required String exitLayerId,
     required String exitTag,
     required String exitColorParam,
+    required bool exitRequiresRoute,
+    required String? gateLayerId,
+    required String gateClosedTag,
+    required String gateEntrySideParam,
     required String failureVariable,
     required Map<String, dynamic> routes,
     required String blockedBehavior,
@@ -302,15 +334,39 @@ class RoutedMotionSystem extends GameSystem {
           continue;
         }
 
+        final exit = state.board.getEntity(exitLayerId, target);
+        final isExit = exit != null && game.hasTag(exit.kind, exitTag);
+        final exitMatches = isExit &&
+            flow.entity.param(colorParam)?.toString() ==
+                exit.param(exitColorParam)?.toString();
+        final bypassTargetRoute = exitMatches && !exitRequiresRoute;
         final targetRoad = state.board.getEntity(routeLayerId, target);
-        final nextHeading = targetRoad == null
+        var nextHeading = targetRoad == null
             ? null
             : _route(routes, targetRoad.kind, heading.opposite.toJson());
-        if (nextHeading == null || !_cardinalNames.contains(nextHeading)) {
+        if (bypassTargetRoute) nextHeading = heading.toJson();
+        if (!bypassTargetRoute &&
+            (nextHeading == null || !_cardinalNames.contains(nextHeading))) {
           blocked[flow] = _Failure(
             _Mover(flow.position, flow.entity),
             target,
             'disconnected_road',
+          );
+          continue;
+        }
+        if (_gateIsClosed(
+          state,
+          game,
+          target,
+          heading.opposite.toJson(),
+          gateLayerId,
+          gateClosedTag,
+          gateEntrySideParam,
+        )) {
+          blocked[flow] = _Failure(
+            _Mover(flow.position, flow.entity),
+            target,
+            'closed_gate',
           );
           continue;
         }
@@ -333,8 +389,6 @@ class RoutedMotionSystem extends GameSystem {
           continue;
         }
 
-        final exit = state.board.getEntity(exitLayerId, target);
-        final isExit = exit != null && game.hasTag(exit.kind, exitTag);
         if (isExit &&
             flow.entity.param(colorParam)?.toString() !=
                 exit.param(exitColorParam)?.toString()) {
@@ -346,7 +400,7 @@ class RoutedMotionSystem extends GameSystem {
           continue;
         }
 
-        intents[flow] = _FlowIntent(flow, target, nextHeading, isExit);
+        intents[flow] = _FlowIntent(flow, target, nextHeading!, isExit);
       }
 
       final byTarget = <Position, List<_FlowIntent>>{};
@@ -495,6 +549,24 @@ class RoutedMotionSystem extends GameSystem {
   bool _hasExit(Map<String, dynamic> routes, String roadKind, String heading) {
     final raw = routes[roadKind];
     return raw is Map && raw.values.contains(heading);
+  }
+
+  bool _gateIsClosed(
+    LevelState state,
+    GameDefinition game,
+    Position target,
+    String incomingSide,
+    String? gateLayerId,
+    String gateClosedTag,
+    String gateEntrySideParam,
+  ) {
+    if (gateLayerId == null || gateLayerId.isEmpty) return false;
+    final gate = state.board.getEntity(gateLayerId, target);
+    if (gate == null || !game.hasTag(gate.kind, gateClosedTag)) return false;
+    final controlledSide = gate.param(gateEntrySideParam)?.toString();
+    return controlledSide == null ||
+        controlledSide == 'any' ||
+        controlledSide == incomingSide;
   }
 
   List<_Failure> _dedupeFailures(List<_Failure> failures) {

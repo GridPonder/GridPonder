@@ -23,6 +23,7 @@ import '../widgets/board_renderer.dart'
         elasticBlockRectTween,
         elasticPushObjectTravel;
 import '../widgets/controls_widget.dart';
+import 'path_animation_state.dart';
 
 /// One entity travelling from [from] to [to] during a turn's animation.
 typedef _Mover = ({
@@ -326,20 +327,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // Path-following movement happens after action/cascade transforms. Replay
     // those earlier cell changes into the held animation board so a vehicle
     // visibly drives over the road orientation the player just created.
-    final pathPreState = preState.copy();
-    for (final event in result.events) {
-      if (event.type == 'entity_path_moved') break;
-      if (event.type != 'cell_transformed' || event.position == null) continue;
-      final layer = event.payload['layer'] as String?;
-      final toKind = event.payload['toKind'] as String?;
-      if (layer != null && toKind != null) {
-        pathPreState.board.setEntity(
-          layer,
-          event.position!,
-          EntityInstance(toKind),
-        );
-      }
-    }
+    final pathPreState = buildPathAnimationState(preState, result.events);
 
     // Stage-aware playback for new motion primitives.
     // Group remaining animations by stage; play each stage to completion

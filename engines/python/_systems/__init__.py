@@ -37,6 +37,7 @@ from .sonar import SonarSystem
 from .terrain_edit import TerrainEditSystem
 from .terrain_skip import TerrainSkipSystem
 from .tile_teleport import TileTeleportSystem
+from .turn_cycle import TurnCycleSystem
 
 
 SystemFactory = Callable[[str, dict], GameSystem]
@@ -67,6 +68,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "elastic_block": lambda sys_id, config: ElasticBlockSystem(sys_id, config),
     "individual_actors": lambda sys_id, _: IndividualActorsSystem(sys_id),
     "terrain_skip": lambda sys_id, _: TerrainSkipSystem(sys_id),
+    "turn_cycle": lambda sys_id, _: TurnCycleSystem(sys_id),
 }
 
 

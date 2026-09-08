@@ -28,6 +28,7 @@ def _game(
     movement_mode="single_step",
     blocked_behavior="fail",
     allow_u_turns=True,
+    exit_requires_route=True,
 ) -> GameDef:
     kinds = {
         "void": {"layer": "ground", "tags": [], "symbol": "V"},
@@ -82,6 +83,7 @@ def _game(
                         "movementMode": movement_mode,
                         "blockedBehavior": blocked_behavior,
                         "allowUTurns": allow_u_turns,
+                        "exitRequiresRoute": exit_requires_route,
                     },
                 },
             ],
@@ -259,6 +261,63 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
             path_event["path"],
             [Pos(0, 0), Pos(1, 0), Pos(2, 0), Pos(3, 0)],
         )
+
+    def test_matching_exit_accepts_horizontal_and_vertical_arrivals(self):
+        game = _game("until_blocked", "stop", False, False)
+        cases = [
+            (
+                "horizontal",
+                (2, 1),
+                Pos(0, 0),
+                Pos(1, 0),
+                "road_h",
+                "road_v",
+                "right",
+            ),
+            (
+                "vertical",
+                (1, 2),
+                Pos(0, 1),
+                Pos(0, 0),
+                "road_v",
+                "road_h",
+                "up",
+            ),
+        ]
+
+        for name, size, source, target, source_road, target_road, heading in cases:
+            with self.subTest(name=name):
+                level = _level(
+                    size=size,
+                    ground=[
+                        {"position": [source.x, source.y], "kind": source_road},
+                        {"position": [target.x, target.y], "kind": target_road},
+                    ],
+                    objects=[
+                        {
+                            "position": [source.x, source.y],
+                            "kind": "truck",
+                            "heading": heading,
+                            "color": "red",
+                        }
+                    ],
+                    markers=[
+                        {
+                            "position": [target.x, target.y],
+                            "kind": "exit_red",
+                            "color": "red",
+                        }
+                    ],
+                    with_goal=True,
+                )
+                engine = TurnEngine(game, level)
+
+                result = engine.execute_turn("advance")
+
+                self.assertTrue(result.is_won)
+                self.assertEqual(
+                    list(engine.state.board.layers["objects"].entries()), []
+                )
 
     def test_disconnected_route_stops_without_crashing(self):
         level = _level(

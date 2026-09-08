@@ -64,6 +64,12 @@ class RoutedMotionSystem(GameSystem):
         exit_layer_id = config.get("exitLayer", "markers")
         exit_tag = config.get("exitTag", "route_exit")
         exit_color_param = config.get("exitColorParam", color_param)
+        exit_requires_route = bool(config.get("exitRequiresRoute", True))
+        gate_layer_id = config.get("gateLayer")
+        gate_closed_tag = config.get("gateClosedTag", "route_closed")
+        gate_entry_side_param = config.get(
+            "gateEntrySideParam", "entrySide"
+        )
         failure_variable = config.get(
             "failureVariable", "routedMotionFailures"
         )
@@ -94,6 +100,10 @@ class RoutedMotionSystem(GameSystem):
                 exit_layer_id=exit_layer_id,
                 exit_tag=exit_tag,
                 exit_color_param=exit_color_param,
+                exit_requires_route=exit_requires_route,
+                gate_layer_id=gate_layer_id,
+                gate_closed_tag=gate_closed_tag,
+                gate_entry_side_param=gate_entry_side_param,
                 failure_variable=failure_variable,
                 routes=routes,
                 blocked_behavior=config.get("blockedBehavior", "fail"),
@@ -129,16 +139,38 @@ class RoutedMotionSystem(GameSystem):
                 failures.append(_Failure(mover, target, "left_board"))
                 continue
 
+            exit_entity = state.board.get_entity(exit_layer_id, target)
+            is_exit = exit_entity is not None and game.has_tag(
+                exit_entity.kind, exit_tag
+            )
+            exit_matches = is_exit and mover.entity.param(
+                color_param
+            ) == exit_entity.param(exit_color_param)
+            bypass_target_route = exit_matches and not exit_requires_route
             target_road = state.board.get_entity(route_layer_id, target)
             next_heading = (
                 self._route(routes, target_road.kind, dir_opposite(heading))
                 if target_road is not None
                 else None
             )
-            if next_heading not in CARDINALS:
+            if bypass_target_route:
+                next_heading = heading
+            if not bypass_target_route and next_heading not in CARDINALS:
                 failures.append(
                     _Failure(mover, target, "disconnected_road")
                 )
+                continue
+
+            if self._gate_is_closed(
+                state,
+                game,
+                target,
+                dir_opposite(heading),
+                gate_layer_id,
+                gate_closed_tag,
+                gate_entry_side_param,
+            ):
+                failures.append(_Failure(mover, target, "closed_gate"))
                 continue
 
             occupant = mover_layer.get(target)
@@ -148,10 +180,6 @@ class RoutedMotionSystem(GameSystem):
                 failures.append(_Failure(mover, target, "occupied"))
                 continue
 
-            exit_entity = state.board.get_entity(exit_layer_id, target)
-            is_exit = exit_entity is not None and game.has_tag(
-                exit_entity.kind, exit_tag
-            )
             if is_exit and mover.entity.param(color_param) != exit_entity.param(
                 exit_color_param
             ):
@@ -248,6 +276,10 @@ class RoutedMotionSystem(GameSystem):
         exit_layer_id: str,
         exit_tag: str,
         exit_color_param: str,
+        exit_requires_route: bool,
+        gate_layer_id,
+        gate_closed_tag: str,
+        gate_entry_side_param: str,
         failure_variable: str,
         routes: dict,
         blocked_behavior: str,
@@ -338,6 +370,16 @@ class RoutedMotionSystem(GameSystem):
                     blocked[flow] = _Failure(mover, target, "left_board")
                     continue
 
+                exit_entity = state.board.get_entity(exit_layer_id, target)
+                is_exit = exit_entity is not None and game.has_tag(
+                    exit_entity.kind, exit_tag
+                )
+                exit_matches = is_exit and flow.entity.param(
+                    color_param
+                ) == exit_entity.param(exit_color_param)
+                bypass_target_route = (
+                    exit_matches and not exit_requires_route
+                )
                 target_road = state.board.get_entity(route_layer_id, target)
                 next_heading = (
                     self._route(
@@ -346,9 +388,24 @@ class RoutedMotionSystem(GameSystem):
                     if target_road is not None
                     else None
                 )
-                if next_heading not in CARDINALS:
+                if bypass_target_route:
+                    next_heading = heading
+                if not bypass_target_route and next_heading not in CARDINALS:
                     blocked[flow] = _Failure(
                         mover, target, "disconnected_road"
+                    )
+                    continue
+                if self._gate_is_closed(
+                    state,
+                    game,
+                    target,
+                    dir_opposite(heading),
+                    gate_layer_id,
+                    gate_closed_tag,
+                    gate_entry_side_param,
+                ):
+                    blocked[flow] = _Failure(
+                        mover, target, "closed_gate"
                     )
                     continue
                 if not allow_u_turns and next_heading == dir_opposite(heading):
@@ -362,10 +419,6 @@ class RoutedMotionSystem(GameSystem):
                     blocked[flow] = _Failure(mover, target, "occupied")
                     continue
 
-                exit_entity = state.board.get_entity(exit_layer_id, target)
-                is_exit = exit_entity is not None and game.has_tag(
-                    exit_entity.kind, exit_tag
-                )
                 if is_exit and flow.entity.param(
                     color_param
                 ) != exit_entity.param(exit_color_param):
@@ -516,6 +569,24 @@ class RoutedMotionSystem(GameSystem):
     def _has_exit(routes: dict, road_kind: str, heading: str) -> bool:
         road_routes = routes.get(road_kind)
         return isinstance(road_routes, dict) and heading in road_routes.values()
+
+    @staticmethod
+    def _gate_is_closed(
+        state: GameState,
+        game: GameDef,
+        target: Pos,
+        incoming_side: str,
+        gate_layer_id,
+        gate_closed_tag: str,
+        gate_entry_side_param: str,
+    ) -> bool:
+        if not isinstance(gate_layer_id, str) or not gate_layer_id:
+            return False
+        gate = state.board.get_entity(gate_layer_id, target)
+        if gate is None or not game.has_tag(gate.kind, gate_closed_tag):
+            return False
+        controlled_side = gate.param(gate_entry_side_param)
+        return controlled_side in (None, "any", incoming_side)
 
     @staticmethod
     def _dedupe_failures(failures: list[_Failure]) -> list[_Failure]:
