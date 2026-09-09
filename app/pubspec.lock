@@ -176,7 +176,7 @@ packages:
       path: "../engines/dart"
       relative: true
     source: path
-    version: "0.8.0"
+    version: "0.11.1"
   http_parser:
     dependency: transitive
     description:

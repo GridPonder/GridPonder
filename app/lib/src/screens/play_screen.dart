@@ -120,6 +120,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   // True once the current level's win has been recorded to ProgressService.
   bool _wonHandled = false;
 
+  // Which `LoseStatus.reason` ended the level, if any — looked up in
+  // `loseDescriptions` so the loss banner can explain why, instead of always
+  // showing the generic "Out of Moves!" text.
+  String? _loseReason;
+
   // AI play state
   bool _aiRunning = false;
   String? _lastThinking;
@@ -177,6 +182,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _lastFloodColor = null;
     _actorFacingByKind = {};
     _wonHandled = false;
+    _loseReason = null;
     _selectedMultiCellObjectId = null;
     _lineOfSightFeedbacks = const [];
     _movingSprites.value = const [];
@@ -204,6 +210,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         src: source,
       );
       return;
+    }
+    if (result.isLost) {
+      _loseReason = result.loseReason;
     }
     _tracker.track(
       'move',
@@ -376,6 +385,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       });
     }
 
+    await _playBeamReveal(preState, result.events);
     await _playLineOfSightFeedback(result.events);
     await _playCellEffects(result.events);
 
@@ -489,6 +499,42 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     await Future.delayed(const Duration(milliseconds: 220));
     if (!mounted) return;
     setState(() => _lineOfSightFeedbacks = const []);
+  }
+
+  /// Plays a `beam` system's path back one cell at a time, in the trace order
+  /// its `beam_cell_revealed` events were emitted, instead of the full path
+  /// simply appearing at once (the engine already painted it all in one
+  /// state write — this is pure playback on top of that).
+  Future<void> _playBeamReveal(
+    LevelState preState,
+    List<GameEvent> events,
+  ) async {
+    final reveals =
+        events.where((e) => e.type == 'beam_cell_revealed').toList();
+    if (reveals.isEmpty) return;
+
+    // Start from a board with every cell this turn will touch cleared, so
+    // last turn's trace (still present in preState) doesn't linger — and
+    // paint each cell back in as its reveal step plays.
+    final animState = preState.copy();
+    for (final e in reveals) {
+      final pos = e.position;
+      final layer = e.payload['layer'] as String? ?? 'markers';
+      if (pos != null) animState.board.setEntity(layer, pos, null);
+    }
+
+    for (final e in reveals) {
+      if (!mounted) return;
+      final pos = e.position;
+      final layer = e.payload['layer'] as String? ?? 'markers';
+      final kind = e.payload['kind'] as String?;
+      if (pos == null || kind == null) continue;
+      animState.board.setEntity(layer, pos, EntityInstance(kind));
+      setState(() => _preAnimState = animState);
+      await Future.delayed(const Duration(milliseconds: 45));
+    }
+    if (!mounted) return;
+    setState(() => _preAnimState = null);
   }
 
   Position? _positionFromPayload(dynamic raw) {
@@ -1196,6 +1242,16 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     return null;
   }
 
+  SystemDef? get _beamSystem {
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type == 'beam' && system.enabled) return system;
+    }
+    return null;
+  }
+
   ActionDef? get _primaryMoveAction {
     final effectiveGame = widget.packService.game.withSystemOverrides(
       _levelDef.systemOverrides,
@@ -1276,6 +1332,73 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       }
     }
     return available;
+  }
+
+  /// Action ids to omit from the control row entirely, not merely gray out.
+  ///
+  /// A `terrain_edit` action whose `budgetVariable` this level's own
+  /// `state.variables` never declares is a mechanic this level hasn't
+  /// introduced at all (the system would treat the missing variable as a
+  /// zero budget and silently refuse every tap anyway) — so its button has
+  /// no reason to render, the same way `_buildReadoutStrip` already skips a
+  /// readout whose variable a level doesn't declare. Lets a pack phase in a
+  /// placeable piece over its level sequence without any per-level UI
+  /// bookkeeping: the level that first sets the variable is the level whose
+  /// button first appears.
+  Set<String> _hiddenActionIds(LevelState state) {
+    final hidden = <String>{};
+    for (final system in widget.packService.game.systems) {
+      if (system.type != 'terrain_edit') continue;
+      final budgetVar = system.config['budgetVariable'] as String?;
+      if (budgetVar == null) continue;
+      if (state.variables.containsKey(budgetVar)) continue;
+      final actionId = system.config['action'] as String?;
+      if (actionId != null) hidden.add(actionId);
+    }
+    return hidden;
+  }
+
+  /// Action id → resolved sprite of the entity kind that action places, for
+  /// every `terrain_edit`-backed placement action whose placed kind has a
+  /// `sprite`. Lets the control button preview exactly what tapping it will
+  /// place (the mirror, the divider, ...) instead of a generic icon — pure
+  /// lookup over already-loaded pack data, cheap enough to rebuild every
+  /// frame and unaffected by which level is current beyond which buttons
+  /// `_hiddenActionIds` lets through.
+  Map<String, ImageProvider> _actionSprites() {
+    final result = <String, ImageProvider>{};
+    for (final system in widget.packService.game.systems) {
+      if (system.type != 'terrain_edit') continue;
+      final actionId = system.config['action'] as String?;
+      final kind = system.config['kind'] as String?;
+      if (actionId == null || kind == null) continue;
+      final sprite = widget.packService.game.entityKinds[kind]?.sprite;
+      // A templated sprite (e.g. "assets/emitter_beam_{facing}.png") has no
+      // instance yet to read the param from — skip it rather than resolve a
+      // literal "{facing}" path, and fall back to the icon.
+      if (sprite == null || sprite.contains('{')) continue;
+      result[actionId] = widget.packService.resolvePackImage(sprite);
+    }
+    return result;
+  }
+
+  /// Runtime variable → resolved sprite of the entity kind a `terrain_edit`
+  /// system's `budgetVariable` tracks. Same idea as [_actionSprites], keyed
+  /// by the readout's variable instead of the button's action id, so a
+  /// budget chip (e.g. "\ 1") can show the actual placed sprite instead of
+  /// a text glyph standing in for it.
+  Map<String, ImageProvider> _variableSprites() {
+    final result = <String, ImageProvider>{};
+    for (final system in widget.packService.game.systems) {
+      if (system.type != 'terrain_edit') continue;
+      final budgetVar = system.config['budgetVariable'] as String?;
+      final kind = system.config['kind'] as String?;
+      if (budgetVar == null || kind == null) continue;
+      final sprite = widget.packService.game.entityKinds[kind]?.sprite;
+      if (sprite == null || sprite.contains('{')) continue;
+      result[budgetVar] = widget.packService.resolvePackImage(sprite);
+    }
+    return result;
   }
 
   void _onCellTap(int x, int y) {
@@ -1837,7 +1960,20 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     }
   }
 
+  /// Resolves a theme `key_press` binding's `key` string to a
+  /// [LogicalKeyboardKey]. Accepts a single a-z letter (the original
+  /// convention) or one of `up`/`down`/`left`/`right`, so a pack can bind
+  /// arrow keys to any action generically instead of only the hardcoded
+  /// arrow-to-`move` fallback below.
   static LogicalKeyboardKey? _keyForChar(String char) {
+    const arrows = {
+      'up': LogicalKeyboardKey.arrowUp,
+      'down': LogicalKeyboardKey.arrowDown,
+      'left': LogicalKeyboardKey.arrowLeft,
+      'right': LogicalKeyboardKey.arrowRight,
+    };
+    final arrow = arrows[char.toLowerCase()];
+    if (arrow != null) return arrow;
     const map = {
       'a': LogicalKeyboardKey.keyA,
       'b': LogicalKeyboardKey.keyB,
@@ -2092,7 +2228,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                     canUndo: _engine.undoDepth > 0 && !_aiRunning,
                     hintStatuses: hintStatuses,
                     availableActionIds: _availableFloodActions(state),
+                    hiddenActionIds: _hiddenActionIds(state),
+                    actionSprites: _actionSprites(),
                     palette: widget.packService.theme?.palette,
+                    gestureMap: widget.packService.theme?.controls?.gestureMap,
                   ),
                 ),
               ],
@@ -2150,18 +2289,23 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// `ui.readouts`. Pack-agnostic: the app never learns what a given variable
   /// means, only how to draw a labelled number.
   Widget _buildReadoutStrip(LevelState state, List<GameReadout> readouts) {
+    final sprites = _variableSprites();
     return Wrap(
       spacing: 8,
       runSpacing: 6,
       alignment: WrapAlignment.center,
       children: [
         for (final r in readouts)
-          _buildReadoutChip(r, state.variables[r.variable]),
+          _buildReadoutChip(r, state.variables[r.variable], sprites[r.variable]),
       ],
     );
   }
 
-  Widget _buildReadoutChip(GameReadout readout, Object? rawValue) {
+  Widget _buildReadoutChip(
+    GameReadout readout,
+    Object? rawValue,
+    ImageProvider? labelSprite,
+  ) {
     final number = (rawValue is num) ? rawValue.toInt() : null;
     final blank = number == null || number == readout.blankWhen;
     final tint = readout.color == null
@@ -2187,14 +2331,16 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
             decoration: BoxDecoration(shape: BoxShape.circle, color: tint),
           ),
           const SizedBox(width: 8),
-          Text(
-            readout.label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade700,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          labelSprite != null
+              ? Image(image: labelSprite, width: 16, height: 16, fit: BoxFit.contain)
+              : Text(
+                  readout.label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
           const SizedBox(width: 8),
           Text(
             blank ? '—' : '$number',
@@ -2820,12 +2966,24 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Position? _selectedActorPosition(LevelState state) {
-    final config = _individualActorSystem?.config;
-    if (config == null) return null;
-    final positionKey =
-        config['selectedPositionVariable'] as String? ??
-        'selectedActorPosition';
-    return _positionFromPayload(state.variables[positionKey]);
+    final iaConfig = _individualActorSystem?.config;
+    if (iaConfig != null) {
+      final positionKey =
+          iaConfig['selectedPositionVariable'] as String? ??
+          'selectedActorPosition';
+      final pos = _positionFromPayload(state.variables[positionKey]);
+      if (pos != null) return pos;
+    }
+    // `beam`-based games have no avatar or moving actor, so the same ring
+    // highlight is repurposed to show which cell the last `tap_cell` landed
+    // on — the only feedback a player gets that their tap registered.
+    final beamConfig = _beamSystem?.config;
+    if (beamConfig != null) {
+      final positionKey =
+          beamConfig['selectedCellVariable'] as String? ?? 'selectedCell';
+      return _positionFromPayload(state.variables[positionKey]);
+    }
+    return null;
   }
 
   void _showGameInfo() {
@@ -2888,15 +3046,18 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
             ),
             const SizedBox(width: 12),
           ],
-          Text(
-            _movesLabel(state),
-            style: TextStyle(
-              color: state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
-              fontSize: 13,
-              fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
+          if (widget.packService.game.ui.showMoves) ...[
+            Text(
+              _movesLabel(state),
+              style: TextStyle(
+                color:
+                    state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
+                fontSize: 13,
+                fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
+              ),
             ),
-          ),
-          const SizedBox(width: 4),
+            const SizedBox(width: 4),
+          ],
           GestureDetector(
             onTap: () {
               final boardText = TextRenderer.render(
@@ -2977,6 +3138,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildLossBanner() {
+    final customMessage = _loseReason == null
+        ? null
+        : widget.packService.game.loseDescriptions[_loseReason];
+    final title = customMessage == null ? 'Out of Moves!' : 'Game Over';
+    final subtitle = customMessage ?? 'Plan the order more carefully.';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
@@ -2988,18 +3154,18 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            'Out of Moves!',
-            style: TextStyle(
+          Text(
+            title,
+            style: const TextStyle(
               color: Colors.white,
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Plan the order more carefully.',
-            style: TextStyle(color: Colors.white70, fontSize: 13),
+          Text(
+            subtitle,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
           const SizedBox(height: 10),
           Row(

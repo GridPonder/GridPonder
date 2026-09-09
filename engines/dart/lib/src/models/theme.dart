@@ -5,7 +5,7 @@ class GestureBinding {
       gesture; // swipe_cardinal, swipe_diagonal, tap_cell, button, key_press
   final String action;
   final String? buttonId;
-  final String? key; // for key_press: single character, e.g. "c"
+  final String? key; // for key_press: single character (e.g. "c") or "up"/"down"/"left"/"right"
   final Map<String, String>? paramMapping;
   final Map<String, dynamic>? params;
 

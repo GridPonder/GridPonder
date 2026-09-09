@@ -14,6 +14,7 @@ from .._game_def import GameDef
 from ._base import GameSystem
 from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
+from .beam import BeamSystem
 from .coupled_actors import CoupledActorsSystem
 from .elastic_block import ElasticBlockSystem
 from .flank_capture import FlankCaptureSystem
@@ -42,6 +43,7 @@ SystemFactory = Callable[[str, dict], GameSystem]
 _REGISTRY: dict[str, SystemFactory] = {
     "anchor_point": lambda sys_id, _: AnchorPointSystem(sys_id),
     "avatar_navigation": lambda sys_id, _: AvatarNavigationSystem(sys_id),
+    "beam": lambda sys_id, config: BeamSystem(sys_id, config),
     "push_objects": lambda sys_id, _: PushObjectsSystem(sys_id),
     "portals": lambda sys_id, _: PortalsSystem(sys_id),
     "ice_slide": lambda sys_id, _: IceSlideSystem(sys_id),

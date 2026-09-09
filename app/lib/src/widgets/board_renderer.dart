@@ -1466,11 +1466,15 @@ class _Cell extends StatelessWidget {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
 
-    // When a kind declares "groundBeneath": true in its display block, render
-    // the layer's default entity sprite first so water shows through transparent
-    // areas of the sprite (e.g. circular body segments on the ground layer).
+    // When a kind declares "groundBeneath": true (top-level, or nested in a
+    // `display` block — the older form, kept for existing packs), render the
+    // layer's default entity sprite first so water shows through transparent
+    // areas of the sprite (e.g. circular body segments on the ground layer),
+    // or a solid terrain sprite (a wall, a placed reflector) still shows the
+    // floor texture behind it instead of bare canvas.
     final kindDef = game.entityKinds[entity.kind];
-    if (kindDef?.display?['groundBeneath'] == true) {
+    if (kindDef?.groundBeneath == true ||
+        kindDef?.display?['groundBeneath'] == true) {
       final matching = game.layers.where((l) => l.id == layerId);
       final defaultKind = matching.isEmpty ? null : matching.first.defaultKind;
       if (defaultKind != null && defaultKind != entity.kind) {

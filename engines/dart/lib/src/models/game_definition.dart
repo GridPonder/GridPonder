@@ -124,11 +124,19 @@ class GameUiConfig {
   /// goal text does not. Turning it off falls back to the goal's description.
   final bool showGoalPreview;
 
+  /// Whether to show the generic "Moves: N" action counter. Defaults on for
+  /// backward compatibility; a game whose action count includes non-move
+  /// actions (e.g. cell selection) and therefore doesn't read as a
+  /// meaningful move tally can turn it off and surface its own progress via
+  /// `readouts` instead.
+  final bool showMoves;
+
   const GameUiConfig({
     this.showGoal = false,
     this.showGuide = false,
     this.readouts = const [],
     this.showGoalPreview = true,
+    this.showMoves = true,
   });
 
   factory GameUiConfig.fromJson(Map<String, dynamic>? j) {
@@ -144,6 +152,7 @@ class GameUiConfig {
                 if (r is Map<String, dynamic>) GameReadout.fromJson(r),
             ].where((r) => r.variable.isNotEmpty).toList(),
       showGoalPreview: (j['showGoalPreview'] as bool?) ?? true,
+      showMoves: (j['showMoves'] as bool?) ?? true,
     );
   }
 }
@@ -192,6 +201,13 @@ class GameDefinition {
   /// mechanical description in place of the renderer's generic auto-generated text.
   final Map<String, String> goalDescriptions;
 
+  /// Per-game loss-message overrides keyed by a `LoseStatus.reason` string
+  /// (e.g. `"variable_threshold:beamHitHazard"`, `"max_actions"`). Lets a
+  /// pack explain *why* a level was lost instead of the renderer's generic
+  /// "Out of Moves!" text, which otherwise shows regardless of which
+  /// `loseCondition` actually fired.
+  final Map<String, String> loseDescriptions;
+
   const GameDefinition({
     required this.id,
     required this.title,
@@ -205,6 +221,7 @@ class GameDefinition {
     required this.defaults,
     this.ui = const GameUiConfig(),
     this.goalDescriptions = const {},
+    this.loseDescriptions = const {},
   });
 
   factory GameDefinition.fromJson(
@@ -251,6 +268,8 @@ class GameDefinition {
       defaults: GameDefaults.fromJson(j['defaults'] as Map<String, dynamic>?),
       ui: GameUiConfig.fromJson(j['ui'] as Map<String, dynamic>?),
       goalDescriptions: ((j['goalDescriptions'] as Map?) ?? const {})
+          .map((k, v) => MapEntry(k as String, v as String)),
+      loseDescriptions: ((j['loseDescriptions'] as Map?) ?? const {})
           .map((k, v) => MapEntry(k as String, v as String)),
     );
   }
@@ -307,6 +326,7 @@ class GameDefinition {
       defaults: defaults,
       ui: ui,
       goalDescriptions: goalDescriptions,
+      loseDescriptions: loseDescriptions,
     );
   }
 

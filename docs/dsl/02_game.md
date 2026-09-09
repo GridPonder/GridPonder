@@ -39,6 +39,7 @@ Visual presentation and input bindings are defined separately in `theme.json` �
 | `defaults` | object | no | Default values for level fields. |
 | `ui` | object | no | Which in-play panels the app shows. See [UI](#ui). |
 | `goalDescriptions` | object | no | One sentence per goal id, shown in the goal panel. |
+| `loseDescriptions` | object | no | One sentence per lose-condition reason string (e.g. `"variable_threshold:hazardHit"`, `"max_actions"` — see `LoseStatus.reason` in the engine), shown in the loss banner in place of the renderer's generic "Out of Moves!" text. A reason absent from the map falls back to that generic text, so packs that never customize this are unaffected. |
 
 ---
 
@@ -49,6 +50,8 @@ Visual presentation and input bindings are defined separately in `theme.json` �
 | `showGoal` | boolean | `false` | Show the goal panel during play. |
 | `showGuide` | boolean | `false` | Show the level's `guide` text during play. |
 | `showGoalPreview` | boolean | `true` | Whether a `board_match` goal is drawn as a miniature target board. Turn it off for a game that uses `board_match` to say "this entity stands here" rather than to specify a pattern — a two-row board with one marked square explains less than the sentence does. The panel then falls back to `goalDescriptions`, listing every goal the level has. |
+| `showMoves` | boolean | `true` | Whether to show the generic "Moves: N" action counter. Turn it off for a game whose action count includes non-move actions (e.g. cell selection in a `beam`-based game) and so doesn't read as a meaningful tally — surface progress via `readouts` instead. |
+| `readouts` | array | `[]` | Live `state.variables` chips shown during play. Each entry: `{"variable": "...", "label": "...", "color": "..."?, "blankWhen": N?}`. Pack-agnostic — the app only knows how to draw a labelled number, never what it means. |
 
 ---
 
@@ -231,6 +234,7 @@ Defines all entity types used by this game. Levels reference kinds by their key 
 | `motion` | object | no | Motion timings used by the renderer when this kind appears in a motion event (`tile_moved`, `tiles_merged` with sources, etc.). See [Motion](#motion). Optional — engine has sensible defaults. |
 | `outline` | object | no | Render hint: stroke a visible border along the perimeter of every contiguous region of cells of this kind. See [Outline](#outline). Pure render hint — no engine impact. |
 | `display` | object | no | Procedural render block consulted when no `sprite` is supplied (or the asset fails to load). See [Display](#display). |
+| `groundBeneath` | boolean | no | Render hint: paint this layer's default kind's sprite underneath this entity before drawing its own sprite/display, so any transparent pixels show that terrain texture instead of bare canvas. For a solid ground-layer kind that replaces the default terrain outright (a wall, a placed reflector) rather than sitting on an object layer above it, this is what makes it read as "sitting on" the floor instead of floating on nothing. (Equivalent to, and checked alongside, the older `display: {"groundBeneath": true}` nested form — this top-level field is what a `sprite`-only kind with no `display` block needs.) Pure render hint — no engine impact. |
 | `render` | object | no | Additional rendering hints (opacity, tint). |
 
 ### Animations

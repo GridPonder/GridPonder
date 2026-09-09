@@ -5,6 +5,12 @@ optionally spending from a runtime budget and optionally guarding what may be
 overwritten. This is the generic hook for player-driven terrain change: the
 rules engine cannot express it, because there is no "player acted at position"
 event — every action must be consumed by a system.
+
+The position normally comes from the action's own `position` param, but when
+that's absent and `config.positionVariable` is set, it's read from
+`state.variables` instead — lets a zero-param button (e.g. a "place here"
+action fired after a separate select/aim step) target whatever position
+another action last wrote to that variable.
 """
 from __future__ import annotations
 
@@ -13,6 +19,15 @@ from .._game_def import GameDef
 from .. import _events as ev
 from ._base import GameSystem
 from ._runtime_var import read_int_variable
+
+
+def _parse_pos(raw) -> Pos | None:
+    if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+        return None
+    try:
+        return Pos(int(raw[0]), int(raw[1]))
+    except (TypeError, ValueError, OverflowError):
+        return None
 
 
 class TerrainEditSystem(GameSystem):
@@ -26,12 +41,12 @@ class TerrainEditSystem(GameSystem):
         if action.get("actionId") != config.get("action", "place"):
             return []
 
-        raw = action.get("params", {}).get("position")
-        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
-            return []
-        try:
-            pos = Pos(int(raw[0]), int(raw[1]))
-        except (TypeError, ValueError, OverflowError):
+        pos = _parse_pos(action.get("params", {}).get("position"))
+        if pos is None:
+            pos_var = config.get("positionVariable")
+            if pos_var is not None:
+                pos = _parse_pos(state.variables.get(pos_var))
+        if pos is None:
             return []
         if not state.board.is_in_bounds(pos):
             return []
