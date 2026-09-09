@@ -126,9 +126,9 @@ class AgentObservation {
       GameDefinition game, Set<String> presentKinds) {
     final actions = <GameAction>[];
     for (final actionDef in game.actions) {
-      // Skip actions whose required entity kind is absent from the board.
+      // Skip actions whose required entity kind(s) are all absent from the board.
       if (actionDef.entityKind != null &&
-          !presentKinds.contains(actionDef.entityKind)) {
+          !actionDef.entityKind!.any(presentKinds.contains)) {
         continue;
       }
       if (actionDef.params.isEmpty) {

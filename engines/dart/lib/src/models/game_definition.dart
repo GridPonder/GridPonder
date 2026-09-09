@@ -20,10 +20,13 @@ class ActionDef {
   final String id;
   final Map<String, ActionParamDef> params;
 
-  /// If set, this action is only offered when this entity kind is present on
-  /// the current board. Used to suppress inapplicable actions in the LLM
-  /// prompt (e.g. flood_purple when no purple cells are on the board).
-  final String? entityKind;
+  /// If set, this action is only offered when at least one of these entity
+  /// kinds is present on the current board. Used to suppress inapplicable
+  /// actions in the LLM prompt (e.g. flood_purple when no purple cells are
+  /// on the board). Accepts a single kind or a list — a shared interact
+  /// action offered by several actor variants (e.g. one per cargo state)
+  /// needs the list form.
+  final List<String>? entityKind;
 
   /// Optional render hint: a colour name (resolved via the renderer's named
   /// palette) that the controls UI uses to draw a swatch button instead of
@@ -44,7 +47,12 @@ class ActionDef {
       id: j['id'] as String,
       params: rawParams.map((k, v) =>
           MapEntry(k, ActionParamDef.fromJson(v as Map<String, dynamic>))),
-      entityKind: j['entityKind'] as String?,
+      entityKind: switch (j['entityKind']) {
+        null => null,
+        final String s => [s],
+        final List<dynamic> l => l.cast<String>(),
+        _ => null,
+      },
       color: j['color'] as String?,
     );
   }

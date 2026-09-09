@@ -1476,21 +1476,27 @@ class _Cell extends StatelessWidget {
             alignment: Alignment.bottomRight,
             child: Container(
               margin: EdgeInsets.all(cellSize * 0.04),
-              width: cellSize * 0.42,
-              height: cellSize * 0.42,
+              width: cellSize * 0.46,
+              height: cellSize * 0.46,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: Colors.black87,
                 border: Border.all(color: c, width: 1.5),
               ),
               alignment: Alignment.center,
-              child: Text(
-                labelText,
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: cellSize * 0.26,
-                  shadows: const [Shadow(color: Colors.black, blurRadius: 2)],
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Padding(
+                  padding: EdgeInsets.all(cellSize * 0.03),
+                  child: Text(
+                    labelText,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: cellSize * 0.26,
+                      shadows: const [Shadow(color: Colors.black, blurRadius: 2)],
+                    ),
+                  ),
                 ),
               ),
             ),

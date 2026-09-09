@@ -19,7 +19,7 @@ def enumerate_actions(game_def, state, engine=None) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     for action_def in game_def.actions:
         entity_kind = action_def.get("entityKind")
-        if entity_kind is not None and entity_kind not in present_kinds:
+        if entity_kind is not None and not present_kinds.intersection(entity_kind):
             continue
         params_def: dict = action_def.get("params", {})
         if not params_def:
