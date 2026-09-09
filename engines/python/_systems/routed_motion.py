@@ -70,6 +70,7 @@ class RoutedMotionSystem(GameSystem):
         gate_entry_side_param = config.get(
             "gateEntrySideParam", "entrySide"
         )
+        route_selector_layer_id = config.get("routeSelectorLayer")
         failure_variable = config.get(
             "failureVariable", "routedMotionFailures"
         )
@@ -104,6 +105,7 @@ class RoutedMotionSystem(GameSystem):
                 gate_layer_id=gate_layer_id,
                 gate_closed_tag=gate_closed_tag,
                 gate_entry_side_param=gate_entry_side_param,
+                route_selector_layer_id=route_selector_layer_id,
                 failure_variable=failure_variable,
                 routes=routes,
                 blocked_behavior=config.get("blockedBehavior", "fail"),
@@ -149,7 +151,14 @@ class RoutedMotionSystem(GameSystem):
             bypass_target_route = exit_matches and not exit_requires_route
             target_road = state.board.get_entity(route_layer_id, target)
             next_heading = (
-                self._route(routes, target_road.kind, dir_opposite(heading))
+                self._route(
+                    state,
+                    routes,
+                    target_road.kind,
+                    dir_opposite(heading),
+                    target,
+                    route_selector_layer_id,
+                )
                 if target_road is not None
                 else None
             )
@@ -280,6 +289,7 @@ class RoutedMotionSystem(GameSystem):
         gate_layer_id,
         gate_closed_tag: str,
         gate_entry_side_param: str,
+        route_selector_layer_id,
         failure_variable: str,
         routes: dict,
         blocked_behavior: str,
@@ -383,7 +393,12 @@ class RoutedMotionSystem(GameSystem):
                 target_road = state.board.get_entity(route_layer_id, target)
                 next_heading = (
                     self._route(
-                        routes, target_road.kind, dir_opposite(heading)
+                        state,
+                        routes,
+                        target_road.kind,
+                        dir_opposite(heading),
+                        target,
+                        route_selector_layer_id,
                     )
                     if target_road is not None
                     else None
@@ -558,17 +573,38 @@ class RoutedMotionSystem(GameSystem):
         }
 
     @staticmethod
-    def _route(routes: dict, road_kind: str, incoming_side: str):
+    def _route(
+        state: GameState,
+        routes: dict,
+        road_kind: str,
+        incoming_side: str,
+        position: Pos,
+        selector_layer_id,
+    ):
         road_routes = routes.get(road_kind)
         if not isinstance(road_routes, dict):
             return None
         value = road_routes.get(incoming_side)
-        return value if isinstance(value, str) else None
+        if isinstance(value, str):
+            return value
+        if not isinstance(value, dict) or not selector_layer_id:
+            return None
+        selector = state.board.get_entity(selector_layer_id, position)
+        if selector is None:
+            return None
+        selected = value.get(selector.kind)
+        return selected if isinstance(selected, str) else None
 
     @staticmethod
     def _has_exit(routes: dict, road_kind: str, heading: str) -> bool:
         road_routes = routes.get(road_kind)
-        return isinstance(road_routes, dict) and heading in road_routes.values()
+        if not isinstance(road_routes, dict):
+            return False
+        return any(
+            value == heading
+            or (isinstance(value, dict) and heading in value.values())
+            for value in road_routes.values()
+        )
 
     @staticmethod
     def _gate_is_closed(

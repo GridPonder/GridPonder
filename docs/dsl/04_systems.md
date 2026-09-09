@@ -1420,6 +1420,7 @@ connected route until the mover reaches a break, exit, or closed cycle.
 | `moverLayer` | string | `"objects"` | Layer holding routed movers. |
 | `moverTag` | string | `"routed_mover"` | Tag selecting movers. |
 | `routeLayer` | string | `"ground"` | Layer holding route tiles. |
+| `routeSelectorLayer` | string | unset | Optional layer whose entity kind selects one branch of a nested route entry on the destination cell. Missing or unmapped selectors leave that approach disconnected. |
 | `headingParam` | string | `"heading"` | Mover parameter containing its next cardinal direction. |
 | `colorParam` | string | `"color"` | Mover parameter matched against an exit. |
 | `exitLayer` | string | `"markers"` | Layer holding exits. |
@@ -1434,7 +1435,7 @@ connected route until the mover reaches a break, exit, or closed cycle.
 | `blockedBehavior` | string | `"fail"` | In `until_blocked` mode, `"stop"` leaves blocked movers safely in place and emits `routed_motion_blocked`; `"fail"` retains failure-counter behavior. |
 | `allowUTurns` | boolean | `true` | Whether a route may send a mover directly back toward the cell it just left. Set `false` for forward-only vehicles. |
 | `maxTravelSteps` | integer | board area × 4 × mover count | Positive safety bound for continuous microsteps. Repeated route state normally terminates first. |
-| `routes` | object | `{}` | Route kind → incoming side → outgoing direction. Each bidirectional path declares both directions. |
+| `routes` | object | `{}` | Route kind → incoming side → outgoing direction, or route kind → incoming side → selector kind → outgoing direction when `routeSelectorLayer` is set. Each bidirectional path declares both directions. |
 
 In `single_step` mode, all movers read one board snapshot and commit together.
 A tick fails atomically if a mover leaves the board, lacks a valid source or
@@ -1448,6 +1449,13 @@ only movers entering from its configured side. The incoming side is the
 opposite of the mover's heading: a mover heading right enters from `left`.
 This allows one signal to control one junction approach without stopping
 unrelated routes or approaches.
+
+When `routeSelectorLayer` is configured, an incoming-side route may be an
+object keyed by the selector entity kind on that destination cell. This models
+a local switch or signal-controlled junction without coupling unrelated cells.
+If the selector is missing, or its kind has no configured branch, the mover
+waits or fails according to `blockedBehavior`. Plain string routes remain
+unchanged and may be mixed with selected routes in the same route map.
 
 In `until_blocked` mode the same simultaneous collision checks run for each
 internal microstep. Movers with `blockedBehavior: "stop"` become inactive for
@@ -1470,9 +1478,16 @@ allows an `all_cleared` goal on the mover's cargo tag.
     "movementMode": "until_blocked",
     "blockedBehavior": "stop",
     "allowUTurns": false,
+    "routeSelectorLayer": "markers",
     "routes": {
       "road_h": {"left": "right", "right": "left"},
-      "corner_nw": {"left": "up", "up": "left"}
+      "corner_nw": {"left": "up", "up": "left"},
+      "signal_junction": {
+        "left": {
+          "signal_right_green": "right",
+          "signal_up_green": "up"
+        }
+      }
     }
   }
 }

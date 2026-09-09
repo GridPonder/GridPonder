@@ -16,6 +16,8 @@ GameDefinition _game({
   String blockedBehavior = 'fail',
   bool allowUTurns = true,
   bool exitRequiresRoute = true,
+  Map<String, dynamic> routes = _routes,
+  String? routeSelectorLayer,
 }) =>
     GameDefinition.fromJson({
       'layers': [
@@ -60,6 +62,11 @@ GameDefinition _game({
           'tags': ['route'],
           'symbol': 'U',
         },
+        'junction_t': {
+          'layer': 'ground',
+          'tags': ['route'],
+          'symbol': '+',
+        },
         'truck': {
           'layer': 'objects',
           'tags': ['routed_mover', 'cargo'],
@@ -71,6 +78,16 @@ GameDefinition _game({
           'tags': ['route_exit'],
           'symbol': 'E',
         },
+        for (final kind in [
+          'selector_up',
+          'selector_right',
+          'selector_yellow',
+        ])
+          kind: {
+            'layer': 'markers',
+            'tags': ['route_selector'],
+            'symbol': kind,
+          },
       },
       'actions': [
         {
@@ -100,12 +117,14 @@ GameDefinition _game({
           'id': 'traffic',
           'type': 'routed_motion',
           'config': {
-            'routes': _routes,
+            'routes': routes,
             'failureVariable': 'crashes',
             'movementMode': movementMode,
             'blockedBehavior': blockedBehavior,
             'allowUTurns': allowUTurns,
             'exitRequiresRoute': exitRequiresRoute,
+            if (routeSelectorLayer != null)
+              'routeSelectorLayer': routeSelectorLayer,
           },
         },
       ],
@@ -485,6 +504,103 @@ void main() {
           reason: scenario.name,
         );
       }
+    });
+
+    test('junction follows its local selector and waits without one', () {
+      final game = _game(
+        movementMode: 'until_blocked',
+        blockedBehavior: 'stop',
+        allowUTurns: false,
+        routeSelectorLayer: 'markers',
+        routes: {
+          ..._routes,
+          'junction_t': {
+            'left': {
+              'selector_up': 'up',
+              'selector_right': 'right',
+            },
+          },
+        },
+      );
+
+      TurnEngine buildEngine(String selectorKind) => _engine(
+            _levelJson(
+              size: const [3, 2],
+              ground: const [
+                {
+                  'position': [0, 1],
+                  'kind': 'road_h'
+                },
+                {
+                  'position': [1, 1],
+                  'kind': 'junction_t'
+                },
+                {
+                  'position': [2, 1],
+                  'kind': 'road_h'
+                },
+                {
+                  'position': [1, 0],
+                  'kind': 'road_v'
+                },
+              ],
+              objects: const [
+                {
+                  'position': [0, 1],
+                  'kind': 'truck',
+                  'heading': 'right',
+                  'color': 'red',
+                },
+              ],
+              markers: [
+                {
+                  'position': [1, 1],
+                  'kind': selectorKind,
+                },
+                {
+                  'position': selectorKind == 'selector_up'
+                      ? const [1, 0]
+                      : const [2, 1],
+                  'kind': 'exit_red',
+                  'color': 'red',
+                },
+              ],
+              withGoal: true,
+            ),
+            game: game,
+          );
+
+      for (final selector in ['selector_up', 'selector_right']) {
+        final engine = buildEngine(selector);
+        final result = engine.executeTurn(const GameAction('advance'));
+
+        expect(result.isWon, isTrue, reason: selector);
+        final path = result.events.singleWhere(
+          (event) => event.type == 'entity_path_moved',
+        );
+        expect(
+          path.payload['path'],
+          selector == 'selector_up'
+              ? const [Position(0, 1), Position(1, 1), Position(1, 0)]
+              : const [Position(0, 1), Position(1, 1), Position(2, 1)],
+        );
+      }
+
+      final waiting = buildEngine('selector_yellow');
+      final result = waiting.executeTurn(const GameAction('advance'));
+      expect(result.isWon, isFalse);
+      expect(
+        waiting.state.board.getEntity('objects', const Position(0, 1)),
+        isNotNull,
+      );
+      expect(
+        result.events.any(
+          (event) =>
+              event.type == 'routed_motion_blocked' &&
+              event.payload['reason'] == 'disconnected_road',
+        ),
+        isTrue,
+      );
     });
 
     test('stops at the last connected cell without crashing', () {

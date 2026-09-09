@@ -29,6 +29,7 @@ class RoutedMotionSystem extends GameSystem {
     final gateClosedTag = config['gateClosedTag'] as String? ?? 'route_closed';
     final gateEntrySideParam =
         config['gateEntrySideParam'] as String? ?? 'entrySide';
+    final routeSelectorLayerId = config['routeSelectorLayer'] as String?;
     final failureVariable =
         config['failureVariable'] as String? ?? 'routedMotionFailures';
     final rawRoutes =
@@ -62,6 +63,7 @@ class RoutedMotionSystem extends GameSystem {
         gateLayerId: gateLayerId,
         gateClosedTag: gateClosedTag,
         gateEntrySideParam: gateEntrySideParam,
+        routeSelectorLayerId: routeSelectorLayerId,
         failureVariable: failureVariable,
         routes: rawRoutes,
         blockedBehavior: config['blockedBehavior'] as String? ?? 'fail',
@@ -113,7 +115,14 @@ class RoutedMotionSystem extends GameSystem {
       final targetRoad = state.board.getEntity(routeLayerId, target);
       var nextHeading = targetRoad == null
           ? null
-          : _route(rawRoutes, targetRoad.kind, heading.opposite.toJson());
+          : _route(
+              state,
+              rawRoutes,
+              targetRoad.kind,
+              heading.opposite.toJson(),
+              target,
+              routeSelectorLayerId,
+            );
       if (bypassTargetRoute) nextHeading = heading.toJson();
       if (!bypassTargetRoute &&
           (nextHeading == null || !_cardinalNames.contains(nextHeading))) {
@@ -242,6 +251,7 @@ class RoutedMotionSystem extends GameSystem {
     required String? gateLayerId,
     required String gateClosedTag,
     required String gateEntrySideParam,
+    required String? routeSelectorLayerId,
     required String failureVariable,
     required Map<String, dynamic> routes,
     required String blockedBehavior,
@@ -343,7 +353,14 @@ class RoutedMotionSystem extends GameSystem {
         final targetRoad = state.board.getEntity(routeLayerId, target);
         var nextHeading = targetRoad == null
             ? null
-            : _route(routes, targetRoad.kind, heading.opposite.toJson());
+            : _route(
+                state,
+                routes,
+                targetRoad.kind,
+                heading.opposite.toJson(),
+                target,
+                routeSelectorLayerId,
+              );
         if (bypassTargetRoute) nextHeading = heading.toJson();
         if (!bypassTargetRoute &&
             (nextHeading == null || !_cardinalNames.contains(nextHeading))) {
@@ -536,19 +553,32 @@ class RoutedMotionSystem extends GameSystem {
       });
 
   String? _route(
+    LevelState state,
     Map<String, dynamic> routes,
     String roadKind,
     String incomingSide,
+    Position position,
+    String? selectorLayerId,
   ) {
     final raw = routes[roadKind];
     if (raw is! Map) return null;
     final value = raw[incomingSide];
-    return value is String ? value : null;
+    if (value is String) return value;
+    if (value is! Map || selectorLayerId == null) return null;
+    final selector = state.board.getEntity(selectorLayerId, position);
+    if (selector == null) return null;
+    final selected = value[selector.kind];
+    return selected is String ? selected : null;
   }
 
   bool _hasExit(Map<String, dynamic> routes, String roadKind, String heading) {
     final raw = routes[roadKind];
-    return raw is Map && raw.values.contains(heading);
+    if (raw is! Map) return false;
+    for (final value in raw.values) {
+      if (value == heading) return true;
+      if (value is Map && value.values.contains(heading)) return true;
+    }
+    return false;
   }
 
   bool _gateIsClosed(

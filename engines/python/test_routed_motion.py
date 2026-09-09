@@ -29,6 +29,8 @@ def _game(
     blocked_behavior="fail",
     allow_u_turns=True,
     exit_requires_route=True,
+    routes=None,
+    route_selector_layer=None,
 ) -> GameDef:
     kinds = {
         "void": {"layer": "ground", "tags": [], "symbol": "V"},
@@ -39,6 +41,11 @@ def _game(
         "corner_sw": {"layer": "ground", "tags": ["route"], "symbol": "3"},
         "corner_nw": {"layer": "ground", "tags": ["route"], "symbol": "4"},
         "u_turn": {"layer": "ground", "tags": ["route"], "symbol": "U"},
+        "junction_t": {
+            "layer": "ground",
+            "tags": ["route"],
+            "symbol": "+",
+        },
         "truck": {
             "layer": "objects",
             "tags": ["routed_mover", "cargo"],
@@ -46,6 +53,21 @@ def _game(
         },
         "barrier": {"layer": "objects", "tags": [], "symbol": "B"},
         "exit_red": {"layer": "markers", "tags": ["route_exit"], "symbol": "E"},
+        "selector_up": {
+            "layer": "markers",
+            "tags": ["route_selector"],
+            "symbol": "U",
+        },
+        "selector_right": {
+            "layer": "markers",
+            "tags": ["route_selector"],
+            "symbol": "R",
+        },
+        "selector_yellow": {
+            "layer": "markers",
+            "tags": ["route_selector"],
+            "symbol": "Y",
+        },
     }
     return GameDef.from_dict(
         {
@@ -78,12 +100,17 @@ def _game(
                     "id": "traffic",
                     "type": "routed_motion",
                     "config": {
-                        "routes": ROUTES,
+                        "routes": routes or ROUTES,
                         "failureVariable": "crashes",
                         "movementMode": movement_mode,
                         "blockedBehavior": blocked_behavior,
                         "allowUTurns": allow_u_turns,
                         "exitRequiresRoute": exit_requires_route,
+                        **(
+                            {"routeSelectorLayer": route_selector_layer}
+                            if route_selector_layer
+                            else {}
+                        ),
                     },
                 },
             ],
@@ -318,6 +345,87 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
                 self.assertEqual(
                     list(engine.state.board.layers["objects"].entries()), []
                 )
+
+    def test_junction_follows_its_local_selector_and_waits_without_one(self):
+        routes = {
+            **ROUTES,
+            "junction_t": {
+                "left": {
+                    "selector_up": "up",
+                    "selector_right": "right",
+                }
+            },
+        }
+        game = _game(
+            "until_blocked",
+            "stop",
+            False,
+            routes=routes,
+            route_selector_layer="markers",
+        )
+
+        def build_engine(selector_kind):
+            destination = [1, 0] if selector_kind == "selector_up" else [2, 1]
+            return TurnEngine(
+                game,
+                _level(
+                    size=(3, 2),
+                    ground=[
+                        {"position": [0, 1], "kind": "road_h"},
+                        {"position": [1, 1], "kind": "junction_t"},
+                        {"position": [2, 1], "kind": "road_h"},
+                        {"position": [1, 0], "kind": "road_v"},
+                    ],
+                    objects=[
+                        {
+                            "position": [0, 1],
+                            "kind": "truck",
+                            "heading": "right",
+                            "color": "red",
+                        }
+                    ],
+                    markers=[
+                        {"position": [1, 1], "kind": selector_kind},
+                        {
+                            "position": destination,
+                            "kind": "exit_red",
+                            "color": "red",
+                        },
+                    ],
+                    with_goal=True,
+                ),
+            )
+
+        expected_paths = {
+            "selector_up": [Pos(0, 1), Pos(1, 1), Pos(1, 0)],
+            "selector_right": [Pos(0, 1), Pos(1, 1), Pos(2, 1)],
+        }
+        for selector_kind, expected_path in expected_paths.items():
+            with self.subTest(selector=selector_kind):
+                engine = build_engine(selector_kind)
+                result = engine.execute_turn("advance")
+                self.assertTrue(result.is_won)
+                path = next(
+                    event
+                    for event in result.events
+                    if event["type"] == "entity_path_moved"
+                )
+                self.assertEqual(path["path"], expected_path)
+
+        waiting = build_engine("selector_yellow")
+        result = waiting.execute_turn("advance")
+        self.assertFalse(result.is_won)
+        self.assertIsNotNone(
+            waiting.state.board.get_entity("objects", Pos(0, 1))
+        )
+        self.assertIn(
+            "disconnected_road",
+            {
+                event["reason"]
+                for event in result.events
+                if event["type"] == "routed_motion_blocked"
+            },
+        )
 
     def test_disconnected_route_stops_without_crashing(self):
         level = _level(
