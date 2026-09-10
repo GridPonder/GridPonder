@@ -133,14 +133,14 @@ class GameEvent {
   static GameEvent entityPathMoved(List<Position> path, String kind,
           {Map<String, dynamic> params = const {},
           String layer = 'objects',
-          bool delivered = false}) =>
+          bool removedAtEnd = false}) =>
       GameEvent('entity_path_moved', {
         'position': path.last,
         'path': path,
         'kind': kind,
         'params': params,
         'layer': layer,
-        'delivered': delivered,
+        'removedAtEnd': removedAtEnd,
       });
 
   static GameEvent tilesSlid(String direction, int movedCount) =>

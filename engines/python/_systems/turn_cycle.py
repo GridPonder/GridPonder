@@ -13,9 +13,7 @@ class TurnCycleSystem(GameSystem):
     The system records whether the current action is a configured trigger during
     action resolution, then applies the cycle at its position in NPC resolution.
     Systems declared earlier observe the old kind; systems declared later
-    observe the new kind. A game can therefore place a signal clock before
-    routed movement when the light must change before vehicles decide whether
-    to move.
+    observe the new kind.
     """
 
     def __init__(self, sys_id: str):

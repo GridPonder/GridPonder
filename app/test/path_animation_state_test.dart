@@ -3,12 +3,12 @@ import 'package:gridponder_app/src/screens/path_animation_state.dart';
 import 'package:gridponder_engine/engine.dart';
 
 void main() {
-  test('path animation preserves params of an earlier transformed signal', () {
-    const signalPosition = Position(0, 0);
+  test('path animation preserves params of an earlier transformed entity', () {
+    const markerPosition = Position(0, 0);
     final markers = BoardLayer.empty(2, 1)
       ..setAt(
-        signalPosition,
-        const EntityInstance('signal_yellow_to_green', {'entrySide': 'left'}),
+        markerPosition,
+        const EntityInstance('phase_a', {'variant': 'left'}),
       );
     final preState = LevelState(
       board: Board(
@@ -22,35 +22,35 @@ void main() {
     );
     final events = [
       GameEvent.cellTransformed(
-        signalPosition,
-        'signal_yellow_to_green',
-        'signal_green',
+        markerPosition,
+        'phase_a',
+        'phase_b',
         'markers',
       ),
       GameEvent.entityPathMoved(
         const [Position(0, 0), Position(1, 0)],
-        'car_blue',
-        delivered: true,
+        'mover',
+        removedAtEnd: true,
       ),
       GameEvent.cellTransformed(
-        signalPosition,
-        'signal_green',
-        'signal_yellow_to_red',
+        markerPosition,
+        'phase_b',
+        'phase_c',
         'markers',
       ),
     ];
 
     final animationState = buildPathAnimationState(preState, events);
-    final animatedSignal = animationState.board.getEntity(
+    final animatedMarker = animationState.board.getEntity(
       'markers',
-      signalPosition,
+      markerPosition,
     )!;
 
-    expect(animatedSignal.kind, 'signal_green');
-    expect(animatedSignal.param('entrySide'), 'left');
+    expect(animatedMarker.kind, 'phase_b');
+    expect(animatedMarker.param('variant'), 'left');
     expect(
-      preState.board.getEntity('markers', signalPosition)!.kind,
-      'signal_yellow_to_green',
+      preState.board.getEntity('markers', markerPosition)!.kind,
+      'phase_a',
     );
   });
 }

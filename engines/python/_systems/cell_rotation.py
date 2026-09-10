@@ -37,7 +37,7 @@ class CellRotationSystem(GameSystem):
             return [ev.action_vetoed()]
 
         blocking_layers = config_list(config, "blockingLayers", ["objects"])
-        blocking_tags = config_list(config, "blockingTags", ["routed_mover"])
+        blocking_tags = config_list(config, "blockingTags", [])
         for blocking_layer in blocking_layers:
             blocker = state.board.get_entity(str(blocking_layer), position)
             if blocker is None:

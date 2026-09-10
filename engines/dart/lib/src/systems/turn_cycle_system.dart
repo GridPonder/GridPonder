@@ -10,8 +10,7 @@ import '../models/game_state.dart';
 /// Trigger actions are recorded during action resolution. The actual cycle is
 /// applied at this system's position in NPC resolution. Systems declared
 /// earlier in `game.json` observe the old kind; systems declared later observe
-/// the new kind. A game can therefore place a signal clock before routed
-/// movement when the light must change before vehicles decide whether to move.
+/// the new kind.
 class TurnCycleSystem extends GameSystem {
   bool _advanceThisTurn = false;
 

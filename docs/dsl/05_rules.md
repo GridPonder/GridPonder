@@ -306,7 +306,7 @@ simultaneous movement batch for renderers.
 | `layer` | string | Layer containing the entity. Defaults to `"objects"`. |
 
 ### `routed_motion_failed`
-A routed mover could not complete the current simultaneous traffic tick. The
+A routed mover could not complete the current simultaneous route tick. The
 board remains at its pre-tick positions; one event is emitted for each distinct
 mover/reason pair, followed by a `variable_changed` event for the configured
 failure counter.
@@ -316,7 +316,7 @@ failure counter.
 | `fromPosition` | `[x, y]` | Mover's unchanged position. |
 | `position` | `[x, y]` | Intended destination, or the source for a source-route error. |
 | `kind` | string | Mover entity kind. |
-| `reason` | string | `invalid_heading`, `invalid_source_route`, `left_board`, `disconnected_road`, `closed_gate`, `occupied`, `wrong_exit`, `same_destination`, `head_on`, or `blocked_by_mover`. |
+| `reason` | string | `invalid_heading`, `invalid_source_route`, `left_board`, `disconnected_route`, `closed_gate`, `occupied`, `wrong_exit`, `same_destination`, `head_on`, or `blocked_by_mover`. |
 
 ### `entity_path_moved`
 A routed entity travelled through two or more cells during one accepted action.
@@ -329,7 +329,7 @@ The path includes both its starting cell and final cell.
 | `kind` | string | Moving entity kind. |
 | `params` | object | Entity parameters after travel. |
 | `layer` | string | Layer containing the entity. |
-| `delivered` | boolean | Whether the entity left the board through a matching exit at the final cell. |
+| `removedAtEnd` | boolean | Whether the entity was removed after reaching the final cell. |
 
 ### `routed_motion_blocked`
 A continuous routed mover stopped safely rather than failing the turn.

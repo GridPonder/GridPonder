@@ -226,7 +226,7 @@ class PhaseRunner {
             final params =
                 (event.payload['params'] as Map?)?.cast<String, dynamic>() ??
                     const <String, dynamic>{};
-            final dur = _motionDurationMs(kind, 'moveDurationMs', 130);
+            final dur = _motionDurationMs(kind, 'pathStepDurationMs', 80);
             out.add(AnimationStep.entityPath(
               path,
               kind,
@@ -234,7 +234,7 @@ class PhaseRunner {
               durationMs: dur,
               stage: motionStage,
               params: params,
-              delivered: event.payload['delivered'] as bool? ?? false,
+              removedAtEnd: event.payload['removedAtEnd'] as bool? ?? false,
             ));
           }
         }

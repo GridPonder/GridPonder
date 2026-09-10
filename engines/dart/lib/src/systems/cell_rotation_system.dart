@@ -39,14 +39,12 @@ class CellRotationSystem extends GameSystem {
       return [GameEvent.actionVetoed()];
     }
 
-    final blockingLayers =
-        (config['blockingLayers'] as List<dynamic>? ??
-                const <dynamic>['objects'])
-            .map((value) => value.toString())
-            .toList();
+    final blockingLayers = (config['blockingLayers'] as List<dynamic>? ??
+            const <dynamic>['objects'])
+        .map((value) => value.toString())
+        .toList();
     final blockingTags =
-        (config['blockingTags'] as List<dynamic>? ??
-                const <dynamic>['routed_mover'])
+        (config['blockingTags'] as List<dynamic>? ?? const <dynamic>[])
             .map((value) => value.toString())
             .toList();
 

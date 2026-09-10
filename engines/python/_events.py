@@ -56,7 +56,7 @@ def entity_path_moved(
     kind: str,
     params: dict | None = None,
     layer: str = "objects",
-    delivered: bool = False,
+    removed_at_end: bool = False,
 ) -> dict:
     """An entity followed an ordered multi-cell route in one turn."""
     return {
@@ -66,7 +66,7 @@ def entity_path_moved(
         "kind": kind,
         "params": params or {},
         "layer": layer,
-        "delivered": delivered,
+        "removedAtEnd": removed_at_end,
     }
 
 

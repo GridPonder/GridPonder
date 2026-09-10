@@ -85,7 +85,7 @@ class AnimationStep {
               80, // per step; total = durationMs * (path.length-1)
           int stage = 0,
           Map<String, dynamic> params = const {},
-          bool delivered = false}) =>
+          bool removedAtEnd = false}) =>
       AnimationStep(
           type: 'entity_path',
           position: path.last,
@@ -97,7 +97,7 @@ class AnimationStep {
             'layer': layer,
             'params': params,
             'stepDurationMs': durationMs,
-            'delivered': delivered,
+            'removedAtEnd': removedAtEnd,
           });
 
   static AnimationStep entityMerge(

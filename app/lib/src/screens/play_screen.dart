@@ -41,7 +41,7 @@ typedef _PathMover = ({
   EntityInstance entity,
   String layer,
   int stepDurationMs,
-  bool delivered,
+  bool removedAtEnd,
 });
 
 class PlayScreen extends StatefulWidget {
@@ -324,10 +324,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       });
     }
 
-    // Path-following movement happens after action/cascade transforms. Replay
-    // those earlier cell changes into the held animation board so a vehicle
-    // visibly drives over the road orientation the player just created.
-    final pathPreState = buildPathAnimationState(preState, result.events);
+    LevelState? pathPreState;
 
     // Stage-aware playback for new motion primitives.
     // Group remaining animations by stage; play each stage to completion
@@ -369,7 +366,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         await _playSlideMotion(preState, moves, clearedCells: clearedCells);
       }
       if (paths.isNotEmpty) {
-        await _playPathMotion(pathPreState, paths, clearedCells: clearedCells);
+        pathPreState ??= buildPathAnimationState(preState, result.events);
+        await _playPathMotion(pathPreState!, paths, clearedCells: clearedCells);
       }
       for (final step in anims) {
         if (!mounted) return;
@@ -993,7 +991,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         entity: EntityInstance(step.entityKind ?? '', params),
         layer: step.extra['layer'] as String? ?? 'objects',
         stepDurationMs: stepDurationMs,
-        delivered: step.extra['delivered'] as bool? ?? false,
+        removedAtEnd: step.extra['removedAtEnd'] as bool? ?? false,
       ));
     }
     if (movers.isEmpty) return;
@@ -1035,7 +1033,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     final postState = animState.copy();
     for (final mover in movers) {
-      if (!mover.delivered &&
+      if (!mover.removedAtEnd &&
           postState.board.getEntity(mover.layer, mover.path.last) == null) {
         postState.board.setEntity(mover.layer, mover.path.last, mover.entity);
       }

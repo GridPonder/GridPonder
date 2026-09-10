@@ -28,8 +28,8 @@ import 'tile_teleport_system.dart';
 import 'turn_cycle_system.dart';
 
 /// Creates a GameSystem instance from a SystemDef.
-typedef SystemFactory =
-    GameSystem Function(String id, Map<String, dynamic> config);
+typedef SystemFactory = GameSystem Function(
+    String id, Map<String, dynamic> config);
 
 class SystemRegistry {
   static final Map<String, SystemFactory> _factories = {
@@ -37,8 +37,7 @@ class SystemRegistry {
     'avatar_navigation': (id, _) => AvatarNavigationSystem(id: id),
     'cell_rotation': (id, _) => CellRotationSystem(id: id),
     'coupled_actors': (id, _) => CoupledActorsSystem(id: id),
-    'elastic_block': (id, config) =>
-        ElasticBlockSystem(id: id, config: config),
+    'elastic_block': (id, config) => ElasticBlockSystem(id: id, config: config),
     'individual_actors': (id, _) => IndividualActorsSystem(id: id),
     'push_objects': (id, _) => PushObjectsSystem(id: id),
     'portals': (id, _) => PortalsSystem(id: id),

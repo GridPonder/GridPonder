@@ -86,6 +86,8 @@ def _game(*, signal_first: bool = False) -> GameDef:
                         },
                         "movementMode": "until_blocked",
                         "blockedBehavior": "stop",
+                        "matchParam": "color",
+                        "exitMatchParam": "color",
                         "gateLayer": "markers",
                     },
                 },

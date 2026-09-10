@@ -20,7 +20,7 @@ class _Intent:
     mover: _Mover
     target: Pos
     next_heading: str
-    delivered: bool
+    removed_at_end: bool
 
 
 @dataclass
@@ -37,7 +37,7 @@ class _FlowMover:
     entity: Entity
     path: list[Pos]
     active: bool = True
-    delivered: bool = False
+    removed_at_end: bool = False
 
 
 @dataclass
@@ -45,7 +45,74 @@ class _FlowIntent:
     flow: _FlowMover
     target: Pos
     next_heading: str
-    delivered: bool
+    removed_at_end: bool
+
+
+@dataclass
+class _StepPlan:
+    target: Pos
+    next_heading: str | None = None
+    removed_at_end: bool = False
+    failure_reason: str | None = None
+
+
+@dataclass(frozen=True)
+class _RouteConfig:
+    mover_layer_id: str
+    mover_tag: str
+    route_layer_id: str
+    heading_param: str
+    match_param: str | None
+    exit_layer_id: str
+    exit_tag: str
+    exit_match_param: str | None
+    exit_requires_route: bool
+    gate_layer_id: str | None
+    gate_closed_tag: str
+    gate_entry_side_param: str
+    route_selector_layer_id: str | None
+    failure_variable: str
+    routes: dict
+    movement_mode: str
+    blocked_behavior: str
+    allow_u_turns: bool
+    max_travel_steps: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "_RouteConfig":
+        match_param = data.get("matchParam")
+        if not isinstance(match_param, str) or not match_param:
+            match_param = None
+        exit_match_param = data.get("exitMatchParam", match_param)
+        if match_param is None:
+            exit_match_param = None
+        return cls(
+            mover_layer_id=str(data.get("moverLayer", "objects")),
+            mover_tag=str(data.get("moverTag", "routed_mover")),
+            route_layer_id=str(data.get("routeLayer", "ground")),
+            heading_param=str(data.get("headingParam", "heading")),
+            match_param=match_param,
+            exit_layer_id=str(data.get("exitLayer", "markers")),
+            exit_tag=str(data.get("exitTag", "route_exit")),
+            exit_match_param=(
+                str(exit_match_param) if exit_match_param is not None else None
+            ),
+            exit_requires_route=bool(data.get("exitRequiresRoute", True)),
+            gate_layer_id=data.get("gateLayer"),
+            gate_closed_tag=str(data.get("gateClosedTag", "route_closed")),
+            gate_entry_side_param=str(
+                data.get("gateEntrySideParam", "entrySide")
+            ),
+            route_selector_layer_id=data.get("routeSelectorLayer"),
+            failure_variable=str(
+                data.get("failureVariable", "routedMotionFailures")
+            ),
+            routes=data.get("routes") or {},
+            movement_mode=str(data.get("movementMode", "single_step")),
+            blocked_behavior=str(data.get("blockedBehavior", "fail")),
+            allow_u_turns=bool(data.get("allowUTurns", True)),
+            max_travel_steps=data.get("maxTravelSteps"),
+        )
 
 
 class RoutedMotionSystem(GameSystem):
@@ -55,62 +122,25 @@ class RoutedMotionSystem(GameSystem):
     def execute_npc_resolution(
         self, state: GameState, game: GameDef
     ) -> list[dict]:
-        config = game.system_config(self.id)
-        mover_layer_id = config.get("moverLayer", "objects")
-        mover_tag = config.get("moverTag", "routed_mover")
-        route_layer_id = config.get("routeLayer", "ground")
-        heading_param = config.get("headingParam", "heading")
-        color_param = config.get("colorParam", "color")
-        exit_layer_id = config.get("exitLayer", "markers")
-        exit_tag = config.get("exitTag", "route_exit")
-        exit_color_param = config.get("exitColorParam", color_param)
-        exit_requires_route = bool(config.get("exitRequiresRoute", True))
-        gate_layer_id = config.get("gateLayer")
-        gate_closed_tag = config.get("gateClosedTag", "route_closed")
-        gate_entry_side_param = config.get(
-            "gateEntrySideParam", "entrySide"
-        )
-        route_selector_layer_id = config.get("routeSelectorLayer")
-        failure_variable = config.get(
-            "failureVariable", "routedMotionFailures"
-        )
-        routes = config.get("routes") or {}
-        movement_mode = config.get("movementMode", "single_step")
+        config = _RouteConfig.from_dict(game.system_config(self.id))
 
-        mover_layer = state.board.layers.get(mover_layer_id)
+        mover_layer = state.board.layers.get(config.mover_layer_id)
         if mover_layer is None:
             return []
         movers = [
             _Mover(position, entity)
             for position, entity in mover_layer.entries()
-            if game.has_tag(entity.kind, mover_tag)
+            if game.has_tag(entity.kind, config.mover_tag)
         ]
         if not movers:
             return []
 
-        if movement_mode == "until_blocked":
+        if config.movement_mode == "until_blocked":
             return self._execute_until_blocked(
                 state,
                 game,
                 movers,
-                mover_layer_id=mover_layer_id,
-                mover_tag=mover_tag,
-                route_layer_id=route_layer_id,
-                heading_param=heading_param,
-                color_param=color_param,
-                exit_layer_id=exit_layer_id,
-                exit_tag=exit_tag,
-                exit_color_param=exit_color_param,
-                exit_requires_route=exit_requires_route,
-                gate_layer_id=gate_layer_id,
-                gate_closed_tag=gate_closed_tag,
-                gate_entry_side_param=gate_entry_side_param,
-                route_selector_layer_id=route_selector_layer_id,
-                failure_variable=failure_variable,
-                routes=routes,
-                blocked_behavior=config.get("blockedBehavior", "fail"),
-                allow_u_turns=bool(config.get("allowUTurns", True)),
-                max_travel_steps=config.get("maxTravelSteps"),
+                config,
             )
 
         mover_by_position = {mover.position: mover for mover in movers}
@@ -118,84 +148,18 @@ class RoutedMotionSystem(GameSystem):
         failures: list[_Failure] = []
 
         for mover in movers:
-            heading = mover.entity.param(heading_param)
-            if heading not in CARDINALS:
-                failures.append(
-                    _Failure(mover, mover.position, "invalid_heading")
-                )
+            step = self._plan_step(state, game, mover, config)
+            if step.failure_reason is not None:
+                failures.append(_Failure(mover, step.target, step.failure_reason))
                 continue
-
-            source_road = state.board.get_entity(
-                route_layer_id, mover.position
+            intents.append(
+                _Intent(
+                    mover,
+                    step.target,
+                    step.next_heading,
+                    step.removed_at_end,
+                )
             )
-            if source_road is None or not self._has_exit(
-                routes, source_road.kind, heading
-            ):
-                failures.append(
-                    _Failure(mover, mover.position, "invalid_source_route")
-                )
-                continue
-
-            target = mover.position.moved(heading)
-            if not state.board.is_in_bounds(target):
-                failures.append(_Failure(mover, target, "left_board"))
-                continue
-
-            exit_entity = state.board.get_entity(exit_layer_id, target)
-            is_exit = exit_entity is not None and game.has_tag(
-                exit_entity.kind, exit_tag
-            )
-            exit_matches = is_exit and mover.entity.param(
-                color_param
-            ) == exit_entity.param(exit_color_param)
-            bypass_target_route = exit_matches and not exit_requires_route
-            target_road = state.board.get_entity(route_layer_id, target)
-            next_heading = (
-                self._route(
-                    state,
-                    routes,
-                    target_road.kind,
-                    dir_opposite(heading),
-                    target,
-                    route_selector_layer_id,
-                )
-                if target_road is not None
-                else None
-            )
-            if bypass_target_route:
-                next_heading = heading
-            if not bypass_target_route and next_heading not in CARDINALS:
-                failures.append(
-                    _Failure(mover, target, "disconnected_road")
-                )
-                continue
-
-            if self._gate_is_closed(
-                state,
-                game,
-                target,
-                dir_opposite(heading),
-                gate_layer_id,
-                gate_closed_tag,
-                gate_entry_side_param,
-            ):
-                failures.append(_Failure(mover, target, "closed_gate"))
-                continue
-
-            occupant = mover_layer.get(target)
-            if occupant is not None and not game.has_tag(
-                occupant.kind, mover_tag
-            ):
-                failures.append(_Failure(mover, target, "occupied"))
-                continue
-
-            if is_exit and mover.entity.param(color_param) != exit_entity.param(
-                exit_color_param
-            ):
-                failures.append(_Failure(mover, target, "wrong_exit"))
-                continue
-
-            intents.append(_Intent(mover, target, next_heading, is_exit))
 
         intents_by_target: dict[Pos, list[_Intent]] = {}
         for intent in intents:
@@ -225,9 +189,9 @@ class RoutedMotionSystem(GameSystem):
                 )
 
         if failures:
-            old_value = int(state.variables.get(failure_variable, 0))
+            old_value = int(state.variables.get(config.failure_variable, 0))
             new_value = old_value + 1
-            state.variables[failure_variable] = new_value
+            state.variables[config.failure_variable] = new_value
             failure_events = [
                 {
                     "type": "routed_motion_failed",
@@ -239,7 +203,7 @@ class RoutedMotionSystem(GameSystem):
                 for failure in self._dedupe_failures(failures)
             ]
             return failure_events + [
-                ev.variable_changed(failure_variable, old_value, new_value)
+                ev.variable_changed(config.failure_variable, old_value, new_value)
             ]
 
         for mover in movers:
@@ -248,17 +212,17 @@ class RoutedMotionSystem(GameSystem):
         events: list[dict] = []
         for intent in intents:
             params = dict(intent.mover.entity.params)
-            params[heading_param] = intent.next_heading
+            params[config.heading_param] = intent.next_heading
             events.append(
                 ev.tile_moved(
                     intent.mover.position,
                     intent.target,
                     intent.mover.entity.kind,
                     params=params,
-                    layer=mover_layer_id,
+                    layer=config.mover_layer_id,
                 )
             )
-            if intent.delivered:
+            if intent.removed_at_end:
                 events.append(
                     ev.object_removed(
                         intent.target, intent.mover.entity.kind
@@ -276,27 +240,9 @@ class RoutedMotionSystem(GameSystem):
         state: GameState,
         game: GameDef,
         movers: list[_Mover],
-        *,
-        mover_layer_id: str,
-        mover_tag: str,
-        route_layer_id: str,
-        heading_param: str,
-        color_param: str,
-        exit_layer_id: str,
-        exit_tag: str,
-        exit_color_param: str,
-        exit_requires_route: bool,
-        gate_layer_id,
-        gate_closed_tag: str,
-        gate_entry_side_param: str,
-        route_selector_layer_id,
-        failure_variable: str,
-        routes: dict,
-        blocked_behavior: str,
-        allow_u_turns: bool,
-        max_travel_steps,
+        config: _RouteConfig,
     ) -> list[dict]:
-        mover_layer = state.board.layers[mover_layer_id]
+        mover_layer = state.board.layers[config.mover_layer_id]
         flows = [
             _FlowMover(i, mover.position, mover.entity, [mover.position])
             for i, mover in enumerate(movers)
@@ -306,8 +252,10 @@ class RoutedMotionSystem(GameSystem):
         seen_states: set[tuple] = set()
         default_limit = state.board.width * state.board.height * 4 * len(flows)
         travel_limit = (
-            max_travel_steps
-            if isinstance(max_travel_steps, int) and max_travel_steps > 0
+            config.max_travel_steps
+            if isinstance(config.max_travel_steps, int)
+            and not isinstance(config.max_travel_steps, bool)
+            and config.max_travel_steps > 0
             else max(1, default_limit)
         )
         rounds = 0
@@ -317,11 +265,11 @@ class RoutedMotionSystem(GameSystem):
                 (
                     flow.index,
                     flow.position,
-                    flow.entity.param(heading_param),
+                    flow.entity.param(config.heading_param),
                     flow.active,
                 )
                 for flow in flows
-                if not flow.delivered
+                if not flow.removed_at_end
             )
             if signature in seen_states:
                 for flow in flows:
@@ -348,7 +296,9 @@ class RoutedMotionSystem(GameSystem):
             rounds += 1
 
             flow_by_position = {
-                flow.position: flow for flow in flows if not flow.delivered
+                flow.position: flow
+                for flow in flows
+                if not flow.removed_at_end
             }
             intents: dict[_FlowMover, _FlowIntent] = {}
             blocked: dict[_FlowMover, _Failure] = {}
@@ -356,92 +306,18 @@ class RoutedMotionSystem(GameSystem):
             for flow in flows:
                 if not flow.active:
                     continue
-                heading = flow.entity.param(heading_param)
                 mover = _Mover(flow.position, flow.entity)
-                if heading not in CARDINALS:
+                step = self._plan_step(state, game, mover, config)
+                if step.failure_reason is not None:
                     blocked[flow] = _Failure(
-                        mover, flow.position, "invalid_heading"
+                        mover, step.target, step.failure_reason
                     )
                     continue
-
-                source_road = state.board.get_entity(
-                    route_layer_id, flow.position
-                )
-                if source_road is None or not self._has_exit(
-                    routes, source_road.kind, heading
-                ):
-                    blocked[flow] = _Failure(
-                        mover, flow.position, "invalid_source_route"
-                    )
-                    continue
-
-                target = flow.position.moved(heading)
-                if not state.board.is_in_bounds(target):
-                    blocked[flow] = _Failure(mover, target, "left_board")
-                    continue
-
-                exit_entity = state.board.get_entity(exit_layer_id, target)
-                is_exit = exit_entity is not None and game.has_tag(
-                    exit_entity.kind, exit_tag
-                )
-                exit_matches = is_exit and flow.entity.param(
-                    color_param
-                ) == exit_entity.param(exit_color_param)
-                bypass_target_route = (
-                    exit_matches and not exit_requires_route
-                )
-                target_road = state.board.get_entity(route_layer_id, target)
-                next_heading = (
-                    self._route(
-                        state,
-                        routes,
-                        target_road.kind,
-                        dir_opposite(heading),
-                        target,
-                        route_selector_layer_id,
-                    )
-                    if target_road is not None
-                    else None
-                )
-                if bypass_target_route:
-                    next_heading = heading
-                if not bypass_target_route and next_heading not in CARDINALS:
-                    blocked[flow] = _Failure(
-                        mover, target, "disconnected_road"
-                    )
-                    continue
-                if self._gate_is_closed(
-                    state,
-                    game,
-                    target,
-                    dir_opposite(heading),
-                    gate_layer_id,
-                    gate_closed_tag,
-                    gate_entry_side_param,
-                ):
-                    blocked[flow] = _Failure(
-                        mover, target, "closed_gate"
-                    )
-                    continue
-                if not allow_u_turns and next_heading == dir_opposite(heading):
-                    blocked[flow] = _Failure(mover, target, "u_turn")
-                    continue
-
-                occupant = mover_layer.get(target)
-                if occupant is not None and not game.has_tag(
-                    occupant.kind, mover_tag
-                ):
-                    blocked[flow] = _Failure(mover, target, "occupied")
-                    continue
-
-                if is_exit and flow.entity.param(
-                    color_param
-                ) != exit_entity.param(exit_color_param):
-                    blocked[flow] = _Failure(mover, target, "wrong_exit")
-                    continue
-
                 intents[flow] = _FlowIntent(
-                    flow, target, next_heading, is_exit
+                    flow,
+                    step.target,
+                    step.next_heading,
+                    step.removed_at_end,
                 )
 
             by_target: dict[Pos, list[_FlowIntent]] = {}
@@ -489,7 +365,7 @@ class RoutedMotionSystem(GameSystem):
                         )
                         propagated = True
 
-            if blocked_behavior == "fail" and blocked:
+            if config.blocked_behavior == "fail" and blocked:
                 failures.extend(blocked.values())
                 for flow in flows:
                     if flow.active:
@@ -515,12 +391,12 @@ class RoutedMotionSystem(GameSystem):
             for intent in moving:
                 flow = intent.flow
                 params = dict(flow.entity.params)
-                params[heading_param] = intent.next_heading
+                params[config.heading_param] = intent.next_heading
                 flow.position = intent.target
                 flow.entity = Entity(flow.entity.kind, params)
                 flow.path.append(intent.target)
-                if intent.delivered:
-                    flow.delivered = True
+                if intent.removed_at_end:
+                    flow.removed_at_end = True
                     flow.active = False
                 else:
                     mover_layer.set(flow.position, flow.entity)
@@ -530,8 +406,8 @@ class RoutedMotionSystem(GameSystem):
                 flow.path,
                 flow.entity.kind,
                 params=flow.entity.params,
-                layer=mover_layer_id,
-                delivered=flow.delivered,
+                layer=config.mover_layer_id,
+                removed_at_end=flow.removed_at_end,
             )
             for flow in flows
             if len(flow.path) > 1
@@ -539,14 +415,14 @@ class RoutedMotionSystem(GameSystem):
         events.extend(
             ev.object_removed(flow.position, flow.entity.kind)
             for flow in flows
-            if flow.delivered
+            if flow.removed_at_end
         )
         events.extend(blocked_events)
 
         if failures:
-            old_value = int(state.variables.get(failure_variable, 0))
+            old_value = int(state.variables.get(config.failure_variable, 0))
             new_value = old_value + 1
-            state.variables[failure_variable] = new_value
+            state.variables[config.failure_variable] = new_value
             events.extend(
                 {
                     "type": "routed_motion_failed",
@@ -558,9 +434,97 @@ class RoutedMotionSystem(GameSystem):
                 for failure in self._dedupe_failures(failures)
             )
             events.append(
-                ev.variable_changed(failure_variable, old_value, new_value)
+                ev.variable_changed(config.failure_variable, old_value, new_value)
             )
         return events
+
+    def _plan_step(
+        self,
+        state: GameState,
+        game: GameDef,
+        mover: _Mover,
+        config: _RouteConfig,
+    ) -> _StepPlan:
+        heading = mover.entity.param(config.heading_param)
+        if heading not in CARDINALS:
+            return _StepPlan(mover.position, failure_reason="invalid_heading")
+
+        source_route = state.board.get_entity(
+            config.route_layer_id, mover.position
+        )
+        if source_route is None or not self._has_exit(
+            config.routes, source_route.kind, heading
+        ):
+            return _StepPlan(
+                mover.position, failure_reason="invalid_source_route"
+            )
+
+        target = mover.position.moved(heading)
+        if not state.board.is_in_bounds(target):
+            return _StepPlan(target, failure_reason="left_board")
+
+        exit_entity = state.board.get_entity(config.exit_layer_id, target)
+        is_exit = exit_entity is not None and game.has_tag(
+            exit_entity.kind, config.exit_tag
+        )
+        if is_exit and not self._exit_matches(
+            mover.entity, exit_entity, config
+        ):
+            return _StepPlan(target, failure_reason="wrong_exit")
+
+        bypass_target_route = is_exit and not config.exit_requires_route
+        target_route = state.board.get_entity(config.route_layer_id, target)
+        next_heading = (
+            self._route(
+                state,
+                config.routes,
+                target_route.kind,
+                dir_opposite(heading),
+                target,
+                config.route_selector_layer_id,
+            )
+            if target_route is not None
+            else None
+        )
+        if bypass_target_route:
+            next_heading = heading
+        if not bypass_target_route and next_heading not in CARDINALS:
+            return _StepPlan(target, failure_reason="disconnected_route")
+
+        if self._gate_is_closed(
+            state,
+            game,
+            target,
+            dir_opposite(heading),
+            config,
+        ):
+            return _StepPlan(target, failure_reason="closed_gate")
+        if not config.allow_u_turns and next_heading == dir_opposite(heading):
+            return _StepPlan(target, failure_reason="u_turn")
+
+        occupant = state.board.get_entity(config.mover_layer_id, target)
+        if occupant is not None and not game.has_tag(
+            occupant.kind, config.mover_tag
+        ):
+            return _StepPlan(target, failure_reason="occupied")
+
+        return _StepPlan(
+            target,
+            next_heading=next_heading,
+            removed_at_end=is_exit,
+        )
+
+    @staticmethod
+    def _exit_matches(
+        mover: Entity,
+        exit_entity: Entity,
+        config: _RouteConfig,
+    ) -> bool:
+        if config.match_param is None:
+            return True
+        return mover.param(config.match_param) == exit_entity.param(
+            config.exit_match_param
+        )
 
     @staticmethod
     def _blocked_event(flow: _FlowMover, target: Pos, reason: str) -> dict:
@@ -576,15 +540,15 @@ class RoutedMotionSystem(GameSystem):
     def _route(
         state: GameState,
         routes: dict,
-        road_kind: str,
+        route_kind: str,
         incoming_side: str,
         position: Pos,
         selector_layer_id,
     ):
-        road_routes = routes.get(road_kind)
-        if not isinstance(road_routes, dict):
+        route_options = routes.get(route_kind)
+        if not isinstance(route_options, dict):
             return None
-        value = road_routes.get(incoming_side)
+        value = route_options.get(incoming_side)
         if isinstance(value, str):
             return value
         if not isinstance(value, dict) or not selector_layer_id:
@@ -596,14 +560,14 @@ class RoutedMotionSystem(GameSystem):
         return selected if isinstance(selected, str) else None
 
     @staticmethod
-    def _has_exit(routes: dict, road_kind: str, heading: str) -> bool:
-        road_routes = routes.get(road_kind)
-        if not isinstance(road_routes, dict):
+    def _has_exit(routes: dict, route_kind: str, heading: str) -> bool:
+        route_options = routes.get(route_kind)
+        if not isinstance(route_options, dict):
             return False
         return any(
             value == heading
             or (isinstance(value, dict) and heading in value.values())
-            for value in road_routes.values()
+            for value in route_options.values()
         )
 
     @staticmethod
@@ -612,16 +576,15 @@ class RoutedMotionSystem(GameSystem):
         game: GameDef,
         target: Pos,
         incoming_side: str,
-        gate_layer_id,
-        gate_closed_tag: str,
-        gate_entry_side_param: str,
+        config: _RouteConfig,
     ) -> bool:
+        gate_layer_id = config.gate_layer_id
         if not isinstance(gate_layer_id, str) or not gate_layer_id:
             return False
         gate = state.board.get_entity(gate_layer_id, target)
-        if gate is None or not game.has_tag(gate.kind, gate_closed_tag):
+        if gate is None or not game.has_tag(gate.kind, config.gate_closed_tag):
             return False
-        controlled_side = gate.param(gate_entry_side_param)
+        controlled_side = gate.param(config.gate_entry_side_param)
         return controlled_side in (None, "any", incoming_side)
 
     @staticmethod

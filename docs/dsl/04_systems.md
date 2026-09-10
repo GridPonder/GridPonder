@@ -1381,7 +1381,7 @@ arrows, valves, and similar orientation states.
 | `layer` | string | `"ground"` | Layer containing the rotatable entity. |
 | `cycles` | object | `{}` | Current kind → next kind map. Closed cycles are authored by mapping the final orientation back to the first. |
 | `blockingLayers` | array of strings | `["objects"]` | Layers checked before rotation. |
-| `blockingTags` | array of strings | `["routed_mover"]` | A blocker vetoes rotation when it has any listed tag. An empty list makes every entity on a blocking layer block. |
+| `blockingTags` | array of strings | `[]` | A blocker vetoes rotation when it has any listed tag. An empty list makes every entity on a blocking layer block. |
 
 An invalid position, a kind absent from `cycles`, an unknown next kind, or a
 blocked cell vetoes the entire action. A vetoed rotation does not advance the
@@ -1422,27 +1422,27 @@ connected route until the mover reaches a break, exit, or closed cycle.
 | `routeLayer` | string | `"ground"` | Layer holding route tiles. |
 | `routeSelectorLayer` | string | unset | Optional layer whose entity kind selects one branch of a nested route entry on the destination cell. Missing or unmapped selectors leave that approach disconnected. |
 | `headingParam` | string | `"heading"` | Mover parameter containing its next cardinal direction. |
-| `colorParam` | string | `"color"` | Mover parameter matched against an exit. |
+| `matchParam` | string | unset | Optional mover parameter matched against an exit. When unset, every tagged exit matches. |
 | `exitLayer` | string | `"markers"` | Layer holding exits. |
 | `exitTag` | string | `"route_exit"` | Tag identifying exit entities. |
-| `exitColorParam` | string | value of `colorParam` | Exit parameter matched against the mover. |
+| `exitMatchParam` | string | value of `matchParam` | Exit parameter matched against the mover. |
 | `exitRequiresRoute` | boolean | `true` | Whether the destination cell's route must accept the mover's incoming side. Set `false` when a matching exit itself accepts arrival from any direction. |
 | `gateLayer` | string | unset | Optional layer holding local route gates. When unset, gate checks are disabled. |
 | `gateClosedTag` | string | `"route_closed"` | Tag identifying a gate state that blocks movement. |
 | `gateEntrySideParam` | string | `"entrySide"` | Gate parameter naming the one incoming side it controls. Missing or `"any"` blocks every approach. |
-| `failureVariable` | string | `"routedMotionFailures"` | Counter incremented once when a traffic tick fails. |
+| `failureVariable` | string | `"routedMotionFailures"` | Counter incremented once when a route tick fails. |
 | `movementMode` | string | `"single_step"` | `"single_step"` advances one cell; `"until_blocked"` repeatedly advances through connected route cells in the same turn. |
 | `blockedBehavior` | string | `"fail"` | In `until_blocked` mode, `"stop"` leaves blocked movers safely in place and emits `routed_motion_blocked`; `"fail"` retains failure-counter behavior. |
-| `allowUTurns` | boolean | `true` | Whether a route may send a mover directly back toward the cell it just left. Set `false` for forward-only vehicles. |
+| `allowUTurns` | boolean | `true` | Whether a route may send a mover directly back toward the cell it just left. Applies to both movement modes. |
 | `maxTravelSteps` | integer | board area × 4 × mover count | Positive safety bound for continuous microsteps. Repeated route state normally terminates first. |
 | `routes` | object | `{}` | Route kind → incoming side → outgoing direction, or route kind → incoming side → selector kind → outgoing direction when `routeSelectorLayer` is set. Each bidirectional path declares both directions. |
 
 In `single_step` mode, all movers read one board snapshot and commit together.
 A tick fails atomically if a mover leaves the board, lacks a valid source or
-destination connection, enters a non-mover, reaches a wrong-colour exit, swaps
+destination connection, enters a non-mover, reaches a non-matching exit, swaps
 head-on, shares a destination, or is blocked by a mover that cannot leave. No
 mover changes cells on a failed tick. A convoy may enter cells vacated by its
-leading vehicles in the same successful tick.
+leading movers in the same successful tick.
 
 When `gateLayer` is configured, a closed gate on the destination cell blocks
 only movers entering from its configured side. The incoming side is the
@@ -1466,9 +1466,10 @@ renderers can animate corners faithfully. If the complete routed state repeats,
 the system has traversed a closed cycle: it emits `routed_motion_blocked` with
 reason `route_cycle` and ends the resolution instead of looping forever.
 
-When a mover reaches a matching exit it emits its final `tile_moved`, is removed
-instead of being stored at the destination, and emits `object_removed`. This
-allows an `all_cleared` goal on the mover's cargo tag.
+When a mover reaches a matching exit it is removed instead of being stored at
+the destination and emits `object_removed`. Single-step movement also emits
+`tile_moved`; continuous movement records the final cell in
+`entity_path_moved`. This allows an `all_cleared` goal on the mover tag.
 
 ```json
 {
@@ -1478,6 +1479,8 @@ allows an `all_cleared` goal on the mover's cargo tag.
     "movementMode": "until_blocked",
     "blockedBehavior": "stop",
     "allowUTurns": false,
+    "matchParam": "channel",
+    "exitMatchParam": "channel",
     "routeSelectorLayer": "markers",
     "routes": {
       "road_h": {"left": "right", "right": "left"},

@@ -16,6 +16,7 @@ GameDefinition _game({
   String blockedBehavior = 'fail',
   bool allowUTurns = true,
   bool exitRequiresRoute = true,
+  String? matchParam = 'color',
   Map<String, dynamic> routes = _routes,
   String? routeSelectorLayer,
 }) =>
@@ -71,6 +72,10 @@ GameDefinition _game({
           'layer': 'objects',
           'tags': ['routed_mover', 'cargo'],
           'symbol': 'T',
+          'motion': {
+            'moveDurationMs': 240,
+            'pathStepDurationMs': 73,
+          },
         },
         'barrier': {'layer': 'objects', 'tags': <String>[], 'symbol': 'B'},
         'exit_red': {
@@ -122,6 +127,8 @@ GameDefinition _game({
             'movementMode': movementMode,
             'blockedBehavior': blockedBehavior,
             'allowUTurns': allowUTurns,
+            if (matchParam != null) 'matchParam': matchParam,
+            if (matchParam != null) 'exitMatchParam': matchParam,
             'exitRequiresRoute': exitRequiresRoute,
             if (routeSelectorLayer != null)
               'routeSelectorLayer': routeSelectorLayer,
@@ -365,6 +372,99 @@ void main() {
     expect(reasons, {'same_destination'});
   });
 
+  test('single-step movement honors the U-turn setting', () {
+    final engine = _engine(
+      _levelJson(
+        size: const [2, 1],
+        ground: const [
+          {
+            'position': [0, 0],
+            'kind': 'road_h',
+          },
+          {
+            'position': [1, 0],
+            'kind': 'u_turn',
+          },
+        ],
+        objects: const [
+          {
+            'position': [0, 0],
+            'kind': 'truck',
+            'heading': 'right',
+          },
+        ],
+      ),
+      game: _game(allowUTurns: false),
+    );
+
+    final result = engine.executeTurn(const GameAction('advance'));
+
+    expect(
+      engine.state.board.getEntity('objects', const Position(0, 0)),
+      isNotNull,
+    );
+    expect(
+      result.events.any(
+        (event) =>
+            event.type == 'routed_motion_failed' &&
+            event.payload['reason'] == 'u_turn',
+      ),
+      isTrue,
+    );
+  });
+
+  test('exit matching is optional and parameter-driven', () {
+    Map<String, dynamic> level() => _levelJson(
+          size: const [2, 1],
+          ground: const [
+            {
+              'position': [0, 0],
+              'kind': 'road_h',
+            },
+            {
+              'position': [1, 0],
+              'kind': 'road_h',
+            },
+          ],
+          objects: const [
+            {
+              'position': [0, 0],
+              'kind': 'truck',
+              'heading': 'right',
+              'color': 'red',
+            },
+          ],
+          markers: const [
+            {
+              'position': [1, 0],
+              'kind': 'exit_red',
+              'color': 'blue',
+            },
+          ],
+        );
+
+    final matched = _engine(
+      level(),
+      game: _game(exitRequiresRoute: false),
+    ).executeTurn(const GameAction('advance'));
+    expect(
+      matched.events.any(
+        (event) =>
+            event.type == 'routed_motion_failed' &&
+            event.payload['reason'] == 'wrong_exit',
+      ),
+      isTrue,
+    );
+
+    final unrestrictedEngine = _engine(
+      level(),
+      game: _game(exitRequiresRoute: false, matchParam: null),
+    );
+    unrestrictedEngine.executeTurn(const GameAction('advance'));
+    expect(
+        unrestrictedEngine.state.board.layers['objects']!.entries(), isEmpty);
+  });
+
   group('until_blocked movement', () {
     late GameDefinition flowGame;
 
@@ -424,7 +524,9 @@ void main() {
       final animation = result.animations.singleWhere(
         (step) => step.type == 'entity_path',
       );
-      expect(animation.extra['delivered'], isTrue);
+      expect(animation.durationMs, 219);
+      expect(animation.extra['stepDurationMs'], 73);
+      expect(animation.extra['removedAtEnd'], isTrue);
       expect(animation.extra['path'], const [
         [0, 0],
         [1, 0],
@@ -597,7 +699,7 @@ void main() {
         result.events.any(
           (event) =>
               event.type == 'routed_motion_blocked' &&
-              event.payload['reason'] == 'disconnected_road',
+              event.payload['reason'] == 'disconnected_route',
         ),
         isTrue,
       );
@@ -644,7 +746,7 @@ void main() {
         result.events.any(
           (event) =>
               event.type == 'routed_motion_blocked' &&
-              event.payload['reason'] == 'disconnected_road',
+              event.payload['reason'] == 'disconnected_route',
         ),
         isTrue,
       );

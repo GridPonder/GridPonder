@@ -79,6 +79,8 @@ GameDefinition _game({bool signalFirst = false}) {
           },
           'movementMode': 'until_blocked',
           'blockedBehavior': 'stop',
+          'matchParam': 'color',
+          'exitMatchParam': 'color',
           'gateLayer': 'markers',
         }
       },
@@ -217,7 +219,7 @@ void main() {
       [2, 0],
       [3, 0],
     ]);
-    expect(vehiclePath.extra['delivered'], isTrue);
+    expect(vehiclePath.extra['removedAtEnd'], isTrue);
 
     expect(engine.undo(), isTrue);
     expect(

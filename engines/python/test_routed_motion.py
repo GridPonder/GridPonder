@@ -29,6 +29,7 @@ def _game(
     blocked_behavior="fail",
     allow_u_turns=True,
     exit_requires_route=True,
+    match_param="color",
     routes=None,
     route_selector_layer=None,
 ) -> GameDef:
@@ -105,6 +106,14 @@ def _game(
                         "movementMode": movement_mode,
                         "blockedBehavior": blocked_behavior,
                         "allowUTurns": allow_u_turns,
+                        **(
+                            {
+                                "matchParam": match_param,
+                                "exitMatchParam": match_param,
+                            }
+                            if match_param is not None
+                            else {}
+                        ),
                         "exitRequiresRoute": exit_requires_route,
                         **(
                             {"routeSelectorLayer": route_selector_layer}
@@ -243,6 +252,81 @@ class RoutedMotionTest(unittest.TestCase):
         self.assertIsNotNone(engine.state.board.get_entity("objects", Pos(2, 0)))
         failures = [e for e in result.events if e["type"] == "routed_motion_failed"]
         self.assertEqual({e["reason"] for e in failures}, {"same_destination"})
+
+    def test_single_step_movement_honors_the_u_turn_setting(self):
+        engine = TurnEngine(
+            _game(allow_u_turns=False),
+            _level(
+                size=(2, 1),
+                ground=[
+                    {"position": [0, 0], "kind": "road_h"},
+                    {"position": [1, 0], "kind": "u_turn"},
+                ],
+                objects=[
+                    {
+                        "position": [0, 0],
+                        "kind": "truck",
+                        "heading": "right",
+                    }
+                ],
+            ),
+        )
+
+        result = engine.execute_turn("advance")
+
+        self.assertIsNotNone(
+            engine.state.board.get_entity("objects", Pos(0, 0))
+        )
+        self.assertTrue(
+            any(
+                event["type"] == "routed_motion_failed"
+                and event["reason"] == "u_turn"
+                for event in result.events
+            )
+        )
+
+    def test_exit_matching_is_optional_and_parameter_driven(self):
+        level = _level(
+            size=(2, 1),
+            ground=[
+                {"position": [0, 0], "kind": "road_h"},
+                {"position": [1, 0], "kind": "road_h"},
+            ],
+            objects=[
+                {
+                    "position": [0, 0],
+                    "kind": "truck",
+                    "heading": "right",
+                    "color": "red",
+                }
+            ],
+            markers=[
+                {
+                    "position": [1, 0],
+                    "kind": "exit_red",
+                    "color": "blue",
+                }
+            ],
+        )
+
+        matched = TurnEngine(
+            _game(exit_requires_route=False), level
+        ).execute_turn("advance")
+        self.assertTrue(
+            any(
+                event["type"] == "routed_motion_failed"
+                and event["reason"] == "wrong_exit"
+                for event in matched.events
+            )
+        )
+
+        unrestricted = TurnEngine(
+            _game(exit_requires_route=False, match_param=None), level
+        )
+        unrestricted.execute_turn("advance")
+        self.assertEqual(
+            list(unrestricted.state.board.layers["objects"].entries()), []
+        )
 
 
 class ContinuousRoutedMotionTest(unittest.TestCase):
@@ -419,7 +503,7 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
             waiting.state.board.get_entity("objects", Pos(0, 1))
         )
         self.assertIn(
-            "disconnected_road",
+            "disconnected_route",
             {
                 event["reason"]
                 for event in result.events
@@ -449,7 +533,7 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
             engine.state.board.get_entity("objects", Pos(1, 0))
         )
         self.assertIn(
-            "disconnected_road",
+            "disconnected_route",
             {
                 event["reason"]
                 for event in result.events

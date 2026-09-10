@@ -3,8 +3,8 @@ import 'package:gridponder_engine/engine.dart';
 /// Builds the board snapshot shown while an `entity_path` animation runs.
 ///
 /// Cell transforms emitted before the first path event must already be visible
-/// while the mover travels. Preserve the transformed entity's instance params:
-/// sprite templates such as `signal_green_{entrySide}.png` depend on them.
+/// while the mover travels. Instance params are preserved because templated
+/// sprites may depend on them.
 LevelState buildPathAnimationState(
   LevelState preState,
   Iterable<GameEvent> events,
