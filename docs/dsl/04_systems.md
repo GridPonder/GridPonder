@@ -279,23 +279,28 @@ Each turn the pipe runs two phases:
 | `moveAction` | string | `"move"` | Action id that moves the overlay. |
 | `anchorToAvatar` | boolean | `false` | If `true`, the overlay follows the avatar position. Avatar position = top-left (for 2x2) or center (for 3x3). |
 | `boundsConstrained` | boolean | `true` | Whether the overlay must stay fully within the board. |
+| `carryLayers` | array of strings | `[]` | Layers whose entities inside the overlay travel with it. Lets the overlay *hold* things — pair it with a `region_transform` `exchange` to pick up and put down. |
 
 **Behavior:**
 1. On `moveAction`, shift overlay position in the action's direction.
-2. If `boundsConstrained`, clamp to board boundaries.
+2. If `boundsConstrained`, clamp to board boundaries. A move clamped to where the
+   overlay already is changes nothing (the turn is still spent).
 3. If `anchorToAvatar`, overlay tracks avatar position automatically.
-4. Update `state.overlay.position`.
-5. Emit `overlay_moved`.
+4. If the overlay moved, translate every entity inside its old footprint on each
+   `carryLayers` layer by the same offset. Entities outside the footprint are
+   untouched, so a carry layer normally holds nothing anywhere else.
+5. Update `state.overlay.position`.
+6. Emit `overlay_moved`.
 
 ---
 
 ### 2.8 `region_transform`
 
-**Purpose:** Apply spatial transformations (rotate, flip, diagonal swap) to cell contents within the overlay region.
+**Purpose:** Apply spatial transformations (rotate, flip, diagonal swap) to cell contents within the overlay region, or exchange two layers' contents inside it.
 
 **Phase:** `action_resolution`
 
-**Events emitted:** `region_rotated`, `region_flipped`, `cells_swapped`
+**Events emitted:** `region_transformed`; `cell_exchanged` per cell for `exchange`
 
 **Config:**
 
@@ -309,8 +314,10 @@ Each operation:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | string | `"rotate"`, `"flip"`, or `"diagonal_swap"`. |
+| `type` | string | `"rotate"`, `"flip"`, `"diagonal_swap"`, or `"exchange"`. |
 | `action` | string | Action id that triggers this operation. |
+| `layers` | `[first, second]` | `exchange` only: the two layers swapped. Ignores `affectedLayers`. |
+| `pairs` | array of `[firstKind, secondKind]` | `exchange` only, optional: kind translations applied as content crosses between the layers. Either side may be `null`. |
 
 Example config:
 ```json
@@ -363,11 +370,39 @@ Swap mapping (2×2 overlay at `[ox, oy]`):
 | `down_left` | `[ox+1, oy]` (top-right) | `[ox, oy+1]` (bottom-left) |
 | `down_right` | `[ox, oy]` (top-left) | `[ox+1, oy+1]` (bottom-right) |
 
+**Operation: `exchange`**
+
+Swaps what `layers[0]` and `layers[1]` hold, cell by cell, across the whole
+overlay at once. With an overlay whose second layer rides along
+(`overlay_cursor.carryLayers`), this is a stamp, a scoop or a crane hold: every
+press puts down everything held and picks up everything underneath.
+
+`pairs` translates kinds as they cross, so one piece of content can look
+different on each side: `["ink_red", "held_red"]` turns `ink_red` into `held_red`
+going up and back into `ink_red` coming down. A `null` side means *nothing*:
+`[null, "slot_empty"]` fills a second-layer cell that received nothing with a
+visible placeholder, and treats that placeholder as nothing when it crosses back.
+Kinds with no pair cross unchanged. Void cells do not exchange.
+
+```json
+"press": {
+  "type": "exchange",
+  "action": "press",
+  "layers": ["ink", "pocket"],
+  "pairs": [["ink_red", "carried_red"], [null, "pocket_empty"]]
+}
+```
+
+Each cell where something moved emits `cell_exchanged` with `mode` `lift`,
+`drop` or `swap` (see [05_rules.md](05_rules.md#cell_exchanged)). Pressing twice
+in the same place restores the board.
+
 **Behavior:**
 1. On the configured action, determine the operation type.
 2. For rotate/flip: collect all entities within the overlay bounds on affected layers, apply the spatial mapping, reposition.
 3. For diagonal_swap: swap the two mapped cells.
-4. Emit the corresponding event.
+4. For exchange: swap the two layers at every overlay cell, translating through `pairs`.
+5. Emit the corresponding event.
 
 ---
 

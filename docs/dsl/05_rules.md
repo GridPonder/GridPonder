@@ -220,6 +220,23 @@ A cell's entity was replaced with a different entity.
 | `toKind` | string | New kind. |
 | `layer` | string | Which layer changed. |
 
+### `cell_exchanged`
+One cell of a [`region_transform`](04_systems.md#28-region_transform) `exchange`:
+the two layers swapped what they held at this cell. Nothing is emitted for a cell
+where both sides were empty.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell that exchanged. |
+| `mode` | string | `"lift"` (the first layer's content crossed to an empty second layer), `"drop"` (the reverse) or `"swap"` (both held something). |
+| `firstLayer` | string | The operation's first layer. |
+| `secondLayer` | string | The operation's second layer. |
+| `firstKind` | string or null | What the first layer held before, `null` for nothing. |
+| `secondKind` | string or null | What the second layer held before, `null` for nothing (a `pairs` placeholder counts as nothing). |
+
+A theme can play a different [cell effect](06_theme.md#cell-effects) per `mode`
+with a `when` filter, e.g. `{"when": {"mode": "lift"}}`.
+
 ### `entity_fell`
 
 Emitted by [`balance_regions`](04_systems.md#224-balance_regions) when a cell's

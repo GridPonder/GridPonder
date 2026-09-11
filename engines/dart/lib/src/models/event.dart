@@ -273,6 +273,27 @@ class GameEvent {
   static GameEvent overlayMoved(List<int> pos) =>
       GameEvent('overlay_moved', {'position': pos});
 
+  /// One cell of a `region_transform` exchange. [mode] is `lift` (the first
+  /// layer's content crossed to an empty second layer), `drop` (the reverse)
+  /// or `swap` (both held something). The kinds are the ones found before the
+  /// exchange, null for nothing.
+  static GameEvent cellExchanged(
+    Position pos,
+    String mode,
+    String firstLayer,
+    String secondLayer,
+    String? firstKind,
+    String? secondKind,
+  ) =>
+      GameEvent('cell_exchanged', {
+        'position': pos,
+        'mode': mode,
+        'firstLayer': firstLayer,
+        'secondLayer': secondLayer,
+        'firstKind': firstKind,
+        'secondKind': secondKind,
+      });
+
   static GameEvent cellsFlooded(List<Position> cells) =>
       GameEvent('cells_flooded', {'cells': cells});
 

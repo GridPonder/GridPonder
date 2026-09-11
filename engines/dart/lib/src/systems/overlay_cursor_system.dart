@@ -2,7 +2,9 @@ import '../engine/game_system.dart';
 import '../models/event.dart';
 import '../models/game_action.dart';
 import '../models/game_definition.dart';
+import '../models/entity.dart';
 import '../models/game_state.dart';
+import '../models/position.dart';
 
 class OverlayCursorSystem extends GameSystem {
   const OverlayCursorSystem({required super.id})
@@ -55,7 +57,40 @@ class OverlayCursorSystem extends GameSystem {
       newY = newY.clamp(0, board.height - overlayHeight);
     }
 
+    if (newX != overlay.x || newY != overlay.y) {
+      _carry(state, config, overlay, newX, newY);
+    }
     state.overlay = overlay.copyWith(x: newX, y: newY);
     return [GameEvent.overlayMoved([newX, newY])];
+  }
+
+  /// Translates every entity inside the old footprint on each `carryLayers`
+  /// layer by the overlay's displacement, so the cursor can hold things.
+  void _carry(
+    LevelState state,
+    Map<String, dynamic> config,
+    OverlayCursor overlay,
+    int newX,
+    int newY,
+  ) {
+    final carryLayers = (config['carryLayers'] as List<dynamic>? ?? const [])
+        .map((l) => l.toString());
+    for (final layerId in carryLayers) {
+      final layer = state.board.layers[layerId];
+      if (layer == null) continue;
+      final held = <(int, int, EntityInstance)>[];
+      for (int dy = 0; dy < overlay.height; dy++) {
+        for (int dx = 0; dx < overlay.width; dx++) {
+          final pos = Position(overlay.x + dx, overlay.y + dy);
+          final entity = layer.getAt(pos);
+          if (entity == null) continue;
+          held.add((dx, dy, entity));
+          layer.setAt(pos, null);
+        }
+      }
+      for (final (dx, dy, entity) in held) {
+        layer.setAt(Position(newX + dx, newY + dy), entity);
+      }
+    }
   }
 }

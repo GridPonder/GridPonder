@@ -24,12 +24,14 @@ class RegionTransformSystem extends GameSystem {
 
     // Find which operation matches the incoming action.
     String? matchedOpType;
+    Map<String, dynamic> matchedOp = const {};
     for (final opEntry in operationsRaw.entries) {
       final opDef = opEntry.value as Map<String, dynamic>?;
       if (opDef == null) continue;
       final opAction = opDef['action'] as String?;
       if (opAction == action.actionId) {
         matchedOpType = opDef['type'] as String?;
+        matchedOp = opDef;
         break;
       }
     }
@@ -57,6 +59,10 @@ class RegionTransformSystem extends GameSystem {
           if (board.isVoid(Position(ox + dx, oy + dy))) return const [];
         }
       }
+    }
+
+    if (matchedOpType == 'exchange') {
+      return _exchange(matchedOp, state, ox, oy, overlayWidth, overlayHeight);
     }
 
     final List<GameEvent> events = [];
@@ -118,6 +124,80 @@ class RegionTransformSystem extends GameSystem {
     }
 
     events.add(GameEvent('region_transformed', {'type': matchedOpType}));
+    return events;
+  }
+
+  /// Swaps the contents of two layers cell by cell inside the overlay.
+  ///
+  /// `pairs` translates kinds on the way across: `[first, second]` turns a
+  /// `first` on the first layer into a `second` on the second layer and back.
+  /// A null side means "nothing": `[null, "slot_empty"]` fills an emptied
+  /// second-layer cell with a visible placeholder and treats that placeholder
+  /// as nothing when it crosses back. Unpaired kinds cross unchanged.
+  List<GameEvent> _exchange(
+    Map<String, dynamic> op,
+    LevelState state,
+    int ox,
+    int oy,
+    int w,
+    int h,
+  ) {
+    final layerIds = (op['layers'] as List<dynamic>? ?? const [])
+        .map((l) => l.toString())
+        .toList();
+    if (layerIds.length != 2) return const [];
+    final board = state.board;
+    final first = board.layers[layerIds[0]];
+    final second = board.layers[layerIds[1]];
+    if (first == null || second == null) return const [];
+
+    final toSecond = <String?, String?>{};
+    final toFirst = <String?, String?>{};
+    for (final pair in op['pairs'] as List<dynamic>? ?? const []) {
+      if (pair is! List || pair.length != 2) continue;
+      final a = pair[0] as String?;
+      final b = pair[1] as String?;
+      toSecond.putIfAbsent(a, () => b);
+      toFirst.putIfAbsent(b, () => a);
+    }
+
+    EntityInstance? cross(EntityInstance? entity, Map<String?, String?> table) {
+      final kind = entity?.kind;
+      if (!table.containsKey(kind)) return entity?.copyWith();
+      final newKind = table[kind];
+      if (newKind == null) return null;
+      return EntityInstance(
+          newKind, entity == null ? const {} : Map.of(entity.params));
+    }
+
+    bool blank(EntityInstance? entity, Map<String?, String?> table) =>
+        entity == null ||
+        (table.containsKey(entity.kind) && table[entity.kind] == null);
+
+    final events = <GameEvent>[];
+    for (int dy = 0; dy < h; dy++) {
+      for (int dx = 0; dx < w; dx++) {
+        final pos = Position(ox + dx, oy + dy);
+        if (!board.isInBounds(pos) || board.isVoid(pos)) continue;
+        final a = first.getAt(pos);
+        final b = second.getAt(pos);
+        first.setAt(pos, cross(b, toFirst));
+        second.setAt(pos, cross(a, toSecond));
+        final aBlank = blank(a, toSecond);
+        final bBlank = blank(b, toFirst);
+        if (aBlank && bBlank) continue;
+        final mode = !aBlank && !bBlank ? 'swap' : (bBlank ? 'lift' : 'drop');
+        events.add(GameEvent.cellExchanged(
+          pos,
+          mode,
+          layerIds[0],
+          layerIds[1],
+          aBlank ? null : a!.kind,
+          bBlank ? null : b!.kind,
+        ));
+      }
+    }
+    events.add(const GameEvent('region_transformed', {'type': 'exchange'}));
     return events;
   }
 

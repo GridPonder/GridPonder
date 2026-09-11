@@ -322,6 +322,25 @@ def region_transformed(op_type: str) -> dict:
     return {"type": "region_transformed", "opType": op_type}
 
 
+def cell_exchanged(
+    pos: Pos, mode: str, layers: list[str],
+    first_kind: Optional[str], second_kind: Optional[str],
+) -> dict:
+    """One cell of a `region_transform` exchange. `mode` is `lift` (the first
+    layer's content crossed to an empty second layer), `drop` (the reverse) or
+    `swap` (both held something). The kinds are the ones found before the
+    exchange, `None` for nothing."""
+    return {
+        "type": "cell_exchanged",
+        "position": pos,
+        "mode": mode,
+        "firstLayer": layers[0],
+        "secondLayer": layers[1],
+        "firstKind": first_kind,
+        "secondKind": second_kind,
+    }
+
+
 def avatar_caught(pos: Pos, npc_kind: str, npc_id: str) -> dict:
     return {
         "type": "avatar_caught",
