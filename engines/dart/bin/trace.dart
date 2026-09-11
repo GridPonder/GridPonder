@@ -56,7 +56,7 @@ void main(List<String> args) {
 
   for (var i = 0; i < steps.length; i++) {
     final action = steps[i];
-    final direction = action.params['direction'] as String? ?? '?';
+    final direction = action.params['direction'] as String? ?? action.actionId;
     final prevState = engine.state;
 
     final result = engine.executeTurn(action);

@@ -47,21 +47,14 @@ class FollowerNpcsSystem(GameSystem):
 
     def execute_npc_resolution(self, state: GameState, game: GameDef) -> list[dict]:
         config = game.system_config(self.id)
-        npc_tags = [str(t) for t in config_list(config, "npcTags", ["npc"])]
         behaviors = config.get("behaviors", {}) or {}
         contact_variable = config.get("contactVariable", "caught")
 
-        board = state.board
-        actors = board.layers.get("actors")
-        if actors is None:
+        if state.board.layers.get("actors") is None:
             return []
 
         # Collect NPC positions first so the board can be mutated while iterating.
-        npc_entries = [
-            (pos, entity)
-            for pos, entity in actors.entries()
-            if any(game.has_tag(entity.kind, tag) for tag in npc_tags)
-        ]
+        npc_entries = self._npc_entries(state, game, config)
 
         # Cells occupied by NPCs after this turn's moves, seeded with every NPC
         # that has not moved yet, so two NPCs cannot land on the same cell.
@@ -69,7 +62,32 @@ class FollowerNpcsSystem(GameSystem):
 
         events: list[dict] = []
 
+        # Trains resolve as units, before the singletons, so a train's members
+        # can never be interleaved with another machine's claim on a cell.
+        for shaft_id, members in self._partition_trains(npc_entries):
+            if self._train_seized(shaft_id, members, state, config):
+                continue
+            # Per-member frequency: a geared train's members run at their own
+            # rates. The active set is those whose gate opens this beat; the
+            # rest are not probed and do not step — but they still turn, in
+            # _resolve_train, because facing is train-level state.
+            active = [
+                (pos, entity) for pos, entity in members
+                if self._member_is_active(entity, behaviors, state)
+            ]
+            if not active:
+                continue  # every wheel off-beat: a no-op, NOT a freeze
+            for npc_pos, npc_entity, next_pos in self._resolve_train(
+                members, active, behaviors, state, game, occupied_after_move,
+            ):
+                self._apply_npc_move(
+                    npc_pos, next_pos, npc_entity, state, contact_variable,
+                    occupied_after_move, events,
+                )
+
         for npc_pos, npc_entity in npc_entries:
+            if self._shaft_of(npc_entity) is not None:
+                continue  # already resolved in the train pass
             behavior_name = npc_entity.param("behavior")
             if behavior_name is None:
                 continue
@@ -146,27 +164,232 @@ class FollowerNpcsSystem(GameSystem):
                 continue
 
             _report_sight_from(next_pos)
-            caught = state.avatar.position == next_pos
-
-            occupied_after_move.discard(npc_pos)
-            occupied_after_move.add(next_pos)
-
-            board.set_entity("actors", npc_pos, None)
-            board.set_entity("actors", next_pos, npc_entity)
-
-            events.append(ev.npc_moved(npc_id, npc_pos, next_pos))
-
-            if caught:
-                # Goal and lose evaluation both run in the phase after this one,
-                # so bumping the counter here is enough for a variable_threshold
-                # lose condition to fire on the same turn.
-                current = state.variables.get(contact_variable, 0)
-                state.variables[contact_variable] = int(current) + 1
-                events.append(
-                    ev.avatar_caught(next_pos, npc_entity.kind, npc_id)
-                )
+            self._apply_npc_move(
+                npc_pos, next_pos, npc_entity, state, contact_variable,
+                occupied_after_move, events,
+            )
 
         return events
+
+    def _apply_npc_move(
+        self, npc_pos: Pos, next_pos: Pos, npc_entity: Entity, state: GameState,
+        contact_variable: str, occupied_after_move: set, events: list[dict],
+    ) -> None:
+        """Commit one NPC step: board, occupancy, npc_moved, and contact.
+
+        Shared by the train pass and the per-NPC loop so both emit identical
+        events for identical motion.
+        """
+        npc_id = f"spirit_{npc_pos.x}_{npc_pos.y}"
+        caught = state.avatar.position == next_pos
+
+        occupied_after_move.discard(npc_pos)
+        occupied_after_move.add(next_pos)
+
+        state.board.set_entity("actors", npc_pos, None)
+        state.board.set_entity("actors", next_pos, npc_entity)
+
+        events.append(ev.npc_moved(npc_id, npc_pos, next_pos))
+
+        if caught:
+            # Goal and lose evaluation both run in the phase after this one, so
+            # bumping the counter here is enough for a variable_threshold lose
+            # condition to fire on the same turn.
+            current = state.variables.get(contact_variable, 0)
+            state.variables[contact_variable] = int(current) + 1
+            events.append(ev.avatar_caught(next_pos, npc_entity.kind, npc_id))
+
+    # -- shafts (linked machines) -------------------------------------------
+
+    def _shaft_of(self, npc_entity: Entity) -> Optional[str]:
+        shaft = npc_entity.param("shaft")
+        return None if shaft is None else str(shaft)
+
+    def _member_is_active(
+        self, npc_entity: Entity, behaviors: dict, state: GameState,
+    ) -> bool:
+        """True when this member's own frequency gate opens on this turn.
+
+        A train may be geared, so the gate is per member rather than per train.
+        A member whose behavior is unknown is inactive rather than fatal: load
+        settle has already rejected that board.
+        """
+        behavior_def = behaviors.get(str(npc_entity.param("behavior")))
+        if not isinstance(behavior_def, dict):
+            return False
+        frequency = behavior_def.get("frequency", 1)
+        return frequency <= 1 or state.turn_count % frequency == 0
+
+    def _partition_trains(
+        self, npc_entries: list[tuple[Pos, Entity]],
+    ) -> list[tuple[str, list[tuple[Pos, Entity]]]]:
+        """Shafted NPCs grouped by shaft id, ordered by each train's first member.
+
+        Board order is the order ``actors.entries()`` yields, which is what the
+        per-NPC loop already uses — so a board of singletons is unaffected, and a
+        board with trains resolves them in the order their first members appear.
+        """
+        trains: dict[str, list[tuple[Pos, Entity]]] = {}
+        for pos, entity in npc_entries:
+            shaft = self._shaft_of(entity)
+            if shaft is None:
+                continue
+            trains.setdefault(shaft, []).append((pos, entity))
+        return list(trains.items())
+
+    def _resolve_train(
+        self, members: list[tuple[Pos, Entity]], active: list[tuple[Pos, Entity]],
+        behaviors: dict, state: GameState, game: GameDef, occupied_after_move: set,
+    ) -> list[tuple[Pos, Entity, Pos]]:
+        """The active members all step forward, else all reverse, else freeze.
+
+        Only ``active`` — the members whose own frequency gate opened this beat —
+        is probed and moved. ``members`` is the whole train and matters for
+        exactly one thing: a reversal flips EVERY member's facing, on-beat or
+        not, because the shaft is rigid in direction.
+
+        Probes without mutating: ``facing`` is written only once the all-reverse
+        branch is known to be legal for every active member, so a train that
+        freezes resumes its original direction the beat the obstruction leaves.
+        """
+        def _legal(pos: Pos, entity: Entity, facing: str,
+                   claimed: set) -> Optional[Pos]:
+            behavior_def = behaviors.get(str(entity.param("behavior")))
+            if not isinstance(behavior_def, dict):
+                return None
+            candidate = pos.moved(facing)
+            # Two members whose tracks cross can both reach the crossing on the
+            # same beat. Without `claimed` they would both be handed the cell,
+            # the second write would overwrite the first, and the train would
+            # lose a member with no event to say so — which then reads as a
+            # seizure, because the size recorded at load no longer matches.
+            if candidate in claimed:
+                return None
+            ok = self._can_move_to(
+                candidate, state, game,
+                behavior_def.get("solidBlocking", True),
+                occupied_after_move,
+                block_avatar=not behavior_def.get("lethalContact", False),
+            )
+            return candidate if ok else None
+
+        def _probe(reversed_: bool) -> Optional[list[Pos]]:
+            """Candidate cells for the whole active set, or None if any is stuck.
+
+            Sequential, so each member's claim blocks the next. The train is
+            all-or-nothing, so a collision between two members is simply a
+            failed direction: it falls through to the reverse, then to a freeze.
+            """
+            claimed: set = set()
+            out: list[Pos] = []
+            for pos, entity in active:
+                facing = self._facing_of(entity)
+                if reversed_:
+                    facing = dir_opposite(facing)
+                candidate = _legal(pos, entity, facing, claimed)
+                if candidate is None:
+                    return None
+                claimed.add(candidate)
+                out.append(candidate)
+            return out
+
+        forward = _probe(False)
+        if forward is not None:
+            return [(pos, e, c) for (pos, e), c in zip(active, forward)]
+
+        reverse = _probe(True)
+        if reverse is not None:
+            for _, entity in members:  # the WHOLE train turns, not just the active
+                entity.params["facing"] = dir_opposite(self._facing_of(entity))
+            return [(pos, e, c) for (pos, e), c in zip(active, reverse)]
+
+        return []
+
+    def _npc_entries(
+        self, state: GameState, game: GameDef, config: dict,
+    ) -> list[tuple[Pos, Entity]]:
+        """Every NPC on the actors layer, in board order.
+
+        Shared by the turn pass and load settle so both agree on what an NPC is.
+        """
+        actors = state.board.layers.get("actors")
+        if actors is None:
+            return []
+        npc_tags = [str(t) for t in config_list(config, "npcTags", ["npc"])]
+        return [
+            (pos, entity)
+            for pos, entity in actors.entries()
+            if any(game.has_tag(entity.kind, tag) for tag in npc_tags)
+        ]
+
+    def execute_load_settle(self, state: GameState, game: GameDef) -> list[dict]:
+        """Record each train's size once, and reject a train that cannot work.
+
+        Sizing at load is what lets seizure be a pure function of the board: the
+        system compares live membership against a constant, so no new mutable
+        state enters the state key and solver dedup, undo and preview are all
+        unaffected.
+        """
+        config = game.system_config(self.id)
+        behaviors = config.get("behaviors", {}) or {}
+        for shaft_id, members in self._partition_trains(
+            self._npc_entries(state, game, config)
+        ):
+            self._validate_train(shaft_id, members, behaviors)
+            state.variables[f"shaft_{shaft_id}_size"] = len(members)
+        return []
+
+    def _validate_train(
+        self, shaft_id: str, members: list[tuple[Pos, Entity]], behaviors: dict,
+    ) -> None:
+        for pos, entity in members:
+            behavior_def = behaviors.get(str(entity.param("behavior")))
+            if not isinstance(behavior_def, dict):
+                raise ValueError(
+                    f"shaft '{shaft_id}': member at {pos} has no known behavior"
+                )
+            if behavior_def.get("type") != "patrol":
+                raise ValueError(
+                    f"shaft '{shaft_id}': every member must be a patrol behavior; "
+                    f"member at {pos} is '{behavior_def.get('type')}'"
+                )
+            # Members MAY differ in frequency — that is the ratio shaft, and a
+            # geared train is the point. What they may not do is carry a
+            # frequency the modulo gate cannot read. `bool` is checked first
+            # because it subclasses `int`, so True would otherwise pass as 1.
+            frequency = behavior_def.get("frequency", 1)
+            if (isinstance(frequency, bool) or not isinstance(frequency, int)
+                    or frequency < 1):
+                raise ValueError(
+                    f"shaft '{shaft_id}': member at {pos} has frequency "
+                    f"{frequency!r}; every member's frequency must be a "
+                    f"positive integer"
+                )
+        # A patrol never leaves its facing axis, so its traversal line is its own
+        # row or column. Two members sharing one would block each other and the
+        # train would jam at t=0 with no way for the player to see why.
+        for i, (pos_a, entity_a) in enumerate(members):
+            horizontal = self._facing_of(entity_a) in ("left", "right")
+            for pos_b, _ in members[i + 1:]:
+                shared = pos_a.y == pos_b.y if horizontal else pos_a.x == pos_b.x
+                if shared:
+                    raise ValueError(
+                        f"shaft '{shaft_id}': members at {pos_a} and {pos_b} "
+                        f"share a traversal line"
+                    )
+
+    def _train_seized(
+        self, shaft_id: str, members: list, state: GameState, config: dict,
+    ) -> bool:
+        """A train that has lost a member never moves again.
+
+        Read strictly: only the boolean True enables seizure, matching the
+        `cycle` precedent in coupled_actors.
+        """
+        if config.get("shaftSeizeOnLoss") is not True:
+            return False
+        size = state.variables.get(f"shaft_{shaft_id}_size")
+        return size is not None and len(members) < int(size)
 
     # -- behavior dispatch ---------------------------------------------------
 

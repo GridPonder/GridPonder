@@ -825,6 +825,31 @@ Example:
 }
 ```
 
+**Shafts (linked machines).** An NPC entity carrying a `shaft: "<id>"` param is
+part of a *train*: every member steps along its own facing each beat, but the
+train resolves as a unit. If any member is blocked, every member flips its facing
+and the train tries the reverse; if that is blocked too, the whole train freezes
+and every member keeps its original facing, resuming its original direction the
+beat the obstruction leaves. Trains resolve before unshafted NPCs, in the board
+order of their first members; an NPC with no `shaft` param is unaffected in every
+respect.
+
+Members must all use a `patrol` behavior, must share one `frequency`, and no
+member may stand on another member's traversal line. All three are validated at
+load and raise.
+
+| config key | type | default | meaning |
+|---|---|---|---|
+| `shaftSeizeOnLoss` | boolean | `false` | When `true`, a train that loses a member to destruction *seizes*: the survivors never move again. Read strictly — only the boolean `true` enables it. Train sizes are recorded once at load settle, so seizure stays a pure function of the board and adds nothing to the state key. |
+
+```json
+{"position": [3, 2], "kind": "carriage", "behavior": "carriage_line", "facing": "right", "shaft": "a"}
+```
+
+A shaft is the only way for the player's body to reach a machine it cannot
+touch: blocking the member within reach turns or freezes every other member,
+wherever they are on the board.
+
 **Reuse:** guards, chasers, patrols, scripted hazards, and creatures that seek a
 resource rather than the player. Sight-gated motion makes the avatar's position
 the only control channel, so an NPC can be steered rather than merely avoided.
