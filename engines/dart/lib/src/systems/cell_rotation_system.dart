@@ -20,7 +20,9 @@ class CellRotationSystem extends GameSystem {
     GameDefinition game,
   ) {
     final config = game.systemConfig(id, {});
-    final rotateAction = config['rotateAction'] as String? ?? 'rotate_cell';
+    final rotateAction = config['rotateAction'] is String
+        ? config['rotateAction'] as String
+        : 'rotate_cell';
     if (action.actionId != rotateAction) return const [];
 
     final position = _parsePosition(action.params['position']);
@@ -28,23 +30,26 @@ class CellRotationSystem extends GameSystem {
       return [GameEvent.actionVetoed()];
     }
 
-    final layerId = config['layer'] as String? ?? 'ground';
+    final layerId =
+        config['layer'] is String ? config['layer'] as String : 'ground';
     final entity = state.board.getEntity(layerId, position);
     if (entity == null) return [GameEvent.actionVetoed()];
 
-    final rawCycles =
-        config['cycles'] as Map<String, dynamic>? ?? const <String, dynamic>{};
-    final nextKind = rawCycles[entity.kind] as String?;
-    if (nextKind == null || !game.entityKinds.containsKey(nextKind)) {
+    final rawCycles = config['cycles'];
+    final nextKind = rawCycles is Map ? rawCycles[entity.kind] : null;
+    if (nextKind is! String || !game.entityKinds.containsKey(nextKind)) {
       return [GameEvent.actionVetoed()];
     }
 
-    final blockingLayers = (config['blockingLayers'] as List<dynamic>? ??
-            const <dynamic>['objects'])
+    final rawBlockingLayers = config['blockingLayers'];
+    final blockingLayers = (rawBlockingLayers is List
+            ? rawBlockingLayers
+            : const <dynamic>['objects'])
         .map((value) => value.toString())
         .toList();
+    final rawBlockingTags = config['blockingTags'];
     final blockingTags =
-        (config['blockingTags'] as List<dynamic>? ?? const <dynamic>[])
+        (rawBlockingTags is List ? rawBlockingTags : const <dynamic>[])
             .map((value) => value.toString())
             .toList();
 

@@ -150,7 +150,6 @@ class RoutedMotionSystem extends GameSystem {
         _FlowMover(i, movers[i].position, movers[i].entity),
     ];
     final blockedEvents = <GameEvent>[];
-    final failureEvents = <_Failure>[];
     final seenStates = <String>{};
     final defaultLimit =
         state.board.width * state.board.height * 4 * flows.length;
@@ -250,11 +249,30 @@ class RoutedMotionSystem extends GameSystem {
       }
 
       if (config.blockedBehavior == 'fail' && blocked.isNotEmpty) {
-        failureEvents.addAll(blocked.values);
-        for (final flow in flows.where((flow) => flow.active)) {
-          flow.active = false;
+        // `fail` is transactional for the whole continuous tick. Earlier
+        // microsteps are only provisional; restore every mover, including
+        // movers that already reached an exit, before reporting the failure.
+        for (final flow in flows) {
+          moverLayer.setAt(flow.position, null);
         }
-        break;
+        for (final mover in movers) {
+          moverLayer.setAt(mover.position, mover.entity);
+        }
+
+        final oldValue =
+            (state.variables[config.failureVariable] as num?)?.toInt() ?? 0;
+        final newValue = oldValue + 1;
+        state.variables[config.failureVariable] = newValue;
+        return [
+          for (final entry in blocked.entries)
+            GameEvent('routed_motion_failed', {
+              'position': entry.value.target,
+              'kind': movers[entry.key.index].entity.kind,
+              'fromPosition': movers[entry.key.index].position,
+              'reason': entry.value.reason,
+            }),
+          GameEvent.variableChanged(config.failureVariable, oldValue, newValue),
+        ];
       }
 
       for (final entry in blocked.entries) {
@@ -302,22 +320,6 @@ class RoutedMotionSystem extends GameSystem {
       ...blockedEvents,
     ];
 
-    if (failureEvents.isNotEmpty) {
-      final oldValue =
-          (state.variables[config.failureVariable] as num?)?.toInt() ?? 0;
-      final newValue = oldValue + 1;
-      state.variables[config.failureVariable] = newValue;
-      events.addAll([
-        for (final failure in _dedupeFailures(failureEvents))
-          GameEvent('routed_motion_failed', {
-            'position': failure.target,
-            'kind': failure.mover.entity.kind,
-            'fromPosition': failure.mover.position,
-            'reason': failure.reason,
-          }),
-        GameEvent.variableChanged(config.failureVariable, oldValue, newValue),
-      ]);
-    }
     return events;
   }
 
@@ -601,30 +603,46 @@ class _RouteConfig {
   });
 
   factory _RouteConfig.fromJson(Map<String, dynamic> json) {
-    final matchParam = json['matchParam'] as String?;
+    String stringOr(dynamic value, String fallback) =>
+        value is String ? value : fallback;
+    String? optionalString(dynamic value) => value is String ? value : null;
+    bool boolOr(dynamic value, bool fallback) =>
+        value is bool ? value : fallback;
+    Map<String, dynamic> mapOrEmpty(dynamic value) {
+      if (value is! Map) return const {};
+      return {
+        for (final entry in value.entries)
+          if (entry.key is String) entry.key as String: entry.value,
+      };
+    }
+
+    final matchParam = optionalString(json['matchParam']);
     return _RouteConfig(
-      moverLayerId: json['moverLayer'] as String? ?? 'objects',
-      moverTag: json['moverTag'] as String? ?? 'routed_mover',
-      routeLayerId: json['routeLayer'] as String? ?? 'ground',
-      headingParam: json['headingParam'] as String? ?? 'heading',
+      moverLayerId: stringOr(json['moverLayer'], 'objects'),
+      moverTag: stringOr(json['moverTag'], 'routed_mover'),
+      routeLayerId: stringOr(json['routeLayer'], 'ground'),
+      headingParam: stringOr(json['headingParam'], 'heading'),
       matchParam: matchParam,
-      exitLayerId: json['exitLayer'] as String? ?? 'markers',
-      exitTag: json['exitTag'] as String? ?? 'route_exit',
+      exitLayerId: stringOr(json['exitLayer'], 'markers'),
+      exitTag: stringOr(json['exitTag'], 'route_exit'),
       exitMatchParam: matchParam == null
           ? null
-          : json['exitMatchParam'] as String? ?? matchParam,
-      exitRequiresRoute: json['exitRequiresRoute'] as bool? ?? true,
-      gateLayerId: json['gateLayer'] as String?,
-      gateClosedTag: json['gateClosedTag'] as String? ?? 'route_closed',
-      gateEntrySideParam: json['gateEntrySideParam'] as String? ?? 'entrySide',
-      routeSelectorLayerId: json['routeSelectorLayer'] as String?,
-      failureVariable:
-          json['failureVariable'] as String? ?? 'routedMotionFailures',
-      routes: json['routes'] as Map<String, dynamic>? ?? const {},
-      movementMode: json['movementMode'] as String? ?? 'single_step',
-      blockedBehavior: json['blockedBehavior'] as String? ?? 'fail',
-      allowUTurns: json['allowUTurns'] as bool? ?? true,
-      maxTravelSteps: json['maxTravelSteps'] as int?,
+          : optionalString(json['exitMatchParam']) ?? matchParam,
+      exitRequiresRoute: boolOr(json['exitRequiresRoute'], true),
+      gateLayerId: optionalString(json['gateLayer']),
+      gateClosedTag: stringOr(json['gateClosedTag'], 'route_closed'),
+      gateEntrySideParam: stringOr(json['gateEntrySideParam'], 'entrySide'),
+      routeSelectorLayerId: optionalString(json['routeSelectorLayer']),
+      failureVariable: stringOr(
+        json['failureVariable'],
+        'routedMotionFailures',
+      ),
+      routes: mapOrEmpty(json['routes']),
+      movementMode: stringOr(json['movementMode'], 'single_step'),
+      blockedBehavior: stringOr(json['blockedBehavior'], 'fail'),
+      allowUTurns: boolOr(json['allowUTurns'], true),
+      maxTravelSteps:
+          json['maxTravelSteps'] is int ? json['maxTravelSteps'] as int : null,
     );
   }
 }

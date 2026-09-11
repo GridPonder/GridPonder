@@ -18,16 +18,18 @@ class TurnCycleSystem(GameSystem):
 
     def __init__(self, sys_id: str):
         super().__init__(sys_id, "turn_cycle")
+        # TurnEngine creates systems per turn; this only bridges the accepted
+        # action resolution to the NPC phase of that same turn.
         self._advance_this_turn = False
 
     def execute_action_resolution(
         self, action: dict, state: GameState, game: GameDef
     ) -> list[dict]:
         config = game.system_config(self.id)
-        trigger_actions = {
-            str(value)
-            for value in config_list(config, "triggerActions", [])
-        }
+        raw_trigger_actions = config_list(config, "triggerActions", [])
+        if not isinstance(raw_trigger_actions, list):
+            raw_trigger_actions = []
+        trigger_actions = {str(value) for value in raw_trigger_actions}
         self._advance_this_turn = (
             not trigger_actions
             or action.get("actionId") in trigger_actions
@@ -41,9 +43,11 @@ class TurnCycleSystem(GameSystem):
             return []
 
         config = game.system_config(self.id)
-        layer_id = str(config.get("layer", "markers"))
+        layer_id = config.get("layer")
+        if not isinstance(layer_id, str):
+            layer_id = "markers"
         layer = state.board.layers.get(layer_id)
-        cycles = config.get("cycles") or {}
+        cycles = config.get("cycles")
         if layer is None or not isinstance(cycles, dict):
             return []
 

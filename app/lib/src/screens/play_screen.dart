@@ -23,6 +23,7 @@ import '../widgets/board_renderer.dart'
         elasticBlockRectTween,
         elasticPushObjectTravel;
 import '../widgets/controls_widget.dart';
+import 'cell_selection_state.dart';
 import 'path_animation_state.dart';
 
 /// One entity travelling from [from] to [to] during a turn's animation.
@@ -226,6 +227,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       pos: _tracker.enabled ? _trackedPositions() : null,
     );
     _syncSelectedMultiCellObject();
+    final selectedCell = selectionPositionForAction(
+      action,
+      widget.packService.theme?.controls?.gestureMap ?? const [],
+    );
 
     // Record the chosen colour for any colour-pick action (any action that
     // declares a `color` in game.json). The play screen uses it to tint the
@@ -246,7 +251,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         .toList();
     final hasSlide = avatarMoves.length > 1;
 
-    setState(() => _animating = true);
+    setState(() {
+      _animating = true;
+      if (selectedCell != null) _selectedCellPosition = selectedCell;
+    });
 
     // Avatar ice-slide: hold the pre-turn board so pushed objects stay at their
     // original positions while Pip slides. Skip last avatarMove — it's the
@@ -1425,9 +1433,6 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       });
       if (binding.params != null) params.addAll(binding.params!);
       final action = GameAction(binding.action, params);
-      if (binding.showSelection && _engine.previewTurn(action).accepted) {
-        setState(() => _selectedCellPosition = Position(x, y));
-      }
       _onAction(action);
       break;
     }

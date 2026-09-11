@@ -1,7 +1,10 @@
 import 'package:gridponder_engine/engine.dart';
 import 'package:test/test.dart';
 
-GameDefinition _game({bool signalFirst = false}) {
+GameDefinition _game({
+  bool signalFirst = false,
+  Map<String, dynamic> cycleConfigOverrides = const {},
+}) {
   final json = <String, dynamic>{
     'layers': [
       {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'void'},
@@ -95,7 +98,8 @@ GameDefinition _game({bool signalFirst = false}) {
             'signal_yellow_to_green': 'signal_green',
             'signal_green': 'signal_yellow_to_red',
             'signal_yellow_to_red': 'signal_red',
-          }
+          },
+          ...cycleConfigOverrides,
         }
       },
     ],
@@ -172,6 +176,27 @@ LevelDefinition _level(GameDefinition game, {bool reverse = false}) {
 }
 
 void main() {
+  test('malformed cycle entries are ignored instead of throwing', () {
+    final game = _game(
+      cycleConfigOverrides: {
+        'cycles': {'signal_red': 7},
+      },
+    );
+    final engine = TurnEngine(game, _level(game));
+
+    final result = engine.executeTurn(
+      const GameAction('rotate_cell', {
+        'position': [0, 1]
+      }),
+    );
+
+    expect(result.accepted, isTrue);
+    expect(
+      engine.state.board.getEntity('markers', const Position(2, 0))!.kind,
+      'signal_red',
+    );
+  });
+
   test('declaring signal first changes the light before routed movement', () {
     final game = _game(signalFirst: true);
     final engine = TurnEngine(game, _level(game));

@@ -12,6 +12,8 @@ import '../models/game_state.dart';
 /// earlier in `game.json` observe the old kind; systems declared later observe
 /// the new kind.
 class TurnCycleSystem extends GameSystem {
+  // PhaseRunner creates a fresh system list for each turn. This flag only
+  // carries the accepted action's decision into that turn's NPC phase.
   bool _advanceThisTurn = false;
 
   TurnCycleSystem({required super.id}) : super(type: 'turn_cycle');
@@ -23,8 +25,9 @@ class TurnCycleSystem extends GameSystem {
     GameDefinition game,
   ) {
     final config = game.systemConfig(id, {});
+    final rawTriggerActions = config['triggerActions'];
     final triggerActions =
-        (config['triggerActions'] as List<dynamic>? ?? const <dynamic>[])
+        (rawTriggerActions is List ? rawTriggerActions : const <dynamic>[])
             .map((value) => value.toString())
             .toSet();
     _advanceThisTurn =
@@ -40,16 +43,19 @@ class TurnCycleSystem extends GameSystem {
     if (!_advanceThisTurn) return const [];
 
     final config = game.systemConfig(id, {});
-    final layerId = config['layer'] as String? ?? 'markers';
+    final layerId =
+        config['layer'] is String ? config['layer'] as String : 'markers';
     final layer = state.board.layers[layerId];
-    final cycles =
-        config['cycles'] as Map<String, dynamic>? ?? const <String, dynamic>{};
+    final cycles = config['cycles'];
     if (layer == null) return const [];
+    if (cycles is! Map) return const [];
 
     final events = <GameEvent>[];
     for (final entry in layer.entries().toList()) {
-      final nextKind = cycles[entry.value.kind] as String?;
-      if (nextKind == null || !game.entityKinds.containsKey(nextKind)) continue;
+      final nextKind = cycles[entry.value.kind];
+      if (nextKind is! String || !game.entityKinds.containsKey(nextKind)) {
+        continue;
+      }
       layer.setAt(
         entry.key,
         EntityInstance(

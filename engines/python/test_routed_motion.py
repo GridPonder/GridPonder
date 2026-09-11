@@ -14,8 +14,8 @@ from engines.python._turn_engine import TurnEngine
 
 
 ROUTES = {
-    "road_h": {"left": "right", "right": "left"},
-    "road_v": {"up": "down", "down": "up"},
+    "route_h": {"left": "right", "right": "left"},
+    "route_v": {"up": "down", "down": "up"},
     "corner_ne": {"up": "right", "right": "up"},
     "corner_se": {"right": "down", "down": "right"},
     "corner_sw": {"down": "left", "left": "down"},
@@ -32,11 +32,15 @@ def _game(
     match_param="color",
     routes=None,
     route_selector_layer=None,
+    rotation_config_overrides=None,
+    routed_config_overrides=None,
 ) -> GameDef:
+    rotation_config_overrides = rotation_config_overrides or {}
+    routed_config_overrides = routed_config_overrides or {}
     kinds = {
         "void": {"layer": "ground", "tags": [], "symbol": "V"},
-        "road_h": {"layer": "ground", "tags": ["route"], "symbol": "-"},
-        "road_v": {"layer": "ground", "tags": ["route"], "symbol": "|"},
+        "route_h": {"layer": "ground", "tags": ["route"], "symbol": "-"},
+        "route_v": {"layer": "ground", "tags": ["route"], "symbol": "|"},
         "corner_ne": {"layer": "ground", "tags": ["route"], "symbol": "1"},
         "corner_se": {"layer": "ground", "tags": ["route"], "symbol": "2"},
         "corner_sw": {"layer": "ground", "tags": ["route"], "symbol": "3"},
@@ -47,9 +51,9 @@ def _game(
             "tags": ["route"],
             "symbol": "+",
         },
-        "truck": {
+        "mover": {
             "layer": "objects",
-            "tags": ["routed_mover", "cargo"],
+            "tags": ["routed_mover", "routed_piece"],
             "symbol": "T",
         },
         "barrier": {"layer": "objects", "tags": [], "symbol": "B"},
@@ -84,21 +88,22 @@ def _game(
             ],
             "systems": [
                 {
-                    "id": "rotate_roads",
+                    "id": "rotate_routes",
                     "type": "cell_rotation",
                     "config": {
                         "cycles": {
-                            "road_h": "road_v",
-                            "road_v": "road_h",
+                            "route_h": "route_v",
+                            "route_v": "route_h",
                             "corner_ne": "corner_se",
                             "corner_se": "corner_sw",
                             "corner_sw": "corner_nw",
                             "corner_nw": "corner_ne",
-                        }
+                        },
+                        **rotation_config_overrides,
                     },
                 },
                 {
-                    "id": "traffic",
+                    "id": "motion",
                     "type": "routed_motion",
                     "config": {
                         "routes": routes or ROUTES,
@@ -120,6 +125,7 @@ def _game(
                             if route_selector_layer
                             else {}
                         ),
+                        **routed_config_overrides,
                     },
                 },
             ],
@@ -147,7 +153,7 @@ def _level(
         },
         "state": {"avatar": {"enabled": False}, "variables": {"crashes": 0}},
         "goals": (
-            [{"id": "deliver", "type": "all_cleared", "config": {"tag": "cargo"}}]
+            [{"id": "clear_movers", "type": "all_cleared", "config": {"tag": "routed_piece"}}]
             if with_goal
             else []
         ),
@@ -160,16 +166,16 @@ def _level(
     }
 
 
-def _prototype_level() -> dict:
+def _turn_preparation_level() -> dict:
     return _level(
         ground=[
-            {"position": [2, 0], "kind": "road_v"},
-            {"position": [0, 1], "kind": "road_h"},
-            {"position": [1, 1], "kind": "road_h"},
+            {"position": [2, 0], "kind": "route_v"},
+            {"position": [0, 1], "kind": "route_h"},
+            {"position": [1, 1], "kind": "route_h"},
             {"position": [2, 1], "kind": "corner_se"},
         ],
         objects=[
-            {"position": [0, 1], "kind": "truck", "heading": "right", "color": "red"}
+            {"position": [0, 1], "kind": "mover", "heading": "right", "color": "red"}
         ],
         markers=[
             {"position": [2, 0], "kind": "exit_red", "color": "red"}
@@ -179,8 +185,8 @@ def _prototype_level() -> dict:
 
 
 class RoutedMotionTest(unittest.TestCase):
-    def test_first_level_gold_path_requires_preparing_the_corner(self):
-        engine = TurnEngine(_game(), _prototype_level())
+    def test_rotation_can_prepare_a_downstream_turn_before_mover_arrives(self):
+        engine = TurnEngine(_game(), _turn_preparation_level())
 
         first = engine.execute_turn("rotate_cell", {"position": [2, 1]})
         second = engine.execute_turn("rotate_cell", {"position": [2, 1]})
@@ -192,8 +198,56 @@ class RoutedMotionTest(unittest.TestCase):
         self.assertIsNone(engine.state.board.get_entity("objects", Pos(2, 0)))
         self.assertEqual(engine.state.action_count, 3)
 
-    def test_occupied_road_cannot_rotate_and_does_not_tick_traffic(self):
-        engine = TurnEngine(_game(), _prototype_level())
+    def test_malformed_optional_config_uses_defaults_instead_of_throwing(self):
+        rotation_engine = TurnEngine(
+            _game(
+                rotation_config_overrides={"cycles": {"corner_se": 7}}
+            ),
+            _turn_preparation_level(),
+        )
+        rotation = rotation_engine.execute_turn(
+            "rotate_cell", {"position": [2, 1]}
+        )
+        self.assertFalse(rotation.accepted)
+
+        routed_engine = TurnEngine(
+            _game(
+                "until_blocked",
+                "stop",
+                routed_config_overrides={
+                    "exitRequiresRoute": "yes",
+                    "allowUTurns": "yes",
+                    "maxTravelSteps": "many",
+                },
+            ),
+            _level(
+                size=(2, 1),
+                ground=[
+                    {"position": [0, 0], "kind": "route_h"},
+                    {"position": [1, 0], "kind": "route_h"},
+                ],
+                objects=[
+                    {
+                        "position": [0, 0],
+                        "kind": "mover",
+                        "heading": "right",
+                        "color": "red",
+                    }
+                ],
+                markers=[
+                    {
+                        "position": [1, 0],
+                        "kind": "exit_red",
+                        "color": "red",
+                    }
+                ],
+                with_goal=True,
+            ),
+        )
+        self.assertTrue(routed_engine.execute_turn("advance").is_won)
+
+    def test_occupied_route_cannot_rotate_and_does_not_tick_motion(self):
+        engine = TurnEngine(_game(), _turn_preparation_level())
 
         result = engine.execute_turn("rotate_cell", {"position": [0, 1]})
 
@@ -202,7 +256,7 @@ class RoutedMotionTest(unittest.TestCase):
         self.assertEqual(engine.state.action_count, 0)
 
     def test_unprepared_corner_loses_without_partially_moving(self):
-        engine = TurnEngine(_game(), _prototype_level())
+        engine = TurnEngine(_game(), _turn_preparation_level())
         engine.execute_turn("advance")
 
         result = engine.execute_turn("advance")
@@ -216,11 +270,11 @@ class RoutedMotionTest(unittest.TestCase):
         level = _level(
             size=(4, 1),
             ground=[
-                {"position": [x, 0], "kind": "road_h"} for x in range(4)
+                {"position": [x, 0], "kind": "route_h"} for x in range(4)
             ],
             objects=[
-                {"position": [0, 0], "kind": "truck", "heading": "right"},
-                {"position": [1, 0], "kind": "truck", "heading": "right"},
+                {"position": [0, 0], "kind": "mover", "heading": "right"},
+                {"position": [1, 0], "kind": "mover", "heading": "right"},
             ],
         )
         engine = TurnEngine(_game(), level)
@@ -232,15 +286,15 @@ class RoutedMotionTest(unittest.TestCase):
         self.assertIsNotNone(engine.state.board.get_entity("objects", Pos(1, 0)))
         self.assertIsNotNone(engine.state.board.get_entity("objects", Pos(2, 0)))
 
-    def test_two_trucks_claiming_one_destination_fail_atomically(self):
+    def test_two_movers_claiming_one_destination_fail_atomically(self):
         level = _level(
             size=(3, 1),
             ground=[
-                {"position": [x, 0], "kind": "road_h"} for x in range(3)
+                {"position": [x, 0], "kind": "route_h"} for x in range(3)
             ],
             objects=[
-                {"position": [0, 0], "kind": "truck", "heading": "right"},
-                {"position": [2, 0], "kind": "truck", "heading": "left"},
+                {"position": [0, 0], "kind": "mover", "heading": "right"},
+                {"position": [2, 0], "kind": "mover", "heading": "left"},
             ],
         )
         engine = TurnEngine(_game(), level)
@@ -259,13 +313,13 @@ class RoutedMotionTest(unittest.TestCase):
             _level(
                 size=(2, 1),
                 ground=[
-                    {"position": [0, 0], "kind": "road_h"},
+                    {"position": [0, 0], "kind": "route_h"},
                     {"position": [1, 0], "kind": "u_turn"},
                 ],
                 objects=[
                     {
                         "position": [0, 0],
-                        "kind": "truck",
+                        "kind": "mover",
                         "heading": "right",
                     }
                 ],
@@ -289,13 +343,13 @@ class RoutedMotionTest(unittest.TestCase):
         level = _level(
             size=(2, 1),
             ground=[
-                {"position": [0, 0], "kind": "road_h"},
-                {"position": [1, 0], "kind": "road_h"},
+                {"position": [0, 0], "kind": "route_h"},
+                {"position": [1, 0], "kind": "route_h"},
             ],
             objects=[
                 {
                     "position": [0, 0],
-                    "kind": "truck",
+                    "kind": "mover",
                     "heading": "right",
                     "color": "red",
                 }
@@ -337,12 +391,12 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
         level = _level(
             size=(4, 1),
             ground=[
-                {"position": [x, 0], "kind": "road_h"} for x in range(4)
+                {"position": [x, 0], "kind": "route_h"} for x in range(4)
             ],
             objects=[
                 {
                     "position": [0, 0],
-                    "kind": "truck",
+                    "kind": "mover",
                     "heading": "right",
                     "color": "red",
                 }
@@ -381,8 +435,8 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
                 (2, 1),
                 Pos(0, 0),
                 Pos(1, 0),
-                "road_h",
-                "road_v",
+                "route_h",
+                "route_v",
                 "right",
             ),
             (
@@ -390,8 +444,8 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
                 (1, 2),
                 Pos(0, 1),
                 Pos(0, 0),
-                "road_v",
-                "road_h",
+                "route_v",
+                "route_h",
                 "up",
             ),
         ]
@@ -407,7 +461,7 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
                     objects=[
                         {
                             "position": [source.x, source.y],
-                            "kind": "truck",
+                            "kind": "mover",
                             "heading": heading,
                             "color": "red",
                         }
@@ -455,15 +509,15 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
                 _level(
                     size=(3, 2),
                     ground=[
-                        {"position": [0, 1], "kind": "road_h"},
+                        {"position": [0, 1], "kind": "route_h"},
                         {"position": [1, 1], "kind": "junction_t"},
-                        {"position": [2, 1], "kind": "road_h"},
-                        {"position": [1, 0], "kind": "road_v"},
+                        {"position": [2, 1], "kind": "route_h"},
+                        {"position": [1, 0], "kind": "route_v"},
                     ],
                     objects=[
                         {
                             "position": [0, 1],
-                            "kind": "truck",
+                            "kind": "mover",
                             "heading": "right",
                             "color": "red",
                         }
@@ -515,12 +569,12 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
         level = _level(
             size=(3, 1),
             ground=[
-                {"position": [0, 0], "kind": "road_h"},
-                {"position": [1, 0], "kind": "road_h"},
-                {"position": [2, 0], "kind": "road_v"},
+                {"position": [0, 0], "kind": "route_h"},
+                {"position": [1, 0], "kind": "route_h"},
+                {"position": [2, 0], "kind": "route_v"},
             ],
             objects=[
-                {"position": [0, 0], "kind": "truck", "heading": "right"}
+                {"position": [0, 0], "kind": "mover", "heading": "right"}
             ],
         )
         engine = TurnEngine(self.game, level)
@@ -541,6 +595,66 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
             },
         )
 
+    def test_fail_rolls_every_mover_back_after_provisional_microsteps(self):
+        level = _level(
+            size=(4, 2),
+            ground=[
+                {
+                    "position": [x, y],
+                    "kind": (
+                        "route_v" if x == 3 and y == 0 else "route_h"
+                    ),
+                }
+                for y in range(2)
+                for x in range(4)
+            ],
+            objects=[
+                {
+                    "position": [0, 0],
+                    "kind": "mover",
+                    "heading": "right",
+                },
+                {
+                    "position": [0, 1],
+                    "kind": "mover",
+                    "heading": "right",
+                },
+            ],
+        )
+        engine = TurnEngine(
+            _game("until_blocked", "fail", False),
+            level,
+        )
+
+        result = engine.execute_turn("advance")
+
+        self.assertEqual(engine.state.variables["crashes"], 1)
+        self.assertIsNotNone(
+            engine.state.board.get_entity("objects", Pos(0, 0))
+        )
+        self.assertIsNotNone(
+            engine.state.board.get_entity("objects", Pos(0, 1))
+        )
+        self.assertIsNone(
+            engine.state.board.get_entity("objects", Pos(2, 0))
+        )
+        self.assertIsNone(
+            engine.state.board.get_entity("objects", Pos(2, 1))
+        )
+        self.assertFalse(
+            any(
+                event["type"] == "entity_path_moved"
+                for event in result.events
+            )
+        )
+        failure = next(
+            event
+            for event in result.events
+            if event["type"] == "routed_motion_failed"
+        )
+        self.assertEqual(failure["fromPosition"], Pos(0, 0))
+        self.assertEqual(failure["position"], Pos(3, 0))
+
     def test_closed_loop_runs_one_lap_and_terminates(self):
         level = _level(
             size=(2, 2),
@@ -551,7 +665,7 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
                 {"position": [0, 1], "kind": "corner_ne"},
             ],
             objects=[
-                {"position": [0, 0], "kind": "truck", "heading": "right"}
+                {"position": [0, 0], "kind": "mover", "heading": "right"}
             ],
         )
         engine = TurnEngine(self.game, level)
@@ -580,11 +694,11 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
         u_turn_level = _level(
             size=(2, 1),
             ground=[
-                {"position": [0, 0], "kind": "road_h"},
+                {"position": [0, 0], "kind": "route_h"},
                 {"position": [1, 0], "kind": "u_turn"},
             ],
             objects=[
-                {"position": [0, 0], "kind": "truck", "heading": "right"}
+                {"position": [0, 0], "kind": "mover", "heading": "right"}
             ],
         )
         u_turn_engine = TurnEngine(self.game, u_turn_level)
@@ -596,10 +710,10 @@ class ContinuousRoutedMotionTest(unittest.TestCase):
         path_level = _level(
             size=(3, 1),
             ground=[
-                {"position": [x, 0], "kind": "road_h"} for x in range(3)
+                {"position": [x, 0], "kind": "route_h"} for x in range(3)
             ],
             objects=[
-                {"position": [0, 0], "kind": "truck", "heading": "right"}
+                {"position": [0, 0], "kind": "mover", "heading": "right"}
             ],
         )
         path_engine = TurnEngine(self.game, path_level)

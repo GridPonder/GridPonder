@@ -15,7 +15,10 @@ class CellRotationSystem(GameSystem):
         self, action: dict, state: GameState, game: GameDef
     ) -> list[dict]:
         config = game.system_config(self.id)
-        if action.get("actionId") != config.get("rotateAction", "rotate_cell"):
+        rotate_action = config.get("rotateAction")
+        if not isinstance(rotate_action, str):
+            rotate_action = "rotate_cell"
+        if action.get("actionId") != rotate_action:
             return []
 
         raw_position = action.get("params", {}).get("position")
@@ -26,18 +29,26 @@ class CellRotationSystem(GameSystem):
         if not state.board.is_in_bounds(position):
             return [ev.action_vetoed()]
 
-        layer_id = config.get("layer", "ground")
+        layer_id = config.get("layer")
+        if not isinstance(layer_id, str):
+            layer_id = "ground"
         entity = state.board.get_entity(layer_id, position)
         if entity is None:
             return [ev.action_vetoed()]
 
-        cycles = config.get("cycles") or {}
+        cycles = config.get("cycles")
+        if not isinstance(cycles, dict):
+            cycles = {}
         next_kind = cycles.get(entity.kind)
         if not isinstance(next_kind, str) or next_kind not in game.entity_kinds:
             return [ev.action_vetoed()]
 
         blocking_layers = config_list(config, "blockingLayers", ["objects"])
+        if not isinstance(blocking_layers, list):
+            blocking_layers = ["objects"]
         blocking_tags = config_list(config, "blockingTags", [])
+        if not isinstance(blocking_tags, list):
+            blocking_tags = []
         for blocking_layer in blocking_layers:
             blocker = state.board.get_entity(str(blocking_layer), position)
             if blocker is None:

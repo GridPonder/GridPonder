@@ -80,38 +80,64 @@ class _RouteConfig:
 
     @classmethod
     def from_dict(cls, data: dict) -> "_RouteConfig":
+        def string_or(value: object, fallback: str) -> str:
+            return value if isinstance(value, str) else fallback
+
+        def optional_string(value: object) -> str | None:
+            return value if isinstance(value, str) else None
+
+        def bool_or(value: object, fallback: bool) -> bool:
+            return value if isinstance(value, bool) else fallback
+
         match_param = data.get("matchParam")
-        if not isinstance(match_param, str) or not match_param:
-            match_param = None
-        exit_match_param = data.get("exitMatchParam", match_param)
+        match_param = optional_string(match_param)
+        exit_match_param = optional_string(data.get("exitMatchParam"))
+        if match_param is not None and exit_match_param is None:
+            exit_match_param = match_param
         if match_param is None:
             exit_match_param = None
+        routes = data.get("routes")
+        if not isinstance(routes, dict):
+            routes = {}
+        max_travel_steps = data.get("maxTravelSteps")
+        if not isinstance(max_travel_steps, int) or isinstance(
+            max_travel_steps, bool
+        ):
+            max_travel_steps = None
         return cls(
-            mover_layer_id=str(data.get("moverLayer", "objects")),
-            mover_tag=str(data.get("moverTag", "routed_mover")),
-            route_layer_id=str(data.get("routeLayer", "ground")),
-            heading_param=str(data.get("headingParam", "heading")),
+            mover_layer_id=string_or(data.get("moverLayer"), "objects"),
+            mover_tag=string_or(data.get("moverTag"), "routed_mover"),
+            route_layer_id=string_or(data.get("routeLayer"), "ground"),
+            heading_param=string_or(data.get("headingParam"), "heading"),
             match_param=match_param,
-            exit_layer_id=str(data.get("exitLayer", "markers")),
-            exit_tag=str(data.get("exitTag", "route_exit")),
-            exit_match_param=(
-                str(exit_match_param) if exit_match_param is not None else None
+            exit_layer_id=string_or(data.get("exitLayer"), "markers"),
+            exit_tag=string_or(data.get("exitTag"), "route_exit"),
+            exit_match_param=exit_match_param,
+            exit_requires_route=bool_or(
+                data.get("exitRequiresRoute"), True
             ),
-            exit_requires_route=bool(data.get("exitRequiresRoute", True)),
-            gate_layer_id=data.get("gateLayer"),
-            gate_closed_tag=str(data.get("gateClosedTag", "route_closed")),
-            gate_entry_side_param=str(
-                data.get("gateEntrySideParam", "entrySide")
+            gate_layer_id=optional_string(data.get("gateLayer")),
+            gate_closed_tag=string_or(
+                data.get("gateClosedTag"), "route_closed"
             ),
-            route_selector_layer_id=data.get("routeSelectorLayer"),
-            failure_variable=str(
-                data.get("failureVariable", "routedMotionFailures")
+            gate_entry_side_param=string_or(
+                data.get("gateEntrySideParam"), "entrySide"
             ),
-            routes=data.get("routes") or {},
-            movement_mode=str(data.get("movementMode", "single_step")),
-            blocked_behavior=str(data.get("blockedBehavior", "fail")),
-            allow_u_turns=bool(data.get("allowUTurns", True)),
-            max_travel_steps=data.get("maxTravelSteps"),
+            route_selector_layer_id=optional_string(
+                data.get("routeSelectorLayer")
+            ),
+            failure_variable=string_or(
+                data.get("failureVariable"), "routedMotionFailures"
+            ),
+            routes=routes,
+            movement_mode=string_or(
+                data.get("movementMode"), "single_step"
+            ),
+            blocked_behavior=string_or(
+                data.get("blockedBehavior"), "fail"
+            ),
+            allow_u_turns=bool_or(data.get("allowUTurns"), True),
+            max_travel_steps=max_travel_steps,
         )
 
 
@@ -189,7 +215,7 @@ class RoutedMotionSystem(GameSystem):
                 )
 
         if failures:
-            old_value = int(state.variables.get(config.failure_variable, 0))
+            old_value = self._failure_count(state, config.failure_variable)
             new_value = old_value + 1
             state.variables[config.failure_variable] = new_value
             failure_events = [
@@ -248,7 +274,6 @@ class RoutedMotionSystem(GameSystem):
             for i, mover in enumerate(movers)
         ]
         blocked_events: list[dict] = []
-        failures: list[_Failure] = []
         seen_states: set[tuple] = set()
         default_limit = state.board.width * state.board.height * 4 * len(flows)
         travel_limit = (
@@ -366,11 +391,35 @@ class RoutedMotionSystem(GameSystem):
                         propagated = True
 
             if config.blocked_behavior == "fail" and blocked:
-                failures.extend(blocked.values())
+                # `fail` is transactional for the whole continuous tick.
+                # Restore movers that travelled in earlier microsteps, even
+                # when one of them already reached and left through an exit.
                 for flow in flows:
-                    if flow.active:
-                        flow.active = False
-                break
+                    mover_layer.set(flow.position, None)
+                for mover in movers:
+                    mover_layer.set(mover.position, mover.entity)
+
+                old_value = self._failure_count(
+                    state, config.failure_variable
+                )
+                new_value = old_value + 1
+                state.variables[config.failure_variable] = new_value
+                events = [
+                    {
+                        "type": "routed_motion_failed",
+                        "position": failure.target,
+                        "kind": movers[flow.index].entity.kind,
+                        "fromPosition": movers[flow.index].position,
+                        "reason": failure.reason,
+                    }
+                    for flow, failure in blocked.items()
+                ]
+                events.append(
+                    ev.variable_changed(
+                        config.failure_variable, old_value, new_value
+                    )
+                )
+                return events
 
             for flow, failure in blocked.items():
                 flow.active = False
@@ -419,23 +468,6 @@ class RoutedMotionSystem(GameSystem):
         )
         events.extend(blocked_events)
 
-        if failures:
-            old_value = int(state.variables.get(config.failure_variable, 0))
-            new_value = old_value + 1
-            state.variables[config.failure_variable] = new_value
-            events.extend(
-                {
-                    "type": "routed_motion_failed",
-                    "position": failure.target,
-                    "kind": failure.mover.entity.kind,
-                    "fromPosition": failure.mover.position,
-                    "reason": failure.reason,
-                }
-                for failure in self._dedupe_failures(failures)
-            )
-            events.append(
-                ev.variable_changed(config.failure_variable, old_value, new_value)
-            )
         return events
 
     def _plan_step(
@@ -586,6 +618,13 @@ class RoutedMotionSystem(GameSystem):
             return False
         controlled_side = gate.param(config.gate_entry_side_param)
         return controlled_side in (None, "any", incoming_side)
+
+    @staticmethod
+    def _failure_count(state: GameState, variable: str) -> int:
+        value = state.variables.get(variable, 0)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return 0
+        return int(value)
 
     @staticmethod
     def _dedupe_failures(failures: list[_Failure]) -> list[_Failure]:

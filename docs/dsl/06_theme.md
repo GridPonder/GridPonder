@@ -71,7 +71,7 @@ Each gesture mapping:
 | `buttonId` | string | conditional | Required when `gesture` is `button`. UI control identifier. |
 | `paramMapping` | object | no | Maps input parameters to action parameters dynamically. |
 | `params` | object | no | Static parameters to include with the action. |
-| `showSelection` | boolean | no | When `true`, an accepted cell tap leaves a visible outline on that cell until another cell is selected or the level state is reset. Defaults to `false`. |
+| `showSelection` | boolean | no | When `true`, an accepted cell-tap action leaves a visible outline on its mapped cell until another cell is selected or the level state is reset. Solve and Hint replay update the same outline. Defaults to `false`. |
 
 **Platform behavior:** On mobile, gestures are used directly. On web/desktop, the engine maps arrow keys to `swipe_cardinal` equivalents, and provides on-screen buttons for `button`-type actions. Games can provide platform-specific overrides (future extension).
 

@@ -13,7 +13,10 @@ from engines.python._models import Pos
 from engines.python._turn_engine import TurnEngine
 
 
-def _game(*, signal_first: bool = False) -> GameDef:
+def _game(
+    *, signal_first: bool = False, cycle_config_overrides=None
+) -> GameDef:
+    cycle_config_overrides = cycle_config_overrides or {}
     data = {
             "layers": [
                 {"id": "ground", "occupancy": "exactly_one", "default": "void"},
@@ -103,6 +106,7 @@ def _game(*, signal_first: bool = False) -> GameDef:
                             "signal_green": "signal_yellow_to_red",
                             "signal_yellow_to_red": "signal_red",
                         },
+                        **cycle_config_overrides,
                     },
                 },
             ],
@@ -163,6 +167,20 @@ def _level(*, reverse: bool = False) -> dict:
 
 
 class TurnCycleGateTest(unittest.TestCase):
+    def test_malformed_cycle_entries_are_ignored_instead_of_throwing(self):
+        game = _game(cycle_config_overrides={"cycles": {"signal_red": 7}})
+        engine = TurnEngine(game, _level())
+
+        result = engine.execute_turn(
+            "rotate_cell", {"position": [0, 1]}
+        )
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(
+            engine.state.board.get_entity("markers", Pos(2, 0)).kind,
+            "signal_red",
+        )
+
     def test_declaring_signal_first_changes_light_before_routed_movement(self):
         engine = TurnEngine(_game(signal_first=True), _level())
 

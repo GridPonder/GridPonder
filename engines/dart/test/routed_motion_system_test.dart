@@ -2,8 +2,8 @@ import 'package:gridponder_engine/engine.dart';
 import 'package:test/test.dart';
 
 const _routes = <String, dynamic>{
-  'road_h': {'left': 'right', 'right': 'left'},
-  'road_v': {'up': 'down', 'down': 'up'},
+  'route_h': {'left': 'right', 'right': 'left'},
+  'route_v': {'up': 'down', 'down': 'up'},
   'corner_ne': {'up': 'right', 'right': 'up'},
   'corner_se': {'right': 'down', 'down': 'right'},
   'corner_sw': {'down': 'left', 'left': 'down'},
@@ -19,6 +19,8 @@ GameDefinition _game({
   String? matchParam = 'color',
   Map<String, dynamic> routes = _routes,
   String? routeSelectorLayer,
+  Map<String, dynamic> rotationConfigOverrides = const {},
+  Map<String, dynamic> routedConfigOverrides = const {},
 }) =>
     GameDefinition.fromJson({
       'layers': [
@@ -28,12 +30,12 @@ GameDefinition _game({
       ],
       'entityKinds': {
         'void': {'layer': 'ground', 'tags': <String>[], 'symbol': 'V'},
-        'road_h': {
+        'route_h': {
           'layer': 'ground',
           'tags': ['route'],
           'symbol': '-',
         },
-        'road_v': {
+        'route_v': {
           'layer': 'ground',
           'tags': ['route'],
           'symbol': '|',
@@ -68,9 +70,9 @@ GameDefinition _game({
           'tags': ['route'],
           'symbol': '+',
         },
-        'truck': {
+        'mover': {
           'layer': 'objects',
-          'tags': ['routed_mover', 'cargo'],
+          'tags': ['routed_mover', 'routed_piece'],
           'symbol': 'T',
           'motion': {
             'moveDurationMs': 240,
@@ -105,21 +107,22 @@ GameDefinition _game({
       ],
       'systems': [
         {
-          'id': 'rotate_roads',
+          'id': 'rotate_routes',
           'type': 'cell_rotation',
           'config': {
             'cycles': {
-              'road_h': 'road_v',
-              'road_v': 'road_h',
+              'route_h': 'route_v',
+              'route_v': 'route_h',
               'corner_ne': 'corner_se',
               'corner_se': 'corner_sw',
               'corner_sw': 'corner_nw',
               'corner_nw': 'corner_ne',
             },
+            ...rotationConfigOverrides,
           },
         },
         {
-          'id': 'traffic',
+          'id': 'motion',
           'type': 'routed_motion',
           'config': {
             'routes': routes,
@@ -132,6 +135,7 @@ GameDefinition _game({
             'exitRequiresRoute': exitRequiresRoute,
             if (routeSelectorLayer != null)
               'routeSelectorLayer': routeSelectorLayer,
+            ...routedConfigOverrides,
           },
         },
       ],
@@ -161,9 +165,9 @@ Map<String, dynamic> _levelJson({
       'goals': withGoal
           ? [
               {
-                'id': 'deliver',
+                'id': 'clear_movers',
                 'type': 'all_cleared',
-                'config': {'tag': 'cargo'},
+                'config': {'tag': 'routed_piece'},
               },
             ]
           : <Map<String, dynamic>>[],
@@ -179,19 +183,19 @@ Map<String, dynamic> _levelJson({
       ],
     };
 
-Map<String, dynamic> _prototypeLevel() => _levelJson(
+Map<String, dynamic> _turnPreparationLevel() => _levelJson(
       ground: [
         {
           'position': [2, 0],
-          'kind': 'road_v'
+          'kind': 'route_v'
         },
         {
           'position': [0, 1],
-          'kind': 'road_h'
+          'kind': 'route_h'
         },
         {
           'position': [1, 1],
-          'kind': 'road_h'
+          'kind': 'route_h'
         },
         {
           'position': [2, 1],
@@ -201,7 +205,7 @@ Map<String, dynamic> _prototypeLevel() => _levelJson(
       objects: [
         {
           'position': [0, 1],
-          'kind': 'truck',
+          'kind': 'mover',
           'heading': 'right',
           'color': 'red',
         },
@@ -225,9 +229,8 @@ TurnEngine _engine(
 }
 
 void main() {
-  test('first level gold path prepares the corner before the truck arrives',
-      () {
-    final engine = _engine(_prototypeLevel());
+  test('rotation can prepare a downstream turn before a mover arrives', () {
+    final engine = _engine(_turnPreparationLevel());
 
     expect(
       engine
@@ -253,8 +256,72 @@ void main() {
     expect(engine.state.actionCount, 3);
   });
 
-  test('an occupied road cannot rotate or tick traffic', () {
-    final engine = _engine(_prototypeLevel());
+  test('malformed optional config uses defaults instead of throwing', () {
+    final rotationEngine = _engine(
+      _turnPreparationLevel(),
+      game: _game(
+        rotationConfigOverrides: {
+          'cycles': {'corner_se': 7},
+        },
+      ),
+    );
+    final rotation = rotationEngine.executeTurn(
+      GameAction('rotate_cell', {
+        'position': [2, 1]
+      }),
+    );
+    expect(rotation.accepted, isFalse);
+
+    final routedGame = _game(
+      movementMode: 'until_blocked',
+      blockedBehavior: 'stop',
+      routedConfigOverrides: const {
+        'exitRequiresRoute': 'yes',
+        'allowUTurns': 'yes',
+        'maxTravelSteps': 'many',
+      },
+    );
+    final routedEngine = _engine(
+      _levelJson(
+        size: const [2, 1],
+        ground: const [
+          {
+            'position': [0, 0],
+            'kind': 'route_h'
+          },
+          {
+            'position': [1, 0],
+            'kind': 'route_h'
+          },
+        ],
+        objects: const [
+          {
+            'position': [0, 0],
+            'kind': 'mover',
+            'heading': 'right',
+            'color': 'red',
+          },
+        ],
+        markers: const [
+          {
+            'position': [1, 0],
+            'kind': 'exit_red',
+            'color': 'red',
+          },
+        ],
+        withGoal: true,
+      ),
+      game: routedGame,
+    );
+
+    expect(
+      routedEngine.executeTurn(const GameAction('advance')).isWon,
+      isTrue,
+    );
+  });
+
+  test('an occupied route cannot rotate or tick motion', () {
+    final engine = _engine(_turnPreparationLevel());
 
     final result = engine.executeTurn(
       GameAction('rotate_cell', {
@@ -271,7 +338,7 @@ void main() {
   });
 
   test('an unprepared corner loses without partially moving', () {
-    final engine = _engine(_prototypeLevel());
+    final engine = _engine(_turnPreparationLevel());
     engine.executeTurn(const GameAction('advance'));
 
     final result = engine.executeTurn(const GameAction('advance'));
@@ -296,18 +363,18 @@ void main() {
           for (var x = 0; x < 4; x++)
             {
               'position': [x, 0],
-              'kind': 'road_h'
+              'kind': 'route_h'
             },
         ],
         objects: [
           {
             'position': [0, 0],
-            'kind': 'truck',
+            'kind': 'mover',
             'heading': 'right'
           },
           {
             'position': [1, 0],
-            'kind': 'truck',
+            'kind': 'mover',
             'heading': 'right'
           },
         ],
@@ -328,7 +395,7 @@ void main() {
     );
   });
 
-  test('two trucks claiming one destination fail atomically', () {
+  test('two movers claiming one destination fail atomically', () {
     final engine = _engine(
       _levelJson(
         size: const [3, 1],
@@ -336,18 +403,18 @@ void main() {
           for (var x = 0; x < 3; x++)
             {
               'position': [x, 0],
-              'kind': 'road_h'
+              'kind': 'route_h'
             },
         ],
         objects: [
           {
             'position': [0, 0],
-            'kind': 'truck',
+            'kind': 'mover',
             'heading': 'right'
           },
           {
             'position': [2, 0],
-            'kind': 'truck',
+            'kind': 'mover',
             'heading': 'left'
           },
         ],
@@ -379,7 +446,7 @@ void main() {
         ground: const [
           {
             'position': [0, 0],
-            'kind': 'road_h',
+            'kind': 'route_h',
           },
           {
             'position': [1, 0],
@@ -389,7 +456,7 @@ void main() {
         objects: const [
           {
             'position': [0, 0],
-            'kind': 'truck',
+            'kind': 'mover',
             'heading': 'right',
           },
         ],
@@ -419,17 +486,17 @@ void main() {
           ground: const [
             {
               'position': [0, 0],
-              'kind': 'road_h',
+              'kind': 'route_h',
             },
             {
               'position': [1, 0],
-              'kind': 'road_h',
+              'kind': 'route_h',
             },
           ],
           objects: const [
             {
               'position': [0, 0],
-              'kind': 'truck',
+              'kind': 'mover',
               'heading': 'right',
               'color': 'red',
             },
@@ -484,13 +551,13 @@ void main() {
             for (var x = 0; x < 4; x++)
               {
                 'position': [x, 0],
-                'kind': 'road_h'
+                'kind': 'route_h'
               },
           ],
           objects: [
             {
               'position': [0, 0],
-              'kind': 'truck',
+              'kind': 'mover',
               'heading': 'right',
               'color': 'red',
             },
@@ -548,8 +615,8 @@ void main() {
           size: const [2, 1],
           source: const Position(0, 0),
           target: const Position(1, 0),
-          sourceRoad: 'road_h',
-          targetRoad: 'road_v',
+          sourceRoad: 'route_h',
+          targetRoad: 'route_v',
           heading: 'right',
         ),
         (
@@ -557,8 +624,8 @@ void main() {
           size: const [1, 2],
           source: const Position(0, 1),
           target: const Position(0, 0),
-          sourceRoad: 'road_v',
-          targetRoad: 'road_h',
+          sourceRoad: 'route_v',
+          targetRoad: 'route_h',
           heading: 'up',
         ),
       ];
@@ -580,7 +647,7 @@ void main() {
             objects: [
               {
                 'position': [scenario.source.x, scenario.source.y],
-                'kind': 'truck',
+                'kind': 'mover',
                 'heading': scenario.heading,
                 'color': 'red',
               },
@@ -631,7 +698,7 @@ void main() {
               ground: const [
                 {
                   'position': [0, 1],
-                  'kind': 'road_h'
+                  'kind': 'route_h'
                 },
                 {
                   'position': [1, 1],
@@ -639,17 +706,17 @@ void main() {
                 },
                 {
                   'position': [2, 1],
-                  'kind': 'road_h'
+                  'kind': 'route_h'
                 },
                 {
                   'position': [1, 0],
-                  'kind': 'road_v'
+                  'kind': 'route_v'
                 },
               ],
               objects: const [
                 {
                   'position': [0, 1],
-                  'kind': 'truck',
+                  'kind': 'mover',
                   'heading': 'right',
                   'color': 'red',
                 },
@@ -712,21 +779,21 @@ void main() {
           ground: [
             {
               'position': [0, 0],
-              'kind': 'road_h'
+              'kind': 'route_h'
             },
             {
               'position': [1, 0],
-              'kind': 'road_h'
+              'kind': 'route_h'
             },
             {
               'position': [2, 0],
-              'kind': 'road_v'
+              'kind': 'route_v'
             },
           ],
           objects: [
             {
               'position': [0, 0],
-              'kind': 'truck',
+              'kind': 'mover',
               'heading': 'right'
             },
           ],
@@ -750,6 +817,68 @@ void main() {
         ),
         isTrue,
       );
+    });
+
+    test('fail rolls every mover back after provisional microsteps', () {
+      final engine = _engine(
+        _levelJson(
+          size: const [4, 2],
+          ground: [
+            for (var y = 0; y < 2; y++)
+              for (var x = 0; x < 4; x++)
+                {
+                  'position': [x, y],
+                  'kind': x == 3 && y == 0 ? 'route_v' : 'route_h',
+                },
+          ],
+          objects: const [
+            {
+              'position': [0, 0],
+              'kind': 'mover',
+              'heading': 'right',
+            },
+            {
+              'position': [0, 1],
+              'kind': 'mover',
+              'heading': 'right',
+            },
+          ],
+        ),
+        game: _game(
+          movementMode: 'until_blocked',
+          blockedBehavior: 'fail',
+          allowUTurns: false,
+        ),
+      );
+
+      final result = engine.executeTurn(const GameAction('advance'));
+
+      expect(engine.state.variables['crashes'], 1);
+      expect(
+        engine.state.board.getEntity('objects', const Position(0, 0)),
+        isNotNull,
+      );
+      expect(
+        engine.state.board.getEntity('objects', const Position(0, 1)),
+        isNotNull,
+      );
+      expect(
+        engine.state.board.getEntity('objects', const Position(2, 0)),
+        isNull,
+      );
+      expect(
+        engine.state.board.getEntity('objects', const Position(2, 1)),
+        isNull,
+      );
+      expect(
+        result.events.any((event) => event.type == 'entity_path_moved'),
+        isFalse,
+      );
+      final failure = result.events.singleWhere(
+        (event) => event.type == 'routed_motion_failed',
+      );
+      expect(failure.payload['fromPosition'], const Position(0, 0));
+      expect(failure.position, const Position(3, 0));
     });
 
     test('a closed loop runs one lap and terminates at repeated state', () {
@@ -777,7 +906,7 @@ void main() {
           objects: [
             {
               'position': [0, 0],
-              'kind': 'truck',
+              'kind': 'mover',
               'heading': 'right'
             },
           ],
@@ -815,7 +944,7 @@ void main() {
           ground: [
             {
               'position': [0, 0],
-              'kind': 'road_h'
+              'kind': 'route_h'
             },
             {
               'position': [1, 0],
@@ -825,7 +954,7 @@ void main() {
           objects: [
             {
               'position': [0, 0],
-              'kind': 'truck',
+              'kind': 'mover',
               'heading': 'right'
             },
           ],
@@ -845,13 +974,13 @@ void main() {
             for (var x = 0; x < 3; x++)
               {
                 'position': [x, 0],
-                'kind': 'road_h'
+                'kind': 'route_h'
               },
           ],
           objects: [
             {
               'position': [0, 0],
-              'kind': 'truck',
+              'kind': 'mover',
               'heading': 'right'
             },
           ],

@@ -57,10 +57,7 @@ class AnimationStep {
           position: to,
           durationMs: durationMs,
           stage: stage,
-          extra: {
-            'from': [from.x, from.y],
-            'to': [to.x, to.y]
-          });
+          extra: {'from': [from.x, from.y], 'to': [to.x, to.y]});
 
   static AnimationStep entityMove(
           Position from, Position to, String entityKind, String layer,
@@ -81,8 +78,7 @@ class AnimationStep {
 
   static AnimationStep entityPath(
           List<Position> path, String entityKind, String layer,
-          {int durationMs =
-              80, // per step; total = durationMs * (path.length-1)
+          {int durationMs = 80, // per step; total = durationMs * (path.length-1)
           int stage = 0,
           Map<String, dynamic> params = const {},
           bool removedAtEnd = false}) =>
@@ -108,9 +104,7 @@ class AnimationStep {
           String resultKind,
           Map<String, dynamic> resultParams,
           String layer,
-          {int durationMs = 200,
-          int stage = 0,
-          String? animationName}) =>
+          {int durationMs = 200, int stage = 0, String? animationName}) =>
       AnimationStep(
           type: 'entity_merge',
           position: dest,
