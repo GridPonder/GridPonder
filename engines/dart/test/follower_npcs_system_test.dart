@@ -1089,6 +1089,31 @@ void main() {
         'traversal',
       );
     });
+
+    test('a member on a perpendicular member\'s line is rejected either way',
+        () {
+      // The check reads BOTH members' axes, so board order cannot hide a
+      // clash. The horizontal member at (1, 0) stands on the vertical
+      // member's column x=1; the vertical one is not on row 0, so checking
+      // only the first member's axis let this through whenever the
+      // horizontal member came first.
+      _expectRejects(
+        _shaftGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'down', 'a'),
+        ]),
+        'traversal',
+      );
+      _expectRejects(
+        _shaftGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'down', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+        'traversal',
+      );
+    });
   });
 }
 

@@ -648,6 +648,23 @@ def test_members_sharing_a_traversal_line_are_rejected_at_load():
     ]), "traversal")
 
 
+def test_a_member_on_a_perpendicular_members_line_is_rejected_either_way():
+    """The check reads BOTH members' axes, so board order cannot hide a clash.
+
+    The horizontal member at (1, 0) stands on the vertical member's column
+    x=1. The vertical one is not on row 0, so checking only the first member's
+    axis let this through whenever the horizontal member came first.
+    """
+    _rejects(_shaft_game(), _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (1, 2, "walker", "down", "a"),
+    ]), "traversal")
+    _rejects(_shaft_game(), _shaft_level([
+        (1, 0, "walker", "down", "a"),
+        (1, 2, "walker", "right", "a"),
+    ]), "traversal")
+
+
 # -- ratio shafts (geared trains) ---------------------------------------------
 #
 # A train may mix frequencies. Each member runs on its own beat; only the
@@ -820,6 +837,7 @@ TESTS_SHAFT = [
     test_members_crossing_tracks_never_share_a_cell,
     test_non_patrol_member_is_rejected_at_load,
     test_members_sharing_a_traversal_line_are_rejected_at_load,
+    test_a_member_on_a_perpendicular_members_line_is_rejected_either_way,
 ]
 
 

@@ -306,15 +306,6 @@ class FollowerNpcsSystem extends GameSystem {
       return ok ? candidate : null;
     }
 
-    Direction facingOf(EntityInstance entity) {
-      try {
-        return Direction.fromJson(
-            entity.param('facing')?.toString() ?? 'right');
-      } catch (_) {
-        return Direction.right;
-      }
-    }
-
     /// Candidate cells for the whole active set, or null if any is stuck.
     ///
     /// Sequential, so each member's claim blocks the next. The train is
@@ -324,8 +315,8 @@ class FollowerNpcsSystem extends GameSystem {
       final claimed = <Position>{};
       final out = <Position>[];
       for (final m in active) {
-        final facing =
-            reversed ? _reverseDirection(facingOf(m.value)) : facingOf(m.value);
+        final own = _facingOf(m.value);
+        final facing = reversed ? _reverseDirection(own) : own;
         final candidate = legal(m.key, m.value, facing, claimed);
         if (candidate == null) return null;
         claimed.add(candidate);
@@ -347,7 +338,7 @@ class FollowerNpcsSystem extends GameSystem {
       for (final m in members) {
         // The WHOLE train turns, not just the active members.
         m.value.params['facing'] =
-            _reverseDirection(facingOf(m.value)).toJson();
+            _reverseDirection(_facingOf(m.value)).toJson();
       }
       return [
         for (var i = 0; i < active.length; i++)
@@ -425,20 +416,36 @@ class FollowerNpcsSystem extends GameSystem {
     }
     // A patrol never leaves its facing axis, so its traversal line is its own
     // row or column. Two members sharing one would block each other and the
-    // train would jam at t=0 with no way for the player to see why.
+    // train would jam at t=0 with no way for the player to see why. The test
+    // runs against BOTH members' axes: a horizontal member standing on a
+    // vertical member's column is on that member's line even though the
+    // vertical one is not on the horizontal one's row, and board order must
+    // not decide which of the two gets checked.
+    bool onLineOf(MapEntry<Position, EntityInstance> m, Position other) {
+      final facing = _facingOf(m.value);
+      final horizontal = facing == Direction.left || facing == Direction.right;
+      return horizontal ? m.key.y == other.y : m.key.x == other.x;
+    }
+
     for (var i = 0; i < members.length; i++) {
-      final facing = members[i].value.param('facing')?.toString() ?? 'right';
-      final horizontal = facing == 'left' || facing == 'right';
       for (var j = i + 1; j < members.length; j++) {
         final a = members[i].key;
         final b = members[j].key;
-        final shared = horizontal ? a.y == b.y : a.x == b.x;
-        if (shared) {
+        if (onLineOf(members[i], b) || onLineOf(members[j], a)) {
           throw ArgumentError(
             "shaft '$shaftId': members at $a and $b share a traversal line",
           );
         }
       }
+    }
+  }
+
+  /// A member's facing param, falling back to right when missing or unknown.
+  Direction _facingOf(EntityInstance entity) {
+    try {
+      return Direction.fromJson(entity.param('facing')?.toString() ?? 'right');
+    } catch (_) {
+      return Direction.right;
     }
   }
 

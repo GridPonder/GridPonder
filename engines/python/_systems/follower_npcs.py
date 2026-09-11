@@ -367,12 +367,20 @@ class FollowerNpcsSystem(GameSystem):
                 )
         # A patrol never leaves its facing axis, so its traversal line is its own
         # row or column. Two members sharing one would block each other and the
-        # train would jam at t=0 with no way for the player to see why.
+        # train would jam at t=0 with no way for the player to see why. The test
+        # runs against BOTH members' axes: a horizontal member standing on a
+        # vertical member's column is on that member's line even though the
+        # vertical one is not on the horizontal one's row, and board order must
+        # not decide which of the two gets checked.
+        def on_line_of(pos: Pos, entity: Entity, other: Pos) -> bool:
+            if self._facing_of(entity) in ("left", "right"):
+                return pos.y == other.y
+            return pos.x == other.x
+
         for i, (pos_a, entity_a) in enumerate(members):
-            horizontal = self._facing_of(entity_a) in ("left", "right")
-            for pos_b, _ in members[i + 1:]:
-                shared = pos_a.y == pos_b.y if horizontal else pos_a.x == pos_b.x
-                if shared:
+            for pos_b, entity_b in members[i + 1:]:
+                if (on_line_of(pos_a, entity_a, pos_b)
+                        or on_line_of(pos_b, entity_b, pos_a)):
                     raise ValueError(
                         f"shaft '{shaft_id}': members at {pos_a} and {pos_b} "
                         f"share a traversal line"

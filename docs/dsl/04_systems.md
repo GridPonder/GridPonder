@@ -834,9 +834,16 @@ beat the obstruction leaves. Trains resolve before unshafted NPCs, in the board
 order of their first members; an NPC with no `shaft` param is unaffected in every
 respect.
 
-Members must all use a `patrol` behavior, must share one `frequency`, and no
-member may stand on another member's traversal line. All three are validated at
-load and raise.
+Members may run at different frequencies: a *geared* train. Each beat, only the
+members whose own `frequency` gate opens are probed and step; the rest stay put.
+A reversal still turns every member, stepping or not, because facing belongs to
+the train. A beat on which no member's gate opens is a no-op, not a freeze.
+
+Members must all use a `patrol` behavior, each `frequency` must be a positive
+integer, and no member may stand on another member's traversal line (its row if
+it faces left or right, its column if it faces up or down). Every pair is
+checked against both members' lines, so board order does not matter. All three
+are validated at load and raise.
 
 | config key | type | default | meaning |
 |---|---|---|---|
