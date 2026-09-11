@@ -148,5 +148,95 @@ void main() {
         reason: 'callers keep the engine state; it must not be mutated',
       );
     });
+
+    // A path mover that exits the board leaves nothing at its destination, so
+    // whatever the finished board holds there is not the mover's to clear.
+    test('never clears the destination of a mover that left the board', () {
+      final post = _state(avatarX: 0, actorX: 3);
+      final exiting = TravellingEntity(
+        from: const Position(1, 0),
+        to: const Position(3, 0),
+        layer: 'actors',
+        entity: const EntityInstance('cinder'),
+        removedAtEnd: true,
+      );
+
+      final pending = boardDuringMotion(post, pending: [exiting]);
+      expect(_actorAt(pending, 1), 'cinder', reason: 'held at its origin');
+      expect(_actorAt(pending, 3), 'cinder', reason: 'not the mover');
+
+      final inFlight = boardDuringMotion(post, inFlight: [exiting]);
+      expect(_actorAt(inFlight, 3), 'cinder', reason: 'not the mover');
+    });
+
+    test('lifts a path that ends where it began while it is in flight', () {
+      final post = _state(avatarX: 0, actorX: 2);
+      final shown = boardDuringMotion(post, inFlight: [_cinder(2, 2)]);
+
+      expect(_actorAt(shown, 2), isNull);
+    });
+  });
+
+  // A signal that switches after a flow has passed it must not switch before
+  // the flow is seen to pass. Everything the turn did before the flow stays.
+  group('transforms hidden behind a path', () {
+    final events = [
+      GameEvent.cellTransformed(const Position(0, 0), 'brush', 'ember', 'ground'),
+      GameEvent.entityPathMoved(const [
+        Position(2, 0),
+        Position(3, 0),
+      ], 'cinder', layer: 'actors'),
+      GameEvent.cellTransformed(const Position(1, 0), 'brush', 'ember', 'ground'),
+    ];
+
+    test('only the transforms after the first path are held back', () {
+      final hidden = transformsAfterFirstPath(events);
+
+      expect(hidden, hasLength(1));
+      expect(hidden.single.position, const Position(1, 0));
+    });
+
+    test('are undone on the held board, keeping the cell params', () {
+      final post = _state(avatarX: 3, actorX: 3, burnt: {0, 1});
+      post.board.setEntity(
+        'ground',
+        const Position(1, 0),
+        const EntityInstance('ember', {'variant': 'left'}),
+      );
+
+      final shown = boardDuringMotion(
+        post,
+        inFlight: [_cinder(2, 3)],
+        hiddenTransforms: transformsAfterFirstPath(events),
+      );
+
+      expect(_groundAt(shown, 0), 'ember', reason: 'burnt before the path');
+      expect(_groundAt(shown, 1), 'brush', reason: 'burns after the path');
+      expect(
+        shown.board.getEntity('ground', const Position(1, 0))!.param('variant'),
+        'left',
+      );
+      expect(
+        shown.avatar.position,
+        const Position(3, 0),
+        reason: 'the avatar is not rewound to replay a path',
+      );
+    });
+
+    test('leave a cell that was rewritten since alone', () {
+      final post = _state(avatarX: 3, actorX: 3);
+      post.board.setEntity(
+        'ground',
+        const Position(1, 0),
+        const EntityInstance('ash'),
+      );
+
+      final shown = boardDuringMotion(
+        post,
+        hiddenTransforms: transformsAfterFirstPath(events),
+      );
+
+      expect(_groundAt(shown, 1), 'ash');
+    });
   });
 }

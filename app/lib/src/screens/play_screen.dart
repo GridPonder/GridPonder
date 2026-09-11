@@ -9,6 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
 import 'package:llm_dart/llm_dart.dart';
+import '../animation/actor_facing.dart';
 import '../animation/motion_board.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
@@ -34,7 +35,6 @@ import '../widgets/board_renderer.dart'
 import '../widgets/balance_panel.dart';
 import '../widgets/controls_widget.dart';
 import 'cell_selection_state.dart';
-import 'path_animation_state.dart';
 
 /// One entity travelling from [from] to [to] during a turn's animation.
 typedef _Mover = ({
@@ -161,7 +161,12 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// overlay state, and an overtaken one leaves the new turn's effects alone.
   int _effectGeneration = 0;
 
-  Map<String, String> _actorFacingByKind = {};
+  /// Idle facing of actors by the cell they stand on — see [actorIdleFacing].
+  Map<Position, String> _actorFacingAt = {};
+
+  /// Transforms the current turn resolved after its paths started, kept off
+  /// the held board until the last path lands — see [transformsAfterFirstPath].
+  List<GameEvent> _hiddenTransforms = const [];
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
 
@@ -237,7 +242,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _agentAttempt = 1;
     _agentMemory.clear();
     _lastFloodColor = null;
-    _actorFacingByKind = {};
+    _actorFacingAt = {};
     _wonHandled = false;
     _selectedMultiCellObjectId = null;
     _selectedCellPosition = null;
@@ -344,6 +349,13 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() {
       _animating = true;
       if (selectedCell != null) _selectedCellPosition = selectedCell;
+      // A machine that reversed on the spot moved nowhere, so no animation
+      // will turn it; its engine-written `facing` param is the only record.
+      _actorFacingAt = facingAfterTurnsInPlace(
+        _actorFacingAt,
+        preState,
+        _engine.state,
+      );
     });
     // Input is held until the animation ends; that time is not the tester's.
     _playtest.beginBusy();
@@ -396,20 +408,24 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // teleports ahead during the avatar's step and then snaps back to slide.
     final travellers = <AnimationStep, TravellingEntity>{};
     for (final step in remaining) {
-      if (step.type != 'entity_move') continue;
+      if (step.type == 'entity_animation') continue;
       final t = _travellerOf(step);
       if (t != null) travellers[step] = t;
     }
     // Movers whose stage has not run yet, shrinking as the stages play.
     final unplayed = travellers.values.toList();
+    final pathTravellers = {
+      for (final e in travellers.entries)
+        if (e.key.type == 'entity_path') e.value,
+    };
+    _hiddenTransforms = pathTravellers.isEmpty
+        ? const []
+        : transformsAfterFirstPath(result.events);
 
     // The ice slide holds the pre-turn board for its own reasons and has no
     // staged movers to reconcile with, so it is left to its own path below.
     if (unplayed.isNotEmpty && !hasSlide) {
-      setState(
-        () =>
-            _preAnimState = boardDuringMotion(_engine.state, pending: unplayed),
-      );
+      setState(() => _preAnimState = _heldBoard(pending: unplayed));
     }
 
     // An ordinary one-cell step: walk it. (An ice slide is several avatar_move
@@ -495,21 +511,6 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       });
     }
 
-    LevelState? pathPreState;
-
-    // Cells this turn removed outright. A path animation replays from the
-    // pre-turn board, so without this the cut cell would stay on screen while
-    // the piece it was holding falls away from it.
-    final clearedCells = result.events
-        .where((e) => e.type == 'cell_cleared' && e.position != null)
-        .map(
-          (e) => (
-            layer: e.payload['layer'] as String? ?? 'objects',
-            position: e.position!,
-          ),
-        )
-        .toList();
-
     // Play each stage to completion before starting the next.
     int? currentStage;
     final stageBuf = <AnimationStep>[];
@@ -534,8 +535,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         );
       }
       if (paths.isNotEmpty) {
-        pathPreState ??= buildPathAnimationState(preState, result.events);
-        await _playPathMotion(pathPreState!, paths, clearedCells: clearedCells);
+        final inFlight = [
+          for (final step in paths)
+            if (travellers[step] case final t?) t,
+        ];
+        unplayed.removeWhere(inFlight.contains);
+        await _playPathMotion(
+          paths,
+          inFlight: inFlight,
+          stillPending: unplayed,
+          lastPaths: !unplayed.any(pathTravellers.contains),
+        );
       }
       for (final step in anims) {
         if (!mounted) return;
@@ -562,22 +572,47 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       setState(() {
         _preAnimState = null;
         _animOverlays = null;
+        _hiddenTransforms = const [];
       });
     }
   }
 
+  /// The board to hold while motion plays: the finished turn, with [pending]
+  /// movers back at their origins, [inFlight] ones lifted off, and any
+  /// transform still waiting on a path undone. See [boardDuringMotion].
+  LevelState _heldBoard({
+    List<TravellingEntity> pending = const [],
+    List<TravellingEntity> inFlight = const [],
+  }) => boardDuringMotion(
+    _engine.state,
+    pending: pending,
+    inFlight: inFlight,
+    hiddenTransforms: _hiddenTransforms,
+  );
+
   /// The entity [step] moves, or null if the step carries no origin to move it
-  /// from.
+  /// from. An `entity_path` travels from the first cell of its path to the
+  /// last, which is the step's position.
   TravellingEntity? _travellerOf(AnimationStep step) {
-    final fromRaw = step.extra['from'];
-    if (fromRaw is! List) return null;
-    final from = Position(fromRaw[0] as int, fromRaw[1] as int);
-    if (from == step.position) return null;
+    final Position from;
+    if (step.type == 'entity_path') {
+      final path = step.extra['path'];
+      if (path is! List || path.length < 2) return null;
+      final first = path.first;
+      if (first is! List) return null;
+      from = Position(first[0] as int, first[1] as int);
+    } else {
+      final fromRaw = step.extra['from'];
+      if (fromRaw is! List) return null;
+      from = Position(fromRaw[0] as int, fromRaw[1] as int);
+      if (from == step.position) return null;
+    }
     final paramsRaw = step.extra['params'];
     return TravellingEntity(
       from: from,
       to: step.position,
       layer: step.extra['layer'] as String? ?? 'objects',
+      removedAtEnd: step.extra['removedAtEnd'] as bool? ?? false,
       entity: EntityInstance(
         step.entityKind ?? '',
         paramsRaw is Map
@@ -1220,11 +1255,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // length of the animation the only copy of each is the sprite in flight.
     if (!mounted) return;
     setState(() {
-      _preAnimState = boardDuringMotion(
-        _engine.state,
-        pending: stillPending,
-        inFlight: inFlight,
-      );
+      _preAnimState = _heldBoard(pending: stillPending, inFlight: inFlight);
       _animOverlays = null;
     });
 
@@ -1252,21 +1283,18 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // holding them back: each one is already at its destination on the engine's
     // board, and arrives there as what it *became* — a boulder that shattered
     // on impact lands as rubble, not as the boulder that was in flight.
-    final postState = boardDuringMotion(_engine.state, pending: stillPending);
+    final postState = _heldBoard(pending: stillPending);
     if (!mounted) {
       _movingSprites.value = const [];
       return;
     }
-    final facingUpdates = <String, String>{
-      for (final m in movers)
-        if (m.layer == 'actors' && m.direction != null)
-          m.entity.kind: m.direction!,
-    };
     setState(() {
       _preAnimState = postState;
-      if (facingUpdates.isNotEmpty) {
-        _actorFacingByKind = {..._actorFacingByKind, ...facingUpdates};
-      }
+      _actorFacingAt = facingAfterMoves(_actorFacingAt, [
+        for (final m in movers)
+          if (m.layer == 'actors' && m.direction != null)
+            (from: m.from, to: m.to, direction: m.direction!),
+      ]);
     });
     _movingSprites.value = const [];
   }
@@ -1274,10 +1302,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// Animates movers along ordered adjacent-cell paths. Unlike a long
   /// `entity_move`, this preserves every corner and updates the facing sprite
   /// at each segment.
+  ///
+  /// Holds the finished board like every other stage, so nothing the turn
+  /// already showed — the avatar's step, an earlier stage's movers, a cell the
+  /// turn cleared — is rewound for the length of the path. [lastPaths] says no
+  /// path is left to play, so transforms held back for the paths show on
+  /// landing.
   Future<void> _playPathMotion(
-    LevelState preState,
     List<AnimationStep> paths, {
-    List<({String layer, Position position})> clearedCells = const [],
+    required List<TravellingEntity> inFlight,
+    required List<TravellingEntity> stillPending,
+    required bool lastPaths,
   }) async {
     final movers = <_PathMover>[];
     for (final step in paths) {
@@ -1309,16 +1344,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final totalMs = movers
         .map((m) => (m.path.length - 1) * m.stepDurationMs)
         .reduce(max);
-    final animState = preState.copy();
-    for (final mover in movers) {
-      animState.board.setEntity(mover.layer, mover.path.first, null);
-    }
-    for (final cleared in clearedCells) {
-      animState.board.setEntity(cleared.layer, cleared.position, null);
-    }
     if (!mounted) return;
     setState(() {
-      _preAnimState = animState;
+      _preAnimState = _heldBoard(pending: stillPending, inFlight: inFlight);
       _animOverlays = null;
     });
 
@@ -1341,18 +1369,23 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       controller.dispose();
     }
 
-    final postState = animState.copy();
-    for (final mover in movers) {
-      if (!mover.removedAtEnd &&
-          postState.board.getEntity(mover.layer, mover.path.last) == null) {
-        postState.board.setEntity(mover.layer, mover.path.last, mover.entity);
-      }
-    }
+    // Land the movers: each is already at its destination on the engine's
+    // board, as whatever it became on arrival.
     if (!mounted) {
       _movingSprites.value = const [];
       return;
     }
-    setState(() => _preAnimState = postState);
+    setState(() {
+      if (lastPaths) _hiddenTransforms = const [];
+      _preAnimState = _heldBoard(pending: stillPending);
+      _actorFacingAt = facingAfterMoves(_actorFacingAt, [
+        for (final m in movers)
+          if (m.layer == 'actors' && !m.removedAtEnd)
+            if (_directionBetween(m.path[m.path.length - 2], m.path.last)
+                case final direction?)
+              (from: m.path.first, to: m.path.last, direction: direction),
+      ]);
+    });
     _movingSprites.value = const [];
   }
 
@@ -1451,7 +1484,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // animation frames render cleanly without the original sprite bleeding through.
     // For ground-layer entities (ice…), keep the original tile visible beneath
     // the overlay frames — clearing ground would show void/black behind the anim.
-    final cleanState = boardDuringMotion(_engine.state, pending: stillPending);
+    final cleanState = _heldBoard(pending: stillPending);
     final layer =
         widget.packService.game.entityKinds[step.entityKind]?.layer ??
         'objects';
@@ -1573,7 +1606,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _avatarMotion.value = null;
     _cellEffects.value = const [];
     _lineOfSightFeedbacks = const [];
-    _actorFacingByKind = {};
+    _actorFacingAt = {};
+    _hiddenTransforms = const [];
   }
 
   void _onReset() {
@@ -1596,7 +1630,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _selectedMultiCellObjectId = null;
       _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
-      _actorFacingByKind = {};
+      _actorFacingAt = {};
     });
   }
 
@@ -2557,7 +2591,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                         game: widget.packService.game,
                         packService: widget.packService,
                         animationOverlays: _animOverlays,
-                        actorFacingByKind: _actorFacingByKind,
+                        actorFacingAt: _actorFacingAt,
                         onCellTap:
                             (_hasCellTapGesture || _moveActionNeedsPosition)
                             ? _onCellTap

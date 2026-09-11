@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
+import '../animation/actor_facing.dart';
 import '../services/pack_service.dart';
 
 /// Resolves a colour name (e.g. "red") to a Color. Pack themes can override
@@ -494,9 +495,9 @@ class BoardRenderer extends StatelessWidget {
   /// translate as a one-cell sprite.
   final ValueListenable<List<MovingMultiCellObject>>? movingMultiCellObjects;
 
-  /// Last known facing direction per actor kind. Used to render idle actor
-  /// sprites after movement animation has finished.
-  final Map<String, String> actorFacingByKind;
+  /// Last known facing per actor cell, see [actorIdleFacing]. Used to render
+  /// idle actor sprites after movement animation has finished.
+  final Map<Position, String> actorFacingAt;
 
   /// When set, cell_flooded entities are rendered in this color instead of
   /// their default color — used by Flood Colors to show the last chosen color.
@@ -539,7 +540,7 @@ class BoardRenderer extends StatelessWidget {
     required this.packService,
     this.animationOverlays,
     this.onCellTap,
-    this.actorFacingByKind = const {},
+    this.actorFacingAt = const {},
     this.floodedColorOverride,
     this.avatarPositionOverride,
     this.avatarMotion,
@@ -601,7 +602,7 @@ class BoardRenderer extends StatelessWidget {
       packService: packService,
       cellSize: cellSize,
       entityOverride: sprite.entity,
-      actorFacingByKind: actorFacingByKind,
+      actorFacingAt: actorFacingAt,
       floodedColorOverride: floodedColorOverride,
     );
     return Positioned(
@@ -738,7 +739,7 @@ class BoardRenderer extends StatelessWidget {
                           skipGround: backgroundMcoPosSet.contains(
                             Position(x, y),
                           ),
-                          actorFacingByKind: actorFacingByKind,
+                          actorFacingAt: actorFacingAt,
                           floodedColorOverride: floodedColorOverride,
                           bodyPaths: bodyPaths,
                         ),
@@ -1467,7 +1468,7 @@ class _Cell extends StatelessWidget {
   final PackService packService;
   final double cellSize;
   final bool skipGround;
-  final Map<String, String> actorFacingByKind;
+  final Map<Position, String> actorFacingAt;
   final Color? floodedColorOverride;
 
   /// When set, the cell draws this entity alone and ignores the board — used
@@ -1487,7 +1488,7 @@ class _Cell extends StatelessWidget {
     required this.packService,
     required this.cellSize,
     this.skipGround = false,
-    this.actorFacingByKind = const {},
+    this.actorFacingAt = const {},
     this.floodedColorOverride,
     this.entityOverride,
     this.bodyPaths = const {},
@@ -1605,8 +1606,8 @@ class _Cell extends StatelessWidget {
 
   Widget _entity(EntityInstance entity, String? layerId, [Position? pos]) {
     final kindDef = game.entityKinds[entity.kind];
-    final facingDirection = layerId == 'actors'
-        ? actorFacingByKind[entity.kind]
+    final facingDirection = layerId == 'actors' && pos != null
+        ? actorIdleFacing(entity, pos, actorFacingAt)
         : null;
     // A `connectedBody` kind (e.g. the snake's trail) picks its sprite from
     // which of its neighbors are its actual predecessor/successor along the
