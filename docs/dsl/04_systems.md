@@ -1542,6 +1542,103 @@ the rest of the board state.
 
 ---
 
+### 2.24 `balance_regions`
+
+**Purpose:** Terrain driven by where bodies stand. The floor is divided into two
+**pans**; every body standing on a pan contributes its weight, the heavier pan is
+*down*, and equal weight is *level*. That **attitude** is written to a state
+variable, and cells marked as **leaves** become solid floor or open shaft
+depending on it. No player action is involved: the verb is where the bodies are.
+
+This is the generic hook for see-saw halls, pressure-balanced bridges, sinking
+rafts and tug-of-war boards — any game where the shape of the board is a
+function of its occupants rather than of a switch.
+
+**Phase:** `npc_resolution` — declare this system **after** any
+[`follower_npcs`](#214-follower_npcs) system, so the attitude reflects both the
+avatar's move and the NPCs'. Systems run in declaration order within a phase.
+The system additionally runs once at **level load**, so an authored board cannot
+contradict its own opening attitude for a turn.
+
+**Events emitted:** `cell_transformed` for each leaf that changes state, and
+[`entity_fell`](05_rules.md#entity_fell) for each body dropped by a leaf opening
+beneath it.
+
+**Config:** a `groups` object, each value a balance group:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pans` | array | — | **Required, exactly two.** Each `{"name": string, "groundTags": [string]}`. A cell belongs to a pan when its ground kind carries one of that pan's tags; a cell in neither pan is neutral and weighs nothing. |
+| `weights` | object | `{}` | Entity kind → integer weight. Kinds absent from the map weigh nothing; non-integer values are ignored. |
+| `avatarWeight` | integer | `1` | The avatar's contribution while it stands on a pan. |
+| `weightLayers` | array | `["actors"]` | Layers searched for weighted bodies. Also the layers a falling leaf empties. |
+| `groundLayer` | string | `"ground"` | Layer holding pan floors and leaves. |
+| `stateVariable` | string | — | Receives the attitude: `-1` first pan down, `0` level, `+1` second pan down. Omit it and the attitude stays internal. |
+| `markerLayer` | string | `"objects"` | Layer holding leaf markers. |
+| `leaves` | array | `[]` | Each `{"marker": kind, "solidWhen": [pan name or "level"], "solidKind": kind, "openKind": kind}`. `openKind` defaults to `"void"`. |
+| `fallVariable` | string | `"fell"` | Incremented when the avatar is dropped, so a `variable_threshold` lose condition ends the level the same turn. |
+
+```json
+{
+  "id": "balance",
+  "type": "balance_regions",
+  "config": {
+    "groups": {
+      "hall": {
+        "pans": [
+          {"name": "west", "groundTags": ["pan_west"]},
+          {"name": "east", "groundTags": ["pan_east"]}
+        ],
+        "weights": {"ram": 1, "carriage": 1},
+        "avatarWeight": 1,
+        "stateVariable": "attitude",
+        "markerLayer": "objects",
+        "fallVariable": "fell",
+        "leaves": [
+          {"marker": "hinge_west", "solidWhen": ["west"], "solidKind": "leaf_plate", "openKind": "void"},
+          {"marker": "hinge_level", "solidWhen": ["level"], "solidKind": "leaf_plate", "openKind": "void"}
+        ]
+      }
+    }
+  }
+}
+```
+
+**Resolution order**, per group, per settle:
+
+1. Sum the weights of every `weightLayers` body standing on each pan, plus
+   `avatarWeight` if the avatar is on one.
+2. Compare the totals; write the attitude to `stateVariable`.
+3. For each marker on `markerLayer` naming a leaf spec, set the ground beneath
+   it to `solidKind` when the attitude is one of `solidWhen`, else `openKind`.
+4. For each leaf that just opened, remove any `weightLayers` body standing on it
+   and emit `entity_fell`; if the avatar is standing there, increment
+   `fallVariable` instead — it stays on the board so the renderer can draw the
+   fall, and the lose condition ends the level in the same turn.
+5. Repeat from 1 if anything changed. A repeat can only happen because a body
+   fell, and a fall strictly removes weight, so this terminates; a hard cap of
+   four passes guards against a malformed level.
+
+**Why leaves are found through markers.** An open leaf must be `void`: that is
+the only ground kind NPC movement refuses, and NPCs do not read ground tags. But
+once a leaf is `void` it is indistinguishable from every wall on the board, so
+scanning the ground for leaf kinds could never find it again. The marker is what
+remembers where a leaf lives — and it doubles as the only thing that tells the
+player where a closed leaf is and which attitude opens it.
+
+**Tolerance contract** (both engines must agree, so it is stated rather than
+implied): a missing or non-object `groups` makes the system **inert**. A group
+whose `pans` is not a list of exactly two entries is skipped. Weights that are
+not integers are ignored, as is a marker naming no leaf spec. Ground under a
+marker that is neither `solidKind` nor `openKind` is **left untouched** — the
+level meant it. Objects on a falling leaf do not fall; only `weightLayers`
+bodies and the avatar do.
+
+**Reuse:** Game-agnostic. Any pack can define pans over its own floor kinds and
+weight whatever entities it likes; nothing here knows about a particular game.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -1566,6 +1663,7 @@ the rest of the board state.
 | Terrain Skip | `terrain_skip` | `cascade_resolution` | event-triggered actor transport across tagged terrain |
 | Terrain Edit | `terrain_edit` | `action_resolution` | `place` (configurable via `action`) |
 | Sonar | `sonar` | `npc_resolution` | (automatic every turn; writes distance readings to variables) |
+| Balance Regions | `balance_regions` | `npc_resolution` | (automatic every turn; also settles at load) |
 | Follower NPCs | `follower_npcs` | `npc_resolution` | (automatic once per turn) |
 | Cell Rotation | `cell_rotation` | `action_resolution` | `rotate_cell` (configurable) |
 | Routed Motion | `routed_motion` | `npc_resolution` | (automatic once per accepted turn) |

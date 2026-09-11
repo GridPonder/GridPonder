@@ -25,4 +25,13 @@ abstract class GameSystem {
   /// Phase 6: NPC resolution.
   List<GameEvent> executeNpcResolution(
       LevelState state, GameDefinition game) => const [];
+
+  /// Level load: settle derived board state before the first turn.
+  ///
+  /// Systems whose output is a pure function of the board need the opening
+  /// board to agree with their own rules before the player sees it, otherwise
+  /// an authored level can contradict itself for exactly one turn. Events are
+  /// returned for symmetry with the phases and discarded by the engine.
+  List<GameEvent> executeLoadSettle(
+      LevelState state, GameDefinition game) => const [];
 }
