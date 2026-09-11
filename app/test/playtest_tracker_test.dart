@@ -124,6 +124,22 @@ void main() {
     expect(captured!.queryParameters.containsKey('tx'), isFalse);
   });
 
+  test('sends busy, the UI-held share of t', () async {
+    // t - busy is the time the tester could act; the gap in it between two
+    // events is think time with the previous move's animation removed.
+    SharedPreferences.setMockInitialValues({});
+    Uri? captured;
+    final tracker = PlaytestTracker(
+      enabled: true,
+      send: (uri) async {
+        captured = uri;
+      },
+    );
+    await tracker.track('move', level: 'pp_001', t: 5700, busy: 700);
+    expect(captured!.queryParameters['t'], '5700');
+    expect(captured!.queryParameters['busy'], '700');
+  });
+
   test('omits pos when it is empty', () async {
     SharedPreferences.setMockInitialValues({});
     Uri? captured;

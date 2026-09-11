@@ -7,6 +7,8 @@ import 'package:gridponder_engine/engine.dart';
 import 'package:llm_dart/llm_dart.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
+import '../services/playtest_codec.dart';
+import '../services/playtest_session.dart';
 import '../services/playtest_tracker.dart';
 import '../services/progress_service.dart';
 import '../services/settings_service.dart';
@@ -51,12 +53,17 @@ class PlayScreen extends StatefulWidget {
   final ProgressService? progress;
   final String? startLevelId;
 
+  /// Where playtest events go. Defaults to the build's own tracker, which is
+  /// inert unless compiled with `PLAYTEST_TRACK=1`; tests pass a recording one.
+  final PlaytestTracker? tracker;
+
   const PlayScreen({
     super.key,
     required this.packService,
     required this.settings,
     this.progress,
     this.startLevelId,
+    this.tracker,
   });
 
   @override
@@ -70,19 +77,12 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   late LevelDefinition _levelDef;
   late TurnEngine _engine;
   late HintService _hintService;
-  final _tracker = PlaytestTracker();
 
-  /// Wall-clock ms since the current level loaded; every tracked event carries
-  /// it as `t` so analysis gets sub-second think times without trusting the
-  /// collector's arrival timestamps.
-  final Stopwatch _levelClock = Stopwatch();
-
-  /// 1-based attempt number within the current level visit; a reset ends the
-  /// attempt it is logged against and starts the next.
-  int _attempt = 1;
-  bool _lossHandled = false;
-  bool _completeTracked = false;
-  bool _levelLoaded = false;
+  /// Playtest lifecycle: level open/exit, attempts, and the `t`/`busy`/`at`
+  /// stamps every event carries. See [PlaytestSession].
+  late final PlaytestSession _playtest = PlaytestSession(
+    widget.tracker ?? PlaytestTracker(),
+  );
 
   /// Dry-run results for the actions available from where the avatar stands,
   /// memoised against the board position they describe. See
@@ -207,32 +207,19 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _lineOfSightFeedbacks = const [];
     _movingSprites.value = const [];
     _movingMultiCellObjects.value = const [];
-    _lossHandled = false;
-    _completeTracked = false;
-    _attempt = 1;
-    _levelClock
-      ..reset()
-      ..start();
-    _levelLoaded = true;
-    _tracker.track(
-      'level_start',
-      level: levelId,
-      at: 1,
-      rev: _tracker.enabled ? _levelRevision() : null,
+    _playtest.startLevel(
+      levelId,
+      rev: _playtest.enabled ? widget.packService.levelRevision(levelId) : null,
     );
   }
 
-  /// Logs abandonment of the currently loaded level, if any. Completing a
-  /// level consumes the exit — advancing after a win is not an abandon.
+  /// Closes the open level for tracking, logging `level_exit` unless the
+  /// current attempt was won. Call it at the moment navigation leaves a level
+  /// — to another level, a story page, or off the screen — so the exit is
+  /// stamped when the tester left. A no-op when no level is open.
   void _trackLevelExit() {
-    if (!_levelLoaded || _completeTracked) return;
-    _tracker.track(
-      'level_exit',
-      level: _levelDef.id,
-      n: _engine.undoDepth,
-      t: _levelClock.elapsedMilliseconds,
-      at: _attempt,
-    );
+    if (_playtest.level == null) return;
+    _playtest.exitLevel(_engine.undoDepth);
   }
 
   Future<void> _onAction(GameAction action) async {
@@ -245,56 +232,46 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// [_playHint]) so all entry points show the same animations.
   Future<void> _runAction(GameAction action, {String source = 'user'}) async {
     final preState = _engine.state.copy();
+    // Serialized before the turn: see [BoardSnapshot] for why a copy won't do.
+    final preBoard = _playtest.enabled
+        ? BoardSnapshot.of(_engine.state.board)
+        : null;
     final result = _engine.executeTurn(action);
     if (!result.accepted) {
       // A rejection leaves the state untouched, so the current-state helpers
       // read the cell the tester was standing on when they tried the illegal
       // move — which is exactly what a friction map needs.
-      _tracker.track(
-        'move',
-        level: _levelDef.id,
+      final tracking = _playtest.enabled;
+      _playtest.move(
         action: action.actionId,
         outcome: 'rejected',
         src: source,
-        n: _engine.undoDepth,
-        t: _levelClock.elapsedMilliseconds,
-        at: _attempt,
-        p: _tracker.enabled ? _trackedParams(action) : null,
-        av: _tracker.enabled ? _trackedAvatar() : null,
-        pos: _tracker.enabled ? _trackedPositions() : null,
+        depth: _engine.undoDepth,
+        p: tracking ? _trackedParams(action) : null,
+        av: tracking ? _trackedAvatar() : null,
+        pos: tracking ? _trackedPositions() : null,
       );
       return;
     }
-    _tracker.track(
-      'move',
-      level: _levelDef.id,
+    final tracking = _playtest.enabled;
+    _playtest.move(
       action: action.actionId,
       outcome: 'accepted',
       src: source,
-      n: _engine.undoDepth,
-      t: _levelClock.elapsedMilliseconds,
-      at: _attempt,
-      p: _tracker.enabled ? _trackedParams(action) : null,
-      pos: _tracker.enabled ? _trackedPositions() : null,
-      av: _tracker.enabled ? _trackedAvatar() : null,
-      tx: _tracker.enabled ? _trackedTransforms(result.events) : null,
-      bd: _tracker.enabled
-          ? _trackedBoardDelta(preState.board, _engine.state.board)
+      depth: _engine.undoDepth,
+      p: tracking ? _trackedParams(action) : null,
+      pos: tracking ? _trackedPositions() : null,
+      av: tracking ? _trackedAvatar() : null,
+      tx: tracking ? _trackedTransforms(result.events) : null,
+      bd: preBoard != null
+          ? boardDelta(preBoard, BoardSnapshot.of(_engine.state.board))
           : null,
-      vars: _tracker.enabled
+      vars: tracking
           ? _trackedVarChanges(preState.variables, _engine.state.variables)
           : null,
     );
-    if (result.isLost && !_lossHandled) {
-      _lossHandled = true;
-      _tracker.track(
-        'level_failed',
-        level: _levelDef.id,
-        reason: result.loseReason ?? 'unknown',
-        n: _engine.undoDepth,
-        t: _levelClock.elapsedMilliseconds,
-        at: _attempt,
-      );
+    if (result.isLost) {
+      _playtest.failed(result.loseReason ?? 'unknown', _engine.undoDepth);
     }
     _syncSelectedMultiCellObject();
     final selectedCell = selectionPositionForAction(
@@ -325,7 +302,22 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _animating = true;
       if (selectedCell != null) _selectedCellPosition = selectedCell;
     });
+    // Input is held until the animation ends; that time is not the tester's.
+    _playtest.beginBusy();
+    try {
+      await _playTurnAnimation(result, preState, avatarMoves, hasSlide);
+    } finally {
+      _playtest.endBusy();
+    }
+  }
 
+  /// Plays one accepted turn's animation queue, then releases input.
+  Future<void> _playTurnAnimation(
+    TurnResult result,
+    LevelState preState,
+    List<AnimationStep> avatarMoves,
+    bool hasSlide,
+  ) async {
     // Avatar ice-slide: hold the pre-turn board so pushed objects stay at their
     // original positions while Pip slides. Skip last avatarMove — it's the
     // final position already shown by the engine state.
@@ -559,35 +551,6 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     return keys.map((k) => '$k=${action.params[k]}').join(';');
   }
 
-  /// Every cell whose content changed this turn, across every layer:
-  /// `x.y:layerId:kind` for a cell now holding `kind`, `x.y:layerId:-` for a
-  /// vacated cell. Diffing the whole board keeps the tracker game-agnostic —
-  /// pushes, spawns and terrain edits all surface here without the client
-  /// naming any pack or layer.
-  String _trackedBoardDelta(Board before, Board after) {
-    final out = <String>[];
-    final layerIds = {...before.layers.keys, ...after.layers.keys}.toList()
-      ..sort();
-    for (final id in layerIds) {
-      final prev = _kindsByCell(before.layers[id]);
-      final now = _kindsByCell(after.layers[id]);
-      final cells = {...prev.keys, ...now.keys}.toList()
-        ..sort((a, b) => a.y != b.y ? a.y.compareTo(b.y) : a.x.compareTo(b.x));
-      for (final cell in cells) {
-        final was = prev[cell];
-        final isNow = now[cell];
-        if (was == isNow) continue;
-        out.add('${cell.x}.${cell.y}:$id:${isNow ?? '-'}');
-      }
-    }
-    return out.join(',');
-  }
-
-  Map<Position, String> _kindsByCell(BoardLayer? layer) {
-    if (layer == null) return const {};
-    return {for (final entry in layer.entries()) entry.key: entry.value.kind};
-  }
-
   /// State variables that changed this turn, as sorted `name:value` pairs —
   /// the only field a gauge- or counter-driven pack shows its progress in.
   String _trackedVarChanges(
@@ -600,37 +563,6 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       if (before[key] != after[key]) out.add('$key:${after[key]}');
     }
     return out.join(',');
-  }
-
-  /// A short content hash of the loaded level, logged with `level_start` so
-  /// analysis can detect that a level changed between playtests (old events
-  /// heatmapped onto a redesigned board are silently misleading). Covers the
-  /// initial board, avatar start, variables and gold-path length; FNV-1a so
-  /// it is stable across runs and platforms.
-  String _levelRevision() {
-    final state = _engine.state;
-    final board = state.board;
-    final parts = <String>['${board.width}x${board.height}'];
-    final layerIds = board.layers.keys.toList()..sort();
-    for (final id in layerIds) {
-      final cells = _kindsByCell(board.layers[id]);
-      final keys = cells.keys.toList()
-        ..sort((a, b) => a.y != b.y ? a.y.compareTo(b.y) : a.x.compareTo(b.x));
-      parts.add(
-        '$id=${keys.map((c) => '${c.x}.${c.y}:${cells[c]}').join(',')}',
-      );
-    }
-    final avatarPos = state.avatar.position;
-    if (avatarPos != null) parts.add('av=${avatarPos.x}.${avatarPos.y}');
-    final varKeys = state.variables.keys.toList()..sort();
-    parts.add(varKeys.map((k) => '$k=${state.variables[k]}').join(','));
-    parts.add('gold=${_levelDef.solution.goldPath.length}');
-    var hash = 0x811c9dc5;
-    for (final code in parts.join('|').codeUnits) {
-      hash ^= code;
-      hash = (hash * 0x01000193) & 0xFFFFFFFF;
-    }
-    return hash.toRadixString(16).padLeft(8, '0');
   }
 
   /// Plays any theme-declared sprite-strip effects triggered by this turn's
@@ -1425,14 +1357,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _selectedCellPosition = null;
       _syncSelectedMultiCellObject();
     });
-    _lossHandled = false;
-    _tracker.track(
-      'undo',
-      level: _levelDef.id,
-      n: depthBefore,
-      t: _levelClock.elapsedMilliseconds,
-      at: _attempt,
-    );
+    _playtest.undo(depthBefore);
   }
 
   /// Logs the reset that ends the current attempt and starts the next. Call it
@@ -1441,16 +1366,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// board too, so they log here as well — without that, the final path can
   /// not be reconstructed from the log.
   void _trackAttemptReset() {
-    _tracker.track(
-      'reset',
-      level: _levelDef.id,
-      n: _engine.undoDepth,
-      t: _levelClock.elapsedMilliseconds,
-      at: _attempt,
-    );
-    _attempt += 1;
-    _lossHandled = false;
-    _completeTracked = false;
+    _playtest.reset(_engine.undoDepth);
     _wonHandled = false;
   }
 
@@ -1507,6 +1423,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       return;
     }
 
+    // Leaving for a story page loads no level, so close this one now rather
+    // than whenever the next level happens to load.
+    _trackLevelExit();
     setState(() {
       _seqIndex++;
       if (!_isShowingStory) _loadLevelById(_currentEntry.ref!);
@@ -1515,11 +1434,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
   /// Jump back one sequence entry (story or level).
   void _prevEntry() {
+    if (_seqIndex == 0) return;
+    _trackLevelExit();
     setState(() {
-      if (_seqIndex > 0) {
-        _seqIndex--;
-        if (!_isShowingStory) _loadLevelById(_currentEntry.ref!);
-      }
+      _seqIndex--;
+      if (!_isShowingStory) _loadLevelById(_currentEntry.ref!);
     });
   }
 
@@ -1790,13 +1709,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       if (!proceed) return;
     }
 
-    _tracker.track(
-      'hint_requested',
-      level: _levelDef.id,
-      n: _engine.undoDepth,
-      t: _levelClock.elapsedMilliseconds,
-      at: _attempt,
-    );
+    _playtest.hintRequested(_engine.undoDepth);
     await _playHint(idx);
   }
 
@@ -1891,11 +1804,16 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
     });
-    await Future.delayed(Duration.zero);
-    for (int i = 0; i < goldPath.length; i++) {
-      if (!mounted) return;
-      await _runAction(goldPath[i], source: 'solve');
-      await Future.delayed(const Duration(milliseconds: 300));
+    _playtest.beginBusy();
+    try {
+      await Future.delayed(Duration.zero);
+      for (int i = 0; i < goldPath.length; i++) {
+        if (!mounted) return;
+        await _runAction(goldPath[i], source: 'solve');
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+    } finally {
+      _playtest.endBusy();
     }
   }
 
@@ -1912,14 +1830,19 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
-    await Future.delayed(
-      kDebugMode ? Duration.zero : const Duration(milliseconds: 200),
-    );
-
-    for (int i = 0; i < stopCount && i < goldPath.length; i++) {
-      if (!mounted) return;
-      await _runAction(goldPath[i], source: 'hint');
-      await Future.delayed(const Duration(milliseconds: 300));
+    // The replay is the UI's time, not the tester's — pauses included.
+    _playtest.beginBusy();
+    try {
+      await Future.delayed(
+        kDebugMode ? Duration.zero : const Duration(milliseconds: 200),
+      );
+      for (int i = 0; i < stopCount && i < goldPath.length; i++) {
+        if (!mounted) return;
+        await _runAction(goldPath[i], source: 'hint');
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+    } finally {
+      _playtest.endBusy();
     }
   }
 
@@ -2270,16 +2193,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // calling async work inside a synchronous build call).
     if (state.isWon && !_wonHandled) {
       _wonHandled = true;
-      _completeTracked = true;
       // `n` is the final path length — undone moves are gone from the depth,
       // so this divided by the gold length is the tester's efficiency.
-      _tracker.track(
-        'level_complete',
-        level: levelId,
-        n: _engine.undoDepth,
-        t: _levelClock.elapsedMilliseconds,
-        at: _attempt,
-      );
+      _playtest.completed(_engine.undoDepth);
       if (widget.progress != null) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) widget.progress!.markCompleted(levelId);

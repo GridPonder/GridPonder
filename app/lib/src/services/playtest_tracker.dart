@@ -50,6 +50,7 @@ class PlaytestTracker {
     String? av,
     String? tx,
     int? t,
+    int? busy,
     int? at,
     String? reason,
     String? rev,
@@ -73,6 +74,7 @@ class PlaytestTracker {
       if (av != null && av.isNotEmpty) params['av'] = av;
       if (tx != null && tx.isNotEmpty) params['tx'] = tx;
       if (t != null) params['t'] = '$t';
+      if (busy != null) params['busy'] = '$busy';
       if (at != null) params['at'] = '$at';
       if (reason != null) params['reason'] = reason;
       if (rev != null && rev.isNotEmpty) params['rev'] = rev;
