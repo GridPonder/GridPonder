@@ -63,6 +63,67 @@ void main() {
     expect(captured!.queryParameters['session'], isNotEmpty);
   });
 
+  test('sends av alongside pos as a separate field', () async {
+    // `av` (the player's own cell) and `pos` (actor-layer cells) are logged
+    // separately so analysis can tell the player's path from the actors
+    // around them.
+    SharedPreferences.setMockInitialValues({});
+    Uri? captured;
+    final tracker = PlaytestTracker(
+      enabled: true,
+      send: (uri) async {
+        captured = uri;
+      },
+    );
+    await tracker.track('move', level: 'fb_001', pos: '5.5', av: '1.2');
+    expect(captured!.queryParameters['pos'], '5.5');
+    expect(captured!.queryParameters['av'], '1.2');
+  });
+
+  test('omits av when it is empty', () async {
+    // Actor-layer packs have no avatar; the field must be absent, not ''.
+    SharedPreferences.setMockInitialValues({});
+    Uri? captured;
+    final tracker = PlaytestTracker(
+      enabled: true,
+      send: (uri) async {
+        captured = uri;
+      },
+    );
+    await tracker.track('move', level: 'pc_001', pos: '5.5', av: '');
+    expect(captured!.queryParameters.containsKey('av'), isFalse);
+    expect(captured!.queryParameters['pos'], '5.5');
+  });
+
+  test('sends tx, the cells this turn transformed', () async {
+    // Terrain that changes under its own rules (Firebreak's fire) is in
+    // neither av nor pos; tx is the only field that carries it.
+    SharedPreferences.setMockInitialValues({});
+    Uri? captured;
+    final tracker = PlaytestTracker(
+      enabled: true,
+      send: (uri) async {
+        captured = uri;
+      },
+    );
+    await tracker.track('move', level: 'fb_001', av: '1.2', tx: '3.2:fire');
+    expect(captured!.queryParameters['tx'], '3.2:fire');
+    expect(captured!.queryParameters['av'], '1.2');
+  });
+
+  test('omits tx when no cell transformed', () async {
+    SharedPreferences.setMockInitialValues({});
+    Uri? captured;
+    final tracker = PlaytestTracker(
+      enabled: true,
+      send: (uri) async {
+        captured = uri;
+      },
+    );
+    await tracker.track('move', level: 'fb_001', av: '1.2', tx: '');
+    expect(captured!.queryParameters.containsKey('tx'), isFalse);
+  });
+
   test('omits pos when it is empty', () async {
     SharedPreferences.setMockInitialValues({});
     Uri? captured;
@@ -120,5 +181,54 @@ void main() {
     );
     await tracker.track('level_start', level: 'sp_001');
     expect(captured!.queryParameters['session'], 'existing-id-123');
+  });
+
+  test(
+    'sends timing, attempt, reason, rev, board delta, vars and params',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      Uri? captured;
+      final tracker = PlaytestTracker(
+        enabled: true,
+        send: (uri) async {
+          captured = uri;
+        },
+      );
+      await tracker.track(
+        'move',
+        level: 'fb_001',
+        t: 1234,
+        at: 2,
+        reason: 'max_actions',
+        rev: 'cafe1234',
+        bd: '1.2:ground:floor',
+        vars: 'burned:1',
+        p: 'direction=up',
+      );
+      expect(captured!.queryParameters['t'], '1234');
+      expect(captured!.queryParameters['at'], '2');
+      expect(captured!.queryParameters['reason'], 'max_actions');
+      expect(captured!.queryParameters['rev'], 'cafe1234');
+      expect(captured!.queryParameters['bd'], '1.2:ground:floor');
+      expect(captured!.queryParameters['vars'], 'burned:1');
+      expect(captured!.queryParameters['p'], 'direction=up');
+    },
+  );
+
+  test('omits empty board delta, vars and params', () async {
+    // A move that changed no cells and no variables, from a no-param action,
+    // must not clutter the log with empty fields (same rule as pos/av/tx).
+    SharedPreferences.setMockInitialValues({});
+    Uri? captured;
+    final tracker = PlaytestTracker(
+      enabled: true,
+      send: (uri) async {
+        captured = uri;
+      },
+    );
+    await tracker.track('move', level: 'fb_001', bd: '', vars: '', p: '');
+    expect(captured!.queryParameters.containsKey('bd'), isFalse);
+    expect(captured!.queryParameters.containsKey('vars'), isFalse);
+    expect(captured!.queryParameters.containsKey('p'), isFalse);
   });
 }
