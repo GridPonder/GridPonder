@@ -107,6 +107,22 @@ def is_cardinal(d: str) -> bool:
 # Entity
 # ---------------------------------------------------------------------------
 
+def _copy_value(v: Any) -> Any:
+    if isinstance(v, dict):
+        return {k: _copy_value(x) for k, x in v.items()}
+    if isinstance(v, list):
+        return [_copy_value(x) for x in v]
+    if isinstance(v, set):
+        return {_copy_value(x) for x in v}
+    return v
+
+
+def _copy_params(params: dict[str, Any]) -> dict[str, Any]:
+    """Deep copy of a JSON-shaped params map: dicts, lists and sets are copied
+    all the way down; scalars are immutable and shared."""
+    return {k: _copy_value(v) for k, v in params.items()}
+
+
 @dataclass
 class Entity:
     kind: str
@@ -120,7 +136,7 @@ class Entity:
         # board.set_entity / layer.set), so sharing the same object is safe.
         if not self.params:
             return self
-        return Entity(self.kind, dict(self.params))
+        return Entity(self.kind, _copy_params(self.params))
 
     def to_key(self) -> tuple:
         if not self.params:
@@ -160,7 +176,7 @@ class MultiCellObject:
             self.id,
             self.kind,
             list(self.cells),
-            {k: (list(v) if isinstance(v, list) else v) for k, v in self.params.items()},
+            _copy_params(self.params),
         )
 
     @classmethod

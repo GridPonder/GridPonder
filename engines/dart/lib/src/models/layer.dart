@@ -1,4 +1,5 @@
 import 'entity.dart';
+import 'json_copy.dart';
 import 'position.dart';
 
 /// Layer definition from game.json.
@@ -104,15 +105,16 @@ class BoardLayer {
     // on every reversal. Sharing them let a play-through rewrite the facings
     // inside the LevelDefinition it was loaded from, so the second run of a
     // level in one session started from a board the first run had turned
-    // around. Entities with no params are never mutated in place (systems
-    // replace them via layer.set), so they stay shared -- this mirrors
-    // Python's `Entity.copy`, which has always deep-copied params.
+    // around. Params are copied all the way down, so a nested list or map is
+    // not shared either. Entities with no params are never mutated in place
+    // (systems replace them via layer.set), so they stay shared -- this
+    // mirrors Python's `Entity.copy`.
     final copied = List.generate(
       height,
       (y) => List<EntityInstance?>.generate(width, (x) {
         final e = _cells[y][x];
         if (e == null || e.params.isEmpty) return e;
-        return EntityInstance(e.kind, Map<String, dynamic>.from(e.params));
+        return EntityInstance(e.kind, deepCopyMap(e.params));
       }),
     );
     return BoardLayer(width, height, copied);

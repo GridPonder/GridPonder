@@ -6,8 +6,8 @@
 // facings inside the LevelDefinition it was loaded from: the first run of a
 // level worked and every later run in the same session started from a board the
 // first run had turned around. In the app that is the Solve button replaying
-// from a corrupted board. Python's `Entity.copy` has always deep-copied params,
-// so this was also a silent Python/Dart divergence that trace parity could not
+// from a corrupted board. Python's `Entity.copy` has always copied params, so
+// this was also a silent Python/Dart divergence that trace parity could not
 // see, because each trace builds a fresh engine.
 import 'package:gridponder_engine/engine.dart';
 import 'package:test/test.dart';
@@ -139,4 +139,45 @@ void main() {
       );
     },
   );
+
+  test('a board copy shares no nested params with its source', () {
+    final layer = BoardLayer.empty(2, 1)
+      ..setAt(
+        const Position(0, 0),
+        EntityInstance('machine', {
+          'route': [
+            [0, 0],
+          ],
+          'gear': {'teeth': 8},
+        }),
+      );
+    final board = Board(
+      width: 2,
+      height: 1,
+      layers: {'actors': layer},
+      multiCellObjects: [
+        MultiCellObjectInstance(
+          id: 'm',
+          kind: 'pipe',
+          cells: const [Position(1, 0)],
+          params: {
+            'flow': [1],
+          },
+        ),
+      ],
+    );
+
+    final copy = board.copy();
+    final entity = copy.layers['actors']!.getAt(const Position(0, 0))!;
+    (entity.params['route'] as List).add([1, 0]);
+    (entity.params['gear'] as Map)['teeth'] = 12;
+    (copy.multiCellObjects.single.params['flow'] as List).add(2);
+
+    final source = layer.getAt(const Position(0, 0))!;
+    expect(source.params['route'], [
+      [0, 0],
+    ]);
+    expect(source.params['gear'], {'teeth': 8});
+    expect(board.multiCellObjects.single.params['flow'], [1]);
+  });
 }
