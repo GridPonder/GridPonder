@@ -955,7 +955,7 @@ void main() {
     });
 
     test('the slow wheel steers the fast one', () {
-      // esc_018's mechanic at the unit level: the member you cannot reach turns
+      // A geared train: the member you cannot reach turns
       // the member you can, on a beat the fast one had every reason to walk on.
       final engine = _engineFor(
         _shaftGame(behaviors: geared),

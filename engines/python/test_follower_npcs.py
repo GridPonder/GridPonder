@@ -711,7 +711,7 @@ def test_reversal_turns_the_member_that_did_not_step():
 
 
 def test_the_slow_wheel_steers_the_fast_one():
-    """esc_018's mechanic at the unit level: the member you cannot reach turns
+    """A geared train: the member you cannot reach turns
     the member you can, on a beat the fast one had every reason to walk on."""
     engine = TurnEngine(_shaft_game(_GEARED), _shaft_level(
         [(1, 0, "walker", "right", "a"), (3, 2, "slow", "right", "a")],

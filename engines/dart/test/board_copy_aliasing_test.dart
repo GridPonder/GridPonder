@@ -9,48 +9,134 @@
 // from a corrupted board. Python's `Entity.copy` has always deep-copied params,
 // so this was also a silent Python/Dart divergence that trace parity could not
 // see, because each trace builds a fresh engine.
-import 'dart:convert';
-import 'dart:io';
-import 'package:test/test.dart';
 import 'package:gridponder_engine/engine.dart';
+import 'package:test/test.dart';
+
+GameDefinition _game() => GameDefinition.fromJson({
+  'id': 'com.gridponder.test_board_copy_aliasing',
+  'layers': [
+    {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+    {'id': 'actors', 'occupancy': 'zero_or_one'},
+  ],
+  'entityKinds': {
+    'empty': {
+      'layer': 'ground',
+      'tags': ['walkable'],
+      'symbol': '.',
+    },
+    'machine': {
+      'layer': 'actors',
+      'tags': ['npc', 'solid'],
+      'symbol': 'M',
+    },
+  },
+  'actions': [
+    {
+      'id': 'move',
+      'params': {
+        'direction': {
+          'type': 'direction',
+          'values': ['up', 'down', 'left', 'right'],
+        },
+      },
+    },
+  ],
+  'systems': [
+    {
+      'id': 'navigation',
+      'type': 'avatar_navigation',
+      'config': <String, dynamic>{},
+    },
+    {
+      'id': 'machines',
+      'type': 'follower_npcs',
+      'config': {
+        'npcTags': ['npc'],
+        'behaviors': {
+          'walker': {
+            'type': 'patrol',
+            'lethalContact': false,
+            'solidBlocking': true,
+          },
+        },
+      },
+    },
+  ],
+}, id: 'test_board_copy_aliasing');
+
+/// A 4x3 board with one machine patrolling the top row, starting east. It hits
+/// the east edge within three beats and turns around, which writes its facing.
+LevelDefinition _level(GameDefinition game) => LevelDefinition.fromJson({
+  'id': 'test_level',
+  'board': {
+    'size': [4, 3],
+    'layers': {
+      'actors': {
+        'format': 'sparse',
+        'entries': [
+          {
+            'position': [0, 0],
+            'kind': 'machine',
+            'behavior': 'walker',
+            'facing': 'right',
+          },
+        ],
+      },
+    },
+  },
+  'state': {
+    'avatar': {
+      'enabled': true,
+      'position': [0, 2],
+    },
+  },
+  'goals': <dynamic>[],
+  'loseConditions': <dynamic>[],
+}, game.layers);
+
+String _facings(LevelState s) => s.board.layers['actors']!
+    .entries()
+    .map((e) => '${e.key}:${e.value.params['facing']}')
+    .join(' ');
+
+/// Spends [beats] beats by walking into the bottom edge (a blocked move is still
+/// a beat) and returns the machine's position and facing after each one.
+List<String> _run(GameDefinition game, LevelDefinition level, int beats) {
+  final engine = TurnEngine(game, level);
+  final trace = <String>[];
+  for (var i = 0; i < beats; i++) {
+    engine.executeTurn(GameAction('move', {'direction': 'down'}));
+    trace.add(_facings(engine.state));
+  }
+  return trace;
+}
 
 void main() {
-  test('replaying a level twice from the same definition gives the same run', () {
-    final root = '/home/mahmoud/work/TIB/gridponder-private/escapement';
-    final game = GameDefinition.fromJson(
-        jsonDecode(File('$root/game.json').readAsStringSync()) as Map<String, dynamic>);
-    final level = LevelDefinition.fromJson(
-        jsonDecode(File('$root/levels/esc_006.json').readAsStringSync())
-            as Map<String, dynamic>,
-        game.layers);
+  test(
+    'replaying a level twice from the same definition gives the same run',
+    () {
+      final game = _game();
+      final level = _level(game);
 
-    String facings(LevelState s) => s.board.layers['actors']!
-        .entries()
-        .map((e) => '${e.key}:${e.value.params['facing']}')
-        .join(' ');
+      final before = _facings(TurnEngine(game, level).state);
+      final first = _run(game, level, 6);
+      expect(
+        first.any((f) => f.endsWith(':left')),
+        isTrue,
+        reason: 'the fixture must make the machine turn around',
+      );
 
-    final before = facings(TurnEngine(game, level).state);
-
-    // Play the gold path once, exactly as the Solve button does.
-    final first = TurnEngine(game, level);
-    for (final a in level.solution.goldPath) {
-      first.executeTurn(a);
-    }
-    final wonFirst = first.isWon;
-
-    // A brand-new engine on the SAME definition must see the same board.
-    final after = facings(TurnEngine(game, level).state);
-    final second = TurnEngine(game, level);
-    for (final a in level.solution.goldPath) {
-      second.executeTurn(a);
-    }
-
-    print('  initial facings : $before');
-    print('  after one play  : $after');
-    print('  first run won   : $wonFirst');
-    print('  second run won  : ${second.isWon}  avatar=${second.state.avatar.position}');
-
-    expect(after, before, reason: 'playing mutated the level definition');
-    expect(second.isWon, isTrue, reason: 'second replay of the same gold path failed');
-  });
+      // A brand-new engine on the SAME definition must see the same board.
+      expect(
+        _facings(TurnEngine(game, level).state),
+        before,
+        reason: 'playing mutated the level definition',
+      );
+      expect(
+        _run(game, level, 6),
+        first,
+        reason: 'the second run of the same definition diverged',
+      );
+    },
+  );
 }
