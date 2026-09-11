@@ -72,6 +72,11 @@ class CellEffectPlayback {
 /// [squash] scales the sprite about its base — 1.0 is at rest, less than 1.0
 /// compresses it, which is how a landing reads as an impact rather than a
 /// stop. Volume is roughly preserved by widening as it flattens.
+/// Where the avatar is between cells while a step is in flight, in fractional
+/// cell units. `(2.5, 1.0)` is halfway from (2,1) to (3,1). [progress] runs
+/// from 0 to 1 and selects the configured directional walk frame.
+typedef AvatarMotion = ({double x, double y, double progress});
+
 class MovingSprite {
   final EntityInstance entity;
   final double x;
@@ -345,20 +350,41 @@ String? connectedHeadSpritePath(
 }
 
 ({bool visible, String? path, bool mirrorHorizontally})
-resolveAvatarSpriteChoice(AvatarThemeDef? theme, String direction) {
+resolveAvatarSpriteChoice(
+  AvatarThemeDef? theme,
+  String direction, {
+  bool moving = false,
+  double progress = 0,
+}) {
   if (theme?.visible == false) {
     return (visible: false, path: null, mirrorHorizontally: false);
   }
 
-  var entry = theme?.resolve('idle', direction);
+  AvatarSpriteEntry? resolve(String requestedDirection) {
+    if (moving) {
+      return theme?.sprites['walk']?[requestedDirection] ??
+          theme?.sprites['moving']?[requestedDirection] ??
+          theme?.resolve('idle', requestedDirection);
+    }
+    return theme?.resolve('idle', requestedDirection);
+  }
+
+  var entry = resolve(direction);
   var mirrorHorizontally = false;
   if (entry?.mirror case final mirrorDirection?) {
-    entry = theme?.resolve('idle', mirrorDirection);
+    entry = resolve(mirrorDirection);
     mirrorHorizontally = true;
   }
+  final frames = entry?.frames;
+  final normalizedProgress = progress < 0
+      ? 0.0
+      : (progress >= 1 ? 0.999999 : progress);
+  final frameIndex = frames?.isNotEmpty == true
+      ? (normalizedProgress * frames!.length).floor()
+      : 0;
   final path =
       entry?.staticPath ??
-      (entry?.frames?.isNotEmpty == true ? entry!.frames!.first : null);
+      (frames?.isNotEmpty == true ? frames![frameIndex] : null);
   return (visible: true, path: path, mirrorHorizontally: mirrorHorizontally);
 }
 
@@ -398,6 +424,24 @@ String? _motionSpritePath(
   }
 
   return null;
+}
+
+/// Selects the temporary walk-frame index for an entity in flight.
+///
+/// Existing packs advance a frame per cell. A kind may instead declare
+/// `motion.frameDurationMs` to play a complete time-based gait during a
+/// one-cell move, which is required by autonomous walkers such as Firebreak's
+/// Cinder.
+int resolveEntityMotionFrame(
+  EntityKindDef? kindDef,
+  double elapsedMs,
+  double travelled,
+) {
+  final raw = kindDef?.motion['frameDurationMs'];
+  if (raw is num && raw > 0) {
+    return (elapsedMs / raw.toDouble()).floor();
+  }
+  return travelled.floor();
 }
 
 class BoardRenderer extends StatelessWidget {
@@ -462,6 +506,11 @@ class BoardRenderer extends StatelessWidget {
   /// state.avatar.position — used during ice slide animations.
   final Position? avatarPositionOverride;
 
+  /// The avatar's position mid-step, driven at frame rate. A listenable rather
+  /// than a plain value so a step repaints the avatar alone instead of
+  /// rebuilding every cell under it — the same reason [movingSprites] is one.
+  final ValueListenable<AvatarMotion?>? avatarMotion;
+
   /// UI-only selection state for direct-manipulation multi-cell objects.
   final String? selectedMultiCellObjectId;
 
@@ -477,7 +526,11 @@ class BoardRenderer extends StatelessWidget {
   /// Short-lived sprite-strip effects playing at specific cells, declared by
   /// the pack theme's `effects` block (e.g. a burst wherever a capture flipped
   /// a cell).
-  final List<CellEffectPlayback> cellEffects;
+  ///
+  /// A listenable for the same reason [movingSprites] is one: a single turn can
+  /// light dozens of cells, and advancing their frames should repaint the
+  /// bursts rather than every cell of the board underneath them.
+  final ValueListenable<List<CellEffectPlayback>>? cellEffects;
 
   const BoardRenderer({
     super.key,
@@ -489,11 +542,12 @@ class BoardRenderer extends StatelessWidget {
     this.actorFacingByKind = const {},
     this.floodedColorOverride,
     this.avatarPositionOverride,
+    this.avatarMotion,
     this.selectedMultiCellObjectId,
     this.selectedActorPosition,
     this.selectedCellPosition,
     this.lineOfSightFeedbacks = const [],
-    this.cellEffects = const [],
+    this.cellEffects,
     this.onCellHover,
     this.actionPreviews = const {},
     this.hoveredPreviewTarget,
@@ -611,6 +665,15 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
+  /// The cell size [build] uses for a board of [cols] x [rows] laid out in
+  /// [constraints]. Exposed so a parent that transforms the board (the play
+  /// screen's zoom camera) can locate cells without re-deriving the rule.
+  static double cellSizeFor(BoxConstraints constraints, int cols, int rows) {
+    return (constraints.maxWidth / cols)
+        .clamp(15.0, 70.0)
+        .clamp(0.0, constraints.maxHeight / rows);
+  }
+
   @override
   Widget build(BuildContext context) {
     final board = state.board;
@@ -620,9 +683,7 @@ class BoardRenderer extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cellSize = (constraints.maxWidth / cols)
-            .clamp(15.0, 70.0)
-            .clamp(0.0, constraints.maxHeight / rows);
+        final cellSize = cellSizeFor(constraints, cols, rows);
 
         final gridWidth = cellSize * cols;
         final gridHeight = cellSize * rows;
@@ -769,15 +830,43 @@ class BoardRenderer extends StatelessWidget {
                 ),
               for (final feedback in lineOfSightFeedbacks)
                 _buildLineOfSightTargetFeedback(feedback, cellSize),
-              for (final effect in cellEffects)
-                _buildCellEffect(effect, cellSize),
-              if (state.avatar.enabled && state.avatar.position != null)
-                _buildAvatar(
-                  avatarPositionOverride != null
-                      ? state.avatar.copyWith(position: avatarPositionOverride)
-                      : state.avatar,
-                  cellSize,
+              if (cellEffects case final effects?)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ValueListenableBuilder<List<CellEffectPlayback>>(
+                      valueListenable: effects,
+                      builder: (context, playing, _) => Stack(
+                        children: [
+                          for (final effect in playing)
+                            _buildCellEffect(effect, cellSize),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
+              if (state.avatar.enabled && state.avatar.position != null)
+                if (avatarMotion case final motion?)
+                  ValueListenableBuilder<AvatarMotion?>(
+                    valueListenable: motion,
+                    builder: (context, inFlight, _) => _buildAvatar(
+                      avatarPositionOverride != null
+                          ? state.avatar.copyWith(
+                              position: avatarPositionOverride,
+                            )
+                          : state.avatar,
+                      cellSize,
+                      motion: inFlight,
+                    ),
+                  )
+                else
+                  _buildAvatar(
+                    avatarPositionOverride != null
+                        ? state.avatar.copyWith(
+                            position: avatarPositionOverride,
+                          )
+                        : state.avatar,
+                    cellSize,
+                  ),
             ],
           ),
         );
@@ -1134,11 +1223,17 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _buildAvatar(AvatarState avatar, double cellSize) {
+  Widget _buildAvatar(
+    AvatarState avatar,
+    double cellSize, {
+    AvatarMotion? motion,
+  }) {
     final direction = avatar.facing.toJson();
     final themed = resolveAvatarSpriteChoice(
       packService.theme?.avatar,
       direction,
+      moving: motion != null,
+      progress: motion?.progress ?? 0,
     );
     if (!themed.visible) return const SizedBox.shrink();
 
@@ -1157,8 +1252,9 @@ class BoardRenderer extends StatelessWidget {
     } else {
       final pos = avatar.position!;
       size = cellSize;
-      left = pos.x * cellSize;
-      top = pos.y * cellSize;
+      // Mid-step the avatar sits between cells; at rest it sits on one.
+      left = (motion?.x ?? pos.x.toDouble()) * cellSize;
+      top = (motion?.y ?? pos.y.toDouble()) * cellSize;
     }
 
     return Positioned(

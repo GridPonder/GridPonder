@@ -66,6 +66,33 @@ void main() {
     );
   });
 
+  test('uses elapsed time for motion frames when configured', () {
+    final kind = EntityKindDef.fromJson('cinder', {
+      'layer': 'actors',
+      'tags': ['npc'],
+      'symbol': '&',
+      'sprite': 'assets/cinder.png',
+      'motion': {'frameDurationMs': 100},
+    });
+
+    expect(resolveEntityMotionFrame(kind, 0, 0), 0);
+    expect(resolveEntityMotionFrame(kind, 99, 0.25), 0);
+    expect(resolveEntityMotionFrame(kind, 100, 0.25), 1);
+    expect(resolveEntityMotionFrame(kind, 399, 0.99), 3);
+    expect(resolveEntityMotionFrame(kind, 400, 1), 4);
+  });
+
+  test('motion frames retain the legacy per-cell fallback', () {
+    final kind = EntityKindDef.fromJson('crate', {
+      'layer': 'objects',
+      'tags': ['solid'],
+      'symbol': 'C',
+      'sprite': 'assets/crate.png',
+    });
+
+    expect(resolveEntityMotionFrame(kind, 399, 2.75), 2);
+  });
+
   test('resolves a pack-local avatar fallback sprite', () {
     final theme = AvatarThemeDef.fromJson({
       'visible': true,
@@ -99,6 +126,46 @@ void main() {
       visible: true,
       path: 'assets/sprites/alien_right.png',
       mirrorHorizontally: true,
+    ));
+  });
+
+  test('selects directional avatar walk frames while moving', () {
+    final theme = AvatarThemeDef.fromJson({
+      'sprites': {
+        'idle': {'right': 'assets/avatar/idle_right.png'},
+        'walk': {
+          'right': {
+            'frames': [
+              'assets/avatar/walk_right_1.png',
+              'assets/avatar/walk_right_2.png',
+            ],
+            'duration': 220,
+            'mode': 'loop',
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveAvatarSpriteChoice(theme, 'right', moving: true, progress: 0.2),
+      (
+        visible: true,
+        path: 'assets/avatar/walk_right_1.png',
+        mirrorHorizontally: false,
+      ),
+    );
+    expect(
+      resolveAvatarSpriteChoice(theme, 'right', moving: true, progress: 0.8),
+      (
+        visible: true,
+        path: 'assets/avatar/walk_right_2.png',
+        mirrorHorizontally: false,
+      ),
+    );
+    expect(resolveAvatarSpriteChoice(theme, 'right'), (
+      visible: true,
+      path: 'assets/avatar/idle_right.png',
+      mirrorHorizontally: false,
     ));
   });
 

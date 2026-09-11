@@ -14,6 +14,14 @@ const _pack = 'carrot_quest';
 const _levelBeforeStory = 'fw_007';
 const _levelAfterStory = 'fw_ice_002';
 
+/// Runs frames until a move's motion has played out. A turn chains several
+/// animations, each needing frames of its own, so one long pump is not enough.
+Future<void> settle(WidgetTester tester) async {
+  for (var i = 0; i < 40; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
 void main() {
   late PackService pack;
   late SettingsService settings;
@@ -79,7 +87,7 @@ void main() {
     );
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump(const Duration(seconds: 2));
+    await settle(tester);
     final move = tracker.named('move').single;
     expect(move['outcome'], 'accepted');
     expect(move['src'], 'user');
@@ -96,7 +104,7 @@ void main() {
     expect(tracker.named('undo').single['n'], 1);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump(const Duration(seconds: 2));
+    await settle(tester);
     await tester.longPress(find.text('Undo'));
     await tester.pump();
     final reset = tracker.named('reset').single;
@@ -104,7 +112,7 @@ void main() {
     expect(reset['n'], 1);
 
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
-    await tester.pump(const Duration(seconds: 2));
+    await settle(tester);
     expect(tracker.named('move').last['at'], 2);
 
     await tester.pumpWidget(const SizedBox());
