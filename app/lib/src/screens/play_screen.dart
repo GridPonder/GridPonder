@@ -1,10 +1,16 @@
 import 'dart:async';
 import 'dart:math' show max, min, sin, sqrt, pi;
 import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb;
+import 'package:flutter/gestures.dart'
+    show PointerScaleEvent, PointerScrollEvent, PointerSignalEvent;
+// The engine exports its own GestureBinding (a theme model), hence the prefix.
+import 'package:flutter/gestures.dart' as gestures show GestureBinding;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
 import 'package:llm_dart/llm_dart.dart';
+import '../animation/actor_facing.dart';
+import '../animation/motion_board.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
 import '../services/playtest_codec.dart';
@@ -14,6 +20,7 @@ import '../services/progress_service.dart';
 import '../services/settings_service.dart';
 import '../widgets/board_renderer.dart'
     show
+        AvatarMotion,
         BoardRenderer,
         CellEffectPlayback,
         LineOfSightFeedback,
@@ -23,10 +30,11 @@ import '../widgets/board_renderer.dart'
         cellNamedColor,
         elasticBlockRect,
         elasticBlockRectTween,
-        elasticPushObjectTravel;
+        elasticPushObjectTravel,
+        resolveEntityMotionFrame;
+import '../widgets/balance_panel.dart';
 import '../widgets/controls_widget.dart';
 import 'cell_selection_state.dart';
-import 'path_animation_state.dart';
 
 /// One entity travelling from [from] to [to] during a turn's animation.
 typedef _Mover = ({
@@ -123,8 +131,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   LevelState? _preAnimState;
   Map<Position, String>? _animOverlays;
   List<LineOfSightFeedback> _lineOfSightFeedbacks = const [];
-  List<CellEffectPlayback> _cellEffects = const [];
   bool _animating = false;
+  bool _resetRequested = false;
+  bool _replaying = false;
+  int _replayGeneration = 0;
+  String _replayLabel = '';
 
   /// Entities in flight, updated at frame rate while motion plays. Kept off
   /// [setState] so a fall repaints the sprites alone rather than the screen.
@@ -133,9 +144,37 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   );
   final ValueNotifier<List<MovingMultiCellObject>> _movingMultiCellObjects =
       ValueNotifier(const []);
-  Map<String, String> _actorFacingByKind = {};
+
+  /// Sprite-strip bursts playing on cells, for the same reason: a Firebreak
+  /// turn can light fifty cells at once, and stepping their frames through
+  /// [setState] rebuilds every cell on the board once per frame.
+  final ValueNotifier<List<CellEffectPlayback>> _cellEffects = ValueNotifier(
+    const [],
+  );
+
+  /// The avatar's position mid-step. Off [setState] for the same reason as
+  /// [_movingSprites]: a step should repaint the avatar, not the board.
+  final ValueNotifier<AvatarMotion?> _avatarMotion = ValueNotifier(null);
+
+  /// Bumped once per turn. The decorative players run after input is released,
+  /// so a later turn can overtake them; each checks this before writing shared
+  /// overlay state, and an overtaken one leaves the new turn's effects alone.
+  int _effectGeneration = 0;
+
+  /// Idle facing of actors by the cell they stand on — see [actorIdleFacing].
+  Map<Position, String> _actorFacingAt = {};
+
+  /// Transforms the current turn resolved after its paths started, kept off
+  /// the held board until the last path lands — see [transformsAfterFirstPath].
+  List<GameEvent> _hiddenTransforms = const [];
   // Non-null during ice slide: overrides the avatar's rendered position.
   Position? _avatarSlidePos;
+
+  // Board zoom: 1 fits the whole board; above 1 the board is magnified and
+  // the view follows the avatar. Kept across levels within the screen.
+  static const double _minBoardZoom = 1.0;
+  static const double _maxBoardZoom = 3.0;
+  double _boardZoom = _minBoardZoom;
 
   // Flood Colors: color of the last successfully applied flood action.
   Color? _lastFloodColor;
@@ -184,12 +223,15 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _agentSub?.cancel();
     _movingSprites.dispose();
     _movingMultiCellObjects.dispose();
+    _avatarMotion.dispose();
+    _cellEffects.dispose();
     super.dispose();
   }
 
   SettingsService get s => widget.settings;
 
   void _loadLevelById(String levelId) {
+    _clearPlaybackState();
     _trackLevelExit();
     _stopAgent();
     _levelDef = widget.packService.level(levelId);
@@ -200,7 +242,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _agentAttempt = 1;
     _agentMemory.clear();
     _lastFloodColor = null;
-    _actorFacingByKind = {};
+    _actorFacingAt = {};
     _wonHandled = false;
     _selectedMultiCellObjectId = null;
     _selectedCellPosition = null;
@@ -223,7 +265,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _onAction(GameAction action) async {
-    if (_aiRunning || _animating) return;
+    if (_aiRunning || _animating || _replaying) return;
     await _runAction(action);
   }
 
@@ -298,26 +340,101 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         .toList();
     final hasSlide = avatarMoves.length > 1;
 
+    // Stop the previous turn's decoration before this turn draws anything.
+    // Effects deliberately outlive their turn (see the end of this method), so
+    // without this a Firebreak turn that set fifty cells alight keeps
+    // repainting the whole board through the next turn's walk.
+    final generation = ++_effectGeneration;
+
     setState(() {
       _animating = true;
       if (selectedCell != null) _selectedCellPosition = selectedCell;
+      // A machine that reversed on the spot moved nowhere, so no animation
+      // will turn it; its engine-written `facing` param is the only record.
+      _actorFacingAt = facingAfterTurnsInPlace(
+        _actorFacingAt,
+        preState,
+        _engine.state,
+      );
     });
     // Input is held until the animation ends; that time is not the tester's.
     _playtest.beginBusy();
     try {
-      await _playTurnAnimation(result, preState, avatarMoves, hasSlide);
+      await _playTurnMotion(result, preState, avatarMoves, hasSlide);
     } finally {
       _playtest.endBusy();
     }
+
+    // Motion is done and the board is at rest, so the player may act again.
+    // What is left is decoration — fire catching, a tool scorching — and making
+    // input wait on it costs a press every time one lands mid-effect.
+    if (!mounted) return;
+    setState(() => _animating = false);
+    if (_resetRequested) {
+      _onReset();
+      return;
+    }
+
+    await _playLineOfSightFeedback(result.events, generation);
+    await _playCellEffects(result.events, generation);
   }
 
-  /// Plays one accepted turn's animation queue, then releases input.
-  Future<void> _playTurnAnimation(
+  /// Plays one accepted turn's motion — everything input waits on. The
+  /// decoration that follows is played by [_runAction] once input is free.
+  Future<void> _playTurnMotion(
     TurnResult result,
     LevelState preState,
     List<AnimationStep> avatarMoves,
     bool hasSlide,
   ) async {
+    // Stage-aware playback for the motion primitives, in the order the engine
+    // resolved them. Built before the avatar walks because the movers in it
+    // have to be held at their origins for the whole turn, not just their own
+    // stage.
+    final remaining =
+        result.animations
+            .where(
+              (s) =>
+                  s.type == 'entity_move' ||
+                  s.type == 'entity_path' ||
+                  s.type == 'entity_animation',
+            )
+            .toList()
+          ..sort((a, b) => a.stage.compareTo(b.stage));
+
+    // Everything that travels this turn, keyed by the step that moves it. The
+    // engine's board already has them all at their destinations, so a mover
+    // that has not animated yet must be put back where it started or it
+    // teleports ahead during the avatar's step and then snaps back to slide.
+    final travellers = <AnimationStep, TravellingEntity>{};
+    for (final step in remaining) {
+      if (step.type == 'entity_animation') continue;
+      final t = _travellerOf(step);
+      if (t != null) travellers[step] = t;
+    }
+    // Movers whose stage has not run yet, shrinking as the stages play.
+    final unplayed = travellers.values.toList();
+    final pathTravellers = {
+      for (final e in travellers.entries)
+        if (e.key.type == 'entity_path') e.value,
+    };
+    _hiddenTransforms = pathTravellers.isEmpty
+        ? const []
+        : transformsAfterFirstPath(result.events);
+
+    // The ice slide holds the pre-turn board for its own reasons and has no
+    // staged movers to reconcile with, so it is left to its own path below.
+    if (unplayed.isNotEmpty && !hasSlide) {
+      setState(() => _preAnimState = _heldBoard(pending: unplayed));
+    }
+
+    // An ordinary one-cell step: walk it. (An ice slide is several avatar_move
+    // steps and has its own path below.)
+    if (!hasSlide && avatarMoves.length == 1) {
+      await _playAvatarStep(avatarMoves.single);
+      if (!mounted) return;
+    }
+
     // Avatar ice-slide: hold the pre-turn board so pushed objects stay at their
     // original positions while Pip slides. Skip last avatarMove — it's the
     // final position already shown by the engine state.
@@ -394,35 +511,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       });
     }
 
-    LevelState? pathPreState;
-
-    // Stage-aware playback for new motion primitives.
-    // Group remaining animations by stage; play each stage to completion
-    // before starting the next.
-    final remaining =
-        result.animations
-            .where(
-              (s) =>
-                  s.type == 'entity_move' ||
-                  s.type == 'entity_path' ||
-                  s.type == 'entity_animation',
-            )
-            .toList()
-          ..sort((a, b) => a.stage.compareTo(b.stage));
-
-    // Cells this turn removed outright. A collapse animation replays from the
-    // pre-turn board, so without this the cut cell would stay on screen while
-    // the piece it was holding falls away from it.
-    final clearedCells = result.events
-        .where((e) => e.type == 'cell_cleared' && e.position != null)
-        .map(
-          (e) => (
-            layer: e.payload['layer'] as String? ?? 'objects',
-            position: e.position!,
-          ),
-        )
-        .toList();
-
+    // Play each stage to completion before starting the next.
     int? currentStage;
     final stageBuf = <AnimationStep>[];
     Future<void> flushStage() async {
@@ -433,15 +522,34 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           .where((s) => s.type == 'entity_animation')
           .toList();
       if (moves.isNotEmpty) {
-        await _playSlideMotion(preState, moves, clearedCells: clearedCells);
+        final inFlight = [
+          for (final step in moves)
+            if (travellers[step] case final t?) t,
+        ];
+        // This stage's movers stop being pending the moment they take off.
+        unplayed.removeWhere(inFlight.contains);
+        await _playSlideMotion(
+          moves,
+          inFlight: inFlight,
+          stillPending: unplayed,
+        );
       }
       if (paths.isNotEmpty) {
-        pathPreState ??= buildPathAnimationState(preState, result.events);
-        await _playPathMotion(pathPreState!, paths, clearedCells: clearedCells);
+        final inFlight = [
+          for (final step in paths)
+            if (travellers[step] case final t?) t,
+        ];
+        unplayed.removeWhere(inFlight.contains);
+        await _playPathMotion(
+          paths,
+          inFlight: inFlight,
+          stillPending: unplayed,
+          lastPaths: !unplayed.any(pathTravellers.contains),
+        );
       }
       for (final step in anims) {
         if (!mounted) return;
-        await _playEntityAnimation(preState, step);
+        await _playEntityAnimation(step, stillPending: unplayed);
       }
       stageBuf.clear();
     }
@@ -464,14 +572,91 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       setState(() {
         _preAnimState = null;
         _animOverlays = null;
+        _hiddenTransforms = const [];
       });
     }
+  }
 
-    await _playLineOfSightFeedback(result.events);
-    await _playCellEffects(result.events);
+  /// The board to hold while motion plays: the finished turn, with [pending]
+  /// movers back at their origins, [inFlight] ones lifted off, and any
+  /// transform still waiting on a path undone. See [boardDuringMotion].
+  LevelState _heldBoard({
+    List<TravellingEntity> pending = const [],
+    List<TravellingEntity> inFlight = const [],
+  }) => boardDuringMotion(
+    _engine.state,
+    pending: pending,
+    inFlight: inFlight,
+    hiddenTransforms: _hiddenTransforms,
+  );
 
-    if (!mounted) return;
-    setState(() => _animating = false);
+  /// The entity [step] moves, or null if the step carries no origin to move it
+  /// from. An `entity_path` travels from the first cell of its path to the
+  /// last, which is the step's position.
+  TravellingEntity? _travellerOf(AnimationStep step) {
+    final Position from;
+    if (step.type == 'entity_path') {
+      final path = step.extra['path'];
+      if (path is! List || path.length < 2) return null;
+      final first = path.first;
+      if (first is! List) return null;
+      from = Position(first[0] as int, first[1] as int);
+    } else {
+      final fromRaw = step.extra['from'];
+      if (fromRaw is! List) return null;
+      from = Position(fromRaw[0] as int, fromRaw[1] as int);
+      if (from == step.position) return null;
+    }
+    final paramsRaw = step.extra['params'];
+    return TravellingEntity(
+      from: from,
+      to: step.position,
+      layer: step.extra['layer'] as String? ?? 'objects',
+      removedAtEnd: step.extra['removedAtEnd'] as bool? ?? false,
+      entity: EntityInstance(
+        step.entityKind ?? '',
+        paramsRaw is Map
+            ? paramsRaw.cast<String, dynamic>()
+            : const <String, dynamic>{},
+      ),
+    );
+  }
+
+  /// Walks the avatar from one cell to the next, interpolated, so a step reads
+  /// as travel rather than a jump between cells.
+  Future<void> _playAvatarStep(AnimationStep step) async {
+    final fromRaw = step.extra['from'];
+    if (fromRaw is! List) return;
+    final from = Position(fromRaw[0] as int, fromRaw[1] as int);
+    final to = step.position;
+    if (from == to) return;
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(
+        milliseconds: step.durationMs > 0
+            ? step.durationMs.clamp(40, 400)
+            : 130,
+      ),
+    );
+    final walk = CurvedAnimation(parent: controller, curve: Curves.easeInOut);
+    void emit() {
+      final t = walk.value;
+      _avatarMotion.value = (
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+        progress: t,
+      );
+    }
+
+    controller.addListener(emit);
+    emit();
+    try {
+      await controller.forward();
+    } finally {
+      controller.dispose();
+    }
+    _avatarMotion.value = null;
   }
 
   /// The avatar's own cell as `x.y`, or `''` when the pack has no avatar.
@@ -569,12 +754,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// events — e.g. a burst on every `cell_transformed`. Purely presentational:
   /// packs opt in through `theme.json`'s `effects` block, and a pack that
   /// declares none costs nothing here.
-  Future<void> _playCellEffects(List<GameEvent> events) async {
+  Future<void> _playCellEffects(List<GameEvent> events, int generation) async {
+    if (!mounted || _effectGeneration != generation) return;
     final effects = widget.packService.theme?.effects;
     if (effects == null || effects.isEmpty) return;
 
-    final targets = <CellEffectPlayback>[];
-    CellEffectDef? active;
+    // Grouped by the effect that matched, because one turn can trigger several
+    // different ones: a Firebreak step sets brush alight, dries damp brush and
+    // burns fire out to ash all at once, and each sheet has its own frame count
+    // and its own pace. Driving them all off whichever def happened to match
+    // last plays most of them at the wrong speed.
+    final cellsByDef = <CellEffectDef, List<Position>>{};
     for (final event in events) {
       final candidates = effects[event.type];
       if (candidates == null) continue;
@@ -590,34 +780,60 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       if (def == null) continue;
       final pos = event.position;
       if (pos == null) continue;
-      active = def;
-      targets.add(CellEffectPlayback(position: pos, def: def, frameIndex: 0));
+      cellsByDef.putIfAbsent(def, () => []).add(pos);
     }
-    if (targets.isEmpty || active == null) return;
+    if (cellsByDef.isEmpty) {
+      if (mounted && _effectGeneration == generation) {
+        _cellEffects.value = const [];
+      }
+      return;
+    }
 
-    final frames = active.frames < 1 ? 1 : active.frames;
-    final perFrame = Duration(
-      milliseconds: (active.durationMs / frames).round().clamp(16, 1000),
-    );
-    for (var frame = 0; frame < frames; frame++) {
-      if (!mounted) return;
-      setState(() {
-        _cellEffects = [
-          for (final t in targets)
-            CellEffectPlayback(
-              position: t.position,
-              def: t.def,
-              frameIndex: frame,
-            ),
-        ];
-      });
-      await Future.delayed(perFrame);
+    // Frame index per group; a group that has run out of frames stops drawing
+    // while the others carry on. Published through a notifier rather than
+    // setState: fifty cells catching at once is fifty overlays, and rebuilding
+    // every cell of the board four times to advance them is what makes the
+    // next keypress feel stuck.
+    final frameOf = {for (final def in cellsByDef.keys) def: 0};
+    void publish() {
+      _cellEffects.value = [
+        for (final entry in cellsByDef.entries)
+          if (frameOf[entry.key]! < entry.key.frames)
+            for (final pos in entry.value)
+              CellEffectPlayback(
+                position: pos,
+                def: entry.key,
+                frameIndex: frameOf[entry.key]!,
+              ),
+      ];
     }
-    if (!mounted) return;
-    setState(() => _cellEffects = const []);
+
+    publish();
+    await Future.wait([
+      for (final def in cellsByDef.keys)
+        () async {
+          final frames = def.frames < 1 ? 1 : def.frames;
+          final perFrame = Duration(
+            milliseconds: (def.durationMs / frames).round().clamp(16, 1000),
+          );
+          for (var frame = 0; frame < frames; frame++) {
+            if (!mounted || _effectGeneration != generation) return;
+            frameOf[def] = frame;
+            publish();
+            await Future.delayed(perFrame);
+          }
+          frameOf[def] = frames;
+          if (mounted && _effectGeneration == generation) publish();
+        }(),
+    ]);
+    if (!mounted || _effectGeneration != generation) return;
+    _cellEffects.value = const [];
   }
 
-  Future<void> _playLineOfSightFeedback(List<GameEvent> events) async {
+  Future<void> _playLineOfSightFeedback(
+    List<GameEvent> events,
+    int generation,
+  ) async {
     final feedbacks = <LineOfSightFeedback>[];
     for (final event in events) {
       if (event.type != 'line_of_sight_detected') continue;
@@ -629,12 +845,19 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         LineOfSightFeedback(source: source, target: target, kind: kind),
       );
     }
-    if (feedbacks.isEmpty) return;
+    if (feedbacks.isEmpty) {
+      if (mounted &&
+          _effectGeneration == generation &&
+          _lineOfSightFeedbacks.isNotEmpty) {
+        setState(() => _lineOfSightFeedbacks = const []);
+      }
+      return;
+    }
 
-    if (!mounted) return;
+    if (!mounted || _effectGeneration != generation) return;
     setState(() => _lineOfSightFeedbacks = feedbacks);
     await Future.delayed(const Duration(milliseconds: 220));
-    if (!mounted) return;
+    if (!mounted || _effectGeneration != generation) return;
     setState(() => _lineOfSightFeedbacks = const []);
   }
 
@@ -977,13 +1200,14 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// first, and the piece that travelled furthest arrives fastest. Lateral
   /// travel (an ice slide, a pushed block) keeps its constant per-cell pace.
   ///
-  /// [clearedCells] are cells the turn removed outright (`cell_cleared`). They
-  /// are gone for the whole animation, so a piece that falls *because* a cell
-  /// was cut is not drawn still hanging from it.
+  /// The board underneath is the turn's *finished* board with [inFlight] lifted
+  /// out of it and [stillPending] — the movers of later stages — put back where
+  /// they started. Cells the turn cut away are already gone from it, so a piece
+  /// that falls because a cell was cut is never drawn hanging from it.
   Future<void> _playSlideMotion(
-    LevelState preState,
     List<AnimationStep> moves, {
-    List<({String layer, Position position})> clearedCells = const [],
+    required List<TravellingEntity> inFlight,
+    required List<TravellingEntity> stillPending,
   }) async {
     if (moves.isEmpty) return;
 
@@ -1027,18 +1251,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         : (perCellMs * span).round();
     final totalMs = travelMs + (falls ? _impactMs : 0);
 
-    // Hold the pre-turn board with the movers lifted out of it: for the length
-    // of the animation the only copy of each is the sprite in flight.
-    final animState = preState.copy();
-    for (final m in movers) {
-      animState.board.setEntity(m.layer, m.from, null);
-    }
-    for (final cleared in clearedCells) {
-      animState.board.setEntity(cleared.layer, cleared.position, null);
-    }
+    // Hold the finished board with these movers lifted out of it: for the
+    // length of the animation the only copy of each is the sprite in flight.
     if (!mounted) return;
     setState(() {
-      _preAnimState = animState;
+      _preAnimState = _heldBoard(pending: stillPending, inFlight: inFlight);
       _animOverlays = null;
     });
 
@@ -1061,28 +1278,23 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       controller.dispose();
     }
 
-    // Land the movers into the held board and drop the sprites in the same
-    // frame, so nothing blinks between the last frame of flight and rest.
-    final postState = animState.copy();
-    for (final m in movers) {
-      if (postState.board.getEntity(m.layer, m.to) == null) {
-        postState.board.setEntity(m.layer, m.to, m.entity);
-      }
-    }
+    // Land the movers and drop the sprites in the same frame, so nothing blinks
+    // between the last frame of flight and rest. Landing is simply no longer
+    // holding them back: each one is already at its destination on the engine's
+    // board, and arrives there as what it *became* — a boulder that shattered
+    // on impact lands as rubble, not as the boulder that was in flight.
+    final postState = _heldBoard(pending: stillPending);
     if (!mounted) {
       _movingSprites.value = const [];
       return;
     }
-    final facingUpdates = <String, String>{
-      for (final m in movers)
-        if (m.layer == 'actors' && m.direction != null)
-          m.entity.kind: m.direction!,
-    };
     setState(() {
       _preAnimState = postState;
-      if (facingUpdates.isNotEmpty) {
-        _actorFacingByKind = {..._actorFacingByKind, ...facingUpdates};
-      }
+      _actorFacingAt = facingAfterMoves(_actorFacingAt, [
+        for (final m in movers)
+          if (m.layer == 'actors' && m.direction != null)
+            (from: m.from, to: m.to, direction: m.direction!),
+      ]);
     });
     _movingSprites.value = const [];
   }
@@ -1090,10 +1302,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// Animates movers along ordered adjacent-cell paths. Unlike a long
   /// `entity_move`, this preserves every corner and updates the facing sprite
   /// at each segment.
+  ///
+  /// Holds the finished board like every other stage, so nothing the turn
+  /// already showed — the avatar's step, an earlier stage's movers, a cell the
+  /// turn cleared — is rewound for the length of the path. [lastPaths] says no
+  /// path is left to play, so transforms held back for the paths show on
+  /// landing.
   Future<void> _playPathMotion(
-    LevelState preState,
     List<AnimationStep> paths, {
-    List<({String layer, Position position})> clearedCells = const [],
+    required List<TravellingEntity> inFlight,
+    required List<TravellingEntity> stillPending,
+    required bool lastPaths,
   }) async {
     final movers = <_PathMover>[];
     for (final step in paths) {
@@ -1125,16 +1344,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final totalMs = movers
         .map((m) => (m.path.length - 1) * m.stepDurationMs)
         .reduce(max);
-    final animState = preState.copy();
-    for (final mover in movers) {
-      animState.board.setEntity(mover.layer, mover.path.first, null);
-    }
-    for (final cleared in clearedCells) {
-      animState.board.setEntity(cleared.layer, cleared.position, null);
-    }
     if (!mounted) return;
     setState(() {
-      _preAnimState = animState;
+      _preAnimState = _heldBoard(pending: stillPending, inFlight: inFlight);
       _animOverlays = null;
     });
 
@@ -1157,18 +1369,23 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       controller.dispose();
     }
 
-    final postState = animState.copy();
-    for (final mover in movers) {
-      if (!mover.removedAtEnd &&
-          postState.board.getEntity(mover.layer, mover.path.last) == null) {
-        postState.board.setEntity(mover.layer, mover.path.last, mover.entity);
-      }
-    }
+    // Land the movers: each is already at its destination on the engine's
+    // board, as whatever it became on arrival.
     if (!mounted) {
       _movingSprites.value = const [];
       return;
     }
-    setState(() => _preAnimState = postState);
+    setState(() {
+      if (lastPaths) _hiddenTransforms = const [];
+      _preAnimState = _heldBoard(pending: stillPending);
+      _actorFacingAt = facingAfterMoves(_actorFacingAt, [
+        for (final m in movers)
+          if (m.layer == 'actors' && !m.removedAtEnd)
+            if (_directionBetween(m.path[m.path.length - 2], m.path.last)
+                case final direction?)
+              (from: m.path.first, to: m.path.last, direction: direction),
+      ]);
+    });
     _movingSprites.value = const [];
   }
 
@@ -1230,12 +1447,14 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       if (since >= 0 && since <= 1) squash = 1 - 0.18 * sin(pi * since);
     }
 
+    final kindDef = widget.packService.game.entityKinds[m.entity.kind];
+    final motionFrame = resolveEntityMotionFrame(kindDef, elapsedMs, travelled);
     final entity = m.direction == null
         ? m.entity
         : EntityInstance(m.entity.kind, {
             ...m.entity.params,
             '_motionDirection': m.direction,
-            '_motionFrame': travelled.floor(),
+            '_motionFrame': motionFrame,
           });
     return MovingSprite(
       entity: entity,
@@ -1254,9 +1473,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _playEntityAnimation(
-    LevelState preState,
-    AnimationStep step,
-  ) async {
+    AnimationStep step, {
+    required List<TravellingEntity> stillPending,
+  }) async {
     final kindDef = widget.packService.game.entityKinds[step.entityKind];
     final animDef = kindDef?.animations[step.animationName!];
     if (animDef == null || animDef.frames.isEmpty) return;
@@ -1265,7 +1484,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // animation frames render cleanly without the original sprite bleeding through.
     // For ground-layer entities (ice…), keep the original tile visible beneath
     // the overlay frames — clearing ground would show void/black behind the anim.
-    final cleanState = preState.copy();
+    final cleanState = _heldBoard(pending: stillPending);
     final layer =
         widget.packService.game.entityKinds[step.entityKind]?.layer ??
         'objects';
@@ -1347,7 +1566,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   void _onUndo() {
-    if (_aiRunning) return;
+    if (_aiRunning || _replaying || _animating) return;
     // Depth before the undo: "was n moves in, stepped back". Undoing out of a
     // loss re-arms the fail event — dying again is a fresh fact.
     final depthBefore = _engine.undoDepth;
@@ -1370,18 +1589,48 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _wonHandled = false;
   }
 
+  /// Invalidate old replay/effect callbacks and discard every visual override.
+  /// Call only once foreground motion has finished, so its controllers cannot
+  /// write a previous attempt's positions back over the new board.
+  void _clearPlaybackState() {
+    _replayGeneration++;
+    _effectGeneration++;
+    _resetRequested = false;
+    _replaying = false;
+    _replayLabel = '';
+    _preAnimState = null;
+    _animOverlays = null;
+    _avatarSlidePos = null;
+    _movingSprites.value = const [];
+    _movingMultiCellObjects.value = const [];
+    _avatarMotion.value = null;
+    _cellEffects.value = const [];
+    _lineOfSightFeedbacks = const [];
+    _actorFacingAt = {};
+    _hiddenTransforms = const [];
+  }
+
   void _onReset() {
     _stopAgent();
+    if (_animating) {
+      // The loss/win banner can appear before the final motion lands. Remember
+      // the click and cancel further replay steps; reset at that motion's end.
+      _resetRequested = true;
+      _replayGeneration++;
+      return;
+    }
     _trackAttemptReset();
     setState(() {
+      _clearPlaybackState();
       _engine.reset();
+      _wonHandled = false;
       _lastThinking = null;
       _lastResponse = null;
       _lastFloodColor = null;
       _selectedMultiCellObjectId = null;
       _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
-      _actorFacingByKind = {};
+      _actorFacingAt = {};
     });
   }
 
@@ -1408,6 +1657,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   void _advance() {
+    if (_replaying || _animating) return;
     if (_seqIndex >= _sequence.length - 1) return; // already at end
 
     // Check lock: if the next *level* entry is locked, block navigation.
@@ -1434,6 +1684,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
   /// Jump back one sequence entry (story or level).
   void _prevEntry() {
+    if (_replaying || _animating) return;
     if (_seqIndex == 0) return;
     _trackLevelExit();
     setState(() {
@@ -1444,6 +1695,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
   /// Jump back to the previous level (skipping story entries).
   void _prevLevel() {
+    if (_replaying || _animating) return;
     setState(() {
       var i = _seqIndex - 1;
       while (i >= 0 && _sequence[i].type != 'level') i--;
@@ -1556,7 +1808,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   void _onCellTap(int x, int y) {
-    if (_aiRunning || _animating) return;
+    if (_aiRunning || _animating || _replaying) return;
     final gestureMap =
         widget.packService.theme?.controls?.gestureMap ?? const [];
     for (final binding in gestureMap) {
@@ -1700,6 +1952,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   // ---------------------------------------------------------------------------
 
   Future<void> _onHint() async {
+    if (_replaying || _animating || _aiRunning) return;
     final idx = _hintService.nextIndex;
     if (idx < 0) return;
 
@@ -1795,53 +2048,47 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Future<void> _onSolve() async {
-    final goldPath = _levelDef.solution.goldPath;
-    if (goldPath.isEmpty) return;
-    _trackAttemptReset();
-    setState(() {
-      _engine.reset();
-      _selectedMultiCellObjectId = null;
-      _selectedCellPosition = null;
-      _lineOfSightFeedbacks = const [];
-    });
-    _playtest.beginBusy();
-    try {
-      await Future.delayed(Duration.zero);
-      for (int i = 0; i < goldPath.length; i++) {
-        if (!mounted) return;
-        await _runAction(goldPath[i], source: 'solve');
-        await Future.delayed(const Duration(milliseconds: 300));
-      }
-    } finally {
-      _playtest.endBusy();
-    }
+    await _replayPath(_levelDef.solution.goldPath.length, source: 'solve');
   }
 
   Future<void> _playHint(int hintIndex) async {
+    if (_replaying || _animating || _aiRunning) return;
     _hintService.markUsed(hintIndex);
-    final stopCount = _levelDef.solution.hintStops[hintIndex];
-    final goldPath = _levelDef.solution.goldPath;
+    await _replayPath(_levelDef.solution.hintStops[hintIndex], source: 'hint');
+  }
 
-    _trackAttemptReset();
+  Future<void> _replayPath(int count, {required String source}) async {
+    if (_replaying || _animating || _aiRunning || count == 0) return;
+    final path = _levelDef.solution.goldPath;
+    _onReset();
+    final generation = ++_replayGeneration;
     setState(() {
-      _engine.reset();
-      _selectedMultiCellObjectId = null;
-      _selectedCellPosition = null;
-      _lineOfSightFeedbacks = const [];
-      _actorFacingByKind = {};
+      _replaying = true;
+      _wonHandled = false;
+      _replayLabel = source == 'solve' ? 'Playing solution' : 'Playing hint';
     });
     // The replay is the UI's time, not the tester's — pauses included.
     _playtest.beginBusy();
     try {
-      await Future.delayed(
-        kDebugMode ? Duration.zero : const Duration(milliseconds: 200),
-      );
-      for (int i = 0; i < stopCount && i < goldPath.length; i++) {
-        if (!mounted) return;
-        await _runAction(goldPath[i], source: 'hint');
+      for (var i = 0; i < count && i < path.length; i++) {
+        if (!mounted || generation != _replayGeneration) return;
+        setState(
+          () => _replayLabel =
+              '${source == 'solve' ? 'Playing solution' : 'Playing hint'} · ${i + 1}/$count',
+        );
+        await _runAction(path[i], source: source);
+        if (!mounted ||
+            generation != _replayGeneration ||
+            _engine.isWon ||
+            _engine.isLost) {
+          return;
+        }
         await Future.delayed(const Duration(milliseconds: 300));
       }
     } finally {
+      if (mounted && generation == _replayGeneration) {
+        setState(() => _replaying = false);
+      }
       _playtest.endBusy();
     }
   }
@@ -2203,7 +2450,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       }
     }
     final hintStatuses = _hintService.statuses;
-    final hintAvailable = _hintService.hasAnyAvailable && !_aiRunning;
+    final hintAvailable =
+        _hintService.hasAnyAvailable &&
+        !_aiRunning &&
+        !_replaying &&
+        !_animating;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F0E8),
@@ -2259,8 +2510,15 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       body: Focus(
         autofocus: true,
         onKeyEvent: (_, event) {
-          if (_aiRunning) return KeyEventResult.ignored;
           if (event is! KeyDownEvent) return KeyEventResult.ignored;
+          // Zoom keys work during AI play and replays too: they never touch
+          // the game, only the view.
+          final zoomKey = _zoomForKey(event.logicalKey);
+          if (zoomKey != null) {
+            _setBoardZoom(zoomKey);
+            return KeyEventResult.handled;
+          }
+          if (_aiRunning) return KeyEventResult.ignored;
           if (event.logicalKey == LogicalKeyboardKey.keyZ ||
               event.logicalKey == LogicalKeyboardKey.keyU) {
             _onUndo();
@@ -2305,10 +2563,16 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         },
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onPanStart: (_aiRunning || _animating) ? null : _onPanStart,
-          onPanUpdate: (_aiRunning || _animating) ? null : _onPanUpdate,
-          onPanEnd: (_aiRunning || _animating) ? null : _onPanEnd,
-          onPanCancel: (_aiRunning || _animating) ? null : _onPanCancel,
+          onPanStart: (_aiRunning || _animating || _replaying)
+              ? null
+              : _onPanStart,
+          onPanUpdate: (_aiRunning || _animating || _replaying)
+              ? null
+              : _onPanUpdate,
+          onPanEnd: (_aiRunning || _animating || _replaying) ? null : _onPanEnd,
+          onPanCancel: (_aiRunning || _animating || _replaying)
+              ? null
+              : _onPanCancel,
           child: SafeArea(
             child: Column(
               children: [
@@ -2319,14 +2583,15 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.all(12),
-                    child: Center(
-                      child: BoardRenderer(
+                    child: _buildZoomableBoard(
+                      state,
+                      BoardRenderer(
                         key: _boardKey,
                         state: state,
                         game: widget.packService.game,
                         packService: widget.packService,
                         animationOverlays: _animOverlays,
-                        actorFacingByKind: _actorFacingByKind,
+                        actorFacingAt: _actorFacingAt,
                         onCellTap:
                             (_hasCellTapGesture || _moveActionNeedsPosition)
                             ? _onCellTap
@@ -2339,6 +2604,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                         cellEffects: _cellEffects,
                         floodedColorOverride: _lastFloodColor,
                         avatarPositionOverride: _avatarSlidePos,
+                        avatarMotion: _avatarMotion,
                         actionPreviews: showPreviews
                             ? _actionPreviews
                             : const {},
@@ -2363,6 +2629,14 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                     ),
                   ),
                 ),
+                if (_replaying)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    child: Text(
+                      _replayLabel,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
                 if (state.isWon) _buildWinBanner(),
                 if (state.isLost) _buildLossBanner(),
                 if (s.aiPlayEnabled &&
@@ -2385,7 +2659,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                     onExit: _onExit,
                     onHint: hintAvailable ? _onHint : null,
                     onSolve: kDebugMode ? _onSolve : null,
-                    canUndo: _engine.undoDepth > 0 && !_aiRunning,
+                    canUndo:
+                        _engine.undoDepth > 0 &&
+                        !_aiRunning &&
+                        !_replaying &&
+                        !_animating,
                     hintStatuses: hintStatuses,
                     availableActionIds: _availableFloodActions(state),
                     palette: widget.packService.theme?.palette,
@@ -2395,6 +2673,170 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
             ),
           ),
         ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Board zoom
+  // ---------------------------------------------------------------------------
+
+  /// The zoom a key asks for: `+`/`=` in, `-` out, `0` back to fit.
+  double? _zoomForKey(LogicalKeyboardKey key) {
+    if (key == LogicalKeyboardKey.equal ||
+        key == LogicalKeyboardKey.add ||
+        key == LogicalKeyboardKey.numpadAdd) {
+      return _boardZoom * 1.25;
+    }
+    if (key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract) {
+      return _boardZoom / 1.25;
+    }
+    if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) {
+      return _minBoardZoom;
+    }
+    return null;
+  }
+
+  void _setBoardZoom(double zoom) {
+    final z = zoom.clamp(_minBoardZoom, _maxBoardZoom);
+    // Snap near-fit values to exactly 1 so zooming back out restores the
+    // untransformed board.
+    final snapped = z < 1.02 ? _minBoardZoom : z;
+    if (snapped == _boardZoom) return;
+    setState(() => _boardZoom = snapped);
+  }
+
+  void _onBoardPointerSignal(PointerSignalEvent event) {
+    if (event is PointerScrollEvent) {
+      gestures.GestureBinding.instance.pointerSignalResolver.register(event, (
+        e,
+      ) {
+        final dy = (e as PointerScrollEvent).scrollDelta.dy;
+        if (dy == 0) return;
+        _setBoardZoom(dy < 0 ? _boardZoom * 1.1 : _boardZoom / 1.1);
+      });
+    } else if (event is PointerScaleEvent) {
+      _setBoardZoom(_boardZoom * event.scale);
+    }
+  }
+
+  /// Wraps [board] in a camera. At zoom 1 the board is laid out exactly as
+  /// before. Above 1 it is scaled up and the view is centred on the avatar
+  /// (or the board's centre when there is none), clamped so it never scrolls
+  /// past the board's edges. The mouse wheel, `+`/`-`/`0` and the corner
+  /// buttons change the zoom; drags stay game input.
+  Widget _buildZoomableBoard(LevelState state, Widget board) {
+    return Listener(
+      onPointerSignal: _onBoardPointerSignal,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final viewport = constraints.biggest;
+          final zoomed = _boardZoom > _minBoardZoom;
+          // At zoom 1 the camera is exactly the identity, so the same tree
+          // serves every zoom and the board is never rebuilt by zooming.
+          final camera = zoomed
+              ? _cameraOffset(state, constraints, viewport)
+              : Offset.zero;
+          final view = Matrix4.translationValues(-camera.dx, -camera.dy, 0)
+            ..scaleByDouble(_boardZoom, _boardZoom, 1, 1);
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: ClipRect(
+                  // Unclipped when fitted, so nothing drawn at the board's
+                  // edge is cut off compared with the unzoomed layout.
+                  clipBehavior: zoomed ? Clip.hardEdge : Clip.none,
+                  child: TweenAnimationBuilder<Matrix4>(
+                    tween: Matrix4Tween(end: view),
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    builder: (context, transform, child) =>
+                        Transform(transform: transform, child: child),
+                    child: Center(child: board),
+                  ),
+                ),
+              ),
+              Positioned(top: 0, right: 0, child: _buildZoomButtons()),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  /// Top-left corner of the visible window, in zoomed board-area coordinates.
+  Offset _cameraOffset(
+    LevelState state,
+    BoxConstraints constraints,
+    Size viewport,
+  ) {
+    final cols = state.board.width;
+    final rows = state.board.height;
+    final cell = BoardRenderer.cellSizeFor(constraints, cols, rows);
+    final gridSize = Size(cell * cols, cell * rows);
+    // [Center] places the fitted grid in the middle of the board area.
+    final gridOrigin = Offset(
+      (viewport.width - gridSize.width) / 2,
+      (viewport.height - gridSize.height) / 2,
+    );
+    final avatarPos =
+        _avatarSlidePos ??
+        (state.avatar.enabled ? state.avatar.position : null);
+    final focus = avatarPos == null
+        ? gridOrigin + Offset(gridSize.width / 2, gridSize.height / 2)
+        : gridOrigin +
+              Offset((avatarPos.x + 0.5) * cell, (avatarPos.y + 0.5) * cell);
+    final z = _boardZoom;
+
+    double axis(double focus, double origin, double grid, double extent) {
+      // A zoomed grid that still fits stays centred; a larger one follows
+      // the focus but never shows past its own edge.
+      if (grid * z <= extent) return (origin + grid / 2) * z - extent / 2;
+      return (focus * z - extent / 2).clamp(
+        origin * z,
+        (origin + grid) * z - extent,
+      );
+    }
+
+    return Offset(
+      axis(focus.dx, gridOrigin.dx, gridSize.width, viewport.width),
+      axis(focus.dy, gridOrigin.dy, gridSize.height, viewport.height),
+    );
+  }
+
+  Widget _buildZoomButtons() {
+    Widget button(IconData icon, String tooltip, VoidCallback? onPressed) {
+      return IconButton(
+        icon: Icon(icon, size: 20),
+        color: Colors.black54,
+        visualDensity: VisualDensity.compact,
+        tooltip: tooltip,
+        onPressed: onPressed,
+      );
+    }
+
+    return Material(
+      color: Colors.white.withValues(alpha: 0.75),
+      borderRadius: BorderRadius.circular(8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          button(
+            Icons.zoom_in,
+            'Zoom in (+)',
+            _boardZoom < _maxBoardZoom
+                ? () => _setBoardZoom(_boardZoom * 1.25)
+                : null,
+          ),
+          button(
+            Icons.zoom_out,
+            'Zoom out (-)',
+            _boardZoom > _minBoardZoom
+                ? () => _setBoardZoom(_boardZoom / 1.25)
+                : null,
+          ),
+        ],
       ),
     );
   }
@@ -2420,6 +2862,13 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          BalancePanel(
+            game: widget.packService.game.withSystemOverrides(
+              _levelDef.systemOverrides,
+            ),
+            state: state,
+            palette: widget.packService.theme?.palette,
+          ),
           if (readouts.isNotEmpty) ...[
             _buildReadoutStrip(state, readouts),
             if (showGoal || showGuide) const SizedBox(height: 6),

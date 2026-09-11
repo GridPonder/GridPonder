@@ -2,6 +2,7 @@ import '../engine/game_system.dart';
 import '../models/game_definition.dart';
 import 'anchor_point_system.dart';
 import 'avatar_navigation_system.dart';
+import 'balance_regions_system.dart';
 import 'cell_rotation_system.dart';
 import 'coupled_actors_system.dart';
 import 'elastic_block_system.dart';
@@ -35,6 +36,7 @@ class SystemRegistry {
   static final Map<String, SystemFactory> _factories = {
     'anchor_point': (id, _) => AnchorPointSystem(id: id),
     'avatar_navigation': (id, _) => AvatarNavigationSystem(id: id),
+    'balance_regions': (id, _) => BalanceRegionsSystem(id: id),
     'cell_rotation': (id, _) => CellRotationSystem(id: id),
     'coupled_actors': (id, _) => CoupledActorsSystem(id: id),
     'elastic_block': (id, config) =>

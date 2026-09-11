@@ -193,6 +193,28 @@ class PhaseRunner {
             stage: motionStage,
           ));
         }
+      } else if (event.type == 'npc_moved') {
+        // follower_npcs predates actor_moved and reports its destination as
+        // toPosition. Resolve the moved kind from the post-phase actors layer
+        // so autonomous NPCs receive the same in-flight animation as actors.
+        final from = event.payload['fromPosition'];
+        final to = event.payload['toPosition'];
+        if (from != null && to != null) {
+          final fromPos = from is Position ? from : Position.fromJson(from);
+          final toPos = to is Position ? to : Position.fromJson(to);
+          final entity = state.board.getEntity('actors', toPos);
+          if (entity != null) {
+            final dur = _motionDurationMs(entity.kind, 'moveDurationMs', 130);
+            out.add(AnimationStep.entityMove(
+              fromPos,
+              toPos,
+              entity.kind,
+              'actors',
+              durationMs: dur,
+              stage: motionStage,
+            ));
+          }
+        }
       } else if (event.type == 'tile_moved') {
         final pos = event.position;
         final from = event.payload['fromPosition'];

@@ -104,7 +104,163 @@ TurnEngine _engineFor(GameDefinition game, Map<String, dynamic> levelJson) {
   return TurnEngine(game, level);
 }
 
-GameAction _move(String direction) => GameAction('move', {'direction': direction});
+GameAction _move(String direction) =>
+    GameAction('move', {'direction': direction});
+
+// -- shafts (linked machines) ------------------------------------------------
+//
+// The fixtures above take a single behavior and a 5x3 board; trains need two
+// behaviors, a system-level config key and room for two separate tracks, so
+// these are a second pair rather than a rewrite of the first. Parity mirror of
+// engines/python/test_follower_npcs.py.
+
+GameDefinition _shaftGame({
+  Map<String, dynamic>? behaviors,
+  Map<String, dynamic>? configExtra,
+}) {
+  final npcConfig = <String, dynamic>{
+    'npcTags': ['npc'],
+    'contactVariable': 'crushed',
+    'behaviors': behaviors ??
+        {
+          'walker': {
+            'type': 'patrol',
+            'lethalContact': false,
+            'solidBlocking': true,
+          },
+        },
+  };
+  npcConfig.addAll(configExtra ?? const <String, dynamic>{});
+
+  final data = {
+    'id': 'com.gridponder.test_follower_shaft',
+    'layers': [
+      {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+      {'id': 'actors', 'occupancy': 'zero_or_one'},
+    ],
+    'entityKinds': {
+      'empty': {
+        'layer': 'ground',
+        'tags': ['walkable'],
+        'symbol': '.',
+      },
+      'void': {
+        'layer': 'ground',
+        'tags': <String>[],
+        'symbol': ' ',
+      },
+      'machine': {
+        'layer': 'actors',
+        'tags': ['npc', 'solid'],
+        'symbol': 'M',
+      },
+    },
+    'actions': [
+      {
+        'id': 'move',
+        'params': {
+          'direction': {
+            'type': 'direction',
+            'values': ['up', 'down', 'left', 'right'],
+          },
+        },
+      },
+    ],
+    'systems': [
+      {
+        'id': 'navigation',
+        'type': 'avatar_navigation',
+        'config': <String, dynamic>{},
+      },
+      {'id': 'machines', 'type': 'follower_npcs', 'config': npcConfig},
+    ],
+  };
+  return GameDefinition.fromJson(data, id: 'test_follower_shaft');
+}
+
+/// 8x5 board. Machines are (x, y, behavior, facing, shaft?) records.
+///
+/// The avatar parks at (0, 4) and spends beats by walking into the bottom edge:
+/// a blocked move is still a beat, which is how the other patrol tests here
+/// advance the world too.
+Map<String, dynamic> _shaftLevelJson(
+  List<(int, int, String, String, String?)> machines, {
+  List<(int, int)> walls = const [],
+}) {
+  final entries = <Map<String, dynamic>>[];
+  for (final m in machines) {
+    final entry = <String, dynamic>{
+      'position': [m.$1, m.$2],
+      'kind': 'machine',
+      'behavior': m.$3,
+      'facing': m.$4,
+    };
+    if (m.$5 != null) entry['shaft'] = m.$5;
+    entries.add(entry);
+  }
+  return {
+    'id': 'test_level',
+    'board': {
+      'size': [8, 5],
+      'layers': {
+        'ground': {
+          'format': 'sparse',
+          'entries': [
+            for (final w in walls)
+              {
+                'position': [w.$1, w.$2],
+                'kind': 'void',
+              },
+          ],
+        },
+        'actors': {'format': 'sparse', 'entries': entries},
+      },
+    },
+    'state': {
+      'avatar': {
+        'enabled': true,
+        'position': [0, 4],
+      },
+    },
+    'goals': <dynamic>[],
+    'loseConditions': [
+      {
+        'type': 'variable_threshold',
+        'config': {'variable': 'crushed', 'target': 1, 'comparison': 'gte'},
+      },
+    ],
+  };
+}
+
+/// Spend one beat without moving: the bottom edge blocks the avatar.
+void _beat(TurnEngine engine) => engine.executeTurn(_move('down'));
+
+List<(int, int)> _machinePositions(TurnEngine engine) {
+  final out = [
+    for (final e in engine.state.board.layers['actors']!.entries())
+      (e.key.x, e.key.y),
+  ]..sort((a, b) => a.$1 == b.$1 ? a.$2.compareTo(b.$2) : a.$1.compareTo(b.$1));
+  return out;
+}
+
+String _facingAt(TurnEngine engine, int x, int y) => engine.state.board
+    .getEntity('actors', Position(x, y))!
+    .param('facing')
+    .toString();
+
+void _expectRejects(
+  GameDefinition game,
+  Map<String, dynamic> levelJson,
+  String word,
+) {
+  expect(
+    () => _engineFor(game, levelJson),
+    throwsA(
+      isA<ArgumentError>()
+          .having((e) => e.toString(), 'message', contains(word)),
+    ),
+  );
+}
 
 void main() {
   group('follower_npcs lethal contact', () {
@@ -283,9 +439,8 @@ void main() {
       _levelJson(avatar: [0, 1], watcher: [3, 1]),
     );
 
-    List<GameEvent> sightings(TurnResult result) => result.events
-        .where((e) => e.type == 'line_of_sight_detected')
-        .toList();
+    List<GameEvent> sightings(TurnResult result) =>
+        result.events.where((e) => e.type == 'line_of_sight_detected').toList();
 
     final seen = sightings(engine.executeTurn(_move('right')));
     expect(seen, hasLength(1));
@@ -315,14 +470,13 @@ void main() {
     );
     final result = engine.executeTurn(_move('right'));
 
-    final seen = result.events
-        .where((e) => e.type == 'line_of_sight_detected')
-        .toList();
-    final moved =
-        result.events.where((e) => e.type == 'npc_moved').toList();
+    final seen =
+        result.events.where((e) => e.type == 'line_of_sight_detected').toList();
+    final moved = result.events.where((e) => e.type == 'npc_moved').toList();
     expect(seen, hasLength(1));
     expect(moved, hasLength(1));
-    expect(seen.first.payload['sourcePosition'], moved.first.payload['toPosition']);
+    expect(seen.first.payload['sourcePosition'],
+        moved.first.payload['toPosition']);
     expect(seen.first.payload['sourcePosition'],
         isNot(equals(moved.first.payload['fromPosition'])));
     // The id still names the cell it started from, so the events correlate.
@@ -345,9 +499,8 @@ void main() {
     final resting = _watcherPosition(engine);
     final result = engine.executeTurn(_move('left'));
 
-    final seen = result.events
-        .where((e) => e.type == 'line_of_sight_detected')
-        .toList();
+    final seen =
+        result.events.where((e) => e.type == 'line_of_sight_detected').toList();
     expect(result.events.where((e) => e.type == 'npc_moved'), isEmpty);
     // Sight is still reported on a skipped turn: it saw, it just did not act.
     expect(seen, hasLength(1));
@@ -381,7 +534,10 @@ void main() {
       'objects': {
         'format': 'sparse',
         'entries': [
-          {'position': [4, 2], 'kind': 'flag'},
+          {
+            'position': [4, 2],
+            'kind': 'flag'
+          },
         ],
       },
     };
@@ -391,7 +547,10 @@ void main() {
         'on': 'npc_moved',
         'then': [
           {
-            'destroy': {'position': [4, 2], 'layer': 'objects'},
+            'destroy': {
+              'position': [4, 2],
+              'layer': 'objects'
+            },
           },
         ],
       },
@@ -406,8 +565,31 @@ void main() {
     expect(
       engine.state.board.getEntity('objects', Position(4, 2)),
       isNull,
-      reason: 'the rule never fired, so NPC events are still invisible to rules',
+      reason:
+          'the rule never fired, so NPC events are still invisible to rules',
     );
+  });
+
+  test('NPC moves produce actor-layer entity motion', () {
+    final game = _makeGame({
+      'type': 'toward_avatar',
+      'requiresLineOfSight': true,
+    });
+    final engine = _engineFor(
+      game,
+      _levelJson(avatar: [0, 1], watcher: [3, 1]),
+    );
+
+    final result = engine.executeTurn(_move('right'));
+    final animations =
+        result.animations.where((step) => step.type == 'entity_move').toList();
+
+    expect(animations, hasLength(1));
+    expect(animations.single.entityKind, 'watcher');
+    expect(animations.single.extra['layer'], 'actors');
+    expect(animations.single.extra['from'], [3, 1]);
+    expect(animations.single.position, const Position(2, 1));
+    expect(animations.single.durationMs, 130);
   });
 
   group('lethalContact governs every behavior', () {
@@ -476,7 +658,10 @@ void main() {
             },
           },
           'state': {
-            'avatar': {'enabled': true, 'position': [0, 0]},
+            'avatar': {
+              'enabled': true,
+              'position': [0, 0]
+            },
           },
           'goals': <dynamic>[],
           'loseConditions': [
@@ -547,6 +732,388 @@ void main() {
       reason: 'the watcher should still have acted',
     );
     expect(engine.state.turnCount, 1);
+  });
+
+  group('follower_npcs shafts', () {
+    test('unshafted board is unchanged by the shaft feature', () {
+      // Guard for Firebreak and Blind Spot: no shaft params -> today's path.
+      // (4,0) faces a wall at (5,0) and reverses; (1,2) is clear and walks on,
+      // entirely unaffected by the other machine's wall.
+      final engine = _engineFor(
+        _shaftGame(),
+        _shaftLevelJson(
+          [(4, 0, 'walker', 'right', null), (1, 2, 'walker', 'right', null)],
+          walls: [(5, 0)],
+        ),
+      );
+
+      _beat(engine);
+
+      expect(_machinePositions(engine), [(2, 2), (3, 0)]);
+      expect(_facingAt(engine, 3, 0), 'left');
+      expect(_facingAt(engine, 2, 2), 'right');
+    });
+
+    test('shafted pair steps in lockstep', () {
+      final engine = _engineFor(
+        _shaftGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+      );
+
+      _beat(engine);
+
+      expect(_machinePositions(engine), [(2, 0), (2, 2)]);
+    });
+
+    test('blocking one member reverses the whole train', () {
+      // The remote turn: (1,2)'s own path is clear all the way to the east
+      // edge. It reverses anyway, because the shaft carries (4,0)'s wall to it.
+      final engine = _engineFor(
+        _shaftGame(),
+        _shaftLevelJson(
+          [(4, 0, 'walker', 'right', 'a'), (1, 2, 'walker', 'right', 'a')],
+          walls: [(5, 0)],
+        ),
+      );
+
+      _beat(engine);
+
+      expect(_machinePositions(engine), [(0, 2), (3, 0)]);
+      expect(_facingAt(engine, 3, 0), 'left');
+      expect(_facingAt(engine, 0, 2), 'left');
+    });
+
+    test('train blocked both ways freezes and keeps facings', () {
+      final engine = _engineFor(
+        _shaftGame(),
+        _shaftLevelJson(
+          [(4, 0, 'walker', 'right', 'a'), (1, 2, 'walker', 'right', 'a')],
+          walls: [(5, 0), (3, 0)],
+        ),
+      );
+
+      _beat(engine);
+
+      expect(_machinePositions(engine), [(1, 2), (4, 0)]);
+      expect(_facingAt(engine, 4, 0), 'right');
+      expect(_facingAt(engine, 1, 2), 'right');
+    });
+
+    test("load settle records each train's size", () {
+      final engine = _engineFor(
+        _shaftGame(configExtra: {'shaftSeizeOnLoss': true}),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+          (6, 3, 'walker', 'up', 'b'),
+        ]),
+      );
+
+      expect(engine.state.variables['shaft_a_size'], 2);
+      expect(engine.state.variables['shaft_b_size'], 1);
+    });
+
+    test('train seizes permanently when a member is destroyed', () {
+      final engine = _engineFor(
+        _shaftGame(configExtra: {'shaftSeizeOnLoss': true}),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+      );
+
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 0), (2, 2)]);
+
+      // Something else removes one member — a leaf opening under it, in the
+      // pack.
+      engine.state.board.setEntity('actors', const Position(2, 0), null);
+
+      for (var i = 0; i < 4; i++) {
+        _beat(engine);
+      }
+      expect(
+        _machinePositions(engine),
+        [(2, 2)],
+        reason: 'survivor must be frozen forever',
+      );
+    });
+
+    test('seizure is off by default', () {
+      final engine = _engineFor(
+        _shaftGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+      );
+
+      engine.state.board.setEntity('actors', const Position(1, 0), null);
+      _beat(engine);
+
+      expect(
+        _machinePositions(engine),
+        [(2, 2)],
+        reason: 'survivor keeps running',
+      );
+    });
+
+    test('seizure flag is read strictly', () {
+      // Matches the `cycle` precedent in coupled_actors: only true enables it.
+      final engine = _engineFor(
+        _shaftGame(configExtra: {'shaftSeizeOnLoss': 1}),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+      );
+
+      engine.state.board.setEntity('actors', const Position(1, 0), null);
+      _beat(engine);
+
+      expect(_machinePositions(engine), [(2, 2)]);
+    });
+
+    // -- ratio shafts (geared trains) -----------------------------------------
+    //
+    // A train may mix frequencies. Each member runs on its own beat; only the
+    // members whose gate opens are probed and step, but a reversal turns the
+    // WHOLE train, because facing is train-level state. Parity mirror of the
+    // ratio tests in engines/python/test_follower_npcs.py.
+    //
+    // turnCount starts at 0 and is read BEFORE it increments, so a frequency-2
+    // member is active on the 1st, 3rd, 5th beat and idle on the 2nd and 4th.
+
+    const geared = {
+      'walker': {
+        'type': 'patrol',
+        'lethalContact': false,
+        'solidBlocking': true,
+      },
+      'slow': {
+        'type': 'patrol',
+        'lethalContact': false,
+        'solidBlocking': true,
+        'frequency': 2,
+      },
+    };
+
+    test('mixed frequency train loads', () {
+      // The whole point of the arc: a geared train is no longer rejected.
+      _engineFor(
+        _shaftGame(behaviors: geared),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'slow', 'right', 'a'),
+        ]),
+      );
+    });
+
+    test('geared members step at their own rates', () {
+      final engine = _engineFor(
+        _shaftGame(behaviors: geared),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'slow', 'right', 'a'),
+        ]),
+      );
+
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 0), (2, 2)]);
+
+      // The slow member is off-beat and stays put; the fast one walks on alone.
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 2), (3, 0)]);
+
+      _beat(engine);
+      expect(_machinePositions(engine), [(3, 2), (4, 0)]);
+    });
+
+    test('reversal turns the member that did not step', () {
+      // The arc's core fact: an off-beat member turns without moving.
+      // Beat 2 (turnCount 1): only the fast member is active. It faces the wall
+      // at (5,0), so the train reverses — and the slow member at (2,2), which
+      // took no step at all this beat, is now facing left.
+      final engine = _engineFor(
+        _shaftGame(behaviors: geared),
+        _shaftLevelJson(
+          [(3, 0, 'walker', 'right', 'a'), (1, 2, 'slow', 'right', 'a')],
+          walls: [(5, 0)],
+        ),
+      );
+
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 2), (4, 0)]);
+
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 2), (3, 0)]);
+      expect(_facingAt(engine, 3, 0), 'left');
+      expect(_facingAt(engine, 2, 2), 'left');
+    });
+
+    test('the slow wheel steers the fast one', () {
+      // A geared train: the member you cannot reach turns
+      // the member you can, on a beat the fast one had every reason to walk on.
+      final engine = _engineFor(
+        _shaftGame(behaviors: geared),
+        _shaftLevelJson(
+          [(1, 0, 'walker', 'right', 'a'), (3, 2, 'slow', 'right', 'a')],
+          walls: [(5, 2)],
+        ),
+      );
+
+      _beat(engine); // turnCount 0: both step east
+      expect(_machinePositions(engine), [(2, 0), (4, 2)]);
+
+      _beat(engine); // turnCount 1: fast alone, clear road
+      expect(_machinePositions(engine), [(3, 0), (4, 2)]);
+
+      _beat(engine); // turnCount 2: slow hits (5,2) and drags the fast one back
+      expect(_machinePositions(engine), [(2, 0), (3, 2)]);
+      expect(_facingAt(engine, 2, 0), 'left');
+      expect(_facingAt(engine, 3, 2), 'left');
+    });
+
+    test('all members off beat is a noop not a freeze', () {
+      // An empty active set must emit nothing and turn nothing. Both members
+      // are frequency 2, so turnCount 1 has no active member at all.
+      final engine = _engineFor(
+        _shaftGame(behaviors: geared),
+        _shaftLevelJson([
+          (1, 0, 'slow', 'right', 'a'),
+          (1, 2, 'slow', 'right', 'a'),
+        ]),
+      );
+
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 0), (2, 2)]);
+
+      // Facings must survive untouched: a no-op is not a blocked train.
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 0), (2, 2)]);
+      expect(_facingAt(engine, 2, 0), 'right');
+      expect(_facingAt(engine, 2, 2), 'right');
+    });
+
+    test('same frequency train is unchanged', () {
+      // Regression guard: an ungeared train still moves in lockstep at its own
+      // rate, on exactly the beats it did before the ratio change.
+      final engine = _engineFor(
+        _shaftGame(behaviors: geared),
+        _shaftLevelJson([
+          (1, 0, 'slow', 'right', 'a'),
+          (1, 2, 'slow', 'right', 'a'),
+        ]),
+      );
+
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 0), (2, 2)]);
+      _beat(engine);
+      expect(_machinePositions(engine), [(2, 0), (2, 2)]);
+      _beat(engine);
+      expect(_machinePositions(engine), [(3, 0), (3, 2)]);
+    });
+
+    test('zero frequency member is rejected', () {
+      _expectRejects(
+        _shaftGame(
+          behaviors: {
+            'walker': {
+              'type': 'patrol',
+              'lethalContact': false,
+              'solidBlocking': true,
+            },
+            'stuck': {
+              'type': 'patrol',
+              'lethalContact': false,
+              'solidBlocking': true,
+              'frequency': 0,
+            },
+          },
+        ),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'stuck', 'right', 'a'),
+        ]),
+        'positive integer',
+      );
+    });
+
+    test('members crossing tracks never share a cell', () {
+      // (2,0) walks east along row 0; (4,2) walks north up column 4. On the
+      // second beat both want (4,0). Before this was fixed they both got it,
+      // the second write erased the first, and the train silently lost a member
+      // — which then read as a seizure, because the size recorded at load no
+      // longer matched. Both machines must still be on the board.
+      final engine = _engineFor(
+        _shaftGame(),
+        _shaftLevelJson([
+          (2, 0, 'walker', 'right', 'a'),
+          (4, 2, 'walker', 'up', 'a'),
+        ]),
+      );
+
+      for (var i = 0; i < 3; i++) {
+        _beat(engine);
+        expect(_machinePositions(engine), hasLength(2));
+      }
+    });
+
+    test('non patrol member is rejected at load', () {
+      _expectRejects(
+        _shaftGame(
+          behaviors: {
+            'walker': {'type': 'patrol', 'lethalContact': false},
+            'ringer': {'type': 'clockwise', 'lethalContact': false},
+          },
+        ),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'ringer', 'right', 'a'),
+        ]),
+        'patrol',
+      );
+    });
+
+    test('members sharing a traversal line are rejected at load', () {
+      // Self-blocking would make lockstep meaningless: the train jams at t=0.
+      _expectRejects(
+        _shaftGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (4, 0, 'walker', 'right', 'a'),
+        ]),
+        'traversal',
+      );
+    });
+
+    test('a member on a perpendicular member\'s line is rejected either way',
+        () {
+      // The check reads BOTH members' axes, so board order cannot hide a
+      // clash. The horizontal member at (1, 0) stands on the vertical
+      // member's column x=1; the vertical one is not on row 0, so checking
+      // only the first member's axis let this through whenever the
+      // horizontal member came first.
+      _expectRejects(
+        _shaftGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'down', 'a'),
+        ]),
+        'traversal',
+      );
+      _expectRejects(
+        _shaftGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'down', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+        'traversal',
+      );
+    });
   });
 }
 
