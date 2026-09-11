@@ -2405,6 +2405,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       'x': LogicalKeyboardKey.keyX,
       'y': LogicalKeyboardKey.keyY,
       'z': LogicalKeyboardKey.keyZ,
+      // Named keys, for a verb with no letter to hang on (a stamp's press).
+      ' ': LogicalKeyboardKey.space,
+      'space': LogicalKeyboardKey.space,
+      'enter': LogicalKeyboardKey.enter,
     };
     return map[char.toLowerCase()];
   }

@@ -66,9 +66,10 @@ Each gesture mapping:
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `gesture` | string | **yes** | Input type: `swipe_cardinal`, `swipe_diagonal`, `tap_cell`, `button`. |
+| `gesture` | string | **yes** | Input type: `swipe_cardinal`, `swipe_diagonal`, `tap_cell`, `button`, `key_press`. |
 | `action` | string | **yes** | Action `id` to emit. Must match an entry in `game.json` `actions`. |
 | `buttonId` | string | conditional | Required when `gesture` is `button`. UI control identifier. |
+| `key` | string | conditional | Required when `gesture` is `key_press`: a letter `a`–`z`, or `space` / `enter`. Checked before the arrow keys and WASD, so do not bind a letter those use. |
 | `paramMapping` | object | no | Maps input parameters to action parameters dynamically. |
 | `params` | object | no | Static parameters to include with the action. |
 | `showSelection` | boolean | no | When `true`, an accepted cell-tap action leaves a visible outline on its mapped cell until another cell is selected or the level state is reset. Solve and Hint replay update the same outline. Defaults to `false`. |
