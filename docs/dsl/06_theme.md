@@ -52,7 +52,7 @@ Maps platform inputs to abstract game actions. The engine uses these bindings as
   "gestureMap": [
     { "gesture": "swipe_cardinal", "action": "move", "paramMapping": { "direction": "swipe_direction" } },
     { "gesture": "swipe_diagonal", "action": "diagonal_swap", "paramMapping": { "direction": "swipe_direction" } },
-    { "gesture": "tap_cell", "action": "tap_cell", "paramMapping": { "position": "tap_position" } },
+    { "gesture": "tap_cell", "action": "tap_cell", "paramMapping": { "position": "tap_position" }, "showSelection": true },
     { "gesture": "button", "buttonId": "rotate_cw", "action": "rotate", "params": { "rotation": "clockwise" } }
   ]
 }
@@ -71,6 +71,7 @@ Each gesture mapping:
 | `buttonId` | string | conditional | Required when `gesture` is `button`. UI control identifier. |
 | `paramMapping` | object | no | Maps input parameters to action parameters dynamically. |
 | `params` | object | no | Static parameters to include with the action. |
+| `showSelection` | boolean | no | When `true`, an accepted cell-tap action leaves a visible outline on its mapped cell until another cell is selected or the level state is reset. Solve and Hint replay update the same outline. Defaults to `false`. |
 
 **Platform behavior:** On mobile, gestures are used directly. On web/desktop, the engine maps arrow keys to `swipe_cardinal` equivalents, and provides on-screen buttons for `button`-type actions. Games can provide platform-specific overrides (future extension).
 

@@ -468,6 +468,9 @@ class BoardRenderer extends StatelessWidget {
   /// UI-only selection state for an individually controlled actor.
   final Position? selectedActorPosition;
 
+  /// UI-only selection state for a directly manipulated board cell.
+  final Position? selectedCellPosition;
+
   /// Short-lived visual feedback for a line-of-sight detection event.
   final List<LineOfSightFeedback> lineOfSightFeedbacks;
 
@@ -488,6 +491,7 @@ class BoardRenderer extends StatelessWidget {
     this.avatarPositionOverride,
     this.selectedMultiCellObjectId,
     this.selectedActorPosition,
+    this.selectedCellPosition,
     this.lineOfSightFeedbacks = const [],
     this.cellEffects = const [],
     this.onCellHover,
@@ -744,10 +748,12 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               if (selectedActorPosition case final selectedPos?)
-                _buildSelectedActorRing(selectedPos, cellSize),
+                _buildSelectionRing(selectedPos, cellSize, 'selected-actor'),
               if (animationOverlays != null)
                 for (final entry in animationOverlays!.entries)
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
+              if (selectedCellPosition case final selectedPos?)
+                _buildSelectionRing(selectedPos, cellSize, 'selected-cell'),
               if (state.overlay != null)
                 _buildOverlay(state.overlay!, cellSize),
               if (lineOfSightFeedbacks.isNotEmpty)
@@ -1043,8 +1049,9 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _buildSelectedActorRing(Position pos, double cellSize) {
+  Widget _buildSelectionRing(Position pos, double cellSize, String keyPrefix) {
     return Positioned(
+      key: ValueKey('$keyPrefix-${pos.x}-${pos.y}'),
       left: pos.x * cellSize,
       top: pos.y * cellSize,
       width: cellSize,

@@ -214,6 +214,30 @@ class PhaseRunner {
             params: params,
           ));
         }
+      } else if (event.type == 'entity_path_moved') {
+        final pathRaw = event.payload['path'];
+        final kind = event.payload['kind'] as String?;
+        if (pathRaw is List && kind != null) {
+          final path = pathRaw
+              .map((p) => p is Position ? p : Position.fromJson(p))
+              .toList();
+          if (path.length > 1) {
+            final layer = event.payload['layer'] as String? ?? 'objects';
+            final params =
+                (event.payload['params'] as Map?)?.cast<String, dynamic>() ??
+                    const <String, dynamic>{};
+            final dur = _motionDurationMs(kind, 'pathStepDurationMs', 80);
+            out.add(AnimationStep.entityPath(
+              path,
+              kind,
+              layer,
+              durationMs: dur,
+              stage: motionStage,
+              params: params,
+              removedAtEnd: event.payload['removedAtEnd'] as bool? ?? false,
+            ));
+          }
+        }
       } else if (event.type == 'object_settled') {
         // An entity that travelled to rest under gravity or a collapse. Cells
         // of one rigid component all settle in the same batch, so giving them

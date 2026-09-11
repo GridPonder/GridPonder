@@ -23,6 +23,8 @@ import '../widgets/board_renderer.dart'
         elasticBlockRectTween,
         elasticPushObjectTravel;
 import '../widgets/controls_widget.dart';
+import 'cell_selection_state.dart';
+import 'path_animation_state.dart';
 
 /// One entity travelling from [from] to [to] during a turn's animation.
 typedef _Mover = ({
@@ -33,6 +35,14 @@ typedef _Mover = ({
   String? direction,
   double distance,
   bool falling,
+});
+
+typedef _PathMover = ({
+  List<Position> path,
+  EntityInstance entity,
+  String layer,
+  int stepDurationMs,
+  bool removedAtEnd,
 });
 
 class PlayScreen extends StatefulWidget {
@@ -88,6 +98,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   Offset? _panStart;
   Position? _panStartCell;
   String? _selectedMultiCellObjectId;
+  Position? _selectedCellPosition;
   static const double _swipeThreshold = 18.0;
   static const int _elasticCellTravelMs = 57;
   static const int _elasticMinTravelMs = 80;
@@ -178,6 +189,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _actorFacingByKind = {};
     _wonHandled = false;
     _selectedMultiCellObjectId = null;
+    _selectedCellPosition = null;
     _lineOfSightFeedbacks = const [];
     _movingSprites.value = const [];
     _tracker.track('level_start', level: levelId);
@@ -215,6 +227,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       pos: _tracker.enabled ? _trackedPositions() : null,
     );
     _syncSelectedMultiCellObject();
+    final selectedCell = selectionPositionForAction(
+      action,
+      widget.packService.theme?.controls?.gestureMap ?? const [],
+    );
 
     // Record the chosen colour for any colour-pick action (any action that
     // declares a `color` in game.json). The play screen uses it to tint the
@@ -235,7 +251,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         .toList();
     final hasSlide = avatarMoves.length > 1;
 
-    setState(() => _animating = true);
+    setState(() {
+      _animating = true;
+      if (selectedCell != null) _selectedCellPosition = selectedCell;
+    });
 
     // Avatar ice-slide: hold the pre-turn board so pushed objects stay at their
     // original positions while Pip slides. Skip last avatarMove — it's the
@@ -313,13 +332,18 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       });
     }
 
+    LevelState? pathPreState;
+
     // Stage-aware playback for new motion primitives.
     // Group remaining animations by stage; play each stage to completion
     // before starting the next.
     final remaining =
         result.animations
             .where(
-              (s) => s.type == 'entity_move' || s.type == 'entity_animation',
+              (s) =>
+                  s.type == 'entity_move' ||
+                  s.type == 'entity_path' ||
+                  s.type == 'entity_animation',
             )
             .toList()
           ..sort((a, b) => a.stage.compareTo(b.stage));
@@ -342,11 +366,16 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     Future<void> flushStage() async {
       if (stageBuf.isEmpty) return;
       final moves = stageBuf.where((s) => s.type == 'entity_move').toList();
+      final paths = stageBuf.where((s) => s.type == 'entity_path').toList();
       final anims = stageBuf
           .where((s) => s.type == 'entity_animation')
           .toList();
       if (moves.isNotEmpty) {
         await _playSlideMotion(preState, moves, clearedCells: clearedCells);
+      }
+      if (paths.isNotEmpty) {
+        pathPreState ??= buildPathAnimationState(preState, result.events);
+        await _playPathMotion(pathPreState!, paths, clearedCells: clearedCells);
       }
       for (final step in anims) {
         if (!mounted) return;
@@ -940,6 +969,118 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _movingSprites.value = const [];
   }
 
+  /// Animates movers along ordered adjacent-cell paths. Unlike a long
+  /// `entity_move`, this preserves every corner and updates the facing sprite
+  /// at each segment.
+  Future<void> _playPathMotion(
+    LevelState preState,
+    List<AnimationStep> paths, {
+    List<({String layer, Position position})> clearedCells = const [],
+  }) async {
+    final movers = <_PathMover>[];
+    for (final step in paths) {
+      final pathRaw = step.extra['path'];
+      if (pathRaw is! List || pathRaw.length < 2) continue;
+      final path = [
+        for (final raw in pathRaw)
+          if (raw is List) Position(raw[0] as int, raw[1] as int),
+      ];
+      if (path.length < 2) continue;
+      final paramsRaw = step.extra['params'];
+      final params = paramsRaw is Map
+          ? paramsRaw.cast<String, dynamic>()
+          : const <String, dynamic>{};
+      final rawStepDuration = step.extra['stepDurationMs'];
+      final stepDurationMs = rawStepDuration is int && rawStepDuration > 0
+          ? rawStepDuration.clamp(40, 400)
+          : 130;
+      movers.add((
+        path: path,
+        entity: EntityInstance(step.entityKind ?? '', params),
+        layer: step.extra['layer'] as String? ?? 'objects',
+        stepDurationMs: stepDurationMs,
+        removedAtEnd: step.extra['removedAtEnd'] as bool? ?? false,
+      ));
+    }
+    if (movers.isEmpty) return;
+
+    final totalMs = movers
+        .map((m) => (m.path.length - 1) * m.stepDurationMs)
+        .reduce(max);
+    final animState = preState.copy();
+    for (final mover in movers) {
+      animState.board.setEntity(mover.layer, mover.path.first, null);
+    }
+    for (final cleared in clearedCells) {
+      animState.board.setEntity(cleared.layer, cleared.position, null);
+    }
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = animState;
+      _animOverlays = null;
+    });
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: totalMs),
+    );
+    void emit() {
+      final elapsedMs = controller.value * totalMs;
+      _movingSprites.value = [
+        for (final mover in movers) _spriteAlongPath(mover, elapsedMs),
+      ];
+    }
+
+    controller.addListener(emit);
+    emit();
+    try {
+      await controller.forward();
+    } finally {
+      controller.dispose();
+    }
+
+    final postState = animState.copy();
+    for (final mover in movers) {
+      if (!mover.removedAtEnd &&
+          postState.board.getEntity(mover.layer, mover.path.last) == null) {
+        postState.board.setEntity(mover.layer, mover.path.last, mover.entity);
+      }
+    }
+    if (!mounted) {
+      _movingSprites.value = const [];
+      return;
+    }
+    setState(() => _preAnimState = postState);
+    _movingSprites.value = const [];
+  }
+
+  MovingSprite _spriteAlongPath(_PathMover mover, double elapsedMs) {
+    final segmentCount = mover.path.length - 1;
+    final progress = (elapsedMs / mover.stepDurationMs).clamp(
+      0.0,
+      segmentCount.toDouble(),
+    );
+    final segment = progress >= segmentCount
+        ? segmentCount - 1
+        : progress.floor();
+    final fraction = progress >= segmentCount ? 1.0 : progress - segment;
+    final from = mover.path[segment];
+    final to = mover.path[segment + 1];
+    final direction = _directionBetween(from, to);
+    final entity = direction == null
+        ? mover.entity
+        : EntityInstance(mover.entity.kind, {
+            ...mover.entity.params,
+            '_motionDirection': direction,
+            '_motionFrame': progress.floor(),
+          });
+    return MovingSprite(
+      entity: entity,
+      x: from.x + (to.x - from.x) * fraction,
+      y: from.y + (to.y - from.y) * fraction,
+    );
+  }
+
   /// A one-cell drop, in milliseconds. Longer drops scale as its square root,
   /// which is how far gravity actually gets in a given time.
   static const _fallCellMs = 190;
@@ -1092,6 +1233,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() {
       _engine.undo();
       _lastFloodColor = null;
+      _selectedCellPosition = null;
       _syncSelectedMultiCellObject();
     });
     _tracker.track('undo', level: _levelDef.id);
@@ -1105,6 +1247,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _lastResponse = null;
       _lastFloodColor = null;
       _selectedMultiCellObjectId = null;
+      _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
@@ -1289,7 +1432,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         params[key] = value == 'tap_position' ? [x, y] : value;
       });
       if (binding.params != null) params.addAll(binding.params!);
-      _onAction(GameAction(binding.action, params));
+      final action = GameAction(binding.action, params);
+      _onAction(action);
       break;
     }
     if (_moveActionNeedsPosition) {
@@ -1522,6 +1666,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() {
       _engine.reset();
       _selectedMultiCellObjectId = null;
+      _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
     });
     await Future.delayed(Duration.zero);
@@ -1540,6 +1685,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() {
       _engine.reset();
       _selectedMultiCellObjectId = null;
+      _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
       _actorFacingByKind = {};
     });
@@ -1699,6 +1845,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _agentAttempt = 1;
       _currentAgent = agent;
       _selectedMultiCellObjectId = null;
+      _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
     });
 
@@ -2039,6 +2186,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                         selectedMultiCellObjectId:
                             _selectedMultiCellObjectForRenderer(state),
                         selectedActorPosition: _selectedActorPosition(state),
+                        selectedCellPosition: _selectedCellPosition,
                         lineOfSightFeedbacks: _lineOfSightFeedbacks,
                         cellEffects: _cellEffects,
                         floodedColorOverride: _lastFloodColor,

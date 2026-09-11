@@ -1365,6 +1365,183 @@ leave `targets` empty and use another goal system.
 
 ---
 
+### 2.21 `cell_rotation`
+
+**Purpose:** Replace one entity with the next kind in a configured cycle when
+the player selects its cell. This is a generic primitive for roads, mirrors,
+arrows, valves, and similar orientation states.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `cell_transformed`, `action_vetoed`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `rotateAction` | string | `"rotate_cell"` | Action id that carries a `position` parameter. |
+| `layer` | string | `"ground"` | Layer containing the rotatable entity. |
+| `cycles` | object | `{}` | Current kind → next kind map. Closed cycles are authored by mapping the final orientation back to the first. |
+| `blockingLayers` | array of strings | `["objects"]` | Layers checked before rotation. |
+| `blockingTags` | array of strings | `[]` | A blocker vetoes rotation when it has any listed tag. An empty list makes every entity on a blocking layer block. |
+
+An invalid position, a kind absent from `cycles`, an unknown next kind, or a
+blocked cell vetoes the entire action. A vetoed rotation does not advance the
+turn or trigger later systems.
+
+```json
+{
+  "id": "rotate_roads",
+  "type": "cell_rotation",
+  "config": {
+    "cycles": {
+      "road_h": "road_v",
+      "road_v": "road_h",
+      "corner_ne": "corner_se",
+      "corner_se": "corner_sw",
+      "corner_sw": "corner_nw",
+      "corner_nw": "corner_ne"
+    }
+  }
+}
+```
+
+### 2.22 `routed_motion`
+
+**Purpose:** Advance tagged entities along deterministic route tiles after each
+accepted player action. Movement can be one cell per turn or continue along the
+connected route until the mover reaches a break, exit, or closed cycle.
+
+**Phase:** `npc_resolution`
+
+**Events emitted:** `tile_moved`, `entity_path_moved`, `object_removed`,
+`routed_motion_blocked`, `routed_motion_failed`, `variable_changed`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `moverLayer` | string | `"objects"` | Layer holding routed movers. |
+| `moverTag` | string | `"routed_mover"` | Tag selecting movers. |
+| `routeLayer` | string | `"ground"` | Layer holding route tiles. |
+| `routeSelectorLayer` | string | unset | Optional layer whose entity kind selects one branch of a nested route entry on the destination cell. Missing or unmapped selectors leave that approach disconnected. |
+| `headingParam` | string | `"heading"` | Mover parameter containing its next cardinal direction. |
+| `matchParam` | string | unset | Optional mover parameter matched against an exit. When unset, every tagged exit matches. |
+| `exitLayer` | string | `"markers"` | Layer holding exits. |
+| `exitTag` | string | `"route_exit"` | Tag identifying exit entities. |
+| `exitMatchParam` | string | value of `matchParam` | Exit parameter matched against the mover. |
+| `exitRequiresRoute` | boolean | `true` | Whether the destination cell's route must accept the mover's incoming side. Set `false` when a matching exit itself accepts arrival from any direction. |
+| `gateLayer` | string | unset | Optional layer holding local route gates. When unset, gate checks are disabled. |
+| `gateClosedTag` | string | `"route_closed"` | Tag identifying a gate state that blocks movement. |
+| `gateEntrySideParam` | string | `"entrySide"` | Gate parameter naming the one incoming side it controls. Missing or `"any"` blocks every approach. |
+| `failureVariable` | string | `"routedMotionFailures"` | Counter incremented once when a route tick fails. |
+| `movementMode` | string | `"single_step"` | `"single_step"` advances one cell; `"until_blocked"` repeatedly advances through connected route cells in the same turn. |
+| `blockedBehavior` | string | `"fail"` | In `until_blocked` mode, `"stop"` leaves blocked movers safely in place and emits `routed_motion_blocked`; `"fail"` retains failure-counter behavior. |
+| `allowUTurns` | boolean | `true` | Whether a route may send a mover directly back toward the cell it just left. Applies to both movement modes. |
+| `maxTravelSteps` | integer | board area × 4 × mover count | Positive safety bound for continuous microsteps. Repeated route state normally terminates first. |
+| `routes` | object | `{}` | Route kind → incoming side → outgoing direction, or route kind → incoming side → selector kind → outgoing direction when `routeSelectorLayer` is set. Each bidirectional path declares both directions. |
+
+In `single_step` mode, all movers read one board snapshot and commit together.
+A tick fails atomically if a mover leaves the board, lacks a valid source or
+destination connection, enters a non-mover, reaches a non-matching exit, swaps
+head-on, shares a destination, or is blocked by a mover that cannot leave. No
+mover changes cells on a failed tick. A convoy may enter cells vacated by its
+leading movers in the same successful tick.
+
+When `gateLayer` is configured, a closed gate on the destination cell blocks
+only movers entering from its configured side. The incoming side is the
+opposite of the mover's heading: a mover heading right enters from `left`.
+This allows one signal to control one junction approach without stopping
+unrelated routes or approaches.
+
+When `routeSelectorLayer` is configured, an incoming-side route may be an
+object keyed by the selector entity kind on that destination cell. This models
+a local switch or signal-controlled junction without coupling unrelated cells.
+If the selector is missing, or its kind has no configured branch, the mover
+waits or fails according to `blockedBehavior`. Plain string routes remain
+unchanged and may be mixed with selected routes in the same route map.
+
+In `until_blocked` mode the same simultaneous collision checks run for each
+internal microstep. Movers with `blockedBehavior: "stop"` become inactive for
+the rest of that player turn when they meet a break, boundary, disallowed
+U-turn, wrong exit, or occupied destination; unrelated movers may continue.
+Their travelled cells are emitted as one ordered `entity_path_moved` event so
+renderers can animate corners faithfully. If the complete routed state repeats,
+the system has traversed a closed cycle: it emits `routed_motion_blocked` with
+reason `route_cycle` and ends the resolution instead of looping forever.
+
+When a mover reaches a matching exit it is removed instead of being stored at
+the destination and emits `object_removed`. Single-step movement also emits
+`tile_moved`; continuous movement records the final cell in
+`entity_path_moved`. This allows an `all_cleared` goal on the mover tag.
+
+```json
+{
+  "id": "traffic",
+  "type": "routed_motion",
+  "config": {
+    "movementMode": "until_blocked",
+    "blockedBehavior": "stop",
+    "allowUTurns": false,
+    "matchParam": "channel",
+    "exitMatchParam": "channel",
+    "routeSelectorLayer": "markers",
+    "routes": {
+      "road_h": {"left": "right", "right": "left"},
+      "corner_nw": {"left": "up", "up": "left"},
+      "signal_junction": {
+        "left": {
+          "signal_right_green": "right",
+          "signal_up_green": "up"
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+### 2.23 `turn_cycle`
+
+**Purpose:** Advance selected entity kinds through a deterministic cycle during
+accepted turns. A common use is a signal clock whose two internal yellow phases
+share the same visual but lead to different next states.
+
+**Phases:** `action_resolution` (records whether the action triggers the
+clock), then `npc_resolution` (applies the cycle)
+
+**Events emitted:** `cell_transformed`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `triggerActions` | string[] | `[]` | Actions that advance the cycle. Empty means every accepted action. |
+| `layer` | string | `"markers"` | Layer containing entities to cycle. |
+| `cycles` | object | `{}` | Current kind → next kind. Kinds absent from this map remain unchanged. Entity parameters are preserved. |
+
+NPC systems run in declaration order. Put `turn_cycle` before a system that
+should observe the new kind, or after a system that should observe the old
+kind. For example, a traffic game can place the signal clock before
+`routed_motion` so the light changes first and vehicles respond to the colour
+currently shown during movement. A vetoed action never reaches NPC resolution,
+so it does not advance the cycle. Undo restores the prior kind together with
+the rest of the board state.
+
+```json
+{
+  "id": "signal_clock",
+  "type": "turn_cycle",
+  "config": {
+    "triggerActions": ["rotate_cell"],
+    "layer": "markers",
+    "cycles": {
+      "signal_red": "signal_yellow_to_green",
+      "signal_yellow_to_green": "signal_green",
+      "signal_green": "signal_yellow_to_red",
+      "signal_yellow_to_red": "signal_red"
+    }
+  }
+}
+```
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -1390,6 +1567,9 @@ leave `targets` empty and use another goal system.
 | Terrain Edit | `terrain_edit` | `action_resolution` | `place` (configurable via `action`) |
 | Sonar | `sonar` | `npc_resolution` | (automatic every turn; writes distance readings to variables) |
 | Follower NPCs | `follower_npcs` | `npc_resolution` | (automatic once per turn) |
+| Cell Rotation | `cell_rotation` | `action_resolution` | `rotate_cell` (configurable) |
+| Routed Motion | `routed_motion` | `npc_resolution` | (automatic once per accepted turn) |
+| Turn Cycle | `turn_cycle` | `action_resolution` + `npc_resolution` | configured accepted actions |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 
@@ -1419,6 +1599,12 @@ obstacles, and a `variable_threshold` completed-target goal).
 
 ### Transformation-style games (pattern matching)
 `overlay_cursor` + `region_transform` (rotate + flip ops) + `flood_fill`
+
+### Live route-planning games
+`cell_rotation` + `routed_motion` with `all_cleared` on the mover tag. Add
+`turn_cycle` plus a configured local route gate for time-based signals. Use
+`max_actions` for stop-at-break route planning, or a `variable_threshold` on
+the failure counter for crash-style single-step traffic.
 
 ### Hybrid games
 Any combination of the above. The system architecture supports free composition as long as there are no conflicting action handlers.
