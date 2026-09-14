@@ -505,6 +505,16 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// its `beam_cell_revealed` events were emitted, instead of the full path
   /// simply appearing at once (the engine already painted it all in one
   /// state write — this is pure playback on top of that).
+  ///
+  /// The engine retraces the *entire* beam every turn, unconditionally —
+  /// that's what lets placing a new reflector update the beam without a
+  /// separate re-fire step — so a naive replay of every `beam_cell_revealed`
+  /// event would redraw the whole beam from scratch on every single action,
+  /// including ones that don't touch the beam at all (placing a reflector on
+  /// the far side of the board), and would make an unrelated branch's target
+  /// flash off and back on. Only cells whose marker actually *changes*
+  /// relative to what's already on screen get blanked and replayed; a cell
+  /// already showing exactly this turn's kind is left untouched.
   Future<void> _playBeamReveal(
     LevelState preState,
     List<GameEvent> events,
@@ -513,14 +523,33 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         events.where((e) => e.type == 'beam_cell_revealed').toList();
     if (reveals.isEmpty) return;
 
-    // Start from a board with every cell this turn will touch cleared, so
-    // last turn's trace (still present in preState) doesn't linger — and
-    // paint each cell back in as its reveal step plays.
+    final finalState = _engine.state;
     final animState = preState.copy();
-    for (final e in reveals) {
-      final pos = e.position;
-      final layer = e.payload['layer'] as String? ?? 'markers';
-      if (pos != null) animState.board.setEntity(layer, pos, null);
+
+    // A marker this turn's retrace no longer covers (the beam retracted from
+    // it — a reflector was removed, or the aim changed) gets no
+    // beam_cell_revealed event of its own, since the engine only emits one
+    // for a cell it actually painted. Clear those up front, instantly and
+    // without fanfare — the interesting animation is the beam's own path,
+    // not cells going dark.
+    final revealedPositions = {
+      for (final e in reveals)
+        if (e.position != null) e.position!,
+    };
+    final touchedLayers = {
+      for (final e in reveals) e.payload['layer'] as String? ?? 'markers',
+    };
+    for (final layer in touchedLayers) {
+      final priorLayer = preState.board.layers[layer];
+      if (priorLayer == null) continue;
+      final finalLayer = finalState.board.layers[layer];
+      for (final entry in priorLayer.entries().toList()) {
+        final pos = entry.key;
+        if (revealedPositions.contains(pos)) continue;
+        if (finalLayer?.getAt(pos)?.kind != entry.value.kind) {
+          animState.board.setEntity(layer, pos, null);
+        }
+      }
     }
 
     for (final e in reveals) {
@@ -529,6 +558,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       final layer = e.payload['layer'] as String? ?? 'markers';
       final kind = e.payload['kind'] as String?;
       if (pos == null || kind == null) continue;
+      // Already showing exactly this — e.g. an untouched branch replayed
+      // solely because the engine retraces everything — so there's nothing
+      // to animate here.
+      if (animState.board.getEntity(layer, pos)?.kind == kind) continue;
       animState.board.setEntity(layer, pos, EntityInstance(kind));
       setState(() => _preAnimState = animState);
       await Future.delayed(const Duration(milliseconds: 45));

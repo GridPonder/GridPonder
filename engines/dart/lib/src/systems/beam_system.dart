@@ -52,6 +52,29 @@ import '../models/position.dart';
 /// matching override falls back to `pathKind`, so a game that doesn't need
 /// directional art keeps working unchanged.
 ///
+/// A `splitters`-configured entity kind forks a single incoming beam into
+/// several outgoing ones (entity kind -> incoming direction -> list of
+/// outgoing directions), each continuing independently from that cell — so
+/// one emitter can, via a single divider, ultimately reach more than one
+/// target. Checked before `reflectors`, so a kind can't be both. Unlike a
+/// reflector, a splitter kind occupies its whole cell physically: an
+/// incoming direction absent from its map is not a pass-through, it's the
+/// solid, unsplit side of the piece, so that approach is simply blocked.
+/// `allTargetsHitVariable` is the splitter-era counterpart to
+/// `allReflectorsUsedVariable`: 1 when every target-tagged entity on
+/// `blockingLayers` was reached by some branch this turn (any source, any
+/// branch), 0 if at least one wasn't — `hitVariable` alone only means
+/// "something reached something," which stops distinguishing outcomes once
+/// a level has more than one target.
+///
+/// `intersectionVariable` catches beam segments crossing each other: a cell
+/// any branch (of any source) already stepped into this turn ends the next
+/// branch that reaches it there, without a hit, the moment it happens —
+/// takes priority over every other role at that cell, including a target.
+/// Lets a level forbid overlapping beam paths the same way `hazardTags`
+/// forbids touching a hazard: set the variable, pair it with a
+/// `variable_threshold` `loseCondition`.
+///
 /// Selection and firing are two different actions on purpose: selection also
 /// records the tapped cell as a generic "last selected position" (independent
 /// of whether it held a source), so another system — e.g. `terrain_edit`'s
@@ -197,6 +220,7 @@ class BeamSystem extends GameSystem {
     final splitters = _splitterMap(cfg['splitters']);
     final hitVariable = cfg['hitVariable'] as String?;
     final hazardVariable = cfg['hazardVariable'] as String?;
+    final intersectionVariable = cfg['intersectionVariable'] as String?;
     final pathLengthVariable = cfg['pathLengthVariable'] as String?;
     final allReflectorsUsedVariable =
         cfg['allReflectorsUsedVariable'] as String?;
@@ -206,10 +230,14 @@ class BeamSystem extends GameSystem {
     final segmentKindHorizontal = cfg['segmentKindHorizontal'] as String?;
     final segmentKindVertical = cfg['segmentKindVertical'] as String?;
     final reflectorGlowKinds = _reflectorMap(cfg['reflectorGlowKinds']);
+    final reflectorDualGlowKinds = _stringMap(cfg['reflectorDualGlowKinds']);
     final splitterGlowKinds = _reflectorMap(cfg['splitterGlowKinds']);
+    final splitterBlockedKinds = _reflectorMap(cfg['splitterBlockedKinds']);
     final blockedKinds = _stringMap(cfg['blockedKinds']);
     final hitTargetKind = cfg['hitTargetKind'] as String?;
     final hazardKind = cfg['hazardKind'] as String?;
+    final intersectionKind = cfg['intersectionKind'] as String?;
+    final intersectionGlowKind = cfg['intersectionGlowKind'] as String?;
     final maxSteps = (cfg['maxSteps'] as num?)?.toInt() ?? 200;
 
     // Every kind any cell could be marked with this turn — a superset used to
@@ -220,8 +248,12 @@ class BeamSystem extends GameSystem {
       if (segmentKindVertical != null) segmentKindVertical,
       if (hitTargetKind != null) hitTargetKind,
       if (hazardKind != null) hazardKind,
+      if (intersectionKind != null) intersectionKind,
+      if (intersectionGlowKind != null) intersectionGlowKind,
       ...reflectorGlowKinds.values.expand((m) => m.values),
+      ...reflectorDualGlowKinds.values,
       ...splitterGlowKinds.values.expand((m) => m.values),
+      ...splitterBlockedKinds.values.expand((m) => m.values),
       ...blockedKinds.values,
     };
     if (allMarkerKinds.isNotEmpty) {
@@ -241,13 +273,31 @@ class BeamSystem extends GameSystem {
     final events = <GameEvent>[];
     var anyHit = false;
     var anyHazard = false;
+    var anyIntersect = false;
     // Summed rather than "first hit's length" so a future multi-source game
     // reads naturally as "total beam material spent" — a per-source budget
     // reduces to plain path length when there is exactly one source.
     var totalHitLength = 0;
     final visitedCells = <Position>{};
     final hitTargetPositions = <Position>{};
+    // Every cell any source's beam has stepped into so far this turn —
+    // shared across sources and branches, so a later one crossing an
+    // earlier one's path (or its own, after looping back) is detected
+    // regardless of which source or branch got there first.
+    final beamCellsThisTurn = <Position>{};
+    // Which diagonal channel(s) of a reflector cell have already carried a
+    // beam this turn — see `_reflectorChannelKey`. Shared the same way as
+    // `beamCellsThisTurn`, keyed by position since a reflector only ever has
+    // two possible channels regardless of which cell it sits on.
+    final reflectorChannelsThisTurn = <Position, Set<String>>{};
 
+    // Traced first, painted second: painting needs to know every position
+    // that ends up hosting a collision *before* it decides how to mark the
+    // plain segment cell that a later branch crashes into — see
+    // `intersectionGlowKind` below. A single combined pass can't know that
+    // in time, since the colliding branch is traced after the branch it
+    // hits.
+    final sourceBranches = <MapEntry<Position, List<_BeamTrace>>>[];
     for (final entry in sourceLayerObj.entries().toList()) {
       if (!sourceTags.any((t) => game.hasTag(entry.value.kind, t))) continue;
       final facingStr = entry.value.param(facingParam);
@@ -273,10 +323,28 @@ class BeamSystem extends GameSystem {
         hazardTags,
         reflectors,
         splitters,
+        beamCellsThisTurn,
+        reflectorChannelsThisTurn,
         maxSteps,
       );
+      sourceBranches.add(MapEntry(entry.key, branches));
+    }
 
-      for (final trace in branches) {
+    // Every position where some branch ended in an 'intersection' this turn
+    // — i.e. a real collision, not just any revisited cell (a reflector's
+    // legitimate second-channel visit never adds a role='intersection'
+    // cell). Used below to retroactively mark the *original* segment a
+    // later branch crashed into, so the plain path it once was reads as
+    // "this got crossed" even at the cell before the crash.
+    final intersectionPositions = <Position>{
+      for (final entry in sourceBranches)
+        for (final trace in entry.value)
+          for (final cell in trace.cells)
+            if (cell.role == 'intersection') cell.position,
+    };
+
+    for (final entry in sourceBranches) {
+      for (final trace in entry.value) {
         for (final cell in trace.cells) {
           final kind = _markerKindFor(
             cell,
@@ -284,10 +352,15 @@ class BeamSystem extends GameSystem {
             segmentKindHorizontal,
             segmentKindVertical,
             reflectorGlowKinds,
+            reflectorDualGlowKinds,
             splitterGlowKinds,
+            splitterBlockedKinds,
             blockedKinds,
             hitTargetKind,
             hazardKind,
+            intersectionKind,
+            intersectionGlowKind,
+            intersectionPositions,
           );
           if (kind != null) {
             state.board
@@ -312,6 +385,9 @@ class BeamSystem extends GameSystem {
         if (trace.cells.any((c) => c.role == 'hazard')) {
           anyHazard = true;
         }
+        if (trace.cells.any((c) => c.role == 'intersection')) {
+          anyIntersect = true;
+        }
         events.add(GameEvent('beam_traced', {
           'position': entry.key,
           'path': trace.path.map((p) => p.toJson()).toList(),
@@ -325,6 +401,9 @@ class BeamSystem extends GameSystem {
     }
     if (hazardVariable != null) {
       state.variables[hazardVariable] = anyHazard ? 1 : 0;
+    }
+    if (intersectionVariable != null) {
+      state.variables[intersectionVariable] = anyIntersect ? 1 : 0;
     }
     if (pathLengthVariable != null) {
       state.variables[pathLengthVariable] = totalHitLength;
@@ -387,6 +466,8 @@ class BeamSystem extends GameSystem {
     List<String> hazardTags,
     Map<String, Map<String, String>> reflectors,
     Map<String, Map<String, List<String>>> splitters,
+    Set<Position> beamCellsThisTurn,
+    Map<Position, Set<String>> reflectorChannelsThisTurn,
     int maxSteps,
   ) =>
       _traceSegment(
@@ -401,6 +482,8 @@ class BeamSystem extends GameSystem {
         hazardTags,
         reflectors,
         splitters,
+        beamCellsThisTurn,
+        reflectorChannelsThisTurn,
         maxSteps,
       );
 
@@ -416,6 +499,8 @@ class BeamSystem extends GameSystem {
     List<String> hazardTags,
     Map<String, Map<String, String>> reflectors,
     Map<String, Map<String, List<String>>> splitters,
+    Set<Position> beamCellsThisTurn,
+    Map<Position, Set<String>> reflectorChannelsThisTurn,
     int maxSteps,
   ) {
     var direction = initialDirection;
@@ -426,6 +511,48 @@ class BeamSystem extends GameSystem {
       final incoming = direction;
       pos = pos.moved(direction);
       if (!state.board.isInBounds(pos)) break;
+
+      // Peeked ahead of the full role lookup below because a reflector cell
+      // needs to know this *before* deciding whether stepping here is a
+      // self-intersection — see `_reflectorChannelKey`.
+      Map<String, String>? reflectorMapHere;
+      for (final layerId in blockingLayers) {
+        final e = state.board.getEntity(layerId, pos);
+        if (e == null) continue;
+        reflectorMapHere = reflectors[e.kind];
+        break;
+      }
+
+      // `Set.add` both checks and records in one step: false means [pos] was
+      // already part of some beam segment traced this turn — this source's
+      // own path looping back, an earlier branch of the same split, or a
+      // different source's beam entirely. Takes priority over every other
+      // role: crossing an existing beam ends the branch regardless of what
+      // else is at that cell. A reflector is the one exception: its two
+      // diagonal channels occupy different, non-overlapping halves of the
+      // cell, so a second pass through the *other* channel isn't a real
+      // overlap — only a repeat of the same channel is.
+      var dualChannelVisit = false;
+      if (!beamCellsThisTurn.add(pos)) {
+        final channelKey = reflectorMapHere == null
+            ? null
+            : _reflectorChannelKey(reflectorMapHere, direction);
+        final usedChannels =
+            reflectorChannelsThisTurn.putIfAbsent(pos, () => <String>{});
+        if (channelKey != null && usedChannels.add(channelKey)) {
+          dualChannelVisit = true;
+        } else {
+          cells.add(_PathCell(pos, incoming, 'intersection', null));
+          break;
+        }
+      } else if (reflectorMapHere != null) {
+        final channelKey = _reflectorChannelKey(reflectorMapHere, direction);
+        if (channelKey != null) {
+          reflectorChannelsThisTurn
+              .putIfAbsent(pos, () => <String>{})
+              .add(channelKey);
+        }
+      }
 
       String? reflectTo;
       List<String>? splitTo;
@@ -452,8 +579,18 @@ class BeamSystem extends GameSystem {
         final splitMap = splitters[cellEntity.kind];
         if (splitMap != null) {
           splitTo = splitMap[direction.toJson()];
-          role = 'splitter';
           entityKind = cellEntity.kind;
+          // A splitter kind occupies its whole cell physically — an
+          // incoming direction with no mapped split isn't a pass-through,
+          // it's the solid, unsplit side of the piece. Only a direction
+          // explicitly mapped in `splitters` divides the beam; every other
+          // approach is simply blocked, never reflected or continued.
+          if (splitTo == null || splitTo.isEmpty) {
+            blocked = true;
+            role = 'blocked';
+          } else {
+            role = 'splitter';
+          }
           break;
         }
         final reflectMap = reflectors[cellEntity.kind];
@@ -471,7 +608,8 @@ class BeamSystem extends GameSystem {
         }
       }
 
-      cells.add(_PathCell(pos, incoming, role, entityKind));
+      cells.add(_PathCell(pos, incoming, role, entityKind,
+          dualChannel: dualChannelVisit));
       if (hitTarget) return [_BeamTrace(cells, true)];
       if (hitHazard) break;
       if (blocked) break;
@@ -490,6 +628,8 @@ class BeamSystem extends GameSystem {
               hazardTags,
               reflectors,
               splitters,
+              beamCellsThisTurn,
+              reflectorChannelsThisTurn,
               maxSteps,
             ),
         ];
@@ -523,6 +663,8 @@ class BeamSystem extends GameSystem {
     List<String> hazardTags,
     Map<String, Map<String, String>> reflectors,
     Map<String, Map<String, List<String>>> splitters,
+    Set<Position> beamCellsThisTurn,
+    Map<Position, Set<String>> reflectorChannelsThisTurn,
     int maxSteps,
   ) {
     Direction direction;
@@ -543,6 +685,8 @@ class BeamSystem extends GameSystem {
       hazardTags,
       reflectors,
       splitters,
+      beamCellsThisTurn,
+      reflectorChannelsThisTurn,
       maxSteps,
     );
   }
@@ -559,19 +703,51 @@ class BeamSystem extends GameSystem {
   /// stay exactly as it looks the rest of the time, not get redecorated with
   /// a beam-path marker a player has no time to appreciate before losing.
   /// `hazardKind` lets a game opt into one anyway (e.g. an explosion sprite).
+  /// An intersection cell (the beam crossed an already-traced beam segment)
+  /// behaves like the hazard exception too, for the same reason: the run
+  /// ends there, so `intersectionKind` (usually unset) is all it ever shows.
+  ///
+  /// A plain segment cell is a special case when its position is in
+  /// [intersectionPositions] — meaning *some* branch this turn ended in a
+  /// collision there, even though this particular cell reached it first and
+  /// safely, before the crash. `intersectionGlowKind` lets a game show that
+  /// cell as a crossing point too (e.g. a plus-shaped glow) rather than a
+  /// plain straight segment, so the collision reads as "these two paths
+  /// crossed here" rather than one path just vanishing.
+  ///
+  /// A [cell] with [_PathCell.dualChannel] set prefers `reflectorDualGlowKinds`
+  /// (entity kind -> marker kind, not direction-specific — both of a
+  /// reflector's channels are lit, so there's no single "incoming direction"
+  /// left to key by) over the ordinary per-direction glow.
+  ///
+  /// A splitter blocked on its unmapped side is a distinct visual case from
+  /// a wall blocking the beam — it's the piece's own solid backing, not an
+  /// obstacle the beam crashed into — so it prefers `splitterBlockedKinds`
+  /// (entity kind -> incoming direction -> marker kind) and, unlike every
+  /// other role, does *not* fall back to `blockedKinds` or `pathKind` when
+  /// unset: no override configured means no marker at all.
   String? _markerKindFor(
     _PathCell cell,
     String? pathKind,
     String? segmentKindHorizontal,
     String? segmentKindVertical,
     Map<String, Map<String, String>> reflectorGlowKinds,
+    Map<String, String> reflectorDualGlowKinds,
     Map<String, Map<String, String>> splitterGlowKinds,
+    Map<String, Map<String, String>> splitterBlockedKinds,
     Map<String, String> blockedKinds,
     String? hitTargetKind,
     String? hazardKind,
+    String? intersectionKind,
+    String? intersectionGlowKind,
+    Set<Position> intersectionPositions,
   ) {
     final dir = cell.incomingDirection.toJson();
     if (cell.role == 'reflector') {
+      if (cell.dualChannel) {
+        final k = reflectorDualGlowKinds[cell.entityKind];
+        if (k != null) return k;
+      }
       final byKind = reflectorGlowKinds[cell.entityKind];
       final k = byKind?[dir];
       if (k != null) return k;
@@ -580,19 +756,53 @@ class BeamSystem extends GameSystem {
       final k = byKind?[dir];
       if (k != null) return k;
     } else if (cell.role == 'blocked') {
+      if (splitterGlowKinds.containsKey(cell.entityKind)) {
+        // This is a splitter's own solid, unmapped side, not a wall — no
+        // configured marker means none at all (see doc comment above).
+        return splitterBlockedKinds[cell.entityKind]?[dir];
+      }
       final k = blockedKinds[dir];
       if (k != null) return k;
     } else if (cell.role == 'target') {
       if (hitTargetKind != null) return hitTargetKind;
     } else if (cell.role == 'hazard') {
       return hazardKind;
+    } else if (cell.role == 'intersection') {
+      return intersectionKind;
     } else if (cell.role == 'segment') {
+      if (intersectionGlowKind != null &&
+          intersectionPositions.contains(cell.position)) {
+        return intersectionGlowKind;
+      }
       final horizontal = cell.incomingDirection == Direction.left ||
           cell.incomingDirection == Direction.right;
       final k = horizontal ? segmentKindHorizontal : segmentKindVertical;
       if (k != null) return k;
     }
     return pathKind;
+  }
+
+  /// The directions a beam can enter a reflector from aren't all independent:
+  /// [reflectMap] folds them into exactly two straight-line channels through
+  /// the cell (e.g. a backslash's up<->right and down<->left), each running
+  /// through a different, non-overlapping half of the cell. Returns a key
+  /// that's identical for both directions of the same channel — [entryDir]
+  /// and the opposite of `reflectMap[entryDir]` — so two visits with the same
+  /// key are a genuine overlap (the same physical line), while two visits
+  /// with different keys aren't. Returns null if [reflectMap] has no entry
+  /// for [entryDir] (this reflector doesn't reflect that approach at all).
+  String? _reflectorChannelKey(
+      Map<String, String> reflectMap, Direction entryDir) {
+    final exitStr = reflectMap[entryDir.toJson()];
+    if (exitStr == null) return null;
+    Direction exitDir;
+    try {
+      exitDir = Direction.fromJson(exitStr);
+    } catch (_) {
+      return null;
+    }
+    final parts = [entryDir.toJson(), exitDir.opposite.toJson()]..sort();
+    return parts.join(',');
   }
 
   Map<String, String> _stringMap(dynamic raw) {
@@ -654,14 +864,18 @@ class BeamSystem extends GameSystem {
 /// One traced cell: where it is, the direction the beam was moving when it
 /// entered ([incomingDirection]), and what it is ([role]: `'segment'` for a
 /// plain floor cell, `'reflector'`, `'blocked'`, or `'target'`, with
-/// [entityKind] set for the latter three).
+/// [entityKind] set for the latter three). [dualChannel] marks a reflector
+/// cell reached a second time this turn through its *other* diagonal
+/// channel — see the note above `_reflectorChannelKey`.
 class _PathCell {
   final Position position;
   final Direction incomingDirection;
   final String role;
   final String? entityKind;
+  final bool dualChannel;
   const _PathCell(
-      this.position, this.incomingDirection, this.role, this.entityKind);
+      this.position, this.incomingDirection, this.role, this.entityKind,
+      {this.dualChannel = false});
 }
 
 class _BeamTrace {

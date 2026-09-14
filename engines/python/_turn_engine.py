@@ -200,14 +200,15 @@ class TurnEngine:
         goals = self._level.get("goals", []) or []
         lose_conditions = self._level.get("loseConditions", []) or []
 
-        is_won, goal_progress = evaluate_goals(goals, state, effective_game, all_events)
+        is_won, goal_progress, goal_satisfied = evaluate_goals(goals, state, effective_game, all_events)
         if is_won:
             state.is_won = True
 
         is_lost = False
         lose_reason = None
         if not state.is_won:
-            is_lost, lose_reason = evaluate_lose(lose_conditions, state, goals, effective_game)
+            is_lost, lose_reason = evaluate_lose(
+                lose_conditions, state, goals, effective_game, goal_satisfied)
             if is_lost:
                 state.is_lost = True
 

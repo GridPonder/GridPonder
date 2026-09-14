@@ -1377,10 +1377,22 @@ defines needs only its own map entry), stopped by a blocking-tagged cell or
 the board edge, and stopped — with the configured hit variable set — at a
 target-tagged cell. A `splitters`-configured cell forks the single incoming
 beam into several independent outgoing ones instead of bending it into one,
-so a single emitter can reach more than one target through a single divider.
-This is the generic hook for any line-based mechanic that bends off
-configurable cell kinds: light/mirror puzzles, wires, sound or sight that
-ricochets — or splits.
+so a single emitter can reach more than one target through a single divider
+— but only from the directions that cell's config actually maps; every other
+approach is simply blocked, since the piece occupies its whole cell. A beam
+segment that steps into a cell some other segment already touched this turn
+— crossing another source's beam, a sibling split branch, or its own path
+looped back — also stops there, with `intersectionVariable` set, so a "no
+overlapping beams" constraint is just another opt-in stop condition. A
+reflector cell is the one exception: `reflectors` folds its four incoming
+directions into exactly two straight-line channels through the cell (e.g. a
+backslash's up↔right and down↔left), each running through a different,
+non-overlapping half of the cell, so a second visit through the *other*
+channel this turn isn't a real overlap — it's allowed, reflects normally, and
+paints `reflectorDualGlowKinds` instead of the usual per-direction glow to
+show both channels lit at once. This is the generic hook for any line-based
+mechanic that bends off configurable cell kinds: light/mirror puzzles, wires,
+sound or sight that ricochets — or splits.
 
 **Phase:** `action_resolution` for selection and firing (they consume player
 input); `npc_resolution` for the trace itself — it recomputes every turn from
@@ -1417,9 +1429,10 @@ since the state write itself already happened all at once)
 | `targetTags` | array of strings | `["goal_target"]` | Tags that end the trace with a hit. |
 | `hazardTags` | array of strings | `[]` | Tags that end the trace at a cell without a hit, setting `hazardVariable` instead. Checked before `reflectors`/`blockingTags`, so a hazard-tagged cell always stops the beam even if it would otherwise also reflect or block. Empty by default — the mechanic is off unless a game opts in. |
 | `reflectors` | object | `{}` | Map of entity kind → `{"up": dir, "down": dir, "left": dir, "right": dir}`, giving the outgoing direction for each incoming direction. A kind absent from the map is not a reflector. |
-| `splitters` | object | `{}` | Map of entity kind → `{incoming direction: [outgoing direction, ...]}`. Checked before `reflectors` (a kind can be one or the other, not both), so a splitter-kind cell forks the single incoming beam into one independent branch per listed direction instead of bending it into one — a single emitter can then reach more than one target through a single divider. An incoming direction absent from a kind's map is a pass-through (beam continues straight), matching how an unmapped direction on a `reflectors` kind behaves today. |
+| `splitters` | object | `{}` | Map of entity kind → `{incoming direction: [outgoing direction, ...]}`. Checked before `reflectors` (a kind can be one or the other, not both), so a splitter-kind cell forks the single incoming beam into one independent branch per listed direction instead of bending it into one — a single emitter can then reach more than one target through a single divider. A splitter kind occupies its whole cell physically, unlike a reflector: an incoming direction absent from a kind's map is **not** a pass-through — it's the solid, unsplit side of the piece, so that approach is simply blocked (no redirect, no continuation), the same terminal outcome as `blockingTags`. Only a direction explicitly listed divides the beam. |
 | `hitVariable` | string | — | Runtime variable set to `1` when any aimed source's trace reached a target this turn, else `0`. Pair with a `variable_threshold` goal. Stays meaningful with `splitters` in play, but stops distinguishing outcomes once a level has more than one target — see `allTargetsHitVariable`. |
 | `hazardVariable` | string | — | Runtime variable set to `1` when any aimed source's trace touched a `hazardTags` cell this turn, else `0`. The system only sets the variable — pairing it with a level's `variable_threshold` `loseCondition` is what actually ends the level, the same generic mechanism `max_actions` and other lose conditions already use. |
+| `intersectionVariable` | string | — | Runtime variable set to `1` when any beam segment traced this turn — any source, any branch — steps into a cell some *other* (or the same, looped-back) segment already stepped into this turn, else `0`. Checked before every other role at each new cell, so a crossing ends that branch immediately regardless of what's actually there (a plain floor cell, a reflector, even a target) — except a `reflectors`-kind cell revisited through its *other* diagonal channel (see `reflectorDualGlowKinds`), which isn't a real overlap and doesn't count. Pair with a `variable_threshold` `loseCondition` for a "beams may never overlap" constraint. |
 | `pathLengthVariable` | string | — | Runtime variable set every turn to the summed length, in cells, of every currently-hitting source's path (each source's own cell excluded, its target cell included); `0` when nothing hits. Summed rather than per-source so it stays meaningful once a level has more than one source — it reads as "total beam material spent," reducing to plain path length for a single source. Pair with an `lte` `variable_threshold` goal to set a maximum-length budget: with several otherwise-valid routes to a target, only those at or under the budget win, so a level can force the shorter of two routes without banning the longer one outright. |
 | `allReflectorsUsedVariable` | string | — | Runtime variable set every turn to `1` when every reflector-kind **or** splitter-kind entity currently on `blockingLayers` lies on some source's traced path, `0` if at least one doesn't. This is about *placement*, not budget — a `budgetVariable` (on the `terrain_edit` system placing reflectors) reaching zero only proves every reflector was placed *somewhere*; a player can satisfy that by dropping leftovers on cells the beam never reaches. Checking placement against the trace is what actually forces a route using every reflector. Pair with a `gte 1` `variable_threshold` goal — and, if a level also requires every reflector to have been placed at all (not just that whichever ones exist are on-path), add separate `lte 0` `variable_threshold` goals on each `budgetVariable` too. |
 | `allTargetsHitVariable` | string | — | Runtime variable set every turn to `1` when every target-tagged entity currently on `blockingLayers` was reached by some branch of some source's trace this turn, `0` if at least one wasn't. The multi-target counterpart to `allReflectorsUsedVariable`'s placement check — exists because `hitVariable` alone can't distinguish "reached one of several targets" from "reached all of them," which matters once `splitters` lets a single emitter aim at more than one. Pair with a `gte 1` `variable_threshold` goal. |
@@ -1427,10 +1440,14 @@ since the state write itself already happened all at once)
 | `pathKind` | string | — | Entity kind painted along each traced path, cleared and repainted every turn. Omit to skip path visualisation entirely (no board writes). Acts as the fallback for any traced cell not matched by a more specific kind below. |
 | `segmentKindHorizontal` / `segmentKindVertical` | string | — | Marker kind for a plain traversed cell (no reflector, blocker, or target there), chosen by the axis of the direction the beam was moving through it. Lets a game show a horizontal vs. vertical beam sprite instead of one uniform `pathKind`. |
 | `reflectorGlowKinds` | object | `{}` | Map of reflector entity kind → `{incoming direction: marker kind}`, keyed by the direction the beam was moving when it *entered* that cell (before this cell's own reflection). A reflector kind bends the same visible pair of cell edges for two of the four incoming directions (e.g. a backslash bends the same edges for `up` and `right`, and again — a different pair — for `down` and `left`), so a game typically only needs two distinct marker kinds per reflector kind, repeated across their matching incoming directions. |
+| `reflectorDualGlowKinds` | object | `{}` | Map of reflector entity kind → marker kind, no direction key — used instead of `reflectorGlowKinds` for a cell reached a second time this turn through its other diagonal channel (see the note on `intersectionVariable` above), since at that point both channels are lit and there's no single "incoming direction" left to key by. Unset, such a cell falls back to `reflectorGlowKinds` for whichever direction the second visit used, same as any other reflector hit. |
 | `splitterGlowKinds` | object | `{}` | Same shape as `reflectorGlowKinds`, for `splitters` entity kinds. Unmatched, a splitter cell falls back to `pathKind` like any other traversed cell. |
-| `blockedKinds` | object | `{}` | Map of incoming direction → marker kind for the cell that stopped the beam, keyed the same way as `reflectorGlowKinds` — lets a wall/blocker show which of its faces is being hit. |
+| `blockedKinds` | object | `{}` | Map of incoming direction → marker kind for the cell that stopped the beam, keyed the same way as `reflectorGlowKinds` — lets a wall/blocker show which of its faces is being hit. Does not apply to a `splitters`-kind cell blocked on its unmapped side — see `splitterBlockedKinds`. |
+| `splitterBlockedKinds` | object | `{}` | Map of splitter entity kind → `{incoming direction: marker kind}`, for a `splitters`-kind cell entered from a direction absent from its own map. Kept separate from `blockedKinds` because the two are visually distinct: `blockedKinds` is the beam crashing into an obstacle, while this is the splitter's own solid, unmapped side — not damage, just the piece as it always looks. Unlike every other marker field, an unmatched cell here does **not** fall back to `blockedKinds` or `pathKind` — no override configured means no marker at all, leaving the piece's own sprite undecorated. |
 | `hitTargetKind` | string | — | Marker kind for the cell that completed a hit, overriding `pathKind` there specifically (e.g. an "energized" target sprite distinct from the plain beam-path marker). |
 | `hazardKind` | string | — | Marker kind for the cell that stopped the beam at a `hazardTags` hazard. Unlike every other role, a hazard cell does *not* fall back to `pathKind` when this is unset — its own entity sprite is left exactly as-is, since the level typically ends the instant the beam reaches it and there's no time for a beam-path marker to matter. Set it only if a game wants an explicit effect (e.g. an explosion sprite) instead. |
+| `intersectionKind` | string | — | Marker kind for the cell where a beam crossed an existing beam segment. Same non-fallback exception as `hazardKind`, for the same reason: the run ends there. |
+| `intersectionGlowKind` | string | — | Marker kind for a plain `'segment'` cell whose *position* some other branch later collided into — i.e. the cell as the original, unsuspecting branch left it, not the collision cell itself (that's `intersectionKind`). Lets a game show both ends of a crossing: this cell picks up a "beams cross here" glow (e.g. a plus shape) instead of its ordinary straight segment, and — since painting always happens after every branch has finished tracing — the actual collision cell still resolves to `intersectionKind` regardless of paint order. Unset, the original cell keeps its normal segment marker as if nothing had crossed it. |
 | `maxSteps` | integer | `200` | Safety cap on trace length, so a loop between two facing reflectors terminates instead of hanging. |
 
 Example config:
@@ -1457,42 +1474,79 @@ Example config:
    emit `beam_aimed`. Otherwise no-op.
 3. Every turn, for every entity on `sourceLayer` tagged `sourceTags` whose
    `facingParam` holds a cardinal direction: step cell by cell from the source
-   in that direction. At each cell, check `blockingLayers` in order; the first
-   entity found there that matches `targetTags` ends that branch as a hit, the
-   first that matches `hazardTags` ends it without a hit (checked before
-   splitters, reflectors, and blockers, so a hazard-tagged cell always stops
-   the beam), the first that matches a key in `splitters` forks the trace —
-   stepping independently from that cell in each of the incoming direction's
-   mapped outgoing directions, each continuing as its own branch subject to
-   all the same rules from here on — the first that matches a key in
+   in that direction. At each new cell, first check whether some beam segment
+   traced earlier this turn — this source's own path looping back, an earlier
+   sibling of a split, or a different source's beam entirely — already
+   stepped into it. If that cell holds a `reflectors`-kind entity, a repeat
+   visit is allowed once through the *other* of its two diagonal channels
+   (the channel not yet used there this turn) — it isn't a real overlap, so
+   it reflects normally and is flagged to paint `reflectorDualGlowKinds`
+   instead of the ordinary per-direction glow; a second visit through the
+   *same* channel, or any revisit of a non-reflector cell, ends the branch
+   there without a hit and sets `intersectionVariable`, regardless of what's
+   actually at that cell (this check runs before target/hazard/splitter/
+   reflector/blocker, taking priority over all of them). Otherwise, check
+   `blockingLayers` in order; the
+   first entity found there that matches `targetTags` ends that branch as a
+   hit, the first that matches `hazardTags` ends it without a hit (checked
+   before splitters, reflectors, and blockers, so a hazard-tagged cell always
+   stops the beam), the first that matches a key in `splitters` either forks
+   the trace — if the incoming direction has a mapped output list, stepping
+   independently from that cell in each of those directions, each continuing
+   as its own branch subject to all the same rules from here on — or, if the
+   incoming direction has no entry in that kind's map, ends the branch without
+   a hit exactly like a `blockingTags` cell (a splitter kind occupies its
+   whole cell physically; an unmapped approach is the solid, unsplit side of
+   the piece, not a pass-through), the first that matches a key in
    `reflectors` changes the current direction to that kind's mapped outgoing
    direction for the incoming direction and continues, and the first that
    matches `blockingTags` ends the branch without a hit. An empty cell (or a
    cell whose entity matches none of the five) is simply traversed. A branch
    also ends at the board edge or after `maxSteps`. A source whose path never
    crosses a `splitters` cell produces exactly one branch, so nothing here
-   changes for a game that never configures `splitters`.
-4. Before retracing, clear every entity on `pathLayer` whose kind is any of
-   `pathKind`/`segmentKindHorizontal`/`segmentKindVertical`/`hitTargetKind`/`hazardKind`,
-   or a value anywhere in `reflectorGlowKinds`/`splitterGlowKinds`/`blockedKinds`
+   changes for a game that never configures `splitters`; a source whose path
+   never crosses itself or another source's produces no `intersection` cell,
+   so nothing here changes for a game that never configures
+   `intersectionVariable`.
+4. Every source is fully traced before any painting happens — painting a
+   cell needs to know the complete set of positions where a collision
+   happened *anywhere* this turn, including collisions from sources or
+   branches traced after it, so `intersectionGlowKind` (step-3 cells that
+   turn out to have been crossed) can't be resolved mid-trace. Before
+   retracing, clear every entity on `pathLayer` whose kind is any of
+   `pathKind`/`segmentKindHorizontal`/`segmentKindVertical`/`hitTargetKind`/`hazardKind`/`intersectionKind`/`intersectionGlowKind`,
+   or a value anywhere in `reflectorGlowKinds`/`reflectorDualGlowKinds`/`splitterGlowKinds`/`splitterBlockedKinds`/`blockedKinds`
    — i.e. every kind this turn's trace could possibly paint. Then, for each
    cell any branch traversed this turn (not the source's own cell), paint the
-   first of: a `reflectorGlowKinds`/`splitterGlowKinds`/`blockedKinds`/`hitTargetKind`
-   match for that cell's role and incoming direction, a
+   first of: a `reflectorDualGlowKinds` match (reflector cells reached
+   through both channels this turn only), a
+   `reflectorGlowKinds`/`splitterGlowKinds`/`hitTargetKind` match for that
+   cell's role and incoming direction, an `intersectionGlowKind` match for a
+   plain cell whose position some other branch later collided into, a
    `segmentKindHorizontal`/`segmentKindVertical` match for a plain cell, or
    `pathKind` — whichever is configured first in that order and non-null,
-   else no marker at all for that cell. The hazard role is the exception: it
-   resolves only to `hazardKind` (usually unset) and never falls back to
-   `pathKind`, so a hazard entity's own sprite stays undecorated by default.
+   else no marker at all for that cell. A `splitters`-kind cell blocked on
+   its unmapped side is its own case: it resolves only to
+   `splitterBlockedKinds` for that entity kind and direction (usually
+   unset) and never falls back to `blockedKinds` or `pathKind`, so its own
+   sprite stays undecorated by default — visually distinct from a wall
+   actually stopping the beam, which still uses `blockedKinds`. The hazard
+   and intersection roles are the same kind of exception: each resolves
+   only to its own `hazardKind`/`intersectionKind` (usually unset) and
+   never falls back to `pathKind`, so that cell's own entity sprite (or,
+   for an intersection on a plain floor cell, nothing) stays undecorated by
+   default.
 5. Set `hitVariable` to `1` if any branch of any source's trace ended in a hit
    this turn, else `0`. Set `hazardVariable` to `1` if any branch touched a
-   `hazardTags` cell this turn, else `0`. Set `pathLengthVariable` to the sum
-   of every hitting branch's path length this turn, else `0`. Set
-   `allReflectorsUsedVariable` to `1` if every reflector-kind or splitter-kind
-   entity on `blockingLayers` this turn lies on some branch's traced path (any
-   source, any branch, hit or not), else `0`. Set `allTargetsHitVariable` to
-   `1` if every target-tagged entity on `blockingLayers` this turn was reached
-   by some branch (any source), else `0`.
+   `hazardTags` cell this turn, else `0`. Set `intersectionVariable` to `1` if
+   any branch crossed an already-traced beam segment this turn, else `0`. Set
+   `pathLengthVariable` to the sum of every hitting branch's path length this
+   turn, else `0`. Set `allReflectorsUsedVariable` to `1` if every
+   reflector-kind or splitter-kind entity on `blockingLayers` this turn lies
+   on some branch's traced path (any source, any branch, hit or not), else
+   `0`. Set `allTargetsHitVariable` to `1` if every target-tagged entity on
+   `blockingLayers` this turn was reached by some branch (any source), else
+   `0`.
 
 **Reuse:** Game-agnostic — any line-based mechanic that bends off configurable
 cell kinds: light/mirror puzzles, wires, sound or sight that ricochets off

@@ -124,6 +124,7 @@ class PhaseRunner {
         state,
         goals: _level.goals,
         game: effectiveGame,
+        goalSatisfied: goalStatus.satisfied,
       );
       if (loseStatus.isLost) {
         state.isLost = true;
