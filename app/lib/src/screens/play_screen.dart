@@ -949,6 +949,22 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     return available;
   }
 
+  /// All entity kinds currently present on the board, across every layer.
+  /// Used to hide action buttons whose `entityKind` requirement (see
+  /// [ActionDef]) isn't met by this level's current state — e.g. the
+  /// excavator's drop button shouldn't appear before any excavator kind
+  /// exists on the board. Same scan `agent.dart`'s `_enumerateActions` uses
+  /// to filter the LLM's action list.
+  Set<String> _presentEntityKinds(LevelState state) {
+    final present = <String>{};
+    for (final layer in state.board.layers.values) {
+      for (final entry in layer.entries()) {
+        present.add(entry.value.kind);
+      }
+    }
+    return present;
+  }
+
   void _onCellTap(int x, int y) {
     if (_aiRunning || _animating) return;
     final gestureMap =
@@ -1763,6 +1779,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                     canUndo: _engine.undoDepth > 0 && !_aiRunning,
                     hintStatuses: hintStatuses,
                     availableActionIds: _availableFloodActions(state),
+                    presentEntityKinds: _presentEntityKinds(state),
                     palette: widget.packService.theme?.palette,
                   ),
                 ),

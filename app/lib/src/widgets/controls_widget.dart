@@ -22,6 +22,11 @@ class ControlsWidget extends StatefulWidget {
   /// If non-null, only these action IDs are currently applicable.
   /// Others are rendered grayed out (but still tappable — engine rejects them).
   final Set<String>? availableActionIds;
+  /// Entity kinds currently present anywhere on the board. An action whose
+  /// `entityKind` requirement (see [ActionDef]) isn't met by this set is
+  /// omitted entirely, not just grayed out — e.g. the excavator's drop
+  /// button doesn't appear on a level with no excavator kind on the board.
+  final Set<String>? presentEntityKinds;
   /// Pack-specific colour overrides forwarded to [cellNamedColor] when
   /// drawing colour-pick action swatches. Pass `theme.palette` from the
   /// caller; null falls back to the renderer's built-in palette.
@@ -39,6 +44,7 @@ class ControlsWidget extends StatefulWidget {
     required this.game,
     this.hintStatuses = const [],
     this.availableActionIds,
+    this.presentEntityKinds,
     this.palette,
   });
 
@@ -49,6 +55,10 @@ class ControlsWidget extends StatefulWidget {
 class _ControlsWidgetState extends State<ControlsWidget> {
   List<ActionDef> get _buttonActions => widget.game.actions
       .where((a) => a.id != 'move' && a.id != 'diagonal_swap')
+      .where((a) =>
+          a.entityKind == null ||
+          widget.presentEntityKinds == null ||
+          a.entityKind!.any(widget.presentEntityKinds!.contains))
       .toList();
 
   bool get _hasDiagonalSwap =>
