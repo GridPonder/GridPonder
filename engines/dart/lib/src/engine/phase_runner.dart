@@ -212,6 +212,9 @@ class PhaseRunner {
               'actors',
               durationMs: dur,
               stage: motionStage,
+              // A copy: the board's params are written in place by later
+              // turns, and the sprite must show the NPC as it moved.
+              params: Map<String, dynamic>.of(entity.params),
             ));
           }
         }

@@ -164,6 +164,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// Idle facing of actors by the cell they stand on — see [actorIdleFacing].
   Map<Position, String> _actorFacingAt = {};
 
+  /// [_actorFacingAt] as it stood before each accepted turn, one entry per
+  /// engine undo step, so undo restores facing along with the engine state.
+  final List<Map<Position, String>> _actorFacingHistory = [];
+
   /// Transforms the current turn resolved after its paths started, kept off
   /// the held board until the last path lands — see [transformsAfterFirstPath].
   List<GameEvent> _hiddenTransforms = const [];
@@ -243,6 +247,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _agentMemory.clear();
     _lastFloodColor = null;
     _actorFacingAt = {};
+    _actorFacingHistory.clear();
     _wonHandled = false;
     _selectedMultiCellObjectId = null;
     _selectedCellPosition = null;
@@ -295,6 +300,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       );
       return;
     }
+    _actorFacingHistory.add(_actorFacingAt);
     final tracking = _playtest.enabled;
     _playtest.move(
       action: action.actionId,
@@ -1571,7 +1577,12 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // loss re-arms the fail event — dying again is a fresh fact.
     final depthBefore = _engine.undoDepth;
     setState(() {
-      _engine.undo();
+      if (_engine.undo()) {
+        // Facing is app-side, so the engine's undo cannot restore it.
+        _actorFacingAt = _actorFacingHistory.isNotEmpty
+            ? _actorFacingHistory.removeLast()
+            : {};
+      }
       _lastFloodColor = null;
       _selectedCellPosition = null;
       _syncSelectedMultiCellObject();
@@ -1607,6 +1618,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _cellEffects.value = const [];
     _lineOfSightFeedbacks = const [];
     _actorFacingAt = {};
+    _actorFacingHistory.clear();
     _hiddenTransforms = const [];
   }
 
@@ -2232,6 +2244,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     _engine.reset();
     setState(() {
+      _actorFacingAt = {};
+      _actorFacingHistory.clear();
       _aiRunning = true;
       _lastThinking = null;
       _lastResponse = null;
