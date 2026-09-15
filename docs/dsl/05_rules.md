@@ -220,6 +220,19 @@ A cell's entity was replaced with a different entity.
 | `toKind` | string | New kind. |
 | `layer` | string | Which layer changed. |
 
+### `entity_fell`
+
+Emitted by [`balance_regions`](04_systems.md#224-balance_regions) when a cell's
+ground gives way under a body. Actors are removed from the board; the avatar is
+not, because its `fallVariable` increments and a `variable_threshold` lose
+condition ends the level in the same turn.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell whose ground opened. |
+| `kind` | string | Entity kind that fell, or `"avatar"`. |
+| `layer` | string | Layer it was removed from, or `"avatar"`. |
+
 ### `spoil_hauled`
 An `excavate` backfill that did **not** happen, because a mover ended the turn
 on the excavator's vacated cell and carried the spoil out. Emitted in place of

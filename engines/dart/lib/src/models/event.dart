@@ -79,6 +79,17 @@ class GameEvent {
         'layer': layer,
       });
 
+  /// A body was on a cell whose ground gave way beneath it. `layer` is the
+  /// board layer it was removed from, or `'avatar'` for the avatar — which
+  /// stays on the board, because a lose condition ends the level in the same
+  /// turn and the renderer still has to draw it falling.
+  static GameEvent entityFell(Position pos, String kind, String layer) =>
+      GameEvent('entity_fell', {
+        'position': pos,
+        'kind': kind,
+        'layer': layer,
+      });
+
   /// An `excavate` backfill that did *not* happen, because a mover ended the
   /// turn on the vacated cell and carried the spoil out.
   ///

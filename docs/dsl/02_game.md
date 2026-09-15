@@ -304,6 +304,7 @@ A `motion` block on an entity kind sets per-cell motion durations the renderer u
 | `mergeDurationMs` | Engine emits `tiles_merged` with `sources` (post-slide merge in `slide_merge`). | 200 |
 | `pathStepDurationMs` | Engine emits `entity_path` (multi-cell traversal, e.g. queued-emitter routes). Per cell. | 80 |
 | `spawnDurationMs` | Engine emits `entity_spawn` (e.g. queued-emitter spawn). | 120 |
+| `frameDurationMs` | Optional time per frame for `motion.sprites.walk`. When present, walk frames advance by elapsed motion time; otherwise they retain the legacy one-frame-per-cell cadence. | absent |
 
 #### How motion events are sequenced
 

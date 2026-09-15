@@ -106,6 +106,21 @@ def cell_transformed(pos: Pos, from_kind: str, to_kind: str, layer: str) -> dict
     }
 
 
+def entity_fell(pos: Pos, kind: str, layer: str) -> dict:
+    """A body was on a cell whose ground gave way beneath it.
+
+    `layer` is the board layer the body was removed from, or `"avatar"` for the
+    avatar — which is not removed from the board, because a lose condition ends
+    the level in the same turn and the renderer still has to draw it falling.
+    """
+    return {
+        "type": "entity_fell",
+        "position": pos,
+        "kind": kind,
+        "layer": layer,
+    }
+
+
 def spoil_hauled(pos: Pos, layer: str) -> dict:
     """An `excavate` backfill that did *not* happen, because a mover ended the
     turn on the vacated cell and carried the spoil out.

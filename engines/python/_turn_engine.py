@@ -60,6 +60,7 @@ class TurnEngine:
         self._level = level_def  # raw dict with goals, rules, systemOverrides, solution, etc.
         self._initial_state = self._make_initial_state()
         self._apply_load_cascade(self._initial_state)
+        self._apply_load_settle(self._initial_state)
         self._state = self._initial_state.copy()
         self._history: list[GameState] = []  # undo stack
 
@@ -259,6 +260,16 @@ class TurnEngine:
         """Restore to initial state, clear undo stack."""
         self._state = self._initial_state.copy()
         self._history.clear()
+
+    def _apply_load_settle(self, state: GameState) -> None:
+        """Let systems settle derived board state before the first turn.
+
+        Mirrors Dart's `_applySystemLoadSettle`. Runs after the load cascade so
+        a system settles the board the rules have already finished with.
+        """
+        effective_game = self._game.with_system_overrides(self._level.get("systemOverrides"))
+        for sys in instantiate_systems(effective_game):
+            sys.execute_load_settle(state, effective_game)
 
     def _apply_load_cascade(self, state: GameState) -> None:
         """Fire ``object_placed`` events for every object on a non-ground layer
