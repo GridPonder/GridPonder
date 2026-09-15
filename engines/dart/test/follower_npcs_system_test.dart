@@ -1114,6 +1114,31 @@ void main() {
         'traversal',
       );
     });
+
+    test('an NPC move animates with the NPC\'s own params', () {
+      // A sprite chosen by a param (facing, shaft) needs the params on the
+      // move step, or the moving sprite is drawn as the bare kind.
+      final engine = _engineFor(
+        _shaftGame(),
+        _shaftLevelJson([(2, 1, 'walker', 'right', null)]),
+      );
+      final result = engine.executeTurn(_move('down'));
+      final moves = result.animations
+          .where((s) => s.type == 'entity_move' && s.extra['layer'] == 'actors')
+          .toList();
+      expect(moves, hasLength(1));
+      final params = moves.single.extra['params'] as Map;
+      expect(params['facing'], 'right');
+      expect(params['behavior'], 'walker');
+      // A copy, not the live board map.
+      expect(
+        identical(
+          params,
+          engine.state.board.getEntity('actors', const Position(3, 1))!.params,
+        ),
+        isFalse,
+      );
+    });
   });
 }
 
