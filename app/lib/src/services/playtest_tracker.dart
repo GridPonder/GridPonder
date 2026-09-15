@@ -47,6 +47,16 @@ class PlaytestTracker {
     String? src,
     int? n,
     String? pos,
+    String? av,
+    String? tx,
+    int? t,
+    int? busy,
+    int? at,
+    String? reason,
+    String? rev,
+    String? bd,
+    String? vars,
+    String? p,
   }) async {
     if (!enabled) return;
     // Tracking must never affect gameplay: a failure here (SharedPreferences,
@@ -61,6 +71,16 @@ class PlaytestTracker {
       if (src != null) params['src'] = src;
       if (n != null) params['n'] = '$n';
       if (pos != null && pos.isNotEmpty) params['pos'] = pos;
+      if (av != null && av.isNotEmpty) params['av'] = av;
+      if (tx != null && tx.isNotEmpty) params['tx'] = tx;
+      if (t != null) params['t'] = '$t';
+      if (busy != null) params['busy'] = '$busy';
+      if (at != null) params['at'] = '$at';
+      if (reason != null) params['reason'] = reason;
+      if (rev != null && rev.isNotEmpty) params['rev'] = rev;
+      if (bd != null && bd.isNotEmpty) params['bd'] = bd;
+      if (vars != null && vars.isNotEmpty) params['vars'] = vars;
+      if (p != null && p.isNotEmpty) params['p'] = p;
       await _send(Uri(path: '/track', queryParameters: params));
     } catch (_) {}
   }

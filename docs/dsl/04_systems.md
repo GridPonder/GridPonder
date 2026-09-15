@@ -825,6 +825,38 @@ Example:
 }
 ```
 
+**Shafts (linked machines).** An NPC entity carrying a `shaft: "<id>"` param is
+part of a *train*: every member steps along its own facing each beat, but the
+train resolves as a unit. If any member is blocked, every member flips its facing
+and the train tries the reverse; if that is blocked too, the whole train freezes
+and every member keeps its original facing, resuming its original direction the
+beat the obstruction leaves. Trains resolve before unshafted NPCs, in the board
+order of their first members; an NPC with no `shaft` param is unaffected in every
+respect.
+
+Members may run at different frequencies: a *geared* train. Each beat, only the
+members whose own `frequency` gate opens are probed and step; the rest stay put.
+A reversal still turns every member, stepping or not, because facing belongs to
+the train. A beat on which no member's gate opens is a no-op, not a freeze.
+
+Members must all use a `patrol` behavior, each `frequency` must be a positive
+integer, and no member may stand on another member's traversal line (its row if
+it faces left or right, its column if it faces up or down). Every pair is
+checked against both members' lines, so board order does not matter. All three
+are validated at load and raise.
+
+| config key | type | default | meaning |
+|---|---|---|---|
+| `shaftSeizeOnLoss` | boolean | `false` | When `true`, a train that loses a member to destruction *seizes*: the survivors never move again. Read strictly — only the boolean `true` enables it. Train sizes are recorded once at load settle, so seizure stays a pure function of the board and adds nothing to the state key. |
+
+```json
+{"position": [3, 2], "kind": "carriage", "behavior": "carriage_line", "facing": "right", "shaft": "a"}
+```
+
+A shaft is the only way for the player's body to reach a machine it cannot
+touch: blocking the member within reach turns or freezes every other member,
+wherever they are on the board.
+
 **Reuse:** guards, chasers, patrols, scripted hazards, and creatures that seek a
 resource rather than the player. Sight-gated motion makes the avatar's position
 the only control channel, so an NPC can be steered rather than merely avoided.
@@ -1551,6 +1583,277 @@ Example config:
 **Reuse:** Game-agnostic — any line-based mechanic that bends off configurable
 cell kinds: light/mirror puzzles, wires, sound or sight that ricochets off
 walls.
+### 2.22 `cell_rotation`
+
+**Purpose:** Replace one entity with the next kind in a configured cycle when
+the player selects its cell. This is a generic primitive for roads, mirrors,
+arrows, valves, and similar orientation states.
+
+**Phase:** `action_resolution`
+
+**Events emitted:** `cell_transformed`, `action_vetoed`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `rotateAction` | string | `"rotate_cell"` | Action id that carries a `position` parameter. |
+| `layer` | string | `"ground"` | Layer containing the rotatable entity. |
+| `cycles` | object | `{}` | Current kind → next kind map. Closed cycles are authored by mapping the final orientation back to the first. |
+| `blockingLayers` | array of strings | `["objects"]` | Layers checked before rotation. |
+| `blockingTags` | array of strings | `[]` | A blocker vetoes rotation when it has any listed tag. An empty list makes every entity on a blocking layer block. |
+
+An invalid position, a kind absent from `cycles`, an unknown next kind, or a
+blocked cell vetoes the entire action. A vetoed rotation does not advance the
+turn or trigger later systems.
+
+```json
+{
+  "id": "rotate_roads",
+  "type": "cell_rotation",
+  "config": {
+    "cycles": {
+      "road_h": "road_v",
+      "road_v": "road_h",
+      "corner_ne": "corner_se",
+      "corner_se": "corner_sw",
+      "corner_sw": "corner_nw",
+      "corner_nw": "corner_ne"
+    }
+  }
+}
+```
+
+### 2.23 `routed_motion`
+
+**Purpose:** Advance tagged entities along deterministic route tiles after each
+accepted player action. Movement can be one cell per turn or continue along the
+connected route until the mover reaches a break, exit, or closed cycle.
+
+**Phase:** `npc_resolution`
+
+**Events emitted:** `tile_moved`, `entity_path_moved`, `object_removed`,
+`routed_motion_blocked`, `routed_motion_failed`, `variable_changed`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `moverLayer` | string | `"objects"` | Layer holding routed movers. |
+| `moverTag` | string | `"routed_mover"` | Tag selecting movers. |
+| `routeLayer` | string | `"ground"` | Layer holding route tiles. |
+| `routeSelectorLayer` | string | unset | Optional layer whose entity kind selects one branch of a nested route entry on the destination cell. Missing or unmapped selectors leave that approach disconnected. |
+| `headingParam` | string | `"heading"` | Mover parameter containing its next cardinal direction. |
+| `matchParam` | string | unset | Optional mover parameter matched against an exit. When unset, every tagged exit matches. |
+| `exitLayer` | string | `"markers"` | Layer holding exits. |
+| `exitTag` | string | `"route_exit"` | Tag identifying exit entities. |
+| `exitMatchParam` | string | value of `matchParam` | Exit parameter matched against the mover. |
+| `exitRequiresRoute` | boolean | `true` | Whether the destination cell's route must accept the mover's incoming side. Set `false` when a matching exit itself accepts arrival from any direction. |
+| `gateLayer` | string | unset | Optional layer holding local route gates. When unset, gate checks are disabled. |
+| `gateClosedTag` | string | `"route_closed"` | Tag identifying a gate state that blocks movement. |
+| `gateEntrySideParam` | string | `"entrySide"` | Gate parameter naming the one incoming side it controls. Missing or `"any"` blocks every approach. |
+| `failureVariable` | string | `"routedMotionFailures"` | Counter incremented once when a route tick fails. |
+| `movementMode` | string | `"single_step"` | `"single_step"` advances one cell; `"until_blocked"` repeatedly advances through connected route cells in the same turn. |
+| `blockedBehavior` | string | `"fail"` | In `until_blocked` mode, `"stop"` leaves blocked movers safely in place and emits `routed_motion_blocked`; `"fail"` retains failure-counter behavior. |
+| `allowUTurns` | boolean | `true` | Whether a route may send a mover directly back toward the cell it just left. Applies to both movement modes. |
+| `maxTravelSteps` | integer | board area × 4 × mover count | Positive safety bound for continuous microsteps. Repeated route state normally terminates first. |
+| `routes` | object | `{}` | Route kind → incoming side → outgoing direction, or route kind → incoming side → selector kind → outgoing direction when `routeSelectorLayer` is set. Each bidirectional path declares both directions. |
+
+In `single_step` mode, all movers read one board snapshot and commit together.
+A tick fails atomically if a mover leaves the board, lacks a valid source or
+destination connection, enters a non-mover, reaches a non-matching exit, swaps
+head-on, shares a destination, or is blocked by a mover that cannot leave. No
+mover changes cells on a failed tick. A convoy may enter cells vacated by its
+leading movers in the same successful tick.
+
+When `gateLayer` is configured, a closed gate on the destination cell blocks
+only movers entering from its configured side. The incoming side is the
+opposite of the mover's heading: a mover heading right enters from `left`.
+This allows one signal to control one junction approach without stopping
+unrelated routes or approaches.
+
+When `routeSelectorLayer` is configured, an incoming-side route may be an
+object keyed by the selector entity kind on that destination cell. This models
+a local switch or signal-controlled junction without coupling unrelated cells.
+If the selector is missing, or its kind has no configured branch, the mover
+waits or fails according to `blockedBehavior`. Plain string routes remain
+unchanged and may be mixed with selected routes in the same route map.
+
+In `until_blocked` mode the same simultaneous collision checks run for each
+internal microstep. Movers with `blockedBehavior: "stop"` become inactive for
+the rest of that player turn when they meet a break, boundary, disallowed
+U-turn, wrong exit, or occupied destination; unrelated movers may continue.
+Their travelled cells are emitted as one ordered `entity_path_moved` event so
+renderers can animate corners faithfully. If the complete routed state repeats,
+the system has traversed a closed cycle: it emits `routed_motion_blocked` with
+reason `route_cycle` and ends the resolution instead of looping forever.
+
+When a mover reaches a matching exit it is removed instead of being stored at
+the destination and emits `object_removed`. Single-step movement also emits
+`tile_moved`; continuous movement records the final cell in
+`entity_path_moved`. This allows an `all_cleared` goal on the mover tag.
+
+```json
+{
+  "id": "traffic",
+  "type": "routed_motion",
+  "config": {
+    "movementMode": "until_blocked",
+    "blockedBehavior": "stop",
+    "allowUTurns": false,
+    "matchParam": "channel",
+    "exitMatchParam": "channel",
+    "routeSelectorLayer": "markers",
+    "routes": {
+      "road_h": {"left": "right", "right": "left"},
+      "corner_nw": {"left": "up", "up": "left"},
+      "signal_junction": {
+        "left": {
+          "signal_right_green": "right",
+          "signal_up_green": "up"
+        }
+      }
+    }
+  }
+}
+```
+
+---
+
+### 2.24 `turn_cycle`
+
+**Purpose:** Advance selected entity kinds through a deterministic cycle during
+accepted turns. A common use is a signal clock whose two internal yellow phases
+share the same visual but lead to different next states.
+
+**Phases:** `action_resolution` (records whether the action triggers the
+clock), then `npc_resolution` (applies the cycle)
+
+**Events emitted:** `cell_transformed`
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `triggerActions` | string[] | `[]` | Actions that advance the cycle. Empty means every accepted action. |
+| `layer` | string | `"markers"` | Layer containing entities to cycle. |
+| `cycles` | object | `{}` | Current kind → next kind. Kinds absent from this map remain unchanged. Entity parameters are preserved. |
+
+NPC systems run in declaration order. Put `turn_cycle` before a system that
+should observe the new kind, or after a system that should observe the old
+kind. For example, a traffic game can place the signal clock before
+`routed_motion` so the light changes first and vehicles respond to the colour
+currently shown during movement. A vetoed action never reaches NPC resolution,
+so it does not advance the cycle. Undo restores the prior kind together with
+the rest of the board state.
+
+```json
+{
+  "id": "signal_clock",
+  "type": "turn_cycle",
+  "config": {
+    "triggerActions": ["rotate_cell"],
+    "layer": "markers",
+    "cycles": {
+      "signal_red": "signal_yellow_to_green",
+      "signal_yellow_to_green": "signal_green",
+      "signal_green": "signal_yellow_to_red",
+      "signal_yellow_to_red": "signal_red"
+    }
+  }
+}
+```
+
+---
+
+### 2.25 `balance_regions`
+
+**Purpose:** Terrain driven by where bodies stand. The floor is divided into two
+**pans**; every body standing on a pan contributes its weight, the heavier pan is
+*down*, and equal weight is *level*. That **attitude** is written to a state
+variable, and cells marked as **leaves** become solid floor or open shaft
+depending on it. No player action is involved: the verb is where the bodies are.
+
+This is the generic hook for see-saw halls, pressure-balanced bridges, sinking
+rafts and tug-of-war boards — any game where the shape of the board is a
+function of its occupants rather than of a switch.
+
+**Phase:** `npc_resolution` — declare this system **after** any
+[`follower_npcs`](#214-follower_npcs) system, so the attitude reflects both the
+avatar's move and the NPCs'. Systems run in declaration order within a phase.
+The system additionally runs once at **level load**, so an authored board cannot
+contradict its own opening attitude for a turn.
+
+**Events emitted:** `cell_transformed` for each leaf that changes state, and
+[`entity_fell`](05_rules.md#entity_fell) for each body dropped by a leaf opening
+beneath it.
+
+**Config:** a `groups` object, each value a balance group:
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pans` | array | — | **Required, exactly two.** Each `{"name": string, "groundTags": [string]}`. A cell belongs to a pan when its ground kind carries one of that pan's tags; a cell in neither pan is neutral and weighs nothing. |
+| `weights` | object | `{}` | Entity kind → integer weight. Kinds absent from the map weigh nothing; non-integer values are ignored. |
+| `avatarWeight` | integer | `1` | The avatar's contribution while it stands on a pan. |
+| `weightLayers` | array | `["actors"]` | Layers searched for weighted bodies. Also the layers a falling leaf empties. |
+| `groundLayer` | string | `"ground"` | Layer holding pan floors and leaves. |
+| `stateVariable` | string | — | Receives the attitude: `-1` first pan down, `0` level, `+1` second pan down. Omit it and the attitude stays internal. |
+| `markerLayer` | string | `"objects"` | Layer holding leaf markers. |
+| `leaves` | array | `[]` | Each `{"marker": kind, "solidWhen": [pan name or "level"], "solidKind": kind, "openKind": kind}`. `openKind` defaults to `"void"`. |
+| `fallVariable` | string | `"fell"` | Incremented when the avatar is dropped, so a `variable_threshold` lose condition ends the level the same turn. |
+
+```json
+{
+  "id": "balance",
+  "type": "balance_regions",
+  "config": {
+    "groups": {
+      "hall": {
+        "pans": [
+          {"name": "west", "groundTags": ["pan_west"]},
+          {"name": "east", "groundTags": ["pan_east"]}
+        ],
+        "weights": {"ram": 1, "carriage": 1},
+        "avatarWeight": 1,
+        "stateVariable": "attitude",
+        "markerLayer": "objects",
+        "fallVariable": "fell",
+        "leaves": [
+          {"marker": "hinge_west", "solidWhen": ["west"], "solidKind": "leaf_plate", "openKind": "void"},
+          {"marker": "hinge_level", "solidWhen": ["level"], "solidKind": "leaf_plate", "openKind": "void"}
+        ]
+      }
+    }
+  }
+}
+```
+
+**Resolution order**, per group, per settle:
+
+1. Sum the weights of every `weightLayers` body standing on each pan, plus
+   `avatarWeight` if the avatar is on one.
+2. Compare the totals; write the attitude to `stateVariable`.
+3. For each marker on `markerLayer` naming a leaf spec, set the ground beneath
+   it to `solidKind` when the attitude is one of `solidWhen`, else `openKind`.
+4. For each leaf that just opened, remove any `weightLayers` body standing on it
+   and emit `entity_fell`; if the avatar is standing there, increment
+   `fallVariable` instead — it stays on the board so the renderer can draw the
+   fall, and the lose condition ends the level in the same turn.
+5. Repeat from 1 if anything changed. A repeat can only happen because a body
+   fell, and a fall strictly removes weight, so this terminates; a hard cap of
+   four passes guards against a malformed level.
+
+**Why leaves are found through markers.** An open leaf must be `void`: that is
+the only ground kind NPC movement refuses, and NPCs do not read ground tags. But
+once a leaf is `void` it is indistinguishable from every wall on the board, so
+scanning the ground for leaf kinds could never find it again. The marker is what
+remembers where a leaf lives — and it doubles as the only thing that tells the
+player where a closed leaf is and which attitude opens it.
+
+**Tolerance contract** (both engines must agree, so it is stated rather than
+implied): a missing or non-object `groups` makes the system **inert**. A group
+whose `pans` is not a list of exactly two entries is skipped. Weights that are
+not integers are ignored, as is a marker naming no leaf spec. Ground under a
+marker that is neither `solidKind` nor `openKind` is **left untouched** — the
+level meant it. Objects on a falling leaf do not fall; only `weightLayers`
+bodies and the avatar do.
+
+**Reuse:** Game-agnostic. Any pack can define pans over its own floor kinds and
+weight whatever entities it likes; nothing here knows about a particular game.
 
 ---
 
@@ -1578,8 +1881,12 @@ walls.
 | Terrain Skip | `terrain_skip` | `cascade_resolution` | event-triggered actor transport across tagged terrain |
 | Terrain Edit | `terrain_edit` | `action_resolution` | `place` (configurable via `action`) |
 | Sonar | `sonar` | `npc_resolution` | (automatic every turn; writes distance readings to variables) |
+| Balance Regions | `balance_regions` | `npc_resolution` | (automatic every turn; also settles at load) |
 | Follower NPCs | `follower_npcs` | `npc_resolution` | (automatic once per turn) |
 | Beam | `beam` | `action_resolution` (select/fire) + `npc_resolution` (trace) | `tap_cell` + `fire(direction)` (configurable) |
+| Cell Rotation | `cell_rotation` | `action_resolution` | `rotate_cell` (configurable) |
+| Routed Motion | `routed_motion` | `npc_resolution` | (automatic once per accepted turn) |
+| Turn Cycle | `turn_cycle` | `action_resolution` + `npc_resolution` | configured accepted actions |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 
@@ -1609,6 +1916,12 @@ obstacles, and a `variable_threshold` completed-target goal).
 
 ### Transformation-style games (pattern matching)
 `overlay_cursor` + `region_transform` (rotate + flip ops) + `flood_fill`
+
+### Live route-planning games
+`cell_rotation` + `routed_motion` with `all_cleared` on the mover tag. Add
+`turn_cycle` plus a configured local route gate for time-based signals. Use
+`max_actions` for stop-at-break route planning, or a `variable_threshold` on
+the failure counter for crash-style single-step traffic.
 
 ### Hybrid games
 Any combination of the above. The system architecture supports free composition as long as there are no conflicting action handlers.

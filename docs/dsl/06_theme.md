@@ -52,7 +52,7 @@ Maps platform inputs to abstract game actions. The engine uses these bindings as
   "gestureMap": [
     { "gesture": "swipe_cardinal", "action": "move", "paramMapping": { "direction": "swipe_direction" } },
     { "gesture": "swipe_diagonal", "action": "diagonal_swap", "paramMapping": { "direction": "swipe_direction" } },
-    { "gesture": "tap_cell", "action": "tap_cell", "paramMapping": { "position": "tap_position" } },
+    { "gesture": "tap_cell", "action": "tap_cell", "paramMapping": { "position": "tap_position" }, "showSelection": true },
     { "gesture": "button", "buttonId": "rotate_cw", "action": "rotate", "params": { "rotation": "clockwise" } }
   ]
 }
@@ -72,6 +72,7 @@ Each gesture mapping:
 | `key` | string | conditional | Required when `gesture` is `key_press`. A single a-z letter, or one of `up`/`down`/`left`/`right` for the arrow keys. |
 | `paramMapping` | object | no | Maps input parameters to action parameters dynamically. |
 | `params` | object | no | Static parameters to include with the action. |
+| `showSelection` | boolean | no | When `true`, an accepted cell-tap action leaves a visible outline on its mapped cell until another cell is selected or the level state is reset. Solve and Hint replay update the same outline. Defaults to `false`. |
 
 **Platform behavior:** On mobile, gestures are used directly. On web/desktop, the engine maps arrow keys to `swipe_cardinal` equivalents (when the game has a `move`-style action), and provides on-screen buttons for `button`-type actions. Games can provide platform-specific overrides (future extension).
 
@@ -139,7 +140,7 @@ The avatar section defines the character's appearance. It supports a simple sing
 
 ### Sprite map mode
 
-For games with directional movement, the avatar should use a **sprite map** keyed by `state` and `direction`. States are emitted by systems during gameplay (e.g., `avatar_navigation` sets `"moving"`, `push_objects` sets `"pushing"`).
+For games with directional movement, the avatar should use a **sprite map** keyed by `state` and `direction`. The renderer selects `walk` while an `avatar_move` step is interpolating and `idle` at rest.
 
 ```json
 "avatar": {
@@ -151,7 +152,7 @@ For games with directional movement, the avatar should use a **sprite map** keye
       "up": "assets/sprites/avatar/rabbit_idle_away_from_player.png",
       "down": "assets/sprites/avatar/rabbit_idle_facing_player.png"
     },
-    "moving": {
+    "walk": {
       "right": {
         "frames": ["assets/sprites/avatar/rabbit_walking_right_1.png", "assets/sprites/avatar/rabbit_walking_right_2.png"],
         "duration": 400,
@@ -184,20 +185,19 @@ For games with directional movement, the avatar should use a **sprite map** keye
 ```
 
 > **What the renderer actually honours today.** The Flutter renderer resolves
-> `sprites.idle.<direction>` by the avatar's current facing, falling back to the
-> flat `avatar.sprite`, and finally to the shared base-pack sprites when a pack
-> declares no avatar art at all. `{"mirror": "<direction>"}` resolves to the
-> named direction's path drawn flipped horizontally, one hop only. Animated
-> entries render their **first frame**: nothing drives a per-frame ticker for the
-> avatar. The `moving` and `pushing` states above are parsed but never requested —
-> no system emits an avatar state — and `visible` is not consulted. Treat those
-> three as specified-but-unimplemented rather than available.
+> `sprites.idle.<direction>` at rest and `sprites.walk.<direction>` during an
+> interpolated `avatar_move`, advancing through the configured frames across the
+> step. `sprites.moving` remains accepted as a compatibility alias for `walk`.
+> Missing walk entries fall back to the directional idle, then the flat
+> `avatar.sprite`, and finally the shared base-pack sprites. `{"mirror":
+> "<direction>"}` resolves to the named direction drawn flipped horizontally,
+> one hop only. Custom states such as `pushing` are parsed but not requested.
 
 #### Sprite map structure
 
 | Level | Key | Value |
 |-------|-----|-------|
-| State | `"idle"`, `"moving"`, `"pushing"`, or custom | Direction map |
+| State | `"idle"`, `"walk"`, `"pushing"`, or custom | Direction map |
 | Direction | `"up"`, `"down"`, `"left"`, `"right"` | Static sprite, animation, or mirror |
 
 #### Direction values
@@ -253,7 +253,7 @@ Games without directional movement (e.g., `slide_merge`-only games) can use simp
         "up": "assets/sprites/avatar/rabbit_idle_away_from_player.png",
         "down": "assets/sprites/avatar/rabbit_idle_facing_player.png"
       },
-      "moving": {
+      "walk": {
         "right": {
           "frames": ["assets/sprites/avatar/rabbit_walking_right_1.png", "assets/sprites/avatar/rabbit_walking_right_2.png"],
           "duration": 400,

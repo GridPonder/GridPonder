@@ -194,6 +194,31 @@ class PhaseRunner {
             stage: motionStage,
           ));
         }
+      } else if (event.type == 'npc_moved') {
+        // follower_npcs predates actor_moved and reports its destination as
+        // toPosition. Resolve the moved kind from the post-phase actors layer
+        // so autonomous NPCs receive the same in-flight animation as actors.
+        final from = event.payload['fromPosition'];
+        final to = event.payload['toPosition'];
+        if (from != null && to != null) {
+          final fromPos = from is Position ? from : Position.fromJson(from);
+          final toPos = to is Position ? to : Position.fromJson(to);
+          final entity = state.board.getEntity('actors', toPos);
+          if (entity != null) {
+            final dur = _motionDurationMs(entity.kind, 'moveDurationMs', 130);
+            out.add(AnimationStep.entityMove(
+              fromPos,
+              toPos,
+              entity.kind,
+              'actors',
+              durationMs: dur,
+              stage: motionStage,
+              // A copy: the board's params are written in place by later
+              // turns, and the sprite must show the NPC as it moved.
+              params: Map<String, dynamic>.of(entity.params),
+            ));
+          }
+        }
       } else if (event.type == 'tile_moved') {
         final pos = event.position;
         final from = event.payload['fromPosition'];
@@ -214,6 +239,30 @@ class PhaseRunner {
             stage: motionStage,
             params: params,
           ));
+        }
+      } else if (event.type == 'entity_path_moved') {
+        final pathRaw = event.payload['path'];
+        final kind = event.payload['kind'] as String?;
+        if (pathRaw is List && kind != null) {
+          final path = pathRaw
+              .map((p) => p is Position ? p : Position.fromJson(p))
+              .toList();
+          if (path.length > 1) {
+            final layer = event.payload['layer'] as String? ?? 'objects';
+            final params =
+                (event.payload['params'] as Map?)?.cast<String, dynamic>() ??
+                    const <String, dynamic>{};
+            final dur = _motionDurationMs(kind, 'pathStepDurationMs', 80);
+            out.add(AnimationStep.entityPath(
+              path,
+              kind,
+              layer,
+              durationMs: dur,
+              stage: motionStage,
+              params: params,
+              removedAtEnd: event.payload['removedAtEnd'] as bool? ?? false,
+            ));
+          }
         }
       } else if (event.type == 'object_settled') {
         // An entity that travelled to rest under gravity or a collapse. Cells

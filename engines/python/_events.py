@@ -51,6 +51,25 @@ def object_removed(pos: Pos, kind: str, animation: str | None = None) -> dict:
     return e
 
 
+def entity_path_moved(
+    path: list[Pos],
+    kind: str,
+    params: dict | None = None,
+    layer: str = "objects",
+    removed_at_end: bool = False,
+) -> dict:
+    """An entity followed an ordered multi-cell route in one turn."""
+    return {
+        "type": "entity_path_moved",
+        "position": path[-1],
+        "path": path,
+        "kind": kind,
+        "params": params or {},
+        "layer": layer,
+        "removedAtEnd": removed_at_end,
+    }
+
+
 def line_of_sight_detected(
     source: Pos,
     target: Pos,
@@ -83,6 +102,21 @@ def cell_transformed(pos: Pos, from_kind: str, to_kind: str, layer: str) -> dict
         "position": pos,
         "fromKind": from_kind,
         "toKind": to_kind,
+        "layer": layer,
+    }
+
+
+def entity_fell(pos: Pos, kind: str, layer: str) -> dict:
+    """A body was on a cell whose ground gave way beneath it.
+
+    `layer` is the board layer the body was removed from, or `"avatar"` for the
+    avatar — which is not removed from the board, because a lose condition ends
+    the level in the same turn and the renderer still has to draw it falling.
+    """
+    return {
+        "type": "entity_fell",
+        "position": pos,
+        "kind": kind,
         "layer": layer,
     }
 

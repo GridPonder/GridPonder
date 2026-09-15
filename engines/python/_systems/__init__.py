@@ -14,7 +14,9 @@ from .._game_def import GameDef
 from ._base import GameSystem
 from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
+from .balance_regions import BalanceRegionsSystem
 from .beam import BeamSystem
+from .cell_rotation import CellRotationSystem
 from .coupled_actors import CoupledActorsSystem
 from .elastic_block import ElasticBlockSystem
 from .flank_capture import FlankCaptureSystem
@@ -28,6 +30,7 @@ from .portals import PortalsSystem
 from .push_objects import PushObjectsSystem
 from .queued_emitters import QueuedEmittersSystem
 from .region_transform import RegionTransformSystem
+from .routed_motion import RoutedMotionSystem
 from .sided_box import SidedBoxSystem
 from .sliding_blocks import SlidingBlocksSystem
 from .slide_merge import SlideMergeSystem
@@ -36,6 +39,7 @@ from .sonar import SonarSystem
 from .terrain_edit import TerrainEditSystem
 from .terrain_skip import TerrainSkipSystem
 from .tile_teleport import TileTeleportSystem
+from .turn_cycle import TurnCycleSystem
 
 
 SystemFactory = Callable[[str, dict], GameSystem]
@@ -43,7 +47,9 @@ SystemFactory = Callable[[str, dict], GameSystem]
 _REGISTRY: dict[str, SystemFactory] = {
     "anchor_point": lambda sys_id, _: AnchorPointSystem(sys_id),
     "avatar_navigation": lambda sys_id, _: AvatarNavigationSystem(sys_id),
+    "balance_regions": lambda sys_id, _: BalanceRegionsSystem(sys_id),
     "beam": lambda sys_id, config: BeamSystem(sys_id, config),
+    "cell_rotation": lambda sys_id, _: CellRotationSystem(sys_id),
     "push_objects": lambda sys_id, _: PushObjectsSystem(sys_id),
     "portals": lambda sys_id, _: PortalsSystem(sys_id),
     "ice_slide": lambda sys_id, _: IceSlideSystem(sys_id),
@@ -51,6 +57,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "slide_merge": lambda sys_id, _: SlideMergeSystem(sys_id),
     "overlay_cursor": lambda sys_id, _: OverlayCursorSystem(sys_id),
     "region_transform": lambda sys_id, _: RegionTransformSystem(sys_id),
+    "routed_motion": lambda sys_id, _: RoutedMotionSystem(sys_id),
     "queued_emitters": lambda sys_id, _: QueuedEmittersSystem(sys_id),
     "tile_teleport": lambda sys_id, _: TileTeleportSystem(sys_id),
     "sided_box": lambda sys_id, _: SidedBoxSystem(sys_id),
@@ -65,6 +72,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "elastic_block": lambda sys_id, config: ElasticBlockSystem(sys_id, config),
     "individual_actors": lambda sys_id, _: IndividualActorsSystem(sys_id),
     "terrain_skip": lambda sys_id, _: TerrainSkipSystem(sys_id),
+    "turn_cycle": lambda sys_id, _: TurnCycleSystem(sys_id),
 }
 
 
