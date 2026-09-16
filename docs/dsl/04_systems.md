@@ -1479,7 +1479,8 @@ since the state write itself already happened all at once)
 | `hitTargetKind` | string | — | Marker kind for the cell that completed a hit, overriding `pathKind` there specifically (e.g. an "energized" target sprite distinct from the plain beam-path marker). |
 | `hazardKind` | string | — | Marker kind for the cell that stopped the beam at a `hazardTags` hazard. Unlike every other role, a hazard cell does *not* fall back to `pathKind` when this is unset — its own entity sprite is left exactly as-is, since the level typically ends the instant the beam reaches it and there's no time for a beam-path marker to matter. Set it only if a game wants an explicit effect (e.g. an explosion sprite) instead. |
 | `intersectionKind` | string | — | Marker kind for the cell where a beam crossed an existing beam segment. Same non-fallback exception as `hazardKind`, for the same reason: the run ends there. |
-| `intersectionGlowKind` | string | — | Marker kind for a plain `'segment'` cell whose *position* some other branch later collided into — i.e. the cell as the original, unsuspecting branch left it, not the collision cell itself (that's `intersectionKind`). Lets a game show both ends of a crossing: this cell picks up a "beams cross here" glow (e.g. a plus shape) instead of its ordinary straight segment, and — since painting always happens after every branch has finished tracing — the actual collision cell still resolves to `intersectionKind` regardless of paint order. Unset, the original cell keeps its normal segment marker as if nothing had crossed it. |
+| `splitterIntersectionKinds` | object | `{}` | Map of splitter entity kind → marker kind, for an `intersection` landing on a `splitters`-kind cell — e.g. a beam re-entering a divider it (or another branch) already used. Kept separate from `intersectionKind` because the two read very differently: a plain crossing is two beam lines meeting, while this is a specific piece being re-entered. Falls back to `intersectionKind` when unset for that entity kind, unlike `splitterBlockedKinds`'s stricter no-fallback rule. |
+| `intersectionGlowKind` | string | — | Marker kind for a plain `'segment'` cell whose *position* some other branch later collided into — i.e. the cell as the original, unsuspecting branch left it, not the collision cell itself (that's `intersectionKind`/`splitterIntersectionKinds`). Lets a game show both ends of a crossing: this cell picks up a "beams cross here" glow (e.g. a plus shape) instead of its ordinary straight segment, and — since painting always happens after every branch has finished tracing — the actual collision cell still resolves to `intersectionKind`/`splitterIntersectionKinds` regardless of paint order. Unset, the original cell keeps its normal segment marker as if nothing had crossed it. |
 | `maxSteps` | integer | `200` | Safety cap on trace length, so a loop between two facing reflectors terminates instead of hanging. |
 
 Example config:
@@ -1547,7 +1548,7 @@ Example config:
    turn out to have been crossed) can't be resolved mid-trace. Before
    retracing, clear every entity on `pathLayer` whose kind is any of
    `pathKind`/`segmentKindHorizontal`/`segmentKindVertical`/`hitTargetKind`/`hazardKind`/`intersectionKind`/`intersectionGlowKind`,
-   or a value anywhere in `reflectorGlowKinds`/`reflectorDualGlowKinds`/`splitterGlowKinds`/`splitterBlockedKinds`/`blockedKinds`
+   or a value anywhere in `reflectorGlowKinds`/`reflectorDualGlowKinds`/`splitterGlowKinds`/`splitterBlockedKinds`/`splitterIntersectionKinds`/`blockedKinds`
    — i.e. every kind this turn's trace could possibly paint. Then, for each
    cell any branch traversed this turn (not the source's own cell), paint the
    first of: a `reflectorDualGlowKinds` match (reflector cells reached
@@ -1567,7 +1568,12 @@ Example config:
    only to its own `hazardKind`/`intersectionKind` (usually unset) and
    never falls back to `pathKind`, so that cell's own entity sprite (or,
    for an intersection on a plain floor cell, nothing) stays undecorated by
-   default.
+   default. An intersection on a `splitters`-kind cell checks
+   `splitterIntersectionKinds` for that entity kind first — unlike
+   `splitterBlockedKinds`, an unmatched entry here still falls back to the
+   ordinary `intersectionKind`, since a game that hasn't opted a specific
+   divider shape into its own collision art should still see the generic
+   one rather than nothing.
 5. Set `hitVariable` to `1` if any branch of any source's trace ended in a hit
    this turn, else `0`. Set `hazardVariable` to `1` if any branch touched a
    `hazardTags` cell this turn, else `0`. Set `intersectionVariable` to `1` if

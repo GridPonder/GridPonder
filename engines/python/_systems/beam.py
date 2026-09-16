@@ -234,7 +234,13 @@ class BeamSystem(GameSystem):
 
         source_layer = cfg.get("sourceLayer", "objects")
         entity = state.board.get_entity(source_layer, src_pos)
-        if entity is None:
+        # Re-validated, not just re-fetched: the entity the selection
+        # recorded may have been removed or transformed into something else
+        # by another system between the select and fire actions, and the
+        # cell could now hold an unrelated entity that just happens to be
+        # non-None.
+        source_tags = config_list(cfg, "sourceTags", ["beam_source"])
+        if entity is None or not any(game.has_tag(entity.kind, t) for t in source_tags):
             return []
 
         facing_param = cfg.get("facingParam", "facing")
@@ -272,6 +278,11 @@ class BeamSystem(GameSystem):
         )
         splitter_glow_kinds = _reflector_map(cfg.get("splitterGlowKinds"))
         splitter_blocked_kinds = _reflector_map(cfg.get("splitterBlockedKinds"))
+        splitter_intersection_kinds = cfg.get("splitterIntersectionKinds")
+        splitter_intersection_kinds = (
+            {str(k): str(v) for k, v in splitter_intersection_kinds.items()}
+            if isinstance(splitter_intersection_kinds, dict) else {}
+        )
         blocked_kinds = cfg.get("blockedKinds")
         blocked_kinds = {str(k): str(v) for k, v in blocked_kinds.items()} if isinstance(blocked_kinds, dict) else {}
         hit_target_kind = cfg.get("hitTargetKind")
@@ -283,7 +294,7 @@ class BeamSystem(GameSystem):
         # Every kind any cell could be marked with this turn — a superset
         # used to clear last turn's trace regardless of which specific kind
         # a cell had.
-        all_marker_kinds = {path_kind, segment_kind_h, segment_kind_v, hit_target_kind, hazard_kind, intersection_kind, intersection_glow_kind, *blocked_kinds.values(), *reflector_dual_glow_kinds.values()}
+        all_marker_kinds = {path_kind, segment_kind_h, segment_kind_v, hit_target_kind, hazard_kind, intersection_kind, intersection_glow_kind, *blocked_kinds.values(), *reflector_dual_glow_kinds.values(), *splitter_intersection_kinds.values()}
         for dir_map in reflector_glow_kinds.values():
             all_marker_kinds.update(dir_map.values())
         for dir_map in splitter_glow_kinds.values():
@@ -372,7 +383,8 @@ class BeamSystem(GameSystem):
                     kind = self._marker_kind_for(
                         cell, path_kind, segment_kind_h, segment_kind_v,
                         reflector_glow_kinds, reflector_dual_glow_kinds,
-                        splitter_glow_kinds, splitter_blocked_kinds, blocked_kinds,
+                        splitters, splitter_glow_kinds, splitter_blocked_kinds,
+                        splitter_intersection_kinds, blocked_kinds,
                         hit_target_kind, hazard_kind, intersection_kind,
                         intersection_glow_kind, intersection_positions,
                     )
@@ -505,12 +517,17 @@ class BeamSystem(GameSystem):
             # Peeked ahead of the full role lookup below because a reflector
             # cell needs to know this *before* deciding whether stepping
             # here is a self-intersection — see `_reflector_channel_key`.
+            # The entity kind itself is kept alongside it so an intersection
+            # landing here can be painted with a piece-specific marker (see
+            # `splitter_intersection_kinds`) instead of the generic one.
             reflect_map_here: Optional[dict[str, str]] = None
+            entity_kind_here: Optional[str] = None
             for layer_id in blocking_layers:
                 e = state.board.get_entity(layer_id, pos)
                 if e is None:
                     continue
                 reflect_map_here = reflectors.get(e.kind)
+                entity_kind_here = e.kind
                 break
 
             # A cell already touched by some beam segment traced this turn —
@@ -533,7 +550,7 @@ class BeamSystem(GameSystem):
                     used_channels.add(channel_key)
                     dual_channel_visit = True
                 else:
-                    cells.append(_PathCell(pos, incoming, "intersection", None))
+                    cells.append(_PathCell(pos, incoming, "intersection", entity_kind_here))
                     break
             else:
                 beam_cells_this_turn.add(pos)
@@ -627,8 +644,10 @@ class BeamSystem(GameSystem):
         segment_kind_v: Optional[str],
         reflector_glow_kinds: dict[str, dict[str, str]],
         reflector_dual_glow_kinds: dict[str, str],
+        splitters: dict[str, dict[str, list[str]]],
         splitter_glow_kinds: dict[str, dict[str, str]],
         splitter_blocked_kinds: dict[str, dict[str, str]],
+        splitter_intersection_kinds: dict[str, str],
         blocked_kinds: dict[str, str],
         hit_target_kind: Optional[str],
         hazard_kind: Optional[str],
@@ -671,7 +690,19 @@ class BeamSystem(GameSystem):
         `splitter_blocked_kinds` (entity kind -> incoming direction -> marker
         kind) and, unlike every other role, does *not* fall back to
         `blocked_kinds` or `path_kind` when unset: no override configured
-        means no marker at all.
+        means no marker at all. Identified via `splitters` itself (the
+        piece's actual behavioral config), not the optional
+        `splitter_glow_kinds` visual map — a splitter kind with no glow
+        overrides configured at all must still read as "no marker," not fall
+        through to a generic wall-hit marker as if it weren't a splitter.
+
+        An intersection cell prefers `splitter_intersection_kinds` (entity
+        kind -> marker kind) when the collision landed on a splitter — a beam
+        re-entering a divider it already used reads very differently from two
+        plain segments crossing, so a game that wants that distinction can
+        give the piece its own "this is where it went wrong" art instead of
+        the generic `intersection_kind`. Unset falls back to
+        `intersection_kind` like normal.
         """
         d = cell.incoming_direction
         if cell.role == "reflector":
@@ -687,7 +718,7 @@ class BeamSystem(GameSystem):
             if k is not None:
                 return k
         elif cell.role == "blocked":
-            if cell.entity_kind in splitter_glow_kinds:
+            if cell.entity_kind in splitters:
                 # This is a splitter's own solid, unmapped side, not a wall —
                 # no configured marker means none at all (see docstring).
                 return splitter_blocked_kinds.get(cell.entity_kind or "", {}).get(d)
@@ -700,6 +731,9 @@ class BeamSystem(GameSystem):
         elif cell.role == "hazard":
             return hazard_kind
         elif cell.role == "intersection":
+            k = splitter_intersection_kinds.get(cell.entity_kind or "")
+            if k is not None:
+                return k
             return intersection_kind
         elif cell.role == "segment":
             if intersection_glow_kind is not None and cell.position in intersection_positions:

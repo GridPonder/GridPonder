@@ -189,7 +189,14 @@ class BeamSystem extends GameSystem {
 
     final sourceLayer = cfg['sourceLayer'] as String? ?? 'objects';
     final entity = state.board.getEntity(sourceLayer, srcPos);
-    if (entity == null) return const [];
+    // Re-validated, not just re-fetched: the entity the selection recorded
+    // may have been removed or transformed into something else by another
+    // system between the select and fire actions, and the cell could now
+    // hold an unrelated entity that just happens to be non-null.
+    final sourceTags = _stringList(cfg['sourceTags'], const ['beam_source']);
+    if (entity == null || !sourceTags.any((t) => game.hasTag(entity.kind, t))) {
+      return const [];
+    }
 
     final facingParam = cfg['facingParam'] as String? ?? 'facing';
     final newParams = Map<String, dynamic>.from(entity.params)
@@ -233,6 +240,8 @@ class BeamSystem extends GameSystem {
     final reflectorDualGlowKinds = _stringMap(cfg['reflectorDualGlowKinds']);
     final splitterGlowKinds = _reflectorMap(cfg['splitterGlowKinds']);
     final splitterBlockedKinds = _reflectorMap(cfg['splitterBlockedKinds']);
+    final splitterIntersectionKinds =
+        _stringMap(cfg['splitterIntersectionKinds']);
     final blockedKinds = _stringMap(cfg['blockedKinds']);
     final hitTargetKind = cfg['hitTargetKind'] as String?;
     final hazardKind = cfg['hazardKind'] as String?;
@@ -254,6 +263,7 @@ class BeamSystem extends GameSystem {
       ...reflectorDualGlowKinds.values,
       ...splitterGlowKinds.values.expand((m) => m.values),
       ...splitterBlockedKinds.values.expand((m) => m.values),
+      ...splitterIntersectionKinds.values,
       ...blockedKinds.values,
     };
     if (allMarkerKinds.isNotEmpty) {
@@ -353,8 +363,10 @@ class BeamSystem extends GameSystem {
             segmentKindVertical,
             reflectorGlowKinds,
             reflectorDualGlowKinds,
+            splitters,
             splitterGlowKinds,
             splitterBlockedKinds,
+            splitterIntersectionKinds,
             blockedKinds,
             hitTargetKind,
             hazardKind,
@@ -514,12 +526,17 @@ class BeamSystem extends GameSystem {
 
       // Peeked ahead of the full role lookup below because a reflector cell
       // needs to know this *before* deciding whether stepping here is a
-      // self-intersection — see `_reflectorChannelKey`.
+      // self-intersection — see `_reflectorChannelKey`. The entity kind
+      // itself is kept alongside it so an intersection landing here can be
+      // painted with a piece-specific marker (see `splitterIntersectionKinds`)
+      // instead of the generic one.
       Map<String, String>? reflectorMapHere;
+      String? entityKindHere;
       for (final layerId in blockingLayers) {
         final e = state.board.getEntity(layerId, pos);
         if (e == null) continue;
         reflectorMapHere = reflectors[e.kind];
+        entityKindHere = e.kind;
         break;
       }
 
@@ -542,7 +559,7 @@ class BeamSystem extends GameSystem {
         if (channelKey != null && usedChannels.add(channelKey)) {
           dualChannelVisit = true;
         } else {
-          cells.add(_PathCell(pos, incoming, 'intersection', null));
+          cells.add(_PathCell(pos, incoming, 'intersection', entityKindHere));
           break;
         }
       } else if (reflectorMapHere != null) {
@@ -636,7 +653,14 @@ class BeamSystem extends GameSystem {
       }
       if (reflectTo != null) {
         try {
-          direction = Direction.fromJson(reflectTo);
+          final next = Direction.fromJson(reflectTo);
+          // A reflector map is only ever documented and traced in cardinal
+          // directions; `Direction` itself is the shared 8-directional model
+          // other systems use diagonally, so parsing alone would silently
+          // accept a diagonal redirect here instead of rejecting it like the
+          // Python engine does.
+          if (!next.isCardinal) break;
+          direction = next;
           continue;
         } catch (_) {
           break;
@@ -673,6 +697,11 @@ class BeamSystem extends GameSystem {
     } catch (_) {
       return [_BeamTrace(prefix, false)];
     }
+    // A splitter map is only ever documented and traced in cardinal
+    // directions, matching the Python engine's `is_cardinal` check — a
+    // diagonal entry dead-ends that one branch right at the splitter cell
+    // rather than silently sending it off at an angle.
+    if (!direction.isCardinal) return [_BeamTrace(prefix, false)];
     return _traceSegment(
       pos,
       direction,
@@ -725,7 +754,18 @@ class BeamSystem extends GameSystem {
   /// obstacle the beam crashed into — so it prefers `splitterBlockedKinds`
   /// (entity kind -> incoming direction -> marker kind) and, unlike every
   /// other role, does *not* fall back to `blockedKinds` or `pathKind` when
-  /// unset: no override configured means no marker at all.
+  /// unset: no override configured means no marker at all. Identified via
+  /// `splitters` itself (the piece's actual behavioral config), not the
+  /// optional `splitterGlowKinds` visual map — a splitter kind with no glow
+  /// overrides configured at all must still read as "no marker," not fall
+  /// through to a generic wall-hit marker as if it weren't a splitter.
+  ///
+  /// An intersection cell prefers `splitterIntersectionKinds` (entity kind ->
+  /// marker kind) when the collision landed on a splitter — a beam re-entering
+  /// a divider it already used reads very differently from two plain segments
+  /// crossing, so a game that wants that distinction can give the piece its
+  /// own "this is where it went wrong" art instead of the generic
+  /// `intersectionKind`. Unset falls back to `intersectionKind` like normal.
   String? _markerKindFor(
     _PathCell cell,
     String? pathKind,
@@ -733,8 +773,10 @@ class BeamSystem extends GameSystem {
     String? segmentKindVertical,
     Map<String, Map<String, String>> reflectorGlowKinds,
     Map<String, String> reflectorDualGlowKinds,
+    Map<String, Map<String, List<String>>> splitters,
     Map<String, Map<String, String>> splitterGlowKinds,
     Map<String, Map<String, String>> splitterBlockedKinds,
+    Map<String, String> splitterIntersectionKinds,
     Map<String, String> blockedKinds,
     String? hitTargetKind,
     String? hazardKind,
@@ -756,7 +798,7 @@ class BeamSystem extends GameSystem {
       final k = byKind?[dir];
       if (k != null) return k;
     } else if (cell.role == 'blocked') {
-      if (splitterGlowKinds.containsKey(cell.entityKind)) {
+      if (splitters.containsKey(cell.entityKind)) {
         // This is a splitter's own solid, unmapped side, not a wall — no
         // configured marker means none at all (see doc comment above).
         return splitterBlockedKinds[cell.entityKind]?[dir];
@@ -768,6 +810,8 @@ class BeamSystem extends GameSystem {
     } else if (cell.role == 'hazard') {
       return hazardKind;
     } else if (cell.role == 'intersection') {
+      final k = splitterIntersectionKinds[cell.entityKind];
+      if (k != null) return k;
       return intersectionKind;
     } else if (cell.role == 'segment') {
       if (intersectionGlowKind != null &&

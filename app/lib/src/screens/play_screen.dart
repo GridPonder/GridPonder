@@ -363,6 +363,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     setState(() {
       _animating = true;
+      // _engine.state already carries this turn's final isWon/isLost — set
+      // the instant the action was accepted, long before the player has
+      // seen any of it. Holding the pre-turn board here closes that gap:
+      // build() shows this instead of falling through to the engine's
+      // already-won state on this very first post-accept rebuild, before
+      // _playTurnMotion below has even started deciding what (if anything)
+      // else to hold. Every path through _playTurnMotion either overwrites
+      // this immediately with a more specific held board, or — for a turn
+      // with no travelling entities at all — leaves it as the correct
+      // starting point for whatever reveal animation runs next.
+      _preAnimState = preState;
       if (selectedCell != null) _selectedCellPosition = selectedCell;
       // A machine that reversed on the spot moved nowhere, so no animation
       // will turn it; its engine-written `facing` param is the only record.
@@ -384,7 +395,18 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // What is left is decoration — fire catching, a tool scorching — and making
     // input wait on it costs a press every time one lands mid-effect.
     if (!mounted) return;
-    setState(() => _animating = false);
+    setState(() {
+      _animating = false;
+      // Safety net for a turn whose animation never touched _preAnimState
+      // at all — no travelling entities, no beam reveal, nothing (e.g. a
+      // pure select tap, or a placement before any source is aimed). Every
+      // stage above that *does* hold a board also clears it back to null
+      // once it finishes, so by this point the only way it can still equal
+      // the placeholder set before _playTurnMotion is that nothing ever
+      // took over from it — and it must not outlive the turn it was
+      // covering for, or the board stays frozen on the pre-turn state.
+      if (identical(_preAnimState, preState)) _preAnimState = null;
+    });
     if (_resetRequested) {
       _onReset();
       return;
@@ -905,14 +927,22 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     if (reveals.isEmpty) return;
 
     final finalState = _engine.state;
-    final animState = preState.copy();
+    // Starts from the FINAL state, not the pre-turn one: anything this
+    // turn's action changed outside the marker layer(s) — a newly placed
+    // reflector, a converted mine — must already be visible from the very
+    // first animated frame, not vanish and pop back in once the reveal
+    // finishes. Only the marker layer(s) below get selectively rolled back
+    // so they can still be replayed cell by cell.
+    final animState = finalState.copy();
+    // Held back until the reveal finishes even though the rest of animState
+    // already reflects the final board: build() shows this state for as
+    // long as _preAnimState is set, and the beam visually reaching the
+    // target is exactly what the loop below is about to animate — the
+    // win/lose banner must wait for that moment, not fire the instant the
+    // turn was accepted, before the player has seen the beam get there.
+    animState.isWon = false;
+    animState.isLost = false;
 
-    // A marker this turn's retrace no longer covers (the beam retracted from
-    // it — a reflector was removed, or the aim changed) gets no
-    // beam_cell_revealed event of its own, since the engine only emits one
-    // for a cell it actually painted. Clear those up front, instantly and
-    // without fanfare — the interesting animation is the beam's own path,
-    // not cells going dark.
     final revealedPositions = {
       for (final e in reveals)
         if (e.position != null) e.position!,
@@ -922,14 +952,35 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     };
     for (final layer in touchedLayers) {
       final priorLayer = preState.board.layers[layer];
-      if (priorLayer == null) continue;
       final finalLayer = finalState.board.layers[layer];
-      for (final entry in priorLayer.entries().toList()) {
-        final pos = entry.key;
-        if (revealedPositions.contains(pos)) continue;
-        if (finalLayer?.getAt(pos)?.kind != entry.value.kind) {
-          animState.board.setEntity(layer, pos, null);
+
+      // A marker this turn's retrace no longer covers (the beam retracted
+      // from it — a reflector was removed, or the aim changed) gets no
+      // beam_cell_revealed event of its own, since the engine only emits one
+      // for a cell it actually painted. Clear those up front, instantly and
+      // without fanfare — the interesting animation is the beam's own path,
+      // not cells going dark.
+      if (priorLayer != null) {
+        for (final entry in priorLayer.entries().toList()) {
+          final pos = entry.key;
+          if (revealedPositions.contains(pos)) continue;
+          if (finalLayer?.getAt(pos)?.kind != entry.value.kind) {
+            animState.board.setEntity(layer, pos, null);
+          }
         }
+      }
+
+      // Every cell this turn's reveal will (re)paint is rolled back to how
+      // it looked before the turn — or blank, if it's new — so the loop
+      // below can replay it being drawn in instead of it already sitting
+      // there in its final form.
+      for (final pos in revealedPositions) {
+        final priorKind = priorLayer?.getAt(pos)?.kind;
+        animState.board.setEntity(
+          layer,
+          pos,
+          priorKind != null ? EntityInstance(priorKind) : null,
+        );
       }
     }
 
