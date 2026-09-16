@@ -266,11 +266,25 @@ class BeamSystem extends GameSystem {
       ...splitterIntersectionKinds.values,
       ...blockedKinds.values,
     };
+    // Snapshotted before the clear below wipes it: painting compares each
+    // cell's intended kind against what it showed *entering* this turn, not
+    // the just-cleared board, so a cell repainted with the exact same kind
+    // it already had is recognized as unchanged and — unlike the board
+    // write itself, which always happens so the state stays correct even
+    // when nothing observable follows from it — skips emitting
+    // `beam_cell_revealed`/`beam_traced` for it. Without this, a source
+    // whose retrace hasn't changed at all this turn (nothing moved, nothing
+    // was placed on its path) would still report itself as if it had,
+    // purely because the trace unconditionally reruns every turn — and a
+    // turn whose only *other* event is `actor_selected` would then wrongly
+    // read as a real move.
+    final priorMarkerKindAt = <Position, String>{};
     if (allMarkerKinds.isNotEmpty) {
       final layer = state.board.layers[pathLayer];
       if (layer != null) {
         for (final entry in layer.entries().toList()) {
           if (allMarkerKinds.contains(entry.value.kind)) {
+            priorMarkerKindAt[entry.key] = entry.value.kind;
             state.board.setEntity(pathLayer, entry.key, null);
           }
         }
@@ -319,6 +333,12 @@ class BeamSystem extends GameSystem {
       } catch (_) {
         continue;
       }
+      // A source's facing is only ever fired cardinally (see _handleFire's
+      // own isCardinal check), but a level can also author it directly in
+      // the initial board state, bypassing that check entirely — so it
+      // must be re-validated here too, matching Python's is_cardinal guard
+      // in this same loop.
+      if (!direction.isCardinal) continue;
 
       // Almost always one branch; more than one only when the ray passed
       // through a `splitters` cell and forked.
@@ -355,6 +375,10 @@ class BeamSystem extends GameSystem {
 
     for (final entry in sourceBranches) {
       for (final trace in entry.value) {
+        // Whether any cell of this branch actually differs from how it
+        // showed entering this turn — gates `beam_traced` below the same
+        // way each cell's own diff gates its `beam_cell_revealed`.
+        var branchChanged = false;
         for (final cell in trace.cells) {
           final kind = _markerKindFor(
             cell,
@@ -377,15 +401,18 @@ class BeamSystem extends GameSystem {
           if (kind != null) {
             state.board
                 .setEntity(pathLayer, cell.position, EntityInstance(kind));
-            // Emitted in trace order (source to endpoint) purely so a
-            // renderer can play the path back cell-by-cell instead of the
-            // board simply appearing fully painted — the state above is
-            // already final.
-            events.add(GameEvent('beam_cell_revealed', {
-              'position': cell.position,
-              'layer': pathLayer,
-              'kind': kind,
-            }));
+            if (priorMarkerKindAt[cell.position] != kind) {
+              branchChanged = true;
+              // Emitted in trace order (source to endpoint) purely so a
+              // renderer can play the path back cell-by-cell instead of the
+              // board simply appearing fully painted — the state above is
+              // already final.
+              events.add(GameEvent('beam_cell_revealed', {
+                'position': cell.position,
+                'layer': pathLayer,
+                'kind': kind,
+              }));
+            }
           }
         }
         visitedCells.addAll(trace.path);
@@ -400,11 +427,13 @@ class BeamSystem extends GameSystem {
         if (trace.cells.any((c) => c.role == 'intersection')) {
           anyIntersect = true;
         }
-        events.add(GameEvent('beam_traced', {
-          'position': entry.key,
-          'path': trace.path.map((p) => p.toJson()).toList(),
-          'hit': trace.hit,
-        }));
+        if (branchChanged) {
+          events.add(GameEvent('beam_traced', {
+            'position': entry.key,
+            'path': trace.path.map((p) => p.toJson()).toList(),
+            'hit': trace.hit,
+          }));
+        }
       }
     }
 

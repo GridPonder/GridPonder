@@ -1977,8 +1977,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// button first appears.
   Set<String> _hiddenActionIds(LevelState state) {
     final hidden = <String>{};
-    for (final system in widget.packService.game.systems) {
-      if (system.type != 'terrain_edit') continue;
+    // Per-level effective systems, not the pack's raw ones — a level's
+    // systemOverrides can disable a terrain_edit system or repoint its
+    // action/budgetVariable/kind entirely, and reading the raw config here
+    // would show a button for a control that either doesn't exist for this
+    // level or does something different than what its sprite/visibility
+    // implies.
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type != 'terrain_edit' || !system.enabled) continue;
       final budgetVar = system.config['budgetVariable'] as String?;
       if (budgetVar == null) continue;
       if (state.variables.containsKey(budgetVar)) continue;
@@ -1997,8 +2006,13 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// `_hiddenActionIds` lets through.
   Map<String, ImageProvider> _actionSprites() {
     final result = <String, ImageProvider>{};
-    for (final system in widget.packService.game.systems) {
-      if (system.type != 'terrain_edit') continue;
+    // See _hiddenActionIds: must reflect this level's own systemOverrides,
+    // not the pack's raw terrain_edit config.
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type != 'terrain_edit' || !system.enabled) continue;
       final actionId = system.config['action'] as String?;
       final kind = system.config['kind'] as String?;
       if (actionId == null || kind == null) continue;
@@ -2019,8 +2033,13 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// a text glyph standing in for it.
   Map<String, ImageProvider> _variableSprites() {
     final result = <String, ImageProvider>{};
-    for (final system in widget.packService.game.systems) {
-      if (system.type != 'terrain_edit') continue;
+    // See _hiddenActionIds: must reflect this level's own systemOverrides,
+    // not the pack's raw terrain_edit config.
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type != 'terrain_edit' || !system.enabled) continue;
       final budgetVar = system.config['budgetVariable'] as String?;
       final kind = system.config['kind'] as String?;
       if (budgetVar == null || kind == null) continue;

@@ -302,11 +302,25 @@ class BeamSystem(GameSystem):
         for dir_map in splitter_blocked_kinds.values():
             all_marker_kinds.update(dir_map.values())
         all_marker_kinds.discard(None)
+        # Snapshotted before the clear below wipes it: painting compares each
+        # cell's intended kind against what it showed *entering* this turn,
+        # not the just-cleared board, so a cell repainted with the exact same
+        # kind it already had is recognized as unchanged and — unlike the
+        # board write itself, which always happens so the state stays
+        # correct even when nothing observable follows from it — skips
+        # emitting beam_cell_revealed/beam_traced for it. Without this, a
+        # source whose retrace hasn't changed at all this turn (nothing
+        # moved, nothing was placed on its path) would still report itself
+        # as if it had, purely because the trace unconditionally reruns
+        # every turn — and a turn whose only *other* event is actor_selected
+        # would then wrongly read as a real move.
+        prior_marker_kind_at: dict[Pos, str] = {}
         if all_marker_kinds:
             layer = state.board.layers.get(path_layer)
             if layer is not None:
                 for pos, entity in list(layer.entries()):
                     if entity.kind in all_marker_kinds:
+                        prior_marker_kind_at[pos] = entity.kind
                         state.board.set_entity(path_layer, pos, None)
 
         source_layer_obj = state.board.layers.get(source_layer)
@@ -379,6 +393,10 @@ class BeamSystem(GameSystem):
             for cells, hit in branches:
                 path = [c.position for c in cells]
 
+                # Whether any cell of this branch actually differs from how
+                # it showed entering this turn — gates beam_traced below the
+                # same way each cell's own diff gates its beam_cell_revealed.
+                branch_changed = False
                 for cell in cells:
                     kind = self._marker_kind_for(
                         cell, path_kind, segment_kind_h, segment_kind_v,
@@ -390,16 +408,18 @@ class BeamSystem(GameSystem):
                     )
                     if kind is not None:
                         state.board.set_entity(path_layer, cell.position, Entity(kind))
-                        # Emitted in trace order (source to endpoint) purely so a
-                        # renderer can play the path back cell-by-cell instead of
-                        # the board simply appearing fully painted — the state
-                        # above is already final.
-                        events.append({
-                            "type": "beam_cell_revealed",
-                            "position": cell.position,
-                            "layer": path_layer,
-                            "kind": kind,
-                        })
+                        if prior_marker_kind_at.get(cell.position) != kind:
+                            branch_changed = True
+                            # Emitted in trace order (source to endpoint) purely so a
+                            # renderer can play the path back cell-by-cell instead of
+                            # the board simply appearing fully painted — the state
+                            # above is already final.
+                            events.append({
+                                "type": "beam_cell_revealed",
+                                "position": cell.position,
+                                "layer": path_layer,
+                                "kind": kind,
+                            })
                 visited_cells.update(path)
                 if hit:
                     any_hit = True
@@ -409,12 +429,13 @@ class BeamSystem(GameSystem):
                     any_hazard = True
                 if any(c.role == "intersection" for c in cells):
                     any_intersect = True
-                events.append({
-                    "type": "beam_traced",
-                    "position": src_pos,
-                    "path": [[p.x, p.y] for p in path],
-                    "hit": hit,
-                })
+                if branch_changed:
+                    events.append({
+                        "type": "beam_traced",
+                        "position": src_pos,
+                        "path": [[p.x, p.y] for p in path],
+                        "hit": hit,
+                    })
 
         if hit_variable is not None:
             state.variables[hit_variable] = 1 if any_hit else 0

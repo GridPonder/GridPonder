@@ -1442,7 +1442,20 @@ the same turn, each with its own full path and whether it reached a target),
 (once per marker painted this turn, in trace order — position, `pathLayer`,
 and the marker kind chosen for it; purely a renderer hook so a UI can play the
 path back cell-by-cell instead of the board simply appearing fully painted,
-since the state write itself already happened all at once)
+since the state write itself already happened all at once).
+Both are conditional on something actually changing: the board write for a
+traced cell happens every turn regardless (the state must stay correct even
+when nothing follows from it), but `beam_cell_revealed` for that cell — and
+`beam_traced` for its whole branch — fires only when the painted kind differs
+from what the cell already showed entering this turn. Since the retrace
+itself reruns every turn unconditionally, a source whose trace hasn't
+actually changed (nothing moved, nothing was placed on its path) would
+otherwise re-report an identical result every single turn, including ones
+where the only actual input was an unrelated `selectAction` tap — which
+matters because that pairs with the `actor_selected` exemption above: a
+selection-only turn must produce *no* events besides `actor_selected` to
+actually read as free, so `beam`'s own per-turn bookkeeping cannot leak
+through as if it were a real consequence of the action.
 
 **Config:**
 

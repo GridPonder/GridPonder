@@ -79,15 +79,6 @@ class PhaseRunner {
 
     // Phase 6: NPC resolution
     baseStage = advanceBase();
-    // Snapshotted before phase 6 runs: a system whose NPC resolution runs
-    // unconditionally every turn regardless of the action (`beam`, `sonar`,
-    // ...) would otherwise disqualify an otherwise selection-only turn from
-    // being free, just because its own always-on per-turn output — e.g. a
-    // beam retrace re-emitting `beam_traced` for a source aimed on some
-    // earlier turn — happened to land in the same event list. Phase 7 below
-    // checks only the events phases 2/3/5 produced as a direct reaction to
-    // this action, not phase 6's unconditional bookkeeping.
-    final preNpcEventCount = allEvents.length;
     final npcEvents = <GameEvent>[];
     for (final sys in systems) {
       final events = sys.executeNpcResolution(state, effectiveGame);
@@ -113,9 +104,18 @@ class PhaseRunner {
     // the UI, which reads this counter. Games that tap to switch between actors
     // would otherwise pay for the tap as well as the step. `turnCount` still
     // advances — it is the pipeline's tick, not a move.
-    final directEvents = allEvents.take(preNpcEventCount);
-    final selectionOnly = directEvents.isNotEmpty &&
-        directEvents.every((e) => e.type == 'actor_selected');
+    //
+    // This counts every event from every phase, including NPC resolution —
+    // deliberately not excluded wholesale, since a system whose NPC
+    // resolution has a genuine, gameplay-relevant effect every turn (e.g.
+    // `turn_cycle` advancing a signal) must still cost the action even when
+    // the action itself was just a selection. What keeps a system like
+    // `beam`, which also runs unconditionally every turn, from wrongly
+    // disqualifying a free selection is its own responsibility: it must
+    // only emit events when its retrace actually changed something, not on
+    // every turn regardless — see `beam`'s own docs.
+    final selectionOnly = allEvents.isNotEmpty &&
+        allEvents.every((e) => e.type == 'actor_selected');
     if (!selectionOnly) {
       state.actionCount++;
     }

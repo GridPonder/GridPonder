@@ -1,15 +1,25 @@
 // Parity mirror of engines/python/test_beam.py — regression coverage for
-// four issues raised in review of the Mirror Laser engine PR:
-//   1. Reselecting an already-aimed source must not count as an action,
-//      even though `beam`'s NPC-resolution retrace runs unconditionally
-//      every turn and keeps emitting beam_traced/beam_cell_revealed.
+// issues raised across two rounds of review of the Mirror Laser engine PR:
+//   1. Reselecting an already-aimed source must not count as an action.
+//      `beam`'s NPC-resolution retrace runs unconditionally every turn, so
+//      it must only emit beam_traced/beam_cell_revealed when the retrace
+//      actually changed something — not on every turn regardless — or a
+//      pure reselect would misreport itself as a real move. The first fix
+//      for this instead excluded all of NPC resolution from the
+//      selection-only check, which went too far: it let a selection tap
+//      "pay" for a genuine NPC-resolution mutation (e.g. `turn_cycle`
+//      advancing a signal every turn) for free, silently bypassing
+//      `max_actions`. See the "does not swallow a genuine NPC mutation"
+//      test below for that repro.
 //   2. A splitter kind with no `splitterGlowKinds`/`splitterBlockedKinds`
 //      configured must show no marker on its blocked side, not fall back
 //      to a generic wall-hit marker as if it weren't a splitter at all.
 //   3. Firing must revalidate `sourceTags` on the stored source cell, not
 //      just check it's non-empty, before writing a facing param onto it.
 //   4. Reflector/splitter redirects must be cardinal-only, matching the
-//      Python engine's `is_cardinal` check.
+//      Python engine's `is_cardinal` check — including a source's own
+//      level-authored initial `facing`, not just fire-action/redirect
+//      directions.
 import 'package:gridponder_engine/engine.dart';
 import 'package:test/test.dart';
 
@@ -90,6 +100,10 @@ GameDefinition _makeGame() {
         },
       },
       'decoy': {'layer': 'objects', 'tags': [], 'symbol': 'X'},
+      // Cycled by turn_cycle below — a stand-in for any NPC-resolution
+      // system whose effect is genuine gameplay state, not decoration.
+      'signal_a': {'layer': 'markers', 'tags': [], 'symbol': '1'},
+      'signal_b': {'layer': 'markers', 'tags': [], 'symbol': '2'},
     },
     'actions': [
       {
@@ -105,6 +119,19 @@ GameDefinition _makeGame() {
     ],
     'systems': [
       {'id': 'beam', 'type': 'beam', 'config': beamConfig},
+      // No triggerActions configured: advances every turn regardless of
+      // the action, the same "unconditional every turn" shape as beam's
+      // own retrace — but unlike beam, every advance is a real mutation.
+      // A no-op everywhere no signal_a/signal_b entity is placed, so this
+      // is inert for every other test in this file.
+      {
+        'id': 'signal_cycle',
+        'type': 'turn_cycle',
+        'config': {
+          'layer': 'markers',
+          'cycles': {'signal_a': 'signal_b', 'signal_b': 'signal_a'},
+        },
+      },
     ],
   };
   return GameDefinition.fromJson(data, id: 'test_beam');
@@ -113,6 +140,7 @@ GameDefinition _makeGame() {
 Map<String, dynamic> _makeLevel({
   List<List<dynamic>> ground = const [],
   List<List<dynamic>> objects = const [],
+  List<List<dynamic>> markers = const [],
   List<int> size = const [6, 6],
   List<Map<String, dynamic>> loseConditions = const [],
 }) {
@@ -136,6 +164,12 @@ Map<String, dynamic> _makeLevel({
                 'kind': o[2],
                 if (o.length > 3) 'facing': o[3],
               }
+          ],
+        },
+        'markers': {
+          'format': 'sparse',
+          'entries': [
+            for (final m in markers) {'position': [m[0], m[1]], 'kind': m[2]}
           ],
         },
       },
@@ -177,9 +211,46 @@ void main() {
       engine.executeTurn(_tap(0, 0));
       expect(engine.state.actionCount, 1,
           reason: 'reselecting the same, already-firing source must stay '
-              'free even though its beam retrace keeps emitting '
-              'beam_traced/beam_cell_revealed every turn regardless of '
-              'the action');
+              'free — its beam retrace reruns every turn, but the trace is '
+              'identical to what is already on the board, so it must not '
+              're-emit beam_traced/beam_cell_revealed for cells that have '
+              'not actually changed');
+    });
+
+    test(
+        'reselecting still costs an action when another NPC-resolution '
+        'system has a genuine effect every turn', () {
+      final engine = _engineFor(
+        _makeGame(),
+        _makeLevel(
+          objects: [
+            [0, 0, 'source']
+          ],
+          // turn_cycle's config above has no triggerActions, so it advances
+          // this every single turn regardless of the action — the same
+          // "unconditional every turn" shape as beam's own retrace, but
+          // unlike beam this is a genuine mutation every time it runs.
+          markers: [
+            [3, 3, 'signal_a']
+          ],
+        ),
+      );
+
+      engine.executeTurn(_tap(0, 0));
+      expect(engine.state.actionCount, 1,
+          reason: 'a selection tap must not get turn_cycle\'s genuine '
+              'per-turn mutation for free just because beam\'s own '
+              'passive retrace is correctly excluded');
+      expect(
+        engine.state.board.getEntity('markers', const Position(3, 3))?.kind,
+        'signal_b',
+        reason: 'the cycle really did advance this turn',
+      );
+
+      engine.executeTurn(_tap(0, 0));
+      expect(engine.state.actionCount, 2,
+          reason: 'and it keeps costing an action on every subsequent '
+              'reselect, since the signal keeps genuinely advancing');
     });
 
     test('reselecting does not trip a max_actions loss early', () {
@@ -338,6 +409,30 @@ void main() {
   });
 
   group('beam cardinal-only redirects', () {
+    test('a level-authored diagonal source facing is never traced', () {
+      final engine = _engineFor(
+        _makeGame(),
+        // No fire action involved at all — mirror_diag isn't even needed;
+        // this facing is set directly in the level's initial board state,
+        // the same way a level can author any other starting param.
+        _makeLevel(objects: [
+          [0, 0, 'source', 'up_left']
+        ]),
+      );
+
+      engine.executeTurn(_tap(5, 5));
+
+      expect(
+        engine.state.board.layers['markers']?.entries(),
+        isEmpty,
+        reason: 'a source facing diagonally must never be traced at all, '
+            "matching Python's is_cardinal check in the same retrace loop "
+            '— a source only ever gets a cardinal facing through fire_*, '
+            'but a level can author the initial facing directly and '
+            'bypass that',
+      );
+    });
+
     test('a reflector configured with a diagonal redirect ends the trace '
         'instead of turning diagonally', () {
       final engine = _engineFor(
