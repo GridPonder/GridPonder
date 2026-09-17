@@ -237,6 +237,20 @@ where both sides were empty.
 A theme can play a different [cell effect](06_theme.md#cell-effects) per `mode`
 with a `when` filter, e.g. `{"when": {"mode": "lift"}}`.
 
+### `cell_blocked`
+A cell refused what an operation would have put on it — currently a
+[`region_transform`](04_systems.md#28-region_transform) `exchange` with a
+`restrict` config. It arrives with `action_vetoed`, so the board is unchanged
+and the turn is not spent; the event exists to explain the refusal, and a theme
+can give it a cell effect like any other.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell that refused. |
+| `layer` | string | Layer the refused entity would have landed on. |
+| `kind` | string | Entity kind that was refused. |
+| `guardKind` | string | Entity kind doing the refusing. |
+
 ### `entity_fell`
 
 Emitted by [`balance_regions`](04_systems.md#224-balance_regions) when a cell's

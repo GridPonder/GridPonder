@@ -204,7 +204,8 @@ class SlidingBlocksTest(unittest.TestCase):
         )
 
         self.assertFalse(result.accepted)
-        self.assertEqual(result.events, [])
+        # A veto reports itself and nothing else: no movement, no cascade.
+        self.assertEqual([e["type"] for e in result.events], ["action_vetoed"])
         self.assertEqual(
             engine.state.board.multi_cell_objects[0].cells,
             [Pos(0, 0)],

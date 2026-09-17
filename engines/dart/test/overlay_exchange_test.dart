@@ -8,20 +8,35 @@ const _pairs = [
   [null, 'slot_empty'],
 ];
 
-GameDefinition _makeGame({List<dynamic> pairs = _pairs}) {
+GameDefinition _makeGame({
+  List<dynamic> pairs = _pairs,
+  Map<String, dynamic>? restrict,
+  Map<String, dynamic> cursorExtra = const {},
+}) {
   Map<String, dynamic> kind(String layer, String symbol,
           [List<String> tags = const []]) =>
       {'layer': layer, 'tags': tags, 'symbol': symbol};
+  final press = {
+    'type': 'exchange',
+    'action': 'press',
+    'layers': ['ink', 'held'],
+    'pairs': pairs,
+    if (restrict != null) 'restrict': restrict,
+  };
   final data = {
     'id': 'com.gridponder.test_overlay_exchange',
     'layers': [
       {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+      {'id': 'paper', 'occupancy': 'zero_or_one'},
       {'id': 'ink', 'occupancy': 'zero_or_one'},
       {'id': 'held', 'occupancy': 'zero_or_one'},
     ],
     'entityKinds': {
       'empty': kind('ground', '.'),
       'void': kind('ground', '#'),
+      'only_red': kind('paper', '4'),
+      'only_blue': kind('paper', '5'),
+      'plain': kind('paper', '='),
       'ink_red': kind('ink', 'r'),
       'ink_blue': kind('ink', 'b'),
       'held_red': kind('held', 'R', ['carried']),
@@ -48,20 +63,14 @@ GameDefinition _makeGame({List<dynamic> pairs = _pairs}) {
           'moveAction': 'move',
           'size': [2, 2],
           'carryLayers': ['held'],
+          ...cursorExtra,
         },
       },
       {
         'id': 'stamp',
         'type': 'region_transform',
         'config': {
-          'operations': {
-            'press': {
-              'type': 'exchange',
-              'action': 'press',
-              'layers': ['ink', 'held'],
-              'pairs': pairs,
-            },
-          },
+          'operations': {'press': press},
         },
       },
     ],
@@ -78,6 +87,7 @@ Map<String, dynamic> _level(
   (int, int) overlay = (0, 0),
   List<(int, int)> voids = const [],
   List<dynamic> goals = const [],
+  Map<(int, int), String> paper = const {},
 }) {
   List<dynamic> entries(Map<(int, int), String> m) => [
         for (final e in m.entries)
@@ -101,6 +111,7 @@ Map<String, dynamic> _level(
               },
           ],
         },
+        'paper': {'format': 'sparse', 'entries': entries(paper)},
         'ink': {'format': 'sparse', 'entries': entries(ink)},
         'held': {'format': 'sparse', 'entries': entries(held)},
       },
@@ -174,6 +185,28 @@ void main() {
       _move(engine, 'up');
       expect((engine.state.overlay!.x, engine.state.overlay!.y), (0, 0));
       expect(_kind(engine, 'held', 1, 1), 'held_red');
+    });
+
+    test('a blocked move spends a turn by default', () {
+      final engine = _engineFor(_makeGame(), _level({}, _slots()));
+      final result = _move(engine, 'left');
+      expect(result.accepted, isTrue);
+      expect(engine.state.actionCount, 1);
+    });
+
+    test('rejectNoOpMoves makes a blocked move free', () {
+      final engine = _engineFor(
+          _makeGame(cursorExtra: {'rejectNoOpMoves': true}),
+          _level({}, _slots(d: 'held_red')));
+      final result = _move(engine, 'up');
+      expect(result.accepted, isFalse);
+      expect(result.events.map((e) => e.type).toList(), ['action_vetoed']);
+      expect(engine.state.actionCount, 0);
+      expect(engine.undoDepth, 0);
+      // A move that does go somewhere is still charged.
+      expect(_move(engine, 'right').accepted, isTrue);
+      expect(engine.state.actionCount, 1);
+      expect(_kind(engine, 'held', 2, 1), 'held_red');
     });
   });
 
@@ -306,6 +339,95 @@ void main() {
       expect(engine.isWon, isFalse);
       _press(engine);
       expect(engine.isWon, isTrue);
+    });
+  });
+
+  group('region_transform exchange restrict', () {
+    const restrict = {
+      'layer': 'paper',
+      'accepts': {
+        'only_red': ['ink_red'],
+        'only_blue': ['ink_blue'],
+      },
+    };
+
+    TurnEngine engineFor(
+      Map<(int, int), String> ink,
+      Map<(int, int), String> held,
+      Map<(int, int), String> paper,
+    ) =>
+        _engineFor(
+            _makeGame(restrict: restrict), _level(ink, held, paper: paper));
+
+    test('one refusal vetoes the whole press', () {
+      // b would print blue on red-only paper; a, c and d are all legal.
+      final engine = engineFor(
+        {(0, 1): 'ink_red'},
+        _slots(a: 'held_red', b: 'held_blue'),
+        {(1, 0): 'only_red'},
+      );
+      final before = _snapshot(engine);
+      final result = _press(engine);
+      expect(result.accepted, isFalse);
+      expect(_snapshot(engine), before);
+      expect(result.events.where((e) => e.type == 'cell_exchanged'), isEmpty);
+    });
+
+    test('the refusal says where and why', () {
+      final engine =
+          engineFor({}, _slots(b: 'held_blue'), {(1, 0): 'only_red'});
+      final result = _press(engine);
+      final blocked =
+          result.events.where((e) => e.type == 'cell_blocked').toList();
+      expect(blocked, hasLength(1));
+      expect(blocked.first.position, const Position(1, 0));
+      expect(blocked.first.payload['kind'], 'ink_blue');
+      expect(blocked.first.payload['guardKind'], 'only_red');
+      expect(blocked.first.payload['layer'], 'ink');
+      expect(result.events.any((e) => e.type == 'action_vetoed'), isTrue);
+    });
+
+    test('a refused press costs nothing', () {
+      final engine =
+          engineFor({}, _slots(b: 'held_blue'), {(1, 0): 'only_red'});
+      final depth = engine.undoDepth;
+      _press(engine);
+      expect(engine.undoDepth, depth);
+    });
+
+    test('the permitted colour prints', () {
+      final engine = engineFor({}, _slots(b: 'held_red'), {(1, 0): 'only_red'});
+      expect(_press(engine).accepted, isTrue);
+      expect(_kind(engine, 'ink', 1, 0), 'ink_red');
+    });
+
+    test('receiving nothing is always permitted', () {
+      final engine =
+          engineFor({(1, 0): 'ink_red'}, _slots(), {(1, 0): 'only_red'});
+      expect(_press(engine).accepted, isTrue);
+      expect(_kind(engine, 'ink', 1, 0), isNull);
+      expect(_press(engine).accepted, isTrue);
+      expect(_kind(engine, 'ink', 1, 0), 'ink_red');
+    });
+
+    test('a kind outside accepts restricts nothing', () {
+      final engine = engineFor({}, _slots(b: 'held_blue'), {(1, 0): 'plain'});
+      expect(_press(engine).accepted, isTrue);
+      expect(_kind(engine, 'ink', 1, 0), 'ink_blue');
+    });
+
+    test('a swap is judged by what arrives', () {
+      final engine = engineFor(
+          {(1, 0): 'ink_blue'}, _slots(b: 'held_red'), {(1, 0): 'only_red'});
+      expect(_press(engine).accepted, isTrue);
+      expect(_kind(engine, 'ink', 1, 0), 'ink_red');
+      expect(_kind(engine, 'held', 1, 0), 'held_blue');
+    });
+
+    test('restrictions outside the overlay are ignored', () {
+      final engine =
+          engineFor({}, _slots(b: 'held_blue'), {(3, 2): 'only_red'});
+      expect(_press(engine).accepted, isTrue);
     });
   });
 }

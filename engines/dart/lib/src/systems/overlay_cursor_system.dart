@@ -57,6 +57,13 @@ class OverlayCursorSystem extends GameSystem {
       newY = newY.clamp(0, board.height - overlayHeight);
     }
 
+    // A move clamped to where the overlay already is changes nothing. Packs
+    // that count actions can refuse it, so bumping the edge costs no turn.
+    final rejectNoOp = config['rejectNoOpMoves'] as bool? ?? false;
+    if (rejectNoOp && newX == overlay.x && newY == overlay.y) {
+      return [GameEvent.actionVetoed()];
+    }
+
     if (newX != overlay.x || newY != overlay.y) {
       _carry(state, config, overlay, newX, newY);
     }

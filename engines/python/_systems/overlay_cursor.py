@@ -43,6 +43,10 @@ class OverlayCursorSystem(GameSystem):
         if constrained:
             nx = max(0, min(nx, state.board.width - ow))
             ny = max(0, min(ny, state.board.height - oh))
+        # A move clamped to where the overlay already is changes nothing. Packs
+        # that count actions can refuse it, so bumping the edge costs no turn.
+        if (nx, ny) == (overlay.x, overlay.y) and config.get("rejectNoOpMoves", False):
+            return [ev.action_vetoed()]
         if (nx, ny) != (overlay.x, overlay.y):
             _carry(state, config, overlay, nx, ny)
         state.overlay = OverlayCursor(nx, ny, overlay.width, overlay.height)

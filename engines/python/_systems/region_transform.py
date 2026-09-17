@@ -115,6 +115,35 @@ class RegionTransformSystem(GameSystem):
         def blank(entity: Optional[Entity], table: dict) -> bool:
             return entity is None or (entity.kind in table and table[entity.kind] is None)
 
+        # `restrict` guards the whole operation before it mutates anything: a
+        # cell may refuse what would land on it, and one refusal vetoes the
+        # press instead of exchanging the other cells.
+        restrict = op.get("restrict") or {}
+        accepts = restrict.get("accepts") or {}
+        guard_layer = board.layers.get(str(restrict.get("layer", "")))
+        if guard_layer is not None and accepts:
+            check_id = str(restrict.get("checkLayer", layer_ids[0]))
+            from_layer = second if check_id == layer_ids[0] else first
+            table = to_first if check_id == layer_ids[0] else to_second
+            blocked: list[dict] = []
+            for dy in range(h):
+                for dx in range(w):
+                    p = Pos(ox + dx, oy + dy)
+                    if not board.is_in_bounds(p) or board.is_void(p):
+                        continue
+                    guard = guard_layer.get(p)
+                    if guard is None:
+                        continue
+                    allowed = accepts.get(guard.kind)
+                    if allowed is None:
+                        continue
+                    incoming = cross(from_layer.get(p), table)
+                    if incoming is None or incoming.kind in list(allowed):
+                        continue
+                    blocked.append(ev.cell_blocked(p, check_id, incoming.kind, guard.kind))
+            if blocked:
+                return blocked + [ev.action_vetoed()]
+
         events: list[dict] = []
         for dy in range(h):
             for dx in range(w):

@@ -174,6 +174,38 @@ class RegionTransformSystem extends GameSystem {
         entity == null ||
         (table.containsKey(entity.kind) && table[entity.kind] == null);
 
+    // `restrict` guards the whole operation before it mutates anything: a
+    // cell may refuse what would land on it, and one refusal vetoes the press
+    // instead of exchanging the other cells.
+    final restrict = op['restrict'] as Map<String, dynamic>? ?? const {};
+    final accepts = restrict['accepts'] as Map<String, dynamic>? ?? const {};
+    final guardLayer = board.layers[restrict['layer']?.toString() ?? ''];
+    if (guardLayer != null && accepts.isNotEmpty) {
+      final checkId = restrict['checkLayer']?.toString() ?? layerIds[0];
+      final fromLayer = checkId == layerIds[0] ? second : first;
+      final table = checkId == layerIds[0] ? toFirst : toSecond;
+      final blocked = <GameEvent>[];
+      for (int dy = 0; dy < h; dy++) {
+        for (int dx = 0; dx < w; dx++) {
+          final pos = Position(ox + dx, oy + dy);
+          if (!board.isInBounds(pos) || board.isVoid(pos)) continue;
+          final guard = guardLayer.getAt(pos);
+          if (guard == null) continue;
+          final allowed = accepts[guard.kind];
+          if (allowed == null) continue;
+          final incoming = cross(fromLayer.getAt(pos), table);
+          if (incoming == null) continue;
+          final permitted = (allowed as List<dynamic>).map((k) => k.toString());
+          if (permitted.contains(incoming.kind)) continue;
+          blocked.add(
+              GameEvent.cellBlocked(pos, checkId, incoming.kind, guard.kind));
+        }
+      }
+      if (blocked.isNotEmpty) {
+        return [...blocked, GameEvent.actionVetoed()];
+      }
+    }
+
     final events = <GameEvent>[];
     for (int dy = 0; dy < h; dy++) {
       for (int dx = 0; dx < w; dx++) {

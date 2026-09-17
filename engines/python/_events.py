@@ -308,6 +308,19 @@ def action_vetoed() -> dict:
     return {"type": "action_vetoed"}
 
 
+def cell_blocked(pos: Pos, layer: str, kind: str, guard_kind: str) -> dict:
+    """A cell refused what an operation would have put on it. `kind` is the
+    refused entity, `guardKind` the entity that refuses it. Emitted alongside
+    `action_vetoed`, so the turn is not spent — it explains the refusal."""
+    return {
+        "type": "cell_blocked",
+        "position": pos,
+        "layer": layer,
+        "kind": kind,
+        "guardKind": guard_kind,
+    }
+
+
 def boxes_merged(pos: Pos, result_sides: int, a_sides: int, b_sides: int) -> dict:
     return {
         "type": "boxes_merged",

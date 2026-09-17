@@ -293,6 +293,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         av: tracking ? _trackedAvatar() : null,
         pos: tracking ? _trackedPositions() : null,
       );
+      // A rejection changes nothing, so the only thing that can explain it is
+      // whatever the vetoing system said — a `cell_blocked` flash on the cell
+      // that refused. Without it a legal-looking input just does nothing.
+      await _playCellEffects(result.events, ++_effectGeneration);
       return;
     }
     final tracking = _playtest.enabled;

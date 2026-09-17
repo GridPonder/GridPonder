@@ -138,11 +138,13 @@ class TurnEngine:
             events = sys.execute_action_resolution(action, state, effective_game)
             all_events.extend(events)
 
-        # If vetoed → reject (don't count the move)
+        # If vetoed → reject (don't count the move). The events raised before
+        # the veto still travel: the board did not change, but a refusal that
+        # cannot say why reads as a dropped input.
         if any(e["type"] == "action_vetoed" for e in all_events):
             if save_history:
                 self._history.pop()
-            return TurnResult(accepted=False, events=[], is_won=False, is_lost=False)
+            return TurnResult(accepted=False, events=all_events, is_won=False, is_lost=False)
 
         # Phase 3: Movement resolution
         for sys in systems:

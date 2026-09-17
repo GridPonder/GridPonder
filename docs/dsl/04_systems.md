@@ -269,7 +269,7 @@ Each turn the pipe runs two phases:
 
 **Phase:** `action_resolution`
 
-**Events emitted:** `overlay_moved`
+**Events emitted:** `overlay_moved`; `action_vetoed` for a refused no-op move
 
 **Config:**
 
@@ -280,11 +280,13 @@ Each turn the pipe runs two phases:
 | `anchorToAvatar` | boolean | `false` | If `true`, the overlay follows the avatar position. Avatar position = top-left (for 2x2) or center (for 3x3). |
 | `boundsConstrained` | boolean | `true` | Whether the overlay must stay fully within the board. |
 | `carryLayers` | array of strings | `[]` | Layers whose entities inside the overlay travel with it. Lets the overlay *hold* things — pair it with a `region_transform` `exchange` to pick up and put down. |
+| `rejectNoOpMoves` | boolean | `false` | Veto a move that leaves the overlay where it is (clamped at the board edge). The veto leaves state, counters, and undo history unchanged, so a `max_actions` budget is not charged for bumping the edge. |
 
 **Behavior:**
 1. On `moveAction`, shift overlay position in the action's direction.
 2. If `boundsConstrained`, clamp to board boundaries. A move clamped to where the
-   overlay already is changes nothing (the turn is still spent).
+   overlay already is changes nothing: with `rejectNoOpMoves` it emits
+   `action_vetoed` and costs nothing; otherwise the turn is still spent.
 3. If `anchorToAvatar`, overlay tracks avatar position automatically.
 4. If the overlay moved, translate every entity inside its old footprint on each
    `carryLayers` layer by the same offset. Entities outside the footprint are
@@ -300,7 +302,7 @@ Each turn the pipe runs two phases:
 
 **Phase:** `action_resolution`
 
-**Events emitted:** `region_transformed`; `cell_exchanged` per cell for `exchange`
+**Events emitted:** `region_transformed`; `cell_exchanged` per cell for `exchange`; `cell_blocked` + `action_vetoed` when an `exchange` `restrict` refuses
 
 **Config:**
 
@@ -318,6 +320,7 @@ Each operation:
 | `action` | string | Action id that triggers this operation. |
 | `layers` | `[first, second]` | `exchange` only: the two layers swapped. Ignores `affectedLayers`. |
 | `pairs` | array of `[firstKind, secondKind]` | `exchange` only, optional: kind translations applied as content crosses between the layers. Either side may be `null`. |
+| `restrict` | object | `exchange` only, optional: `{layer, accepts, checkLayer}` — cells that refuse what would land on them. One refusal vetoes the whole operation. |
 
 Example config:
 ```json
@@ -396,6 +399,32 @@ Kinds with no pair cross unchanged. Void cells do not exchange.
 Each cell where something moved emits `cell_exchanged` with `mode` `lift`,
 `drop` or `swap` (see [05_rules.md](05_rules.md#cell_exchanged)). Pressing twice
 in the same place restores the board.
+
+`restrict` lets cells refuse what an exchange would put on them. It is checked
+for the whole region *before* anything moves: one refusal vetoes the action, so
+the other cells do not exchange either, the turn is not spent and no undo entry
+is made. `layer` names the layer holding the refusing entities and `accepts`
+maps each of their kinds to the kinds it permits; a kind absent from `accepts`
+permits everything, and receiving nothing is always permitted. `checkLayer`
+chooses which side of the exchange is inspected (default `layers[0]`).
+
+```json
+"press": {
+  "type": "exchange",
+  "action": "press",
+  "layers": ["ink", "pocket"],
+  "pairs": [["ink_red", "carried_red"], [null, "pocket_empty"]],
+  "restrict": {
+    "layer": "restrict",
+    "accepts": {"only_red": ["ink_red"]}
+  }
+}
+```
+
+A refused cell emits `cell_blocked` (position, `layer`, the refused `kind` and
+the refusing `guardKind`) next to `action_vetoed`, so a theme can flash the cell
+that said no. Because the whole region is inspected first, a restriction can
+never half-apply an exchange, and every legal exchange stays reversible.
 
 **Behavior:**
 1. On the configured action, determine the operation type.

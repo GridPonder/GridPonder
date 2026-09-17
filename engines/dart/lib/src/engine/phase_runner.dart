@@ -51,8 +51,10 @@ class PhaseRunner {
     }
 
     // If a system explicitly vetoed the action, reject without counting a move.
+    // The events raised before the veto still travel: the board did not change,
+    // but a refusal that cannot say why reads as a dropped input.
     if (allEvents.any((e) => e.type == 'action_vetoed')) {
-      return TurnResult.rejected(state);
+      return TurnResult.rejected(state, events: allEvents);
     }
 
     // Phase 3: Movement resolution

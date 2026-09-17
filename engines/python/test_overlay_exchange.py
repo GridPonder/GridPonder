@@ -25,17 +25,25 @@ PAIRS = [
 ]
 
 
-def _make_game(pairs=PAIRS) -> GameDef:
+def _make_game(pairs=PAIRS, restrict=None, cursor_extra=None) -> GameDef:
+    press = {"type": "exchange", "action": "press",
+             "layers": ["ink", "held"], "pairs": pairs}
+    if restrict is not None:
+        press["restrict"] = restrict
     data = {
         "id": "com.gridponder.test_overlay_exchange",
         "layers": [
             {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            {"id": "paper", "occupancy": "zero_or_one"},
             {"id": "ink", "occupancy": "zero_or_one"},
             {"id": "held", "occupancy": "zero_or_one"},
         ],
         "entityKinds": {
             "empty": {"layer": "ground", "tags": []},
             "void": {"layer": "ground", "tags": []},
+            "only_red": {"layer": "paper", "tags": []},
+            "only_blue": {"layer": "paper", "tags": []},
+            "plain": {"layer": "paper", "tags": []},
             "ink_red": {"layer": "ink", "tags": []},
             "ink_blue": {"layer": "ink", "tags": []},
             "held_red": {"layer": "held", "tags": ["carried"]},
@@ -49,18 +57,18 @@ def _make_game(pairs=PAIRS) -> GameDef:
         ],
         "systems": [
             {"id": "cursor", "type": "overlay_cursor", "config": {
-                "moveAction": "move", "size": [2, 2], "carryLayers": ["held"]}},
+                "moveAction": "move", "size": [2, 2], "carryLayers": ["held"],
+                **(cursor_extra or {})}},
             {"id": "stamp", "type": "region_transform", "config": {
-                "operations": {"press": {
-                    "type": "exchange", "action": "press",
-                    "layers": ["ink", "held"], "pairs": pairs}}}},
+                "operations": {"press": press}}},
         ],
         "defaults": {"avatar": {"enabled": False}},
     }
     return GameDef.from_dict(data, id="test_overlay_exchange")
 
 
-def _level(ink, held, overlay=(0, 0), size=(4, 3), ground=(), goals=None) -> dict:
+def _level(ink, held, overlay=(0, 0), size=(4, 3), ground=(), goals=None,
+           paper=None) -> dict:
     return {
         "id": "t",
         "board": {
@@ -68,6 +76,9 @@ def _level(ink, held, overlay=(0, 0), size=(4, 3), ground=(), goals=None) -> dic
             "layers": {
                 "ground": {"format": "sparse", "entries": [
                     {"position": list(p), "kind": "void"} for p in ground]},
+                "paper": {"format": "sparse", "entries": [
+                    {"position": list(p), "kind": k}
+                    for p, k in (paper or {}).items()]},
                 "ink": {"format": "sparse", "entries": [
                     {"position": list(p), "kind": k} for p, k in ink.items()]},
                 "held": {"format": "sparse", "entries": [
@@ -120,6 +131,25 @@ class CarryTests(unittest.TestCase):
         _move(engine, "up")
         self.assertEqual((engine.state.overlay.x, engine.state.overlay.y), (0, 0))
         self.assertEqual(_kind(engine, "held", 1, 1), "held_red")
+
+    def test_blocked_move_spends_a_turn_by_default(self):
+        engine = TurnEngine(_make_game(), _level({}, _slots()))
+        result = _move(engine, "left")
+        self.assertTrue(result.accepted)
+        self.assertEqual(engine.state.action_count, 1)
+
+    def test_reject_no_op_moves_makes_a_blocked_move_free(self):
+        engine = TurnEngine(_make_game(cursor_extra={"rejectNoOpMoves": True}),
+                            _level({}, _slots(d="held_red")))
+        result = _move(engine, "up")
+        self.assertFalse(result.accepted)
+        self.assertEqual([e["type"] for e in result.events], ["action_vetoed"])
+        self.assertEqual(engine.state.action_count, 0)
+        self.assertEqual(engine.undo_depth, 0)
+        # A move that does go somewhere is still charged.
+        self.assertTrue(_move(engine, "right").accepted)
+        self.assertEqual(engine.state.action_count, 1)
+        self.assertEqual(_kind(engine, "held", 2, 1), "held_red")
 
     def test_overlay_position_is_part_of_the_state_key(self):
         engine = TurnEngine(_make_game(), _level({}, _slots()))
@@ -216,6 +246,83 @@ class ExchangeTests(unittest.TestCase):
         self.assertFalse(engine.is_won)
         _press(engine)
         self.assertTrue(engine.is_won)
+
+
+RESTRICT = {"layer": "paper", "accepts": {"only_red": ["ink_red"],
+                                          "only_blue": ["ink_blue"]}}
+
+
+class RestrictTests(unittest.TestCase):
+    """`restrict`: a cell may refuse what an exchange would put on it, and one
+    refusal vetoes the whole press."""
+
+    def _engine(self, ink, held, paper, overlay=(0, 0)):
+        return TurnEngine(_make_game(restrict=RESTRICT),
+                          _level(ink, held, overlay=overlay, paper=paper))
+
+    def test_one_refusal_vetoes_the_whole_press(self):
+        # b would print blue on red-only paper; a, c and d are all legal.
+        engine = self._engine({(0, 1): "ink_red"},
+                              _slots(a="held_red", b="held_blue"),
+                              {(1, 0): "only_red"})
+        before = engine.state.to_key()
+        result = _press(engine)
+        self.assertFalse(result.accepted)
+        self.assertEqual(before, engine.state.to_key())
+        # Nothing else moved: the legal corners did not exchange either.
+        self.assertEqual(_kind(engine, "held", 0, 0), "held_red")
+        self.assertEqual(_kind(engine, "ink", 0, 1), "ink_red")
+        self.assertFalse([e for e in result.events if e["type"] == "cell_exchanged"])
+
+    def test_the_refusal_says_where_and_why(self):
+        engine = self._engine({}, _slots(b="held_blue"), {(1, 0): "only_red"})
+        result = _press(engine)
+        blocked = [e for e in result.events if e["type"] == "cell_blocked"]
+        self.assertEqual(len(blocked), 1)
+        self.assertEqual(tuple(blocked[0]["position"]), (1, 0))
+        self.assertEqual(blocked[0]["kind"], "ink_blue")
+        self.assertEqual(blocked[0]["guardKind"], "only_red")
+        self.assertEqual(blocked[0]["layer"], "ink")
+        self.assertTrue([e for e in result.events if e["type"] == "action_vetoed"])
+
+    def test_a_refused_press_costs_nothing(self):
+        engine = self._engine({}, _slots(b="held_blue"), {(1, 0): "only_red"})
+        turns, depth = engine.state.turn_count, len(engine._history)
+        _press(engine)
+        self.assertEqual(engine.state.turn_count, turns)
+        self.assertEqual(len(engine._history), depth)
+
+    def test_the_permitted_colour_prints(self):
+        engine = self._engine({}, _slots(b="held_red"), {(1, 0): "only_red"})
+        self.assertTrue(_press(engine).accepted)
+        self.assertEqual(_kind(engine, "ink", 1, 0), "ink_red")
+
+    def test_receiving_nothing_is_always_permitted(self):
+        # An empty slot over restricted paper lifts what is there and leaves it
+        # blank, so the reverse of a legal press is always legal too.
+        engine = self._engine({(1, 0): "ink_red"}, _slots(), {(1, 0): "only_red"})
+        self.assertTrue(_press(engine).accepted)
+        self.assertIsNone(_kind(engine, "ink", 1, 0))
+        self.assertTrue(_press(engine).accepted)
+        self.assertEqual(_kind(engine, "ink", 1, 0), "ink_red")
+
+    def test_a_kind_outside_accepts_restricts_nothing(self):
+        engine = self._engine({}, _slots(b="held_blue"), {(1, 0): "plain"})
+        self.assertTrue(_press(engine).accepted)
+        self.assertEqual(_kind(engine, "ink", 1, 0), "ink_blue")
+
+    def test_a_swap_is_judged_by_what_arrives(self):
+        # Blue leaves the red-only cell and red arrives: legal, even though the
+        # cell held a forbidden colour a moment earlier.
+        engine = self._engine({(1, 0): "ink_blue"}, _slots(b="held_red"),
+                              {(1, 0): "only_red"})
+        self.assertTrue(_press(engine).accepted)
+        self.assertEqual(_kind(engine, "ink", 1, 0), "ink_red")
+        self.assertEqual(_kind(engine, "held", 1, 0), "held_blue")
+
+    def test_restrictions_outside_the_overlay_are_ignored(self):
+        engine = self._engine({}, _slots(b="held_blue"), {(3, 2): "only_red"})
+        self.assertTrue(_press(engine).accepted)
 
 
 if __name__ == "__main__":
