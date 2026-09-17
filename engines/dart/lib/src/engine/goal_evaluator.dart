@@ -9,13 +9,26 @@ import '../models/position.dart';
 class GoalStatus {
   final bool isWon;
   final Map<String, double> progress; // goalId → 0.0..1.0
+  final Map<String, bool> satisfied; // goalId → individually done this turn
 
-  const GoalStatus({required this.isWon, required this.progress});
+  const GoalStatus({
+    required this.isWon,
+    required this.progress,
+    this.satisfied = const {},
+  });
 }
 
 class GoalEvaluator {
   /// Evaluate all goals. Level is won when ALL goals are satisfied.
   /// Also processes sequence_match progress and emits goal_step_completed events.
+  ///
+  /// Per-goal `satisfied` is computed here (rather than a caller re-deriving
+  /// it from `progress`) because the two aren't equivalent: a zero-target
+  /// `variable_threshold` goal (e.g. a budget that must reach exactly 0)
+  /// reports `progress` 1.0 unconditionally — there's no lower value to
+  /// normalize against — regardless of whether it's actually `done`. A lose
+  /// condition that asks "is goal X met" (e.g. `premature_success`) needs the
+  /// real boolean, not that placeholder.
   GoalStatus evaluate(
     List<GoalDef> goals,
     LevelState state,
@@ -25,15 +38,17 @@ class GoalEvaluator {
     if (goals.isEmpty) return const GoalStatus(isWon: false, progress: {});
 
     final progress = <String, double>{};
+    final satisfied = <String, bool>{};
     bool allDone = true;
 
     for (final goal in goals) {
       final (done, prog) = _evaluateGoal(goal, state, game, pendingEvents);
       progress[goal.id] = prog;
+      satisfied[goal.id] = done;
       if (!done) allDone = false;
     }
 
-    return GoalStatus(isWon: allDone, progress: progress);
+    return GoalStatus(isWon: allDone, progress: progress, satisfied: satisfied);
   }
 
   (bool done, double progress) _evaluateGoal(

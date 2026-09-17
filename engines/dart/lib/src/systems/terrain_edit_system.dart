@@ -15,6 +15,12 @@ import 'runtime_variable.dart';
 /// terrain change: the rules engine cannot express it, because there is no
 /// "player acted at position" event — every action must be consumed by a
 /// system.
+///
+/// The position normally comes from the action's own `position` param, but
+/// when that's absent and `config.positionVariable` is set, it's read from
+/// `state.variables` instead — lets a zero-param button (e.g. a "place here"
+/// action fired after a separate select/aim step) target whatever position
+/// another action last wrote to that variable.
 class TerrainEditSystem extends GameSystem {
   const TerrainEditSystem({required super.id}) : super(type: 'terrain_edit');
 
@@ -28,7 +34,14 @@ class TerrainEditSystem extends GameSystem {
     final editAction = config['action'] as String? ?? 'place';
     if (action.actionId != editAction) return const [];
 
-    final pos = _parsePosition(action.params['position']);
+    var pos = _parsePosition(action.params['position']);
+    if (pos == null) {
+      // Falls back to a runtime variable when the action itself carries no
+      // position — lets a zero-param button act on whatever a prior
+      // position-carrying action (e.g. `tap_cell`) last selected.
+      final posVar = config['positionVariable'] as String?;
+      if (posVar != null) pos = _parsePosition(state.variables[posVar]);
+    }
     if (pos == null) return const [];
     if (!state.board.isInBounds(pos)) return const [];
 
