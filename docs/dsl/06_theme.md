@@ -69,12 +69,14 @@ Each gesture mapping:
 | `gesture` | string | **yes** | Input type: `swipe_cardinal`, `swipe_diagonal`, `tap_cell`, `button`, `key_press`. |
 | `action` | string | **yes** | Action `id` to emit. Must match an entry in `game.json` `actions`. |
 | `buttonId` | string | conditional | Required when `gesture` is `button`. UI control identifier. |
-| `key` | string | conditional | Required when `gesture` is `key_press`: a letter `a`–`z`, or `space` / `enter`. Checked before the arrow keys and WASD, so do not bind a letter those use. |
+| `key` | string | conditional | Required when `gesture` is `key_press`: a letter `a`–`z`, one of `up`/`down`/`left`/`right` for the arrow keys, or `space` / `enter`. Checked before the built-in arrow keys and WASD movement, so a binding for one of those keys replaces that movement. |
 | `paramMapping` | object | no | Maps input parameters to action parameters dynamically. |
 | `params` | object | no | Static parameters to include with the action. |
 | `showSelection` | boolean | no | When `true`, an accepted cell-tap action leaves a visible outline on its mapped cell until another cell is selected or the level state is reset. Solve and Hint replay update the same outline. Defaults to `false`. |
 
-**Platform behavior:** On mobile, gestures are used directly. On web/desktop, the engine maps arrow keys to `swipe_cardinal` equivalents, and provides on-screen buttons for `button`-type actions. Games can provide platform-specific overrides (future extension).
+**Platform behavior:** On mobile, gestures are used directly. On web/desktop, the engine maps arrow keys to `swipe_cardinal` equivalents (when the game has a `move`-style action), and provides on-screen buttons for `button`-type actions. Games can provide platform-specific overrides (future extension).
+
+**Keyboard-only actions.** A zero-param action bound only to `key_press` (no `button` entry) does not get an auto-rendered on-screen button — the reference app renders a button for every zero-param action *unless* the pack's own theme binds that action id exclusively to a non-button gesture. This lets a game offer purely keyboard-driven controls for some actions (e.g. four directional actions driven by the arrow keys) without cluttering the control row.
 
 ---
 

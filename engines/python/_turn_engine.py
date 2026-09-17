@@ -194,6 +194,16 @@ class TurnEngine:
         # as one in the UI, which reads this counter. Games that tap to switch
         # between actors would otherwise pay for the tap as well as the step.
         # `turn_count` still advances — it is the pipeline's tick, not a move.
+        #
+        # This counts every event from every phase, including NPC resolution
+        # — deliberately not excluded wholesale, since a system whose NPC
+        # resolution has a genuine, gameplay-relevant effect every turn (e.g.
+        # `turn_cycle` advancing a signal) must still cost the action even
+        # when the action itself was just a selection. What keeps a system
+        # like `beam`, which also runs unconditionally every turn, from
+        # wrongly disqualifying a free selection is its own responsibility:
+        # it must only emit events when its retrace actually changed
+        # something, not on every turn regardless — see `beam`'s own docs.
         selection_only = bool(all_events) and all(
             e["type"] == "actor_selected" for e in all_events)
         if not selection_only:
@@ -203,14 +213,15 @@ class TurnEngine:
         goals = self._level.get("goals", []) or []
         lose_conditions = self._level.get("loseConditions", []) or []
 
-        is_won, goal_progress = evaluate_goals(goals, state, effective_game, all_events)
+        is_won, goal_progress, goal_satisfied = evaluate_goals(goals, state, effective_game, all_events)
         if is_won:
             state.is_won = True
 
         is_lost = False
         lose_reason = None
         if not state.is_won:
-            is_lost, lose_reason = evaluate_lose(lose_conditions, state, goals, effective_game)
+            is_lost, lose_reason = evaluate_lose(
+                lose_conditions, state, goals, effective_game, goal_satisfied)
             if is_lost:
                 state.is_lost = True
 

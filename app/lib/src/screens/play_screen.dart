@@ -164,6 +164,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// Idle facing of actors by the cell they stand on — see [actorIdleFacing].
   Map<Position, String> _actorFacingAt = {};
 
+  /// [_actorFacingAt] as it stood before each accepted turn, one entry per
+  /// engine undo step, so undo restores facing along with the engine state.
+  final List<Map<Position, String>> _actorFacingHistory = [];
+
   /// Transforms the current turn resolved after its paths started, kept off
   /// the held board until the last path lands — see [transformsAfterFirstPath].
   List<GameEvent> _hiddenTransforms = const [];
@@ -181,6 +185,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
   // True once the current level's win has been recorded to ProgressService.
   bool _wonHandled = false;
+
+  // Which `LoseStatus.reason` ended the level, if any — looked up in
+  // `loseDescriptions` so the loss banner can explain why, instead of always
+  // showing the generic "Out of Moves!" text.
+  String? _loseReason;
 
   // AI play state
   bool _aiRunning = false;
@@ -243,7 +252,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _agentMemory.clear();
     _lastFloodColor = null;
     _actorFacingAt = {};
+    _actorFacingHistory.clear();
     _wonHandled = false;
+    _loseReason = null;
     _selectedMultiCellObjectId = null;
     _selectedCellPosition = null;
     _lineOfSightFeedbacks = const [];
@@ -299,6 +310,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       await _playCellEffects(result.events, ++_effectGeneration);
       return;
     }
+    if (result.isLost) {
+      _loseReason = result.loseReason;
+    }
+    _actorFacingHistory.add(_actorFacingAt);
     final tracking = _playtest.enabled;
     _playtest.move(
       action: action.actionId,
@@ -352,6 +367,17 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     setState(() {
       _animating = true;
+      // _engine.state already carries this turn's final isWon/isLost — set
+      // the instant the action was accepted, long before the player has
+      // seen any of it. Holding the pre-turn board here closes that gap:
+      // build() shows this instead of falling through to the engine's
+      // already-won state on this very first post-accept rebuild, before
+      // _playTurnMotion below has even started deciding what (if anything)
+      // else to hold. Every path through _playTurnMotion either overwrites
+      // this immediately with a more specific held board, or — for a turn
+      // with no travelling entities at all — leaves it as the correct
+      // starting point for whatever reveal animation runs next.
+      _preAnimState = preState;
       if (selectedCell != null) _selectedCellPosition = selectedCell;
       // A machine that reversed on the spot moved nowhere, so no animation
       // will turn it; its engine-written `facing` param is the only record.
@@ -373,7 +399,18 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // What is left is decoration — fire catching, a tool scorching — and making
     // input wait on it costs a press every time one lands mid-effect.
     if (!mounted) return;
-    setState(() => _animating = false);
+    setState(() {
+      _animating = false;
+      // Safety net for a turn whose animation never touched _preAnimState
+      // at all — no travelling entities, no beam reveal, nothing (e.g. a
+      // pure select tap, or a placement before any source is aimed). Every
+      // stage above that *does* hold a board also clears it back to null
+      // once it finishes, so by this point the only way it can still equal
+      // the placeholder set before _playTurnMotion is that nothing ever
+      // took over from it — and it must not outlive the turn it was
+      // covering for, or the board stays frozen on the pre-turn state.
+      if (identical(_preAnimState, preState)) _preAnimState = null;
+    });
     if (_resetRequested) {
       _onReset();
       return;
@@ -579,6 +616,12 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         _hiddenTransforms = const [];
       });
     }
+
+    // Kept inside motion (input still held) rather than promoted to the
+    // decorative players in _runAction: two overlapping beam reveals writing
+    // _preAnimState from different turns is exactly the flicker this replay
+    // was built to avoid, so it must finish before a later turn can start.
+    await _playBeamReveal(preState, result.events);
   }
 
   /// The board to hold while motion plays: the finished turn, with [pending]
@@ -863,6 +906,104 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     await Future.delayed(const Duration(milliseconds: 220));
     if (!mounted || _effectGeneration != generation) return;
     setState(() => _lineOfSightFeedbacks = const []);
+  }
+
+  /// Plays a `beam` system's path back one cell at a time, in the trace order
+  /// its `beam_cell_revealed` events were emitted, instead of the full path
+  /// simply appearing at once (the engine already painted it all in one
+  /// state write — this is pure playback on top of that).
+  ///
+  /// The engine retraces the *entire* beam every turn, unconditionally —
+  /// that's what lets placing a new reflector update the beam without a
+  /// separate re-fire step — so a naive replay of every `beam_cell_revealed`
+  /// event would redraw the whole beam from scratch on every single action,
+  /// including ones that don't touch the beam at all (placing a reflector on
+  /// the far side of the board), and would make an unrelated branch's target
+  /// flash off and back on. Only cells whose marker actually *changes*
+  /// relative to what's already on screen get blanked and replayed; a cell
+  /// already showing exactly this turn's kind is left untouched.
+  Future<void> _playBeamReveal(
+    LevelState preState,
+    List<GameEvent> events,
+  ) async {
+    final reveals =
+        events.where((e) => e.type == 'beam_cell_revealed').toList();
+    if (reveals.isEmpty) return;
+
+    final finalState = _engine.state;
+    // Starts from the FINAL state, not the pre-turn one: anything this
+    // turn's action changed outside the marker layer(s) — a newly placed
+    // reflector, a converted mine — must already be visible from the very
+    // first animated frame, not vanish and pop back in once the reveal
+    // finishes. Only the marker layer(s) below get selectively rolled back
+    // so they can still be replayed cell by cell.
+    final animState = finalState.copy();
+    // Held back until the reveal finishes even though the rest of animState
+    // already reflects the final board: build() shows this state for as
+    // long as _preAnimState is set, and the beam visually reaching the
+    // target is exactly what the loop below is about to animate — the
+    // win/lose banner must wait for that moment, not fire the instant the
+    // turn was accepted, before the player has seen the beam get there.
+    animState.isWon = false;
+    animState.isLost = false;
+
+    final revealedPositions = {
+      for (final e in reveals)
+        if (e.position != null) e.position!,
+    };
+    final touchedLayers = {
+      for (final e in reveals) e.payload['layer'] as String? ?? 'markers',
+    };
+    for (final layer in touchedLayers) {
+      final priorLayer = preState.board.layers[layer];
+      final finalLayer = finalState.board.layers[layer];
+
+      // A marker this turn's retrace no longer covers (the beam retracted
+      // from it — a reflector was removed, or the aim changed) gets no
+      // beam_cell_revealed event of its own, since the engine only emits one
+      // for a cell it actually painted. Clear those up front, instantly and
+      // without fanfare — the interesting animation is the beam's own path,
+      // not cells going dark.
+      if (priorLayer != null) {
+        for (final entry in priorLayer.entries().toList()) {
+          final pos = entry.key;
+          if (revealedPositions.contains(pos)) continue;
+          if (finalLayer?.getAt(pos)?.kind != entry.value.kind) {
+            animState.board.setEntity(layer, pos, null);
+          }
+        }
+      }
+
+      // Every cell this turn's reveal will (re)paint is rolled back to how
+      // it looked before the turn — or blank, if it's new — so the loop
+      // below can replay it being drawn in instead of it already sitting
+      // there in its final form.
+      for (final pos in revealedPositions) {
+        final priorKind = priorLayer?.getAt(pos)?.kind;
+        animState.board.setEntity(
+          layer,
+          pos,
+          priorKind != null ? EntityInstance(priorKind) : null,
+        );
+      }
+    }
+
+    for (final e in reveals) {
+      if (!mounted) return;
+      final pos = e.position;
+      final layer = e.payload['layer'] as String? ?? 'markers';
+      final kind = e.payload['kind'] as String?;
+      if (pos == null || kind == null) continue;
+      // Already showing exactly this — e.g. an untouched branch replayed
+      // solely because the engine retraces everything — so there's nothing
+      // to animate here.
+      if (animState.board.getEntity(layer, pos)?.kind == kind) continue;
+      animState.board.setEntity(layer, pos, EntityInstance(kind));
+      setState(() => _preAnimState = animState);
+      await Future.delayed(const Duration(milliseconds: 45));
+    }
+    if (!mounted) return;
+    setState(() => _preAnimState = null);
   }
 
   Position? _positionFromPayload(dynamic raw) {
@@ -1575,7 +1716,12 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // loss re-arms the fail event — dying again is a fresh fact.
     final depthBefore = _engine.undoDepth;
     setState(() {
-      _engine.undo();
+      if (_engine.undo()) {
+        // Facing is app-side, so the engine's undo cannot restore it.
+        _actorFacingAt = _actorFacingHistory.isNotEmpty
+            ? _actorFacingHistory.removeLast()
+            : {};
+      }
       _lastFloodColor = null;
       _selectedCellPosition = null;
       _syncSelectedMultiCellObject();
@@ -1611,6 +1757,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _cellEffects.value = const [];
     _lineOfSightFeedbacks = const [];
     _actorFacingAt = {};
+    _actorFacingHistory.clear();
     _hiddenTransforms = const [];
   }
 
@@ -1729,6 +1876,16 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     return null;
   }
 
+  SystemDef? get _beamSystem {
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type == 'beam' && system.enabled) return system;
+    }
+    return null;
+  }
+
   ActionDef? get _primaryMoveAction {
     final effectiveGame = widget.packService.game.withSystemOverrides(
       _levelDef.systemOverrides,
@@ -1809,6 +1966,92 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       }
     }
     return available;
+  }
+
+  /// Action ids to omit from the control row entirely, not merely gray out.
+  ///
+  /// A `terrain_edit` action whose `budgetVariable` this level's own
+  /// `state.variables` never declares is a mechanic this level hasn't
+  /// introduced at all (the system would treat the missing variable as a
+  /// zero budget and silently refuse every tap anyway) — so its button has
+  /// no reason to render, the same way `_buildReadoutStrip` already skips a
+  /// readout whose variable a level doesn't declare. Lets a pack phase in a
+  /// placeable piece over its level sequence without any per-level UI
+  /// bookkeeping: the level that first sets the variable is the level whose
+  /// button first appears.
+  Set<String> _hiddenActionIds(LevelState state) {
+    final hidden = <String>{};
+    // Per-level effective systems, not the pack's raw ones — a level's
+    // systemOverrides can disable a terrain_edit system or repoint its
+    // action/budgetVariable/kind entirely, and reading the raw config here
+    // would show a button for a control that either doesn't exist for this
+    // level or does something different than what its sprite/visibility
+    // implies.
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type != 'terrain_edit' || !system.enabled) continue;
+      final budgetVar = system.config['budgetVariable'] as String?;
+      if (budgetVar == null) continue;
+      if (state.variables.containsKey(budgetVar)) continue;
+      final actionId = system.config['action'] as String?;
+      if (actionId != null) hidden.add(actionId);
+    }
+    return hidden;
+  }
+
+  /// Action id → resolved sprite of the entity kind that action places, for
+  /// every `terrain_edit`-backed placement action whose placed kind has a
+  /// `sprite`. Lets the control button preview exactly what tapping it will
+  /// place (the mirror, the divider, ...) instead of a generic icon — pure
+  /// lookup over already-loaded pack data, cheap enough to rebuild every
+  /// frame and unaffected by which level is current beyond which buttons
+  /// `_hiddenActionIds` lets through.
+  Map<String, ImageProvider> _actionSprites() {
+    final result = <String, ImageProvider>{};
+    // See _hiddenActionIds: must reflect this level's own systemOverrides,
+    // not the pack's raw terrain_edit config.
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type != 'terrain_edit' || !system.enabled) continue;
+      final actionId = system.config['action'] as String?;
+      final kind = system.config['kind'] as String?;
+      if (actionId == null || kind == null) continue;
+      final sprite = widget.packService.game.entityKinds[kind]?.sprite;
+      // A templated sprite (e.g. "assets/emitter_beam_{facing}.png") has no
+      // instance yet to read the param from — skip it rather than resolve a
+      // literal "{facing}" path, and fall back to the icon.
+      if (sprite == null || sprite.contains('{')) continue;
+      result[actionId] = widget.packService.resolvePackImage(sprite);
+    }
+    return result;
+  }
+
+  /// Runtime variable → resolved sprite of the entity kind a `terrain_edit`
+  /// system's `budgetVariable` tracks. Same idea as [_actionSprites], keyed
+  /// by the readout's variable instead of the button's action id, so a
+  /// budget chip (e.g. "\ 1") can show the actual placed sprite instead of
+  /// a text glyph standing in for it.
+  Map<String, ImageProvider> _variableSprites() {
+    final result = <String, ImageProvider>{};
+    // See _hiddenActionIds: must reflect this level's own systemOverrides,
+    // not the pack's raw terrain_edit config.
+    final effectiveGame = widget.packService.game.withSystemOverrides(
+      _levelDef.systemOverrides,
+    );
+    for (final system in effectiveGame.systems) {
+      if (system.type != 'terrain_edit' || !system.enabled) continue;
+      final budgetVar = system.config['budgetVariable'] as String?;
+      final kind = system.config['kind'] as String?;
+      if (budgetVar == null || kind == null) continue;
+      final sprite = widget.packService.game.entityKinds[kind]?.sprite;
+      if (sprite == null || sprite.contains('{')) continue;
+      result[budgetVar] = widget.packService.resolvePackImage(sprite);
+    }
+    return result;
   }
 
   void _onCellTap(int x, int y) {
@@ -2236,6 +2479,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     _engine.reset();
     setState(() {
+      _actorFacingAt = {};
+      _actorFacingHistory.clear();
       _aiRunning = true;
       _lastThinking = null;
       _lastResponse = null;
@@ -2381,7 +2626,20 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     }
   }
 
+  /// Resolves a theme `key_press` binding's `key` string to a
+  /// [LogicalKeyboardKey]. Accepts a single a-z letter (the original
+  /// convention) or one of `up`/`down`/`left`/`right`, so a pack can bind
+  /// arrow keys to any action generically instead of only the hardcoded
+  /// arrow-to-`move` fallback below.
   static LogicalKeyboardKey? _keyForChar(String char) {
+    const arrows = {
+      'up': LogicalKeyboardKey.arrowUp,
+      'down': LogicalKeyboardKey.arrowDown,
+      'left': LogicalKeyboardKey.arrowLeft,
+      'right': LogicalKeyboardKey.arrowRight,
+    };
+    final arrow = arrows[char.toLowerCase()];
+    if (arrow != null) return arrow;
     const map = {
       'a': LogicalKeyboardKey.keyA,
       'b': LogicalKeyboardKey.keyB,
@@ -2674,7 +2932,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                         !_animating,
                     hintStatuses: hintStatuses,
                     availableActionIds: _availableFloodActions(state),
+                    hiddenActionIds: _hiddenActionIds(state),
+                    actionSprites: _actionSprites(),
                     palette: widget.packService.theme?.palette,
+                    gestureMap: widget.packService.theme?.controls?.gestureMap,
                   ),
                 ),
               ],
@@ -2903,18 +3164,23 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// `ui.readouts`. Pack-agnostic: the app never learns what a given variable
   /// means, only how to draw a labelled number.
   Widget _buildReadoutStrip(LevelState state, List<GameReadout> readouts) {
+    final sprites = _variableSprites();
     return Wrap(
       spacing: 8,
       runSpacing: 6,
       alignment: WrapAlignment.center,
       children: [
         for (final r in readouts)
-          _buildReadoutChip(r, state.variables[r.variable]),
+          _buildReadoutChip(r, state.variables[r.variable], sprites[r.variable]),
       ],
     );
   }
 
-  Widget _buildReadoutChip(GameReadout readout, Object? rawValue) {
+  Widget _buildReadoutChip(
+    GameReadout readout,
+    Object? rawValue,
+    ImageProvider? labelSprite,
+  ) {
     final number = (rawValue is num) ? rawValue.toInt() : null;
     final blank = number == null || number == readout.blankWhen;
     final tint = readout.color == null
@@ -2940,14 +3206,16 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
             decoration: BoxDecoration(shape: BoxShape.circle, color: tint),
           ),
           const SizedBox(width: 8),
-          Text(
-            readout.label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.grey.shade700,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
+          labelSprite != null
+              ? Image(image: labelSprite, width: 16, height: 16, fit: BoxFit.contain)
+              : Text(
+                  readout.label,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey.shade700,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
           const SizedBox(width: 8),
           Text(
             blank ? '—' : '$number',
@@ -3573,12 +3841,24 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Position? _selectedActorPosition(LevelState state) {
-    final config = _individualActorSystem?.config;
-    if (config == null) return null;
-    final positionKey =
-        config['selectedPositionVariable'] as String? ??
-        'selectedActorPosition';
-    return _positionFromPayload(state.variables[positionKey]);
+    final iaConfig = _individualActorSystem?.config;
+    if (iaConfig != null) {
+      final positionKey =
+          iaConfig['selectedPositionVariable'] as String? ??
+          'selectedActorPosition';
+      final pos = _positionFromPayload(state.variables[positionKey]);
+      if (pos != null) return pos;
+    }
+    // `beam`-based games have no avatar or moving actor, so the same ring
+    // highlight is repurposed to show which cell the last `tap_cell` landed
+    // on — the only feedback a player gets that their tap registered.
+    final beamConfig = _beamSystem?.config;
+    if (beamConfig != null) {
+      final positionKey =
+          beamConfig['selectedCellVariable'] as String? ?? 'selectedCell';
+      return _positionFromPayload(state.variables[positionKey]);
+    }
+    return null;
   }
 
   void _showGameInfo() {
@@ -3641,15 +3921,18 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
             ),
             const SizedBox(width: 12),
           ],
-          Text(
-            _movesLabel(state),
-            style: TextStyle(
-              color: state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
-              fontSize: 13,
-              fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
+          if (widget.packService.game.ui.showMoves) ...[
+            Text(
+              _movesLabel(state),
+              style: TextStyle(
+                color:
+                    state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
+                fontSize: 13,
+                fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
+              ),
             ),
-          ),
-          const SizedBox(width: 4),
+            const SizedBox(width: 4),
+          ],
           GestureDetector(
             onTap: () {
               final boardText = TextRenderer.render(
@@ -3730,6 +4013,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildLossBanner() {
+    final customMessage = _loseReason == null
+        ? null
+        : widget.packService.game.loseDescriptions[_loseReason];
+    final title = customMessage == null ? 'Out of Moves!' : 'Game Over';
+    final subtitle = customMessage ?? 'Plan the order more carefully.';
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
@@ -3741,18 +4029,18 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Text(
-            'Out of Moves!',
-            style: TextStyle(
+          Text(
+            title,
+            style: const TextStyle(
               color: Colors.white,
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
           ),
           const SizedBox(height: 4),
-          const Text(
-            'Plan the order more carefully.',
-            style: TextStyle(color: Colors.white70, fontSize: 13),
+          Text(
+            subtitle,
+            style: const TextStyle(color: Colors.white70, fontSize: 13),
           ),
           const SizedBox(height: 10),
           Row(

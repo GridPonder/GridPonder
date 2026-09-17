@@ -86,6 +86,17 @@ class EntityKindDef {
   /// branches (currently `number`, `num_<N>` for value-coloured numeric tiles).
   final Map<String, dynamic>? display;
 
+  /// Whether the renderer should paint this layer's default kind's sprite
+  /// underneath this entity's own sprite/display before drawing it — so a
+  /// solid ground-layer kind (a wall, a placed reflector, anything that
+  /// replaces the default terrain rather than sitting on an object layer
+  /// above it) still shows that terrain's texture through any transparent
+  /// pixels, instead of the bare canvas. Equivalent to (and checked in
+  /// addition to) setting `groundBeneath: true` inside a `display` block —
+  /// this top-level field is what a `sprite`-only kind (no `display` block
+  /// at all) needs to opt in, since the nested form has nothing to nest in.
+  final bool groundBeneath;
+
   const EntityKindDef({
     required this.id,
     required this.layer,
@@ -101,6 +112,7 @@ class EntityKindDef {
     this.motion = const {},
     this.outline,
     this.display,
+    this.groundBeneath = false,
   });
 
   factory EntityKindDef.fromJson(String id, Map<String, dynamic> j) {
@@ -132,6 +144,7 @@ class EntityKindDef {
       motion: (j['motion'] as Map?)?.cast<String, dynamic>() ?? const {},
       outline: (j['outline'] as Map?)?.cast<String, dynamic>(),
       display: (j['display'] as Map?)?.cast<String, dynamic>(),
+      groundBeneath: j['groundBeneath'] as bool? ?? false,
     );
   }
 

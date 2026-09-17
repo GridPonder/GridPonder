@@ -106,6 +106,16 @@ class PhaseRunner {
     // the UI, which reads this counter. Games that tap to switch between actors
     // would otherwise pay for the tap as well as the step. `turnCount` still
     // advances — it is the pipeline's tick, not a move.
+    //
+    // This counts every event from every phase, including NPC resolution —
+    // deliberately not excluded wholesale, since a system whose NPC
+    // resolution has a genuine, gameplay-relevant effect every turn (e.g.
+    // `turn_cycle` advancing a signal) must still cost the action even when
+    // the action itself was just a selection. What keeps a system like
+    // `beam`, which also runs unconditionally every turn, from wrongly
+    // disqualifying a free selection is its own responsibility: it must
+    // only emit events when its retrace actually changed something, not on
+    // every turn regardless — see `beam`'s own docs.
     final selectionOnly = allEvents.isNotEmpty &&
         allEvents.every((e) => e.type == 'actor_selected');
     if (!selectionOnly) {
@@ -126,6 +136,7 @@ class PhaseRunner {
         state,
         goals: _level.goals,
         game: effectiveGame,
+        goalSatisfied: goalStatus.satisfied,
       );
       if (loseStatus.isLost) {
         state.isLost = true;
@@ -214,6 +225,9 @@ class PhaseRunner {
               'actors',
               durationMs: dur,
               stage: motionStage,
+              // A copy: the board's params are written in place by later
+              // turns, and the sprite must show the NPC as it moved.
+              params: Map<String, dynamic>.of(entity.params),
             ));
           }
         }

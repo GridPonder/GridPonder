@@ -14,6 +14,7 @@ class LoseEvaluator {
     LevelState state, {
     List<GoalDef> goals = const [],
     GameDefinition? game,
+    Map<String, bool> goalSatisfied = const {},
   }) {
     for (final cond in conditions) {
       switch (cond.type) {
@@ -21,6 +22,30 @@ class LoseEvaluator {
           final limit = cond.config['limit'] as int;
           if (state.actionCount >= limit) {
             return LoseStatus(isLost: true, reason: 'max_actions');
+          }
+        // Fires when the player's action satisfied `triggerGoalId` (e.g. a
+        // beam-puzzle's "hit" goal, which for a multi-target level only
+        // means *every* target lit) without having also satisfied every
+        // goal in `requiredGoalIds` — the level's other, less visible
+        // requirements (every reflector placed, every placed reflector
+        // actually on-path). Reuses the level's own `goals` array rather
+        // than duplicating that config: "the loose reading of the puzzle is
+        // already satisfied, but the real solution isn't" is generic beyond
+        // this one game — any puzzle whose ostensible goal is reachable by a
+        // shortcut that skips its real constraints can use this.
+        case 'premature_success':
+          final triggerId = cond.config['triggerGoalId'] as String;
+          final requiredIds =
+              (cond.config['requiredGoalIds'] as List?)?.cast<String>() ??
+                  const <String>[];
+          final triggered = goalSatisfied[triggerId] ?? false;
+          final allRequiredMet =
+              requiredIds.every((id) => goalSatisfied[id] ?? false);
+          if (triggered && !allRequiredMet) {
+            return LoseStatus(
+              isLost: true,
+              reason: 'premature_success:$triggerId',
+            );
           }
         case 'variable_threshold':
           final name = cond.config['variable'] as String;
