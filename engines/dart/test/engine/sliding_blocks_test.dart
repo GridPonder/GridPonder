@@ -169,7 +169,8 @@ void main() {
     }));
 
     expect(result.accepted, isFalse);
-    expect(result.events, isEmpty);
+    // A veto reports itself and nothing else: no movement, no cascade.
+    expect(result.events.map((e) => e.type), ['action_vetoed']);
     expect(
       engine.state.board.getMultiCellObject('moving')?.cells,
       [const Position(0, 0)],

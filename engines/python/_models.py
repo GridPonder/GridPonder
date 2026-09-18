@@ -542,7 +542,13 @@ class GameState:
         av = self.avatar
         avatar_key = (av.enabled, av.position, av.facing, av.item)
         vars_key = _freeze_value(self.variables)
-        return (board_key, mco_key, avatar_key, vars_key)
+        # The overlay is player state in its own right: two boards that differ
+        # only in where the cursor sits are different states. Packs that move
+        # the avatar in lockstep with the overlay hid this; a pack without an
+        # avatar does not.
+        ov = self.overlay
+        overlay_key = (ov.x, ov.y, ov.width, ov.height) if ov else None
+        return (board_key, mco_key, avatar_key, vars_key, overlay_key)
 
 
 def _freeze_value(value):

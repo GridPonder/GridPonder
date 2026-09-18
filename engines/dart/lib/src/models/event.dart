@@ -273,12 +273,49 @@ class GameEvent {
   static GameEvent overlayMoved(List<int> pos) =>
       GameEvent('overlay_moved', {'position': pos});
 
+  /// One cell of a `region_transform` exchange. [mode] is `lift` (the first
+  /// layer's content crossed to an empty second layer), `drop` (the reverse)
+  /// or `swap` (both held something). The kinds are the ones found before the
+  /// exchange, null for nothing.
+  static GameEvent cellExchanged(
+    Position pos,
+    String mode,
+    String firstLayer,
+    String secondLayer,
+    String? firstKind,
+    String? secondKind,
+  ) =>
+      GameEvent('cell_exchanged', {
+        'position': pos,
+        'mode': mode,
+        'firstLayer': firstLayer,
+        'secondLayer': secondLayer,
+        'firstKind': firstKind,
+        'secondKind': secondKind,
+      });
+
   static GameEvent cellsFlooded(List<Position> cells) =>
       GameEvent('cells_flooded', {'cells': cells});
 
   /// Signals that a system explicitly rejects the action (turn should not
   /// count as a move). Used by flood_fill when no adjacent target cells exist.
   static GameEvent actionVetoed() => const GameEvent('action_vetoed', {});
+
+  /// A cell refused what an operation would have put on it. [kind] is the
+  /// refused entity, [guardKind] the entity that refuses it. Emitted alongside
+  /// [actionVetoed], so the turn is not spent — it explains the refusal.
+  static GameEvent cellBlocked(
+    Position pos,
+    String layer,
+    String kind,
+    String guardKind,
+  ) =>
+      GameEvent('cell_blocked', {
+        'position': pos,
+        'layer': layer,
+        'kind': kind,
+        'guardKind': guardKind,
+      });
 
   static GameEvent boxesMerged(
           Position pos, int resultSides, int aSides, int bSides) =>

@@ -157,10 +157,14 @@ class TurnResult {
     this.loseReason,
   });
 
-  static TurnResult rejected(LevelState state) => TurnResult(
+  static TurnResult rejected(
+    LevelState state, {
+    List<GameEvent> events = const [],
+  }) =>
+      TurnResult(
         accepted: false,
         newState: state,
-        events: const [],
+        events: events,
         animations: const [],
         goalProgress: const {},
         isWon: false,

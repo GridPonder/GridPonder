@@ -49,6 +49,7 @@ class TurnEngine {
       _actionHistory.add(action);
     } else {
       _history.removeLast(); // nothing changed, discard undo entry
+      return TurnResult.rejected(_state, events: result.events);
     }
 
     return result;
@@ -66,7 +67,10 @@ class TurnEngine {
     if (_state.isWon || _state.isLost) {
       return TurnResult.rejected(_state);
     }
-    return _runner.run(action, _state.copy());
+    final result = _runner.run(action, _state.copy());
+    return result.accepted
+        ? result
+        : TurnResult.rejected(_state, events: result.events);
   }
 
   /// Undo the last action.

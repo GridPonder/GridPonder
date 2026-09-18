@@ -136,13 +136,21 @@ class TurnEngine:
         # Phase 2: Action resolution
         for sys in systems:
             events = sys.execute_action_resolution(action, state, effective_game)
-            all_events.extend(events)
 
-        # If vetoed → reject (don't count the move)
-        if any(e["type"] == "action_vetoed" for e in all_events):
-            if save_history:
-                self._history.pop()
-            return TurnResult(accepted=False, events=[], is_won=False, is_lost=False)
+            # A veto rejects the whole transaction. Only the vetoing system's
+            # events describe that rejection; earlier events describe changes
+            # to the working state that will be discarded.
+            if any(e["type"] == "action_vetoed" for e in events):
+                if save_history:
+                    self._history.pop()
+                return TurnResult(
+                    accepted=False,
+                    events=events,
+                    is_won=False,
+                    is_lost=False,
+                )
+
+            all_events.extend(events)
 
         # Phase 3: Movement resolution
         for sys in systems:

@@ -308,6 +308,19 @@ def action_vetoed() -> dict:
     return {"type": "action_vetoed"}
 
 
+def cell_blocked(pos: Pos, layer: str, kind: str, guard_kind: str) -> dict:
+    """A cell refused what an operation would have put on it. `kind` is the
+    refused entity, `guardKind` the entity that refuses it. Emitted alongside
+    `action_vetoed`, so the turn is not spent — it explains the refusal."""
+    return {
+        "type": "cell_blocked",
+        "position": pos,
+        "layer": layer,
+        "kind": kind,
+        "guardKind": guard_kind,
+    }
+
+
 def boxes_merged(pos: Pos, result_sides: int, a_sides: int, b_sides: int) -> dict:
     return {
         "type": "boxes_merged",
@@ -320,6 +333,25 @@ def boxes_merged(pos: Pos, result_sides: int, a_sides: int, b_sides: int) -> dic
 
 def region_transformed(op_type: str) -> dict:
     return {"type": "region_transformed", "opType": op_type}
+
+
+def cell_exchanged(
+    pos: Pos, mode: str, layers: list[str],
+    first_kind: Optional[str], second_kind: Optional[str],
+) -> dict:
+    """One cell of a `region_transform` exchange. `mode` is `lift` (the first
+    layer's content crossed to an empty second layer), `drop` (the reverse) or
+    `swap` (both held something). The kinds are the ones found before the
+    exchange, `None` for nothing."""
+    return {
+        "type": "cell_exchanged",
+        "position": pos,
+        "mode": mode,
+        "firstLayer": layers[0],
+        "secondLayer": layers[1],
+        "firstKind": first_kind,
+        "secondKind": second_kind,
+    }
 
 
 def avatar_caught(pos: Pos, npc_kind: str, npc_id: str) -> dict:
