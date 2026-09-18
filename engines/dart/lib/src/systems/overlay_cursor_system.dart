@@ -65,7 +65,9 @@ class OverlayCursorSystem extends GameSystem {
     }
 
     if (newX != overlay.x || newY != overlay.y) {
-      _carry(state, config, overlay, newX, newY);
+      if (!_carry(state, config, overlay, newX, newY)) {
+        return [GameEvent.actionVetoed()];
+      }
     }
     state.overlay = overlay.copyWith(x: newX, y: newY);
     return [GameEvent.overlayMoved([newX, newY])];
@@ -73,7 +75,12 @@ class OverlayCursorSystem extends GameSystem {
 
   /// Translates every entity inside the old footprint on each `carryLayers`
   /// layer by the overlay's displacement, so the cursor can hold things.
-  void _carry(
+  ///
+  /// The move is atomic: every carried entity must have an in-bounds,
+  /// unoccupied destination before any layer is mutated. Cells in the old
+  /// footprint are allowed destinations because their contents move in the
+  /// same transaction.
+  bool _carry(
     LevelState state,
     Map<String, dynamic> config,
     OverlayCursor overlay,
@@ -81,23 +88,41 @@ class OverlayCursorSystem extends GameSystem {
     int newY,
   ) {
     final carryLayers = (config['carryLayers'] as List<dynamic>? ?? const [])
-        .map((l) => l.toString());
+        .map((l) => l.toString())
+        .toSet();
+    final moves = <(String, Position, Position, EntityInstance)>[];
+
+    bool wasInsideOldFootprint(Position pos) =>
+        pos.x >= overlay.x &&
+        pos.x < overlay.x + overlay.width &&
+        pos.y >= overlay.y &&
+        pos.y < overlay.y + overlay.height;
+
+    // Validate the complete move before clearing a single source cell.
     for (final layerId in carryLayers) {
       final layer = state.board.layers[layerId];
       if (layer == null) continue;
-      final held = <(int, int, EntityInstance)>[];
       for (int dy = 0; dy < overlay.height; dy++) {
         for (int dx = 0; dx < overlay.width; dx++) {
-          final pos = Position(overlay.x + dx, overlay.y + dy);
-          final entity = layer.getAt(pos);
+          final from = Position(overlay.x + dx, overlay.y + dy);
+          final entity = layer.getAt(from);
           if (entity == null) continue;
-          held.add((dx, dy, entity));
-          layer.setAt(pos, null);
+          final to = Position(newX + dx, newY + dy);
+          if (!state.board.isInBounds(to)) return false;
+          if (!wasInsideOldFootprint(to) && layer.getAt(to) != null) {
+            return false;
+          }
+          moves.add((layerId, from, to, entity));
         }
       }
-      for (final (dx, dy, entity) in held) {
-        layer.setAt(Position(newX + dx, newY + dy), entity);
-      }
     }
+
+    for (final (layerId, from, _, _) in moves) {
+      state.board.layers[layerId]!.setAt(from, null);
+    }
+    for (final (layerId, _, to, entity) in moves) {
+      state.board.layers[layerId]!.setAt(to, entity);
+    }
+    return true;
   }
 }

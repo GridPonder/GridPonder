@@ -46,15 +46,16 @@ class PhaseRunner {
     // Phase 2: Action resolution
     for (final sys in systems) {
       final events = sys.executeActionResolution(action, state, effectiveGame);
+
+      // A veto rejects the whole transaction. Only the events emitted by the
+      // vetoing system describe that rejection; events from earlier systems
+      // describe mutations of the working state that will be discarded.
+      if (events.any((e) => e.type == 'action_vetoed')) {
+        return TurnResult.rejected(state, events: events);
+      }
+
       allEvents.addAll(events);
       _collectAnimations(events, state, animations, baseStage);
-    }
-
-    // If a system explicitly vetoed the action, reject without counting a move.
-    // The events raised before the veto still travel: the board did not change,
-    // but a refusal that cannot say why reads as a dropped input.
-    if (allEvents.any((e) => e.type == 'action_vetoed')) {
-      return TurnResult.rejected(state, events: allEvents);
     }
 
     // Phase 3: Movement resolution

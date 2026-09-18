@@ -193,7 +193,9 @@ class RegionTransformSystem extends GameSystem {
           if (guard == null) continue;
           final allowed = accepts[guard.kind];
           if (allowed == null) continue;
-          final incoming = cross(fromLayer.getAt(pos), table);
+          final source = fromLayer.getAt(pos);
+          if (blank(source, table)) continue;
+          final incoming = cross(source, table);
           if (incoming == null) continue;
           final permitted = (allowed as List<dynamic>).map((k) => k.toString());
           if (permitted.contains(incoming.kind)) continue;

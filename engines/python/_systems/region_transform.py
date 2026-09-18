@@ -137,7 +137,10 @@ class RegionTransformSystem(GameSystem):
                     allowed = accepts.get(guard.kind)
                     if allowed is None:
                         continue
-                    incoming = cross(from_layer.get(p), table)
+                    source = from_layer.get(p)
+                    if blank(source, table):
+                        continue
+                    incoming = cross(source, table)
                     if incoming is None or incoming.kind in list(allowed):
                         continue
                     blocked.append(ev.cell_blocked(p, check_id, incoming.kind, guard.kind))
@@ -185,4 +188,3 @@ class RegionTransformSystem(GameSystem):
             a, b = pair
             return {a: b, b: a}
         return {}
-

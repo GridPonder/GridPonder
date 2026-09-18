@@ -12,16 +12,35 @@ GameDefinition _makeGame({
   List<dynamic> pairs = _pairs,
   Map<String, dynamic>? restrict,
   Map<String, dynamic> cursorExtra = const {},
+  String exchangeAction = 'press',
+  bool exchangeBeforeCursor = false,
 }) {
   Map<String, dynamic> kind(String layer, String symbol,
           [List<String> tags = const []]) =>
       {'layer': layer, 'tags': tags, 'symbol': symbol};
   final press = {
     'type': 'exchange',
-    'action': 'press',
+    'action': exchangeAction,
     'layers': ['ink', 'held'],
     'pairs': pairs,
     if (restrict != null) 'restrict': restrict,
+  };
+  final cursorSystem = {
+    'id': 'cursor',
+    'type': 'overlay_cursor',
+    'config': {
+      'moveAction': 'move',
+      'size': [2, 2],
+      'carryLayers': ['held'],
+      ...cursorExtra,
+    },
+  };
+  final exchangeSystem = {
+    'id': 'stamp',
+    'type': 'region_transform',
+    'config': {
+      'operations': {'press': press},
+    },
   };
   final data = {
     'id': 'com.gridponder.test_overlay_exchange',
@@ -55,25 +74,9 @@ GameDefinition _makeGame({
       },
       {'id': 'press', 'params': <String, dynamic>{}},
     ],
-    'systems': [
-      {
-        'id': 'cursor',
-        'type': 'overlay_cursor',
-        'config': {
-          'moveAction': 'move',
-          'size': [2, 2],
-          'carryLayers': ['held'],
-          ...cursorExtra,
-        },
-      },
-      {
-        'id': 'stamp',
-        'type': 'region_transform',
-        'config': {
-          'operations': {'press': press},
-        },
-      },
-    ],
+    'systems': exchangeBeforeCursor
+        ? [exchangeSystem, cursorSystem]
+        : [cursorSystem, exchangeSystem],
     'defaults': {
       'avatar': {'enabled': false},
     },
@@ -207,6 +210,77 @@ void main() {
       expect(_move(engine, 'right').accepted, isTrue);
       expect(engine.state.actionCount, 1);
       expect(_kind(engine, 'held', 2, 1), 'held_red');
+    });
+
+    test('a destination collision vetoes the whole carry', () {
+      final held = _slots(a: 'held_red')..[(2, 0)] = 'held_blue';
+      final engine = _engineFor(_makeGame(), _level({}, held));
+      final before = _snapshot(engine);
+
+      final result = _move(engine, 'right');
+
+      expect(result.accepted, isFalse);
+      expect(result.events.map((e) => e.type), ['action_vetoed']);
+      expect(_snapshot(engine), before);
+      expect(_kind(engine, 'held', 2, 0), 'held_blue');
+      expect(engine.undoDepth, 0);
+    });
+
+    test('an unconstrained carry cannot lose entities out of bounds', () {
+      final engine = _engineFor(
+        _makeGame(cursorExtra: {'boundsConstrained': false}),
+        _level({}, _slots(a: 'held_red')),
+      );
+      final before = _snapshot(engine);
+
+      final result = _move(engine, 'left');
+
+      expect(result.accepted, isFalse);
+      expect(result.events.map((e) => e.type), ['action_vetoed']);
+      expect(_snapshot(engine), before);
+      expect(engine.undoDepth, 0);
+    });
+
+    test('a veto reports no events from rolled-back systems', () {
+      final engine = _engineFor(
+        _makeGame(
+          exchangeAction: 'move',
+          exchangeBeforeCursor: true,
+          cursorExtra: {'rejectNoOpMoves': true},
+        ),
+        _level({(0, 0): 'ink_red'}, _slots()),
+      );
+      final before = _snapshot(engine);
+
+      final result = _move(engine, 'left');
+
+      expect(result.accepted, isFalse);
+      expect(result.events.map((e) => e.type), ['action_vetoed']);
+      expect(_snapshot(engine), before);
+      expect(result.newState, same(engine.state));
+      expect(_kind(engine, 'ink', 0, 0), 'ink_red');
+    });
+
+    test('a vetoed preview exposes only the committed state', () {
+      final engine = _engineFor(
+        _makeGame(
+          exchangeAction: 'move',
+          exchangeBeforeCursor: true,
+          cursorExtra: {'rejectNoOpMoves': true},
+        ),
+        _level({(0, 0): 'ink_red'}, _slots()),
+      );
+      final before = _snapshot(engine);
+
+      final result = engine.previewTurn(
+        const GameAction('move', {'direction': 'left'}),
+      );
+
+      expect(result.accepted, isFalse);
+      expect(result.events.map((e) => e.type), ['action_vetoed']);
+      expect(result.newState, same(engine.state));
+      expect(_snapshot(engine), before);
+      expect(_kind(engine, 'ink', 0, 0), 'ink_red');
     });
   });
 
@@ -408,6 +482,26 @@ void main() {
       expect(_kind(engine, 'ink', 1, 0), isNull);
       expect(_press(engine).accepted, isTrue);
       expect(_kind(engine, 'ink', 1, 0), 'ink_red');
+    });
+
+    test('a placeholder arriving on the second layer is still nothing', () {
+      const secondLayerRestrict = {
+        'layer': 'paper',
+        'checkLayer': 'held',
+        'accepts': {
+          'only_red': ['held_red'],
+        },
+      };
+      final engine = _engineFor(
+        _makeGame(restrict: secondLayerRestrict),
+        _level({}, _slots(a: 'held_blue'), paper: {(0, 0): 'only_red'}),
+      );
+
+      final result = _press(engine);
+
+      expect(result.accepted, isTrue);
+      expect(_kind(engine, 'ink', 0, 0), 'ink_blue');
+      expect(_kind(engine, 'held', 0, 0), 'slot_empty');
     });
 
     test('a kind outside accepts restricts nothing', () {

@@ -269,7 +269,8 @@ Each turn the pipe runs two phases:
 
 **Phase:** `action_resolution`
 
-**Events emitted:** `overlay_moved`; `action_vetoed` for a refused no-op move
+**Events emitted:** `overlay_moved`; `action_vetoed` for a refused no-op or
+unsafe carry move
 
 **Config:**
 
@@ -289,7 +290,9 @@ Each turn the pipe runs two phases:
    `action_vetoed` and costs nothing; otherwise the turn is still spent.
 3. If `anchorToAvatar`, overlay tracks avatar position automatically.
 4. If the overlay moved, translate every entity inside its old footprint on each
-   `carryLayers` layer by the same offset. Entities outside the footprint are
+   `carryLayers` layer by the same offset. The carry is atomic: if a carried
+   entity would leave the board or overwrite an entity outside the old
+   footprint, the whole move is vetoed and nothing changes. Other entities are
    untouched, so a carry layer normally holds nothing anywhere else.
 5. Update `state.overlay.position`.
 6. Emit `overlay_moved`.
@@ -405,7 +408,8 @@ for the whole region *before* anything moves: one refusal vetoes the action, so
 the other cells do not exchange either, the turn is not spent and no undo entry
 is made. `layer` names the layer holding the refusing entities and `accepts`
 maps each of their kinds to the kinds it permits; a kind absent from `accepts`
-permits everything, and receiving nothing is always permitted. `checkLayer`
+permits everything, and receiving nothing is always permitted. A source kind
+whose `pairs` translation is `null` is also conceptual nothing. `checkLayer`
 chooses which side of the exchange is inspected (default `layers[0]`).
 
 ```json

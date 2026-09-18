@@ -25,11 +25,17 @@ PAIRS = [
 ]
 
 
-def _make_game(pairs=PAIRS, restrict=None, cursor_extra=None) -> GameDef:
-    press = {"type": "exchange", "action": "press",
+def _make_game(pairs=PAIRS, restrict=None, cursor_extra=None,
+               exchange_action="press", exchange_before_cursor=False) -> GameDef:
+    press = {"type": "exchange", "action": exchange_action,
              "layers": ["ink", "held"], "pairs": pairs}
     if restrict is not None:
         press["restrict"] = restrict
+    cursor_system = {"id": "cursor", "type": "overlay_cursor", "config": {
+        "moveAction": "move", "size": [2, 2], "carryLayers": ["held"],
+        **(cursor_extra or {})}}
+    exchange_system = {"id": "stamp", "type": "region_transform", "config": {
+        "operations": {"press": press}}}
     data = {
         "id": "com.gridponder.test_overlay_exchange",
         "layers": [
@@ -55,13 +61,8 @@ def _make_game(pairs=PAIRS, restrict=None, cursor_extra=None) -> GameDef:
                                                     "values": ["up", "down", "left", "right"]}}},
             {"id": "press", "params": {}},
         ],
-        "systems": [
-            {"id": "cursor", "type": "overlay_cursor", "config": {
-                "moveAction": "move", "size": [2, 2], "carryLayers": ["held"],
-                **(cursor_extra or {})}},
-            {"id": "stamp", "type": "region_transform", "config": {
-                "operations": {"press": press}}},
-        ],
+        "systems": ([exchange_system, cursor_system] if exchange_before_cursor
+                    else [cursor_system, exchange_system]),
         "defaults": {"avatar": {"enabled": False}},
     }
     return GameDef.from_dict(data, id="test_overlay_exchange")
@@ -156,6 +157,51 @@ class CarryTests(unittest.TestCase):
         before = engine.state.to_key()
         _move(engine, "right")
         self.assertNotEqual(before, engine.state.to_key())
+
+    def test_destination_collision_vetoes_the_whole_carry(self):
+        held = _slots(a="held_red")
+        held[(2, 0)] = "held_blue"
+        engine = TurnEngine(_make_game(), _level({}, held))
+        before = engine.state.to_key()
+
+        result = _move(engine, "right")
+
+        self.assertFalse(result.accepted)
+        self.assertEqual([e["type"] for e in result.events], ["action_vetoed"])
+        self.assertEqual(engine.state.to_key(), before)
+        self.assertEqual(_kind(engine, "held", 2, 0), "held_blue")
+        self.assertEqual(engine.undo_depth, 0)
+
+    def test_unconstrained_carry_cannot_lose_entities_out_of_bounds(self):
+        engine = TurnEngine(
+            _make_game(cursor_extra={"boundsConstrained": False}),
+            _level({}, _slots(a="held_red")),
+        )
+        before = engine.state.to_key()
+
+        result = _move(engine, "left")
+
+        self.assertFalse(result.accepted)
+        self.assertEqual([e["type"] for e in result.events], ["action_vetoed"])
+        self.assertEqual(engine.state.to_key(), before)
+        self.assertEqual(engine.undo_depth, 0)
+
+    def test_veto_reports_no_events_from_rolled_back_systems(self):
+        engine = TurnEngine(
+            _make_game(
+                exchange_action="move",
+                exchange_before_cursor=True,
+                cursor_extra={"rejectNoOpMoves": True},
+            ),
+            _level({(0, 0): "ink_red"}, _slots()),
+        )
+        before = engine.state.to_key()
+
+        result = _move(engine, "left")
+
+        self.assertFalse(result.accepted)
+        self.assertEqual([e["type"] for e in result.events], ["action_vetoed"])
+        self.assertEqual(engine.state.to_key(), before)
 
 
 class ExchangeTests(unittest.TestCase):
@@ -305,6 +351,23 @@ class RestrictTests(unittest.TestCase):
         self.assertIsNone(_kind(engine, "ink", 1, 0))
         self.assertTrue(_press(engine).accepted)
         self.assertEqual(_kind(engine, "ink", 1, 0), "ink_red")
+
+    def test_placeholder_arriving_on_second_layer_is_still_nothing(self):
+        restrict = {
+            "layer": "paper",
+            "checkLayer": "held",
+            "accepts": {"only_red": ["held_red"]},
+        }
+        engine = TurnEngine(
+            _make_game(restrict=restrict),
+            _level({}, _slots(a="held_blue"), paper={(0, 0): "only_red"}),
+        )
+
+        result = _press(engine)
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(_kind(engine, "ink", 0, 0), "ink_blue")
+        self.assertEqual(_kind(engine, "held", 0, 0), "slot_empty")
 
     def test_a_kind_outside_accepts_restricts_nothing(self):
         engine = self._engine({}, _slots(b="held_blue"), {(1, 0): "plain"})
