@@ -51,6 +51,25 @@ def object_removed(pos: Pos, kind: str, animation: str | None = None) -> dict:
     return e
 
 
+def entity_path_moved(
+    path: list[Pos],
+    kind: str,
+    params: dict | None = None,
+    layer: str = "objects",
+    removed_at_end: bool = False,
+) -> dict:
+    """An entity followed an ordered multi-cell route in one turn."""
+    return {
+        "type": "entity_path_moved",
+        "position": path[-1],
+        "path": path,
+        "kind": kind,
+        "params": params or {},
+        "layer": layer,
+        "removedAtEnd": removed_at_end,
+    }
+
+
 def line_of_sight_detected(
     source: Pos,
     target: Pos,
@@ -83,6 +102,21 @@ def cell_transformed(pos: Pos, from_kind: str, to_kind: str, layer: str) -> dict
         "position": pos,
         "fromKind": from_kind,
         "toKind": to_kind,
+        "layer": layer,
+    }
+
+
+def entity_fell(pos: Pos, kind: str, layer: str) -> dict:
+    """A body was on a cell whose ground gave way beneath it.
+
+    `layer` is the board layer the body was removed from, or `"avatar"` for the
+    avatar — which is not removed from the board, because a lose condition ends
+    the level in the same turn and the renderer still has to draw it falling.
+    """
+    return {
+        "type": "entity_fell",
+        "position": pos,
+        "kind": kind,
         "layer": layer,
     }
 
@@ -274,6 +308,19 @@ def action_vetoed() -> dict:
     return {"type": "action_vetoed"}
 
 
+def cell_blocked(pos: Pos, layer: str, kind: str, guard_kind: str) -> dict:
+    """A cell refused what an operation would have put on it. `kind` is the
+    refused entity, `guardKind` the entity that refuses it. Emitted alongside
+    `action_vetoed`, so the turn is not spent — it explains the refusal."""
+    return {
+        "type": "cell_blocked",
+        "position": pos,
+        "layer": layer,
+        "kind": kind,
+        "guardKind": guard_kind,
+    }
+
+
 def boxes_merged(pos: Pos, result_sides: int, a_sides: int, b_sides: int) -> dict:
     return {
         "type": "boxes_merged",
@@ -286,6 +333,25 @@ def boxes_merged(pos: Pos, result_sides: int, a_sides: int, b_sides: int) -> dic
 
 def region_transformed(op_type: str) -> dict:
     return {"type": "region_transformed", "opType": op_type}
+
+
+def cell_exchanged(
+    pos: Pos, mode: str, layers: list[str],
+    first_kind: Optional[str], second_kind: Optional[str],
+) -> dict:
+    """One cell of a `region_transform` exchange. `mode` is `lift` (the first
+    layer's content crossed to an empty second layer), `drop` (the reverse) or
+    `swap` (both held something). The kinds are the ones found before the
+    exchange, `None` for nothing."""
+    return {
+        "type": "cell_exchanged",
+        "position": pos,
+        "mode": mode,
+        "firstLayer": layers[0],
+        "secondLayer": layers[1],
+        "firstKind": first_kind,
+        "secondKind": second_kind,
+    }
 
 
 def avatar_caught(pos: Pos, npc_kind: str, npc_id: str) -> dict:

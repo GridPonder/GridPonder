@@ -27,10 +27,28 @@ class ControlsWidget extends StatefulWidget {
   /// omitted entirely, not just grayed out — e.g. the excavator's drop
   /// button doesn't appear on a level with no excavator kind on the board.
   final Set<String>? presentEntityKinds;
+  /// Action ids to omit entirely rather than gray out — for a mechanic the
+  /// current level hasn't introduced at all, not one that's merely
+  /// inapplicable this turn. Distinct from [availableActionIds]: those still
+  /// render (dimmed), these don't render at all.
+  final Set<String>? hiddenActionIds;
+  /// Action id → the resolved sprite of the entity kind that action places,
+  /// for a `terrain_edit`-backed placement button (e.g. `place_backslash` →
+  /// the mirror's own PNG). Previews exactly what tapping the button will
+  /// place instead of a generic icon; an action with no entry here (or no
+  /// sprite for its placed kind) keeps its icon.
+  final Map<String, ImageProvider>? actionSprites;
   /// Pack-specific colour overrides forwarded to [cellNamedColor] when
   /// drawing colour-pick action swatches. Pass `theme.palette` from the
   /// caller; null falls back to the renderer's built-in palette.
   final Map<String, String>? palette;
+  /// Theme gesture bindings, used to suppress the on-screen button for an
+  /// action that the pack has bound to a non-button gesture (e.g.
+  /// `key_press`) and *not* also to a button — lets a game offer
+  /// keyboard-only controls for some actions instead of a full row of
+  /// buttons. An action with no gestureMap entry at all, or with a `button`
+  /// entry, still gets its default auto-rendered button.
+  final List<GestureBinding>? gestureMap;
 
   const ControlsWidget({
     super.key,
@@ -45,7 +63,10 @@ class ControlsWidget extends StatefulWidget {
     this.hintStatuses = const [],
     this.availableActionIds,
     this.presentEntityKinds,
+    this.hiddenActionIds,
+    this.actionSprites,
     this.palette,
+    this.gestureMap,
   });
 
   @override
@@ -53,13 +74,34 @@ class ControlsWidget extends StatefulWidget {
 }
 
 class _ControlsWidgetState extends State<ControlsWidget> {
-  List<ActionDef> get _buttonActions => widget.game.actions
-      .where((a) => a.id != 'move' && a.id != 'diagonal_swap')
-      .where((a) =>
-          a.entityKind == null ||
-          widget.presentEntityKinds == null ||
-          a.entityKind!.any(widget.presentEntityKinds!.contains))
-      .toList();
+  /// Action ids bound to at least one gesture, but never to a `button`
+  /// gesture — these are keyboard/gesture-only by the pack's own theme and
+  /// should not get an auto-rendered control button.
+  Set<String> get _keyboardOnlyActionIds {
+    final map = widget.gestureMap;
+    if (map == null) return const {};
+    final bound = <String>{};
+    final viaButton = <String>{};
+    for (final binding in map) {
+      bound.add(binding.action);
+      if (binding.gesture == 'button') viaButton.add(binding.action);
+    }
+    return bound.difference(viaButton);
+  }
+
+  List<ActionDef> get _buttonActions {
+    final hidden = _keyboardOnlyActionIds;
+    final explicitlyHidden = widget.hiddenActionIds ?? const {};
+    return widget.game.actions
+        .where((a) => a.id != 'move' && a.id != 'diagonal_swap')
+        .where((a) => !hidden.contains(a.id))
+        .where((a) => !explicitlyHidden.contains(a.id))
+        .where((a) =>
+            a.entityKind == null ||
+            widget.presentEntityKinds == null ||
+            a.entityKind!.any(widget.presentEntityKinds!.contains))
+        .toList();
+  }
 
   bool get _hasDiagonalSwap =>
       widget.game.actions.any((a) => a.id == 'diagonal_swap');
@@ -141,6 +183,12 @@ class _ControlsWidgetState extends State<ControlsWidget> {
         'flip' => Icons.flip,
         'clone' => Icons.blur_on,
         'drop_rock' => Icons.download,
+        'fire_up' => Icons.arrow_upward,
+        'fire_down' => Icons.arrow_downward,
+        'fire_left' => Icons.arrow_back,
+        'fire_right' => Icons.arrow_forward,
+        'place_backslash' => Icons.south_east,
+        'place_forward_slash' => Icons.north_east,
         _ => Icons.play_arrow_outlined,
       };
       final label = switch (actionDef.id) {
@@ -148,10 +196,17 @@ class _ControlsWidgetState extends State<ControlsWidget> {
         'flip' => 'Flip',
         'clone' => 'Clone',
         'drop_rock' => 'Drop',
+        'fire_up' => 'Fire ↑',
+        'fire_down' => 'Fire ↓',
+        'fire_left' => 'Fire ←',
+        'fire_right' => 'Fire →',
+        'place_backslash' => 'Place \\',
+        'place_forward_slash' => 'Place /',
         _ => actionDef.id,
       };
       return _CtrlBtn(
         icon: icon,
+        image: widget.actionSprites?[actionDef.id],
         label: label,
         onTap: () => widget.onAction(GameAction(actionDef.id, {})),
       );
@@ -331,12 +386,14 @@ class _DiagonalSwapBtns extends StatelessWidget {
 
 class _CtrlBtn extends StatelessWidget {
   final IconData icon;
+  final ImageProvider? image;
   final String label;
   final VoidCallback? onTap;
   final VoidCallback? onLongPress;
 
   const _CtrlBtn({
     required this.icon,
+    this.image,
     required this.label,
     this.onTap,
     this.onLongPress,
@@ -358,10 +415,20 @@ class _CtrlBtn extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon,
-                color:
-                    enabled ? Colors.grey.shade700 : Colors.grey.shade400,
-                size: 22),
+            image != null
+                ? Opacity(
+                    opacity: enabled ? 1.0 : 0.4,
+                    child: Image(
+                      image: image!,
+                      width: 22,
+                      height: 22,
+                      fit: BoxFit.contain,
+                    ),
+                  )
+                : Icon(icon,
+                    color:
+                        enabled ? Colors.grey.shade700 : Colors.grey.shade400,
+                    size: 22),
             const SizedBox(height: 2),
             Text(
               label,

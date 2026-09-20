@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
 import 'pack_file_reader.dart';
 import 'pack_registry.dart';
+import 'playtest_codec.dart' as codec;
 
 /// Metadata for a pack shown in the library screen.
 class PackInfo {
@@ -48,14 +49,34 @@ class PackService {
   final PackFileReader _reader;
   // Pre-loaded image bytes for installed packs (pack-relative path → bytes).
   final Map<String, Uint8List> _assetCache;
+  // The decoded pack files, kept for [levelRevision]: the parsed models drop
+  // parts of the source (rule and goal JSON, override maps) that a revision
+  // has to cover.
+  final Map<String, dynamic> _gameJson;
+  final Map<String, Map<String, dynamic>> _levelJsons;
 
-  PackService._(this.pack, this.info, this._reader, this._assetCache);
+  PackService._(
+    this.pack,
+    this.info,
+    this._reader,
+    this._assetCache,
+    this._gameJson,
+    this._levelJsons,
+  );
 
   ThemeDef? get theme => pack.theme;
   List<String> get levelIds => pack.orderedLevels.map((l) => l.id).toList();
   List<SequenceEntry> get sequence => pack.game.levelSequence;
   LevelDefinition level(String id) => pack.levels[id]!;
   GameDefinition get game => pack.game;
+
+  /// Content hash of everything that affects how level [id] plays — see
+  /// [codec.levelRevision]. Empty when the level's source is unknown.
+  String levelRevision(String id) {
+    final level = _levelJsons[id];
+    if (level == null) return '';
+    return codec.levelRevision(level, _gameJson);
+  }
 
   // ---------------------------------------------------------------------------
   // Loading
@@ -157,7 +178,14 @@ class PackService {
         ? await reader.preloadAssets()
         : <String, Uint8List>{};
 
-    return PackService._(loadedPack, info, reader, assetCache);
+    return PackService._(
+      loadedPack,
+      info,
+      reader,
+      assetCache,
+      game,
+      levelJsons,
+    );
   }
 
   static Future<PackInfo> _buildInfo(

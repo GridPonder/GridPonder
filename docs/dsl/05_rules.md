@@ -220,6 +220,50 @@ A cell's entity was replaced with a different entity.
 | `toKind` | string | New kind. |
 | `layer` | string | Which layer changed. |
 
+### `cell_exchanged`
+One cell of a [`region_transform`](04_systems.md#28-region_transform) `exchange`:
+the two layers swapped what they held at this cell. Nothing is emitted for a cell
+where both sides were empty.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell that exchanged. |
+| `mode` | string | `"lift"` (the first layer's content crossed to an empty second layer), `"drop"` (the reverse) or `"swap"` (both held something). |
+| `firstLayer` | string | The operation's first layer. |
+| `secondLayer` | string | The operation's second layer. |
+| `firstKind` | string or null | What the first layer held before, `null` for nothing. |
+| `secondKind` | string or null | What the second layer held before, `null` for nothing (a `pairs` placeholder counts as nothing). |
+
+A theme can play a different [cell effect](06_theme.md#cell-effects) per `mode`
+with a `when` filter, e.g. `{"when": {"mode": "lift"}}`.
+
+### `cell_blocked`
+A cell refused what an operation would have put on it — currently a
+[`region_transform`](04_systems.md#28-region_transform) `exchange` with a
+`restrict` config. It arrives with `action_vetoed`, so the board is unchanged
+and the turn is not spent; the event exists to explain the refusal, and a theme
+can give it a cell effect like any other.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell that refused. |
+| `layer` | string | Layer the refused entity would have landed on. |
+| `kind` | string | Entity kind that was refused. |
+| `guardKind` | string | Entity kind doing the refusing. |
+
+### `entity_fell`
+
+Emitted by [`balance_regions`](04_systems.md#224-balance_regions) when a cell's
+ground gives way under a body. Actors are removed from the board; the avatar is
+not, because its `fallVariable` increments and a `variable_threshold` lose
+condition ends the level in the same turn.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell whose ground opened. |
+| `kind` | string | Entity kind that fell, or `"avatar"`. |
+| `layer` | string | Layer it was removed from, or `"avatar"`. |
+
 ### `spoil_hauled`
 An `excavate` backfill that did **not** happen, because a mover ended the turn
 on the excavator's vacated cell and carried the spoil out. Emitted in place of
@@ -241,7 +285,7 @@ Avatar inventory changed.
 | `newItem` | string or null | New inventory slot. |
 
 ### `object_pushed`
-An object was pushed by the avatar.
+An object was pushed by the avatar or an object-moving system.
 
 | Payload | Type | Description |
 |---------|------|-------------|
@@ -249,6 +293,97 @@ An object was pushed by the avatar.
 | `fromPosition` | `[x, y]` | Original position. |
 | `toPosition` | `[x, y]` | New position. |
 | `direction` | string | Push direction. |
+| `layer` | string | Optional layer containing the pushed entity. |
+| `originPosition` | `[x, y]` | Optional position before a multi-step push sequence began. |
+
+### `elastic_block_inflated`
+An `elastic_block` expanded by one or more complete leading-edge lines.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `id` | string | Multi-cell object id. |
+| `kind` | string | Multi-cell object kind. |
+| `fromCells` | array of `[x, y]` | Footprint before inflation. |
+| `toCells` | array of `[x, y]` | Footprint after inflation. |
+| `addedCells` | array of `[x, y]` | Cells added to the footprint. |
+| `direction` | string | Inflated edge direction. |
+| `distance` | integer | Number of complete lines added. |
+
+### `elastic_block_collapsed`
+An obstructed `elastic_block` press removed trailing slices while keeping the
+leading edge fixed.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `id` | string | Multi-cell object id. |
+| `kind` | string | Multi-cell object kind. |
+| `fromCells` | array of `[x, y]` | Footprint before collapse. |
+| `toCells` | array of `[x, y]` | Footprint after collapse. |
+| `direction` | string | Edge against which the object collapsed. |
+
+### `target_completed`
+An `elastic_block` footprint exactly matched an unfinished configured target.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `targetId` | string | Configured target id. |
+
+### `target_consumed`
+A completed elastic-block target was fully vacated and applied its permanent
+board transformation.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `targetId` | string | Configured target id. |
+| `mode` | string | `"none"`, `"void"`, or `"wall"`. |
+
+### `tile_moved`
+A single entity moved between cells. Several events emitted in one phase are a
+simultaneous movement batch for renderers.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `fromPosition` | `[x, y]` | Original position. |
+| `position` | `[x, y]` | Destination position. |
+| `kind` | string | Moving entity kind. |
+| `params` | object | Entity parameters after movement. |
+| `layer` | string | Layer containing the entity. Defaults to `"objects"`. |
+
+### `routed_motion_failed`
+A routed mover could not complete the current simultaneous route tick. The
+board remains at its pre-tick positions; one event is emitted for each distinct
+mover/reason pair, followed by a `variable_changed` event for the configured
+failure counter.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `fromPosition` | `[x, y]` | Mover's unchanged position. |
+| `position` | `[x, y]` | Intended destination, or the source for a source-route error. |
+| `kind` | string | Mover entity kind. |
+| `reason` | string | `invalid_heading`, `invalid_source_route`, `left_board`, `disconnected_route`, `closed_gate`, `occupied`, `wrong_exit`, `same_destination`, `head_on`, or `blocked_by_mover`. |
+
+### `entity_path_moved`
+A routed entity travelled through two or more cells during one accepted action.
+The path includes both its starting cell and final cell.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `path` | array of `[x, y]` | Ordered cells visited, including start and finish. |
+| `position` | `[x, y]` | Final path position. |
+| `kind` | string | Moving entity kind. |
+| `params` | object | Entity parameters after travel. |
+| `layer` | string | Layer containing the entity. |
+| `removedAtEnd` | boolean | Whether the entity was removed after reaching the final cell. |
+
+### `routed_motion_blocked`
+A continuous routed mover stopped safely rather than failing the turn.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `fromPosition` | `[x, y]` | Cell where the mover remains. |
+| `position` | `[x, y]` | Cell it could not enter, or its current cell for a source/cycle stop. |
+| `kind` | string | Mover entity kind. |
+| `reason` | string | Failure reasons above, plus `u_turn`, `route_cycle`, or `travel_limit`. |
 
 ### `tiles_merged`
 Two tiles merged during slide.

@@ -79,6 +79,17 @@ class GameEvent {
         'layer': layer,
       });
 
+  /// A body was on a cell whose ground gave way beneath it. `layer` is the
+  /// board layer it was removed from, or `'avatar'` for the avatar — which
+  /// stays on the board, because a lose condition ends the level in the same
+  /// turn and the renderer still has to draw it falling.
+  static GameEvent entityFell(Position pos, String kind, String layer) =>
+      GameEvent('entity_fell', {
+        'position': pos,
+        'kind': kind,
+        'layer': layer,
+      });
+
   /// An `excavate` backfill that did *not* happen, because a mover ended the
   /// turn on the vacated cell and carried the spoil out.
   ///
@@ -125,6 +136,22 @@ class GameEvent {
         'kind': kind,
         'params': params,
         'layer': layer,
+      });
+
+  /// One entity travelled through an ordered route during a single turn.
+  /// The complete path lets renderers preserve corners instead of drawing a
+  /// straight line from the first cell to the last one.
+  static GameEvent entityPathMoved(List<Position> path, String kind,
+          {Map<String, dynamic> params = const {},
+          String layer = 'objects',
+          bool removedAtEnd = false}) =>
+      GameEvent('entity_path_moved', {
+        'position': path.last,
+        'path': path,
+        'kind': kind,
+        'params': params,
+        'layer': layer,
+        'removedAtEnd': removedAtEnd,
       });
 
   static GameEvent tilesSlid(String direction, int movedCount) =>
@@ -246,12 +273,49 @@ class GameEvent {
   static GameEvent overlayMoved(List<int> pos) =>
       GameEvent('overlay_moved', {'position': pos});
 
+  /// One cell of a `region_transform` exchange. [mode] is `lift` (the first
+  /// layer's content crossed to an empty second layer), `drop` (the reverse)
+  /// or `swap` (both held something). The kinds are the ones found before the
+  /// exchange, null for nothing.
+  static GameEvent cellExchanged(
+    Position pos,
+    String mode,
+    String firstLayer,
+    String secondLayer,
+    String? firstKind,
+    String? secondKind,
+  ) =>
+      GameEvent('cell_exchanged', {
+        'position': pos,
+        'mode': mode,
+        'firstLayer': firstLayer,
+        'secondLayer': secondLayer,
+        'firstKind': firstKind,
+        'secondKind': secondKind,
+      });
+
   static GameEvent cellsFlooded(List<Position> cells) =>
       GameEvent('cells_flooded', {'cells': cells});
 
   /// Signals that a system explicitly rejects the action (turn should not
   /// count as a move). Used by flood_fill when no adjacent target cells exist.
   static GameEvent actionVetoed() => const GameEvent('action_vetoed', {});
+
+  /// A cell refused what an operation would have put on it. [kind] is the
+  /// refused entity, [guardKind] the entity that refuses it. Emitted alongside
+  /// [actionVetoed], so the turn is not spent — it explains the refusal.
+  static GameEvent cellBlocked(
+    Position pos,
+    String layer,
+    String kind,
+    String guardKind,
+  ) =>
+      GameEvent('cell_blocked', {
+        'position': pos,
+        'layer': layer,
+        'kind': kind,
+        'guardKind': guardKind,
+      });
 
   static GameEvent boxesMerged(
           Position pos, int resultSides, int aSides, int bSides) =>

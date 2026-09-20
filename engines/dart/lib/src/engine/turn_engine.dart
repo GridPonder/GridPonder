@@ -22,6 +22,7 @@ class TurnEngine {
     _state = level.initialState();
     _runner = PhaseRunner(game, level);
     _applyLoadCascade();
+    _applySystemLoadSettle();
   }
 
   LevelState get state => _state;
@@ -48,6 +49,7 @@ class TurnEngine {
       _actionHistory.add(action);
     } else {
       _history.removeLast(); // nothing changed, discard undo entry
+      return TurnResult.rejected(_state, events: result.events);
     }
 
     return result;
@@ -65,7 +67,10 @@ class TurnEngine {
     if (_state.isWon || _state.isLost) {
       return TurnResult.rejected(_state);
     }
-    return _runner.run(action, _state.copy());
+    final result = _runner.run(action, _state.copy());
+    return result.accepted
+        ? result
+        : TurnResult.rejected(_state, events: result.events);
   }
 
   /// Undo the last action.
@@ -82,6 +87,21 @@ class TurnEngine {
     _actionHistory.clear();
     _state = level.initialState();
     _applyLoadCascade();
+    _applySystemLoadSettle();
+  }
+
+  /// Let systems settle derived board state before the first turn. Mirrors
+  /// Python's `_apply_load_settle`. Runs after the load cascade so a system
+  /// settles the board the rules have already finished with.
+  ///
+  /// Kept separate from [_applyLoadCascade] deliberately: that method returns
+  /// early when the board carries no object-layer entities, and a system's
+  /// settle must run regardless.
+  void _applySystemLoadSettle() {
+    final effectiveGame = game.withSystemOverrides(level.systemOverrides);
+    for (final sys in SystemRegistry.instantiate(effectiveGame, null)) {
+      sys.executeLoadSettle(_state, effectiveGame);
+    }
   }
 
   /// Fire `object_placed` events for every object on a non-ground layer at

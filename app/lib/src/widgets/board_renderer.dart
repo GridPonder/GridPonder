@@ -2,6 +2,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
+import '../animation/actor_facing.dart';
 import '../services/pack_service.dart';
 
 /// Resolves a colour name (e.g. "red") to a Color. Pack themes can override
@@ -72,6 +73,11 @@ class CellEffectPlayback {
 /// [squash] scales the sprite about its base — 1.0 is at rest, less than 1.0
 /// compresses it, which is how a landing reads as an impact rather than a
 /// stop. Volume is roughly preserved by widening as it flattens.
+/// Where the avatar is between cells while a step is in flight, in fractional
+/// cell units. `(2.5, 1.0)` is halfway from (2,1) to (3,1). [progress] runs
+/// from 0 to 1 and selects the configured directional walk frame.
+typedef AvatarMotion = ({double x, double y, double progress});
+
 class MovingSprite {
   final EntityInstance entity;
   final double x;
@@ -84,6 +90,87 @@ class MovingSprite {
     required this.y,
     this.squash = 1.0,
   });
+}
+
+/// One rectangular multi-cell object changing its bounds at sub-cell
+/// precision. Elastic blocks use this while inflating so their leading edge
+/// stays physically attached to any crate it is pushing instead of snapping
+/// to its final footprint after the crate animation.
+class MovingMultiCellObject {
+  final MultiCellObjectInstance object;
+  final double left;
+  final double top;
+  final double width;
+  final double height;
+  final bool selected;
+
+  const MovingMultiCellObject({
+    required this.object,
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+    this.selected = false,
+  });
+}
+
+/// Distance a pushed object has travelled once the elastic face has advanced
+/// [blockTravel] cells. A shorter object journey means the block crossed empty
+/// space before making contact, so the object waits for that part of the
+/// animation instead of appearing to move by itself.
+double elasticPushObjectTravel({
+  required double blockTravel,
+  required double totalBlockDistance,
+  required double objectDistance,
+}) => (blockTravel - (totalBlockDistance - objectDistance)).clamp(
+  0.0,
+  objectDistance,
+);
+
+/// Fractional rectangle occupied by an elastic block while its leading edge
+/// grows [travelled] cells in [direction].
+Rect elasticBlockRect(Rect start, String direction, double travelled) {
+  return switch (direction) {
+    'left' => Rect.fromLTRB(
+      start.left - travelled,
+      start.top,
+      start.right,
+      start.bottom,
+    ),
+    'right' => Rect.fromLTRB(
+      start.left,
+      start.top,
+      start.right + travelled,
+      start.bottom,
+    ),
+    'up' => Rect.fromLTRB(
+      start.left,
+      start.top - travelled,
+      start.right,
+      start.bottom,
+    ),
+    'down' => Rect.fromLTRB(
+      start.left,
+      start.top,
+      start.right,
+      start.bottom + travelled,
+    ),
+    _ => start,
+  };
+}
+
+/// Interpolates all four edges of an elastic block. Inflation moves one edge
+/// outward; collapse moves the opposite edge inward, so the same interpolation
+/// covers both motions without snapping between whole-cell footprints.
+Rect elasticBlockRectTween(Rect start, Rect end, double progress) {
+  final t = progress.clamp(0.0, 1.0);
+  double tween(double from, double to) => from + (to - from) * t;
+  return Rect.fromLTRB(
+    tween(start.left, end.left),
+    tween(start.top, end.top),
+    tween(start.right, end.right),
+    tween(start.bottom, end.bottom),
+  );
 }
 
 /// Resolves the sprite path for an entity instance, including optional
@@ -264,20 +351,41 @@ String? connectedHeadSpritePath(
 }
 
 ({bool visible, String? path, bool mirrorHorizontally})
-resolveAvatarSpriteChoice(AvatarThemeDef? theme, String direction) {
+resolveAvatarSpriteChoice(
+  AvatarThemeDef? theme,
+  String direction, {
+  bool moving = false,
+  double progress = 0,
+}) {
   if (theme?.visible == false) {
     return (visible: false, path: null, mirrorHorizontally: false);
   }
 
-  var entry = theme?.resolve('idle', direction);
+  AvatarSpriteEntry? resolve(String requestedDirection) {
+    if (moving) {
+      return theme?.sprites['walk']?[requestedDirection] ??
+          theme?.sprites['moving']?[requestedDirection] ??
+          theme?.resolve('idle', requestedDirection);
+    }
+    return theme?.resolve('idle', requestedDirection);
+  }
+
+  var entry = resolve(direction);
   var mirrorHorizontally = false;
   if (entry?.mirror case final mirrorDirection?) {
-    entry = theme?.resolve('idle', mirrorDirection);
+    entry = resolve(mirrorDirection);
     mirrorHorizontally = true;
   }
+  final frames = entry?.frames;
+  final normalizedProgress = progress < 0
+      ? 0.0
+      : (progress >= 1 ? 0.999999 : progress);
+  final frameIndex = frames?.isNotEmpty == true
+      ? (normalizedProgress * frames!.length).floor()
+      : 0;
   final path =
       entry?.staticPath ??
-      (entry?.frames?.isNotEmpty == true ? entry!.frames!.first : null);
+      (frames?.isNotEmpty == true ? frames![frameIndex] : null);
   return (visible: true, path: path, mirrorHorizontally: mirrorHorizontally);
 }
 
@@ -317,6 +425,24 @@ String? _motionSpritePath(
   }
 
   return null;
+}
+
+/// Selects the temporary walk-frame index for an entity in flight.
+///
+/// Existing packs advance a frame per cell. A kind may instead declare
+/// `motion.frameDurationMs` to play a complete time-based gait during a
+/// one-cell move, which is required by autonomous walkers such as Firebreak's
+/// Cinder.
+int resolveEntityMotionFrame(
+  EntityKindDef? kindDef,
+  double elapsedMs,
+  double travelled,
+) {
+  final raw = kindDef?.motion['frameDurationMs'];
+  if (raw is num && raw > 0) {
+    return (elapsedMs / raw.toDouble()).floor();
+  }
+  return travelled.floor();
 }
 
 class BoardRenderer extends StatelessWidget {
@@ -364,9 +490,14 @@ class BoardRenderer extends StatelessWidget {
   /// `connectedBody` — the board renders exactly as before.
   final List<LevelState> history;
 
-  /// Last known facing direction per actor kind. Used to render idle actor
-  /// sprites after movement animation has finished.
-  final Map<String, String> actorFacingByKind;
+  /// Rectangular multi-cell objects whose bounds are changing between cells.
+  /// Kept separate from [movingSprites] because these stretch rather than
+  /// translate as a one-cell sprite.
+  final ValueListenable<List<MovingMultiCellObject>>? movingMultiCellObjects;
+
+  /// Last known facing per actor cell, see [actorIdleFacing]. Used to render
+  /// idle actor sprites after movement animation has finished.
+  final Map<Position, String> actorFacingAt;
 
   /// When set, cell_flooded entities are rendered in this color instead of
   /// their default color — used by Flood Colors to show the last chosen color.
@@ -376,11 +507,19 @@ class BoardRenderer extends StatelessWidget {
   /// state.avatar.position — used during ice slide animations.
   final Position? avatarPositionOverride;
 
+  /// The avatar's position mid-step, driven at frame rate. A listenable rather
+  /// than a plain value so a step repaints the avatar alone instead of
+  /// rebuilding every cell under it — the same reason [movingSprites] is one.
+  final ValueListenable<AvatarMotion?>? avatarMotion;
+
   /// UI-only selection state for direct-manipulation multi-cell objects.
   final String? selectedMultiCellObjectId;
 
   /// UI-only selection state for an individually controlled actor.
   final Position? selectedActorPosition;
+
+  /// UI-only selection state for a directly manipulated board cell.
+  final Position? selectedCellPosition;
 
   /// Short-lived visual feedback for a line-of-sight detection event.
   final List<LineOfSightFeedback> lineOfSightFeedbacks;
@@ -388,7 +527,11 @@ class BoardRenderer extends StatelessWidget {
   /// Short-lived sprite-strip effects playing at specific cells, declared by
   /// the pack theme's `effects` block (e.g. a burst wherever a capture flipped
   /// a cell).
-  final List<CellEffectPlayback> cellEffects;
+  ///
+  /// A listenable for the same reason [movingSprites] is one: a single turn can
+  /// light dozens of cells, and advancing their frames should repaint the
+  /// bursts rather than every cell of the board underneath them.
+  final ValueListenable<List<CellEffectPlayback>>? cellEffects;
 
   const BoardRenderer({
     super.key,
@@ -397,18 +540,21 @@ class BoardRenderer extends StatelessWidget {
     required this.packService,
     this.animationOverlays,
     this.onCellTap,
-    this.actorFacingByKind = const {},
+    this.actorFacingAt = const {},
     this.floodedColorOverride,
     this.avatarPositionOverride,
+    this.avatarMotion,
     this.selectedMultiCellObjectId,
     this.selectedActorPosition,
+    this.selectedCellPosition,
     this.lineOfSightFeedbacks = const [],
-    this.cellEffects = const [],
+    this.cellEffects,
     this.onCellHover,
     this.actionPreviews = const {},
     this.hoveredPreviewTarget,
     this.movingSprites,
     this.history = const [],
+    this.movingMultiCellObjects,
   });
 
   /// Per-headKind ordered travel path for every `connectedBody` kind the pack
@@ -456,7 +602,7 @@ class BoardRenderer extends StatelessWidget {
       packService: packService,
       cellSize: cellSize,
       entityOverride: sprite.entity,
-      actorFacingByKind: actorFacingByKind,
+      actorFacingAt: actorFacingAt,
       floodedColorOverride: floodedColorOverride,
     );
     return Positioned(
@@ -478,6 +624,39 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
+  Widget _buildMovingMultiCellObject(
+    MovingMultiCellObject motion,
+    double cellSize,
+  ) {
+    final background =
+        _mcoDisplay(motion.object, cellSize) ??
+        ColoredBox(
+          color: cellNamedColor('grey', palette: packService.theme?.palette),
+        );
+    final borderWidth = (cellSize * 0.055).clamp(2.0, 4.0);
+    return Positioned(
+      left: motion.left * cellSize,
+      top: motion.top * cellSize,
+      width: motion.width * cellSize,
+      height: motion.height * cellSize,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          background,
+          if (motion.selected)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                border: Border.all(
+                  color: const Color(0xFFFFC107),
+                  width: borderWidth,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _tappable(int x, int y, Widget child) {
     if (onCellTap == null) return child;
     return GestureDetector(
@@ -485,6 +664,15 @@ class BoardRenderer extends StatelessWidget {
       onTap: () => onCellTap!(x, y),
       child: child,
     );
+  }
+
+  /// The cell size [build] uses for a board of [cols] x [rows] laid out in
+  /// [constraints]. Exposed so a parent that transforms the board (the play
+  /// screen's zoom camera) can locate cells without re-deriving the rule.
+  static double cellSizeFor(BoxConstraints constraints, int cols, int rows) {
+    return (constraints.maxWidth / cols)
+        .clamp(15.0, 70.0)
+        .clamp(0.0, constraints.maxHeight / rows);
   }
 
   @override
@@ -496,9 +684,7 @@ class BoardRenderer extends StatelessWidget {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cellSize = (constraints.maxWidth / cols)
-            .clamp(15.0, 70.0)
-            .clamp(0.0, constraints.maxHeight / rows);
+        final cellSize = cellSizeFor(constraints, cols, rows);
 
         final gridWidth = cellSize * cols;
         final gridHeight = cellSize * rows;
@@ -553,7 +739,7 @@ class BoardRenderer extends StatelessWidget {
                           skipGround: backgroundMcoPosSet.contains(
                             Position(x, y),
                           ),
-                          actorFacingByKind: actorFacingByKind,
+                          actorFacingAt: actorFacingAt,
                           floodedColorOverride: floodedColorOverride,
                           bodyPaths: bodyPaths,
                         ),
@@ -577,6 +763,20 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               ),
+              if (movingMultiCellObjects case final objects?)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ValueListenableBuilder<List<MovingMultiCellObject>>(
+                      valueListenable: objects,
+                      builder: (context, inFlight, _) => Stack(
+                        children: [
+                          for (final object in inFlight)
+                            _buildMovingMultiCellObject(object, cellSize),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               // Entities in flight. Rebuilt on their own listenable so a fall
               // can be driven at frame rate without rebuilding every cell
               // underneath it.
@@ -610,10 +810,12 @@ class BoardRenderer extends StatelessWidget {
                   ),
                 ),
               if (selectedActorPosition case final selectedPos?)
-                _buildSelectedActorRing(selectedPos, cellSize),
+                _buildSelectionRing(selectedPos, cellSize, 'selected-actor'),
               if (animationOverlays != null)
                 for (final entry in animationOverlays!.entries)
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
+              if (selectedCellPosition case final selectedPos?)
+                _buildSelectionRing(selectedPos, cellSize, 'selected-cell'),
               if (state.overlay != null)
                 _buildOverlay(state.overlay!, cellSize),
               if (lineOfSightFeedbacks.isNotEmpty)
@@ -629,15 +831,43 @@ class BoardRenderer extends StatelessWidget {
                 ),
               for (final feedback in lineOfSightFeedbacks)
                 _buildLineOfSightTargetFeedback(feedback, cellSize),
-              for (final effect in cellEffects)
-                _buildCellEffect(effect, cellSize),
-              if (state.avatar.enabled && state.avatar.position != null)
-                _buildAvatar(
-                  avatarPositionOverride != null
-                      ? state.avatar.copyWith(position: avatarPositionOverride)
-                      : state.avatar,
-                  cellSize,
+              if (cellEffects case final effects?)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ValueListenableBuilder<List<CellEffectPlayback>>(
+                      valueListenable: effects,
+                      builder: (context, playing, _) => Stack(
+                        children: [
+                          for (final effect in playing)
+                            _buildCellEffect(effect, cellSize),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
+              if (state.avatar.enabled && state.avatar.position != null)
+                if (avatarMotion case final motion?)
+                  ValueListenableBuilder<AvatarMotion?>(
+                    valueListenable: motion,
+                    builder: (context, inFlight, _) => _buildAvatar(
+                      avatarPositionOverride != null
+                          ? state.avatar.copyWith(
+                              position: avatarPositionOverride,
+                            )
+                          : state.avatar,
+                      cellSize,
+                      motion: inFlight,
+                    ),
+                  )
+                else
+                  _buildAvatar(
+                    avatarPositionOverride != null
+                        ? state.avatar.copyWith(
+                            position: avatarPositionOverride,
+                          )
+                        : state.avatar,
+                    cellSize,
+                  ),
             ],
           ),
         );
@@ -702,7 +932,9 @@ class BoardRenderer extends StatelessWidget {
               _mcoFallback(pos, mco, exitPos, cellSize),
         );
       } else {
-        background = _mcoFallback(pos, mco, exitPos, cellSize);
+        background =
+            _mcoDisplay(mco, cellSize) ??
+            _mcoFallback(pos, mco, exitPos, cellSize);
       }
 
       // Queue value label rendered on top of the background.
@@ -725,7 +957,8 @@ class BoardRenderer extends StatelessWidget {
         children: [
           background,
           if (label != null) label,
-          if (selected) _selectedMcoCellOverlay(cellSize),
+          if (selected)
+            _selectedMcoCellOverlay(pos, mco.cells.toSet(), cellSize),
         ],
       );
 
@@ -739,22 +972,75 @@ class BoardRenderer extends StatelessWidget {
     }).toList();
   }
 
-  Widget _selectedMcoCellOverlay(double cellSize) {
+  Widget? _mcoDisplay(MultiCellObjectInstance mco, double cellSize) {
+    final display = game.entityKinds[mco.kind]?.display;
+    if (display == null) return null;
+    final colorSpec = display['color'];
+    Color? color;
+    if (colorSpec is String) {
+      if (colorSpec.startsWith('@param:')) {
+        final value = mco.params[colorSpec.substring(7)];
+        if (value is String) {
+          color = cellNamedColor(value, palette: packService.theme?.palette);
+        }
+      } else {
+        color = cellNamedColor(colorSpec, palette: packService.theme?.palette);
+      }
+    }
+    color ??= cellNamedColor('grey', palette: packService.theme?.palette);
+
+    return switch (display['type']) {
+      'fill' => ColoredBox(color: color),
+      'tile' => Container(
+        margin: EdgeInsets.all(cellSize * 0.1),
+        decoration: BoxDecoration(
+          color: color,
+          borderRadius: BorderRadius.circular(cellSize * 0.1),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 2,
+              offset: Offset(1, 1),
+            ),
+          ],
+        ),
+      ),
+      'circle' => Center(
+        child: Container(
+          width: cellSize * 0.5,
+          height: cellSize * 0.5,
+          decoration: BoxDecoration(shape: BoxShape.circle, color: color),
+        ),
+      ),
+      _ => null,
+    };
+  }
+
+  Widget _selectedMcoCellOverlay(
+    Position position,
+    Set<Position> footprint,
+    double cellSize,
+  ) {
     final borderWidth = (cellSize * 0.055).clamp(2.0, 4.0);
+    const color = Color(0xFFFFC107);
+    final side = BorderSide(color: color, width: borderWidth);
     return IgnorePointer(
       child: DecoratedBox(
         decoration: BoxDecoration(
-          border: Border.all(
-            color: const Color(0xFFFFC107),
-            width: borderWidth,
+          border: Border(
+            left: footprint.contains(Position(position.x - 1, position.y))
+                ? BorderSide.none
+                : side,
+            right: footprint.contains(Position(position.x + 1, position.y))
+                ? BorderSide.none
+                : side,
+            top: footprint.contains(Position(position.x, position.y - 1))
+                ? BorderSide.none
+                : side,
+            bottom: footprint.contains(Position(position.x, position.y + 1))
+                ? BorderSide.none
+                : side,
           ),
-          boxShadow: [
-            BoxShadow(
-              color: const Color(0xFFFFC107).withValues(alpha: 0.35),
-              blurRadius: borderWidth * 2.4,
-              spreadRadius: borderWidth * 0.25,
-            ),
-          ],
         ),
       ),
     );
@@ -853,8 +1139,9 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _buildSelectedActorRing(Position pos, double cellSize) {
+  Widget _buildSelectionRing(Position pos, double cellSize, String keyPrefix) {
     return Positioned(
+      key: ValueKey('$keyPrefix-${pos.x}-${pos.y}'),
       left: pos.x * cellSize,
       top: pos.y * cellSize,
       width: cellSize,
@@ -937,11 +1224,17 @@ class BoardRenderer extends StatelessWidget {
     );
   }
 
-  Widget _buildAvatar(AvatarState avatar, double cellSize) {
+  Widget _buildAvatar(
+    AvatarState avatar,
+    double cellSize, {
+    AvatarMotion? motion,
+  }) {
     final direction = avatar.facing.toJson();
     final themed = resolveAvatarSpriteChoice(
       packService.theme?.avatar,
       direction,
+      moving: motion != null,
+      progress: motion?.progress ?? 0,
     );
     if (!themed.visible) return const SizedBox.shrink();
 
@@ -960,8 +1253,9 @@ class BoardRenderer extends StatelessWidget {
     } else {
       final pos = avatar.position!;
       size = cellSize;
-      left = pos.x * cellSize;
-      top = pos.y * cellSize;
+      // Mid-step the avatar sits between cells; at rest it sits on one.
+      left = (motion?.x ?? pos.x.toDouble()) * cellSize;
+      top = (motion?.y ?? pos.y.toDouble()) * cellSize;
     }
 
     return Positioned(
@@ -1174,7 +1468,7 @@ class _Cell extends StatelessWidget {
   final PackService packService;
   final double cellSize;
   final bool skipGround;
-  final Map<String, String> actorFacingByKind;
+  final Map<Position, String> actorFacingAt;
   final Color? floodedColorOverride;
 
   /// When set, the cell draws this entity alone and ignores the board — used
@@ -1194,7 +1488,7 @@ class _Cell extends StatelessWidget {
     required this.packService,
     required this.cellSize,
     this.skipGround = false,
-    this.actorFacingByKind = const {},
+    this.actorFacingAt = const {},
     this.floodedColorOverride,
     this.entityOverride,
     this.bodyPaths = const {},
@@ -1276,11 +1570,15 @@ class _Cell extends StatelessWidget {
     final entity = state.board.getEntity(layerId, pos);
     if (entity == null) return const SizedBox.shrink();
 
-    // When a kind declares "groundBeneath": true in its display block, render
-    // the layer's default entity sprite first so water shows through transparent
-    // areas of the sprite (e.g. circular body segments on the ground layer).
+    // When a kind declares "groundBeneath": true (top-level, or nested in a
+    // `display` block — the older form, kept for existing packs), render the
+    // layer's default entity sprite first so water shows through transparent
+    // areas of the sprite (e.g. circular body segments on the ground layer),
+    // or a solid terrain sprite (a wall, a placed reflector) still shows the
+    // floor texture behind it instead of bare canvas.
     final kindDef = game.entityKinds[entity.kind];
-    if (kindDef?.display?['groundBeneath'] == true) {
+    if (kindDef?.groundBeneath == true ||
+        kindDef?.display?['groundBeneath'] == true) {
       final matching = game.layers.where((l) => l.id == layerId);
       final defaultKind = matching.isEmpty ? null : matching.first.defaultKind;
       if (defaultKind != null && defaultKind != entity.kind) {
@@ -1312,8 +1610,8 @@ class _Cell extends StatelessWidget {
 
   Widget _entity(EntityInstance entity, String? layerId, [Position? pos]) {
     final kindDef = game.entityKinds[entity.kind];
-    final facingDirection = layerId == 'actors'
-        ? actorFacingByKind[entity.kind]
+    final facingDirection = layerId == 'actors' && pos != null
+        ? actorIdleFacing(entity, pos, actorFacingAt)
         : null;
     // A `connectedBody` kind (e.g. the snake's trail) picks its sprite from
     // which of its neighbors are its actual predecessor/successor along the

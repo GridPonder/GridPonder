@@ -46,13 +46,16 @@ class PhaseRunner {
     // Phase 2: Action resolution
     for (final sys in systems) {
       final events = sys.executeActionResolution(action, state, effectiveGame);
+
+      // A veto rejects the whole transaction. Only the events emitted by the
+      // vetoing system describe that rejection; events from earlier systems
+      // describe mutations of the working state that will be discarded.
+      if (events.any((e) => e.type == 'action_vetoed')) {
+        return TurnResult.rejected(state, events: events);
+      }
+
       allEvents.addAll(events);
       _collectAnimations(events, state, animations, baseStage);
-    }
-
-    // If a system explicitly vetoed the action, reject without counting a move.
-    if (allEvents.any((e) => e.type == 'action_vetoed')) {
-      return TurnResult.rejected(state);
     }
 
     // Phase 3: Movement resolution
@@ -104,6 +107,16 @@ class PhaseRunner {
     // the UI, which reads this counter. Games that tap to switch between actors
     // would otherwise pay for the tap as well as the step. `turnCount` still
     // advances — it is the pipeline's tick, not a move.
+    //
+    // This counts every event from every phase, including NPC resolution —
+    // deliberately not excluded wholesale, since a system whose NPC
+    // resolution has a genuine, gameplay-relevant effect every turn (e.g.
+    // `turn_cycle` advancing a signal) must still cost the action even when
+    // the action itself was just a selection. What keeps a system like
+    // `beam`, which also runs unconditionally every turn, from wrongly
+    // disqualifying a free selection is its own responsibility: it must
+    // only emit events when its retrace actually changed something, not on
+    // every turn regardless — see `beam`'s own docs.
     final selectionOnly = allEvents.isNotEmpty &&
         allEvents.every((e) => e.type == 'actor_selected');
     if (!selectionOnly) {
@@ -124,6 +137,7 @@ class PhaseRunner {
         state,
         goals: _level.goals,
         game: effectiveGame,
+        goalSatisfied: goalStatus.satisfied,
       );
       if (loseStatus.isLost) {
         state.isLost = true;
@@ -193,6 +207,31 @@ class PhaseRunner {
             stage: motionStage,
           ));
         }
+      } else if (event.type == 'npc_moved') {
+        // follower_npcs predates actor_moved and reports its destination as
+        // toPosition. Resolve the moved kind from the post-phase actors layer
+        // so autonomous NPCs receive the same in-flight animation as actors.
+        final from = event.payload['fromPosition'];
+        final to = event.payload['toPosition'];
+        if (from != null && to != null) {
+          final fromPos = from is Position ? from : Position.fromJson(from);
+          final toPos = to is Position ? to : Position.fromJson(to);
+          final entity = state.board.getEntity('actors', toPos);
+          if (entity != null) {
+            final dur = _motionDurationMs(entity.kind, 'moveDurationMs', 130);
+            out.add(AnimationStep.entityMove(
+              fromPos,
+              toPos,
+              entity.kind,
+              'actors',
+              durationMs: dur,
+              stage: motionStage,
+              // A copy: the board's params are written in place by later
+              // turns, and the sprite must show the NPC as it moved.
+              params: Map<String, dynamic>.of(entity.params),
+            ));
+          }
+        }
       } else if (event.type == 'tile_moved') {
         final pos = event.position;
         final from = event.payload['fromPosition'];
@@ -213,6 +252,30 @@ class PhaseRunner {
             stage: motionStage,
             params: params,
           ));
+        }
+      } else if (event.type == 'entity_path_moved') {
+        final pathRaw = event.payload['path'];
+        final kind = event.payload['kind'] as String?;
+        if (pathRaw is List && kind != null) {
+          final path = pathRaw
+              .map((p) => p is Position ? p : Position.fromJson(p))
+              .toList();
+          if (path.length > 1) {
+            final layer = event.payload['layer'] as String? ?? 'objects';
+            final params =
+                (event.payload['params'] as Map?)?.cast<String, dynamic>() ??
+                    const <String, dynamic>{};
+            final dur = _motionDurationMs(kind, 'pathStepDurationMs', 80);
+            out.add(AnimationStep.entityPath(
+              path,
+              kind,
+              layer,
+              durationMs: dur,
+              stage: motionStage,
+              params: params,
+              removedAtEnd: event.payload['removedAtEnd'] as bool? ?? false,
+            ));
+          }
         }
       } else if (event.type == 'object_settled') {
         // An entity that travelled to rest under gravity or a collapse. Cells

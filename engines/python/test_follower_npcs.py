@@ -16,6 +16,7 @@ ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from engines.python._game_def import GameDef
+from engines.python._models import Pos
 from engines.python._turn_engine import TurnEngine
 
 
@@ -416,6 +417,430 @@ def test_a_harmless_patrol_bounces_off_the_avatar():
     assert _sentry_pos(engine).x == 2, _sentry_pos(engine)
 
 
+# -- shafts (linked machines) ------------------------------------------------
+#
+# The fixtures above take a single behavior and a 5x3 board; trains need two
+# behaviors, a system-level config key and room for two separate tracks, so
+# these are a second pair rather than a rewrite of the first.
+
+
+def _shaft_game(behaviors: dict | None = None, config_extra: dict | None = None) -> GameDef:
+    npc_config = {
+        "npcTags": ["npc"],
+        "contactVariable": "crushed",
+        "behaviors": behaviors or {
+            "walker": {"type": "patrol", "lethalContact": False, "solidBlocking": True},
+        },
+    }
+    npc_config.update(config_extra or {})
+    data = {
+        "id": "com.gridponder.test_follower_shaft",
+        "layers": [
+            {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+            {"id": "actors", "occupancy": "zero_or_one"},
+        ],
+        "entityKinds": {
+            "empty": {"layer": "ground", "tags": ["walkable"]},
+            "void": {"layer": "ground", "tags": []},
+            "machine": {"layer": "actors", "tags": ["npc", "solid"]},
+        },
+        "actions": [
+            {"id": "move", "params": {"direction": {"type": "direction", "values": ["up", "down", "left", "right"]}}},
+        ],
+        "systems": [
+            {"id": "navigation", "type": "avatar_navigation", "config": {}},
+            {"id": "machines", "type": "follower_npcs", "config": npc_config},
+        ],
+    }
+    return GameDef.from_dict(data, id="test_follower_shaft")
+
+
+def _shaft_level(machines: list, walls: tuple = ()) -> dict:
+    """8x5 board. Machines are (x, y, behavior, facing[, shaft]) tuples.
+
+    The avatar parks at (0, 4) and spends beats by walking into the bottom edge:
+    a blocked move is still a beat, which is how the other patrol tests here
+    advance the world too.
+    """
+    entries = []
+    for m in machines:
+        entry = {"position": [m[0], m[1]], "kind": "machine", "behavior": m[2], "facing": m[3]}
+        if len(m) > 4 and m[4] is not None:
+            entry["shaft"] = m[4]
+        entries.append(entry)
+    return {
+        "id": "test_level",
+        "board": {
+            "size": [8, 5],
+            "layers": {
+                "ground": {"format": "sparse",
+                           "entries": [{"position": [x, y], "kind": "void"} for x, y in walls]},
+                "actors": {"format": "sparse", "entries": entries},
+            },
+        },
+        "state": {"avatar": {"enabled": True, "position": [0, 4]}},
+        "goals": [],
+        "loseConditions": [
+            {"type": "variable_threshold",
+             "config": {"variable": "crushed", "target": 1, "comparison": "gte"}},
+        ],
+    }
+
+
+def _beat(engine: TurnEngine):
+    """Spend one beat without moving: the bottom edge blocks the avatar."""
+    return engine.execute_turn("move", {"direction": "down"})
+
+
+def _machines(engine: TurnEngine) -> list:
+    return sorted((pos.x, pos.y) for pos, _ in engine.state.board.layers["actors"].entries())
+
+
+def _facing_at(engine: TurnEngine, x: int, y: int) -> str:
+    return str(engine.state.board.get_entity("actors", Pos(x, y)).param("facing"))
+
+
+def test_unshafted_board_is_unchanged_by_the_shaft_feature():
+    """Guard for Firebreak and Blind Spot: no shaft params -> today's path.
+
+    Two independent patrols on separate rows. One is walled in front and
+    reverses; the other's path is clear and it simply walks on. This is today's
+    behaviour, recorded literally so the train pass cannot drift it.
+    """
+    engine = TurnEngine(_shaft_game(), _shaft_level(
+        [(4, 0, "walker", "right"), (1, 2, "walker", "right")], walls=((5, 0),),
+    ))
+
+    _beat(engine)
+
+    # (4,0) faces a wall at (5,0): it reverses to (3,0). (1,2) is clear: it
+    # walks on to (2,2), entirely unaffected by the other machine's wall.
+    assert _machines(engine) == [(2, 2), (3, 0)], _machines(engine)
+    assert _facing_at(engine, 3, 0) == "left"
+    assert _facing_at(engine, 2, 2) == "right"
+
+
+def test_shafted_pair_steps_in_lockstep():
+    engine = TurnEngine(_shaft_game(), _shaft_level(
+        [(1, 0, "walker", "right", "a"), (1, 2, "walker", "right", "a")],
+    ))
+
+    _beat(engine)
+
+    assert _machines(engine) == [(2, 0), (2, 2)], _machines(engine)
+
+
+def test_blocking_one_member_reverses_the_whole_train():
+    """The remote turn: a wall in front of one member turns the other one.
+
+    (1,2)'s own path is clear all the way to the east edge. It reverses anyway,
+    because the shaft carries (4,0)'s wall to it.
+    """
+    engine = TurnEngine(_shaft_game(), _shaft_level(
+        [(4, 0, "walker", "right", "a"), (1, 2, "walker", "right", "a")],
+        walls=((5, 0),),
+    ))
+
+    _beat(engine)
+
+    assert _machines(engine) == [(0, 2), (3, 0)], _machines(engine)
+    assert _facing_at(engine, 3, 0) == "left"
+    assert _facing_at(engine, 0, 2) == "left"
+
+
+def test_train_blocked_both_ways_freezes_and_keeps_facings():
+    """Engine fact #5, applied to the train: freeze, keep facing, resume later."""
+    engine = TurnEngine(_shaft_game(), _shaft_level(
+        [(4, 0, "walker", "right", "a"), (1, 2, "walker", "right", "a")],
+        walls=((5, 0), (3, 0)),
+    ))
+
+    _beat(engine)
+
+    assert _machines(engine) == [(1, 2), (4, 0)], _machines(engine)
+    assert _facing_at(engine, 4, 0) == "right"
+    assert _facing_at(engine, 1, 2) == "right"
+
+
+def _seize_game(**config_extra) -> GameDef:
+    return _shaft_game(config_extra=config_extra)
+
+
+def test_load_settle_records_each_trains_size():
+    engine = TurnEngine(_seize_game(shaftSeizeOnLoss=True), _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (1, 2, "walker", "right", "a"),
+        (6, 3, "walker", "up", "b"),
+    ]))
+
+    assert engine.state.variables["shaft_a_size"] == 2
+    assert engine.state.variables["shaft_b_size"] == 1
+
+
+def test_train_seizes_permanently_when_a_member_is_destroyed():
+    """The capstone verb: subtraction becomes a permanent remote freeze."""
+    engine = TurnEngine(_seize_game(shaftSeizeOnLoss=True), _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (1, 2, "walker", "right", "a"),
+    ]))
+
+    _beat(engine)
+    assert _machines(engine) == [(2, 0), (2, 2)], _machines(engine)
+
+    # Something else removes one member — a leaf opening under it, in the pack.
+    engine.state.board.set_entity("actors", Pos(2, 0), None)
+
+    for _ in range(4):
+        _beat(engine)
+    assert _machines(engine) == [(2, 2)], "survivor must be frozen forever"
+
+
+def test_seizure_is_off_by_default():
+    engine = TurnEngine(_shaft_game(), _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (1, 2, "walker", "right", "a"),
+    ]))
+
+    engine.state.board.set_entity("actors", Pos(1, 0), None)
+    _beat(engine)
+
+    assert _machines(engine) == [(2, 2)], "survivor keeps running"
+
+
+def test_seizure_flag_is_read_strictly():
+    """Matches the `cycle` precedent in coupled_actors: only True enables it."""
+    engine = TurnEngine(_seize_game(shaftSeizeOnLoss=1), _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (1, 2, "walker", "right", "a"),
+    ]))
+
+    engine.state.board.set_entity("actors", Pos(1, 0), None)
+    _beat(engine)
+
+    assert _machines(engine) == [(2, 2)], _machines(engine)
+
+
+def _rejects(game, level, word: str) -> None:
+    try:
+        TurnEngine(game, level)
+    except ValueError as exc:
+        assert word in str(exc), f"expected {word!r} in {exc!r}"
+    else:
+        raise AssertionError(f"expected a ValueError mentioning {word!r}")
+
+
+def test_non_patrol_member_is_rejected_at_load():
+    game = _shaft_game(behaviors={
+        "walker": {"type": "patrol", "lethalContact": False},
+        "ringer": {"type": "clockwise", "lethalContact": False},
+    })
+    _rejects(game, _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (1, 2, "ringer", "right", "a"),
+    ]), "patrol")
+
+
+def test_members_sharing_a_traversal_line_are_rejected_at_load():
+    """Self-blocking would make lockstep meaningless: the train jams at t=0."""
+    _rejects(_shaft_game(), _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (4, 0, "walker", "right", "a"),
+    ]), "traversal")
+
+
+def test_a_member_on_a_perpendicular_members_line_is_rejected_either_way():
+    """The check reads BOTH members' axes, so board order cannot hide a clash.
+
+    The horizontal member at (1, 0) stands on the vertical member's column
+    x=1. The vertical one is not on row 0, so checking only the first member's
+    axis let this through whenever the horizontal member came first.
+    """
+    _rejects(_shaft_game(), _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (1, 2, "walker", "down", "a"),
+    ]), "traversal")
+    _rejects(_shaft_game(), _shaft_level([
+        (1, 0, "walker", "down", "a"),
+        (1, 2, "walker", "right", "a"),
+    ]), "traversal")
+
+
+# -- ratio shafts (geared trains) ---------------------------------------------
+#
+# A train may mix frequencies. Each member runs on its own beat; only the
+# members whose gate opens are probed and step, but a reversal turns the WHOLE
+# train, because facing is train-level state.
+#
+# turn_count starts at 0 and is read BEFORE it increments, so a frequency-2
+# member is active on the 1st, 3rd, 5th beat and idle on the 2nd and 4th.
+
+_GEARED = {
+    "walker": {"type": "patrol", "lethalContact": False, "solidBlocking": True},
+    "slow": {"type": "patrol", "lethalContact": False, "solidBlocking": True,
+             "frequency": 2},
+}
+
+
+def test_mixed_frequency_train_loads():
+    """The whole point of the arc: a geared train is no longer rejected."""
+    TurnEngine(_shaft_game(_GEARED), _shaft_level(
+        [(1, 0, "walker", "right", "a"), (1, 2, "slow", "right", "a")],
+    ))
+
+
+def test_geared_members_step_at_their_own_rates():
+    """turn_count 0: both step. turn_count 1: only the fast one."""
+    engine = TurnEngine(_shaft_game(_GEARED), _shaft_level(
+        [(1, 0, "walker", "right", "a"), (1, 2, "slow", "right", "a")],
+    ))
+
+    _beat(engine)
+    assert _machines(engine) == [(2, 0), (2, 2)], _machines(engine)
+
+    _beat(engine)
+    # The slow member is off-beat and stays put; the fast one walks on alone.
+    assert _machines(engine) == [(2, 2), (3, 0)], _machines(engine)
+
+    _beat(engine)
+    assert _machines(engine) == [(3, 2), (4, 0)], _machines(engine)
+
+
+def test_reversal_turns_the_member_that_did_not_step():
+    """The arc's core fact: an off-beat member turns without moving.
+
+    Beat 1 (turn_count 0): both active, both walk east.
+    Beat 2 (turn_count 1): only the fast member is active. It faces the wall at
+    (5,0), so the train reverses — and the slow member at (2,2), which took no
+    step at all this beat, is now facing left.
+    """
+    engine = TurnEngine(_shaft_game(_GEARED), _shaft_level(
+        [(3, 0, "walker", "right", "a"), (1, 2, "slow", "right", "a")],
+        walls=((5, 0),),
+    ))
+
+    _beat(engine)
+    assert _machines(engine) == [(2, 2), (4, 0)], _machines(engine)
+
+    _beat(engine)
+    assert _machines(engine) == [(2, 2), (3, 0)], _machines(engine)
+    assert _facing_at(engine, 3, 0) == "left"
+    assert _facing_at(engine, 2, 2) == "left"
+
+
+def test_the_slow_wheel_steers_the_fast_one():
+    """A geared train: the member you cannot reach turns
+    the member you can, on a beat the fast one had every reason to walk on."""
+    engine = TurnEngine(_shaft_game(_GEARED), _shaft_level(
+        [(1, 0, "walker", "right", "a"), (3, 2, "slow", "right", "a")],
+        walls=((5, 2),),
+    ))
+
+    _beat(engine)   # turn_count 0: both step east
+    assert _machines(engine) == [(2, 0), (4, 2)], _machines(engine)
+
+    _beat(engine)   # turn_count 1: fast alone, clear road
+    assert _machines(engine) == [(3, 0), (4, 2)], _machines(engine)
+
+    _beat(engine)   # turn_count 2: slow hits (5,2) and drags the fast one back
+    assert _machines(engine) == [(2, 0), (3, 2)], _machines(engine)
+    assert _facing_at(engine, 2, 0) == "left"
+    assert _facing_at(engine, 3, 2) == "left"
+
+
+def test_all_members_off_beat_is_a_noop_not_a_freeze():
+    """An empty active set must emit nothing and turn nothing.
+
+    Both members are frequency 2, so turn_count 1 has no active member at all.
+    Facings must survive untouched: a no-op is not a blocked train.
+    """
+    engine = TurnEngine(_shaft_game(_GEARED), _shaft_level(
+        [(1, 0, "slow", "right", "a"), (1, 2, "slow", "right", "a")],
+    ))
+
+    _beat(engine)
+    assert _machines(engine) == [(2, 0), (2, 2)], _machines(engine)
+
+    result = _beat(engine)
+    assert _machines(engine) == [(2, 0), (2, 2)], _machines(engine)
+    assert _facing_at(engine, 2, 0) == "right"
+    assert _facing_at(engine, 2, 2) == "right"
+    moved = [e for e in result.events if e["type"] == "entity_moved"]
+    assert moved == [], moved
+
+
+def test_same_frequency_train_is_unchanged():
+    """Regression guard: an ungeared train still moves in lockstep at its own
+    rate, on exactly the beats it did before the ratio change."""
+    engine = TurnEngine(_shaft_game(_GEARED), _shaft_level(
+        [(1, 0, "slow", "right", "a"), (1, 2, "slow", "right", "a")],
+    ))
+
+    _beat(engine)
+    assert _machines(engine) == [(2, 0), (2, 2)], _machines(engine)
+    _beat(engine)
+    assert _machines(engine) == [(2, 0), (2, 2)], _machines(engine)
+    _beat(engine)
+    assert _machines(engine) == [(3, 0), (3, 2)], _machines(engine)
+
+
+def test_zero_frequency_member_is_rejected():
+    game = _shaft_game(behaviors={
+        "walker": {"type": "patrol", "lethalContact": False, "solidBlocking": True},
+        "stuck": {"type": "patrol", "lethalContact": False, "solidBlocking": True,
+                  "frequency": 0},
+    })
+    _rejects(game, _shaft_level([
+        (1, 0, "walker", "right", "a"),
+        (1, 2, "stuck", "right", "a"),
+    ]), "positive integer")
+
+
+def test_members_crossing_tracks_never_share_a_cell():
+    """Two members whose tracks cross must not both be given the crossing.
+
+    (2,0) walks east along row 0; (4,2) walks north up column 4. On the second
+    beat both want (4,0). Before this was fixed they both got it, the second
+    write erased the first, and the train silently lost a member — which then
+    read as a seizure, because the size recorded at load no longer matched.
+    Both machines must still be on the board.
+    """
+    behaviors = {
+        "walker": {"type": "patrol", "lethalContact": False, "solidBlocking": True},
+    }
+    engine = TurnEngine(_shaft_game(behaviors), _shaft_level([
+        (2, 0, "walker", "right", "a"),
+        (4, 2, "walker", "up", "a"),
+    ]))
+
+    for _ in range(3):
+        _beat(engine)
+        live = _machines(engine)
+        assert len(live) == 2, f"a member vanished: {live}"
+
+
+TESTS_SHAFT = [
+    test_unshafted_board_is_unchanged_by_the_shaft_feature,
+    test_shafted_pair_steps_in_lockstep,
+    test_blocking_one_member_reverses_the_whole_train,
+    test_train_blocked_both_ways_freezes_and_keeps_facings,
+    test_load_settle_records_each_trains_size,
+    test_train_seizes_permanently_when_a_member_is_destroyed,
+    test_seizure_is_off_by_default,
+    test_seizure_flag_is_read_strictly,
+    test_mixed_frequency_train_loads,
+    test_geared_members_step_at_their_own_rates,
+    test_reversal_turns_the_member_that_did_not_step,
+    test_the_slow_wheel_steers_the_fast_one,
+    test_all_members_off_beat_is_a_noop_not_a_freeze,
+    test_same_frequency_train_is_unchanged,
+    test_zero_frequency_member_is_rejected,
+    test_members_crossing_tracks_never_share_a_cell,
+    test_non_patrol_member_is_rejected_at_load,
+    test_members_sharing_a_traversal_line_are_rejected_at_load,
+    test_a_member_on_a_perpendicular_members_line_is_rejected_either_way,
+]
+
+
 TESTS = [
     test_lethal_contact_loses_the_level,
     test_contact_is_refused_without_lethal_contact,
@@ -432,7 +857,7 @@ TESTS = [
     test_rules_receive_npc_events,
     test_lethal_contact_governs_patrol_too,
     test_a_harmless_patrol_bounces_off_the_avatar,
-]
+] + TESTS_SHAFT
 
 
 def run_all() -> bool:

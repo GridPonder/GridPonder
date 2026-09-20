@@ -80,7 +80,8 @@ class AnimationStep {
           List<Position> path, String entityKind, String layer,
           {int durationMs = 80, // per step; total = durationMs * (path.length-1)
           int stage = 0,
-          Map<String, dynamic> params = const {}}) =>
+          Map<String, dynamic> params = const {},
+          bool removedAtEnd = false}) =>
       AnimationStep(
           type: 'entity_path',
           position: path.last,
@@ -92,6 +93,7 @@ class AnimationStep {
             'layer': layer,
             'params': params,
             'stepDurationMs': durationMs,
+            'removedAtEnd': removedAtEnd,
           });
 
   static AnimationStep entityMerge(
@@ -155,10 +157,14 @@ class TurnResult {
     this.loseReason,
   });
 
-  static TurnResult rejected(LevelState state) => TurnResult(
+  static TurnResult rejected(
+    LevelState state, {
+    List<GameEvent> events = const [],
+  }) =>
+      TurnResult(
         accepted: false,
         newState: state,
-        events: const [],
+        events: events,
         animations: const [],
         goalProgress: const {},
         isWon: false,

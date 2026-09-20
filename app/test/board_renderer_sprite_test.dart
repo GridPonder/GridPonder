@@ -1,3 +1,5 @@
+import 'dart:ui';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:gridponder_app/src/widgets/board_renderer.dart';
 import 'package:gridponder_engine/engine.dart';
@@ -64,6 +66,33 @@ void main() {
     );
   });
 
+  test('uses elapsed time for motion frames when configured', () {
+    final kind = EntityKindDef.fromJson('cinder', {
+      'layer': 'actors',
+      'tags': ['npc'],
+      'symbol': '&',
+      'sprite': 'assets/cinder.png',
+      'motion': {'frameDurationMs': 100},
+    });
+
+    expect(resolveEntityMotionFrame(kind, 0, 0), 0);
+    expect(resolveEntityMotionFrame(kind, 99, 0.25), 0);
+    expect(resolveEntityMotionFrame(kind, 100, 0.25), 1);
+    expect(resolveEntityMotionFrame(kind, 399, 0.99), 3);
+    expect(resolveEntityMotionFrame(kind, 400, 1), 4);
+  });
+
+  test('motion frames retain the legacy per-cell fallback', () {
+    final kind = EntityKindDef.fromJson('crate', {
+      'layer': 'objects',
+      'tags': ['solid'],
+      'symbol': 'C',
+      'sprite': 'assets/crate.png',
+    });
+
+    expect(resolveEntityMotionFrame(kind, 399, 2.75), 2);
+  });
+
   test('resolves a pack-local avatar fallback sprite', () {
     final theme = AvatarThemeDef.fromJson({
       'visible': true,
@@ -100,6 +129,46 @@ void main() {
     ));
   });
 
+  test('selects directional avatar walk frames while moving', () {
+    final theme = AvatarThemeDef.fromJson({
+      'sprites': {
+        'idle': {'right': 'assets/avatar/idle_right.png'},
+        'walk': {
+          'right': {
+            'frames': [
+              'assets/avatar/walk_right_1.png',
+              'assets/avatar/walk_right_2.png',
+            ],
+            'duration': 220,
+            'mode': 'loop',
+          },
+        },
+      },
+    });
+
+    expect(
+      resolveAvatarSpriteChoice(theme, 'right', moving: true, progress: 0.2),
+      (
+        visible: true,
+        path: 'assets/avatar/walk_right_1.png',
+        mirrorHorizontally: false,
+      ),
+    );
+    expect(
+      resolveAvatarSpriteChoice(theme, 'right', moving: true, progress: 0.8),
+      (
+        visible: true,
+        path: 'assets/avatar/walk_right_2.png',
+        mirrorHorizontally: false,
+      ),
+    );
+    expect(resolveAvatarSpriteChoice(theme, 'right'), (
+      visible: true,
+      path: 'assets/avatar/idle_right.png',
+      mirrorHorizontally: false,
+    ));
+  });
+
   test('renders board layers in the order declared by the pack', () {
     final game = GameDefinition.fromJson({
       'layers': [
@@ -116,5 +185,56 @@ void main() {
       'markers',
       'objects',
     ]);
+  });
+
+  test('elastic face reaches a crate before the crate starts moving', () {
+    expect(
+      elasticPushObjectTravel(
+        blockTravel: 1.5,
+        totalBlockDistance: 4,
+        objectDistance: 2,
+      ),
+      0,
+    );
+    expect(
+      elasticPushObjectTravel(
+        blockTravel: 2.5,
+        totalBlockDistance: 4,
+        objectDistance: 2,
+      ),
+      0.5,
+    );
+    expect(
+      elasticPushObjectTravel(
+        blockTravel: 4,
+        totalBlockDistance: 4,
+        objectDistance: 2,
+      ),
+      2,
+    );
+  });
+
+  test('elastic block grows only its leading edge', () {
+    const start = Rect.fromLTRB(2, 3, 4, 5);
+
+    expect(
+      elasticBlockRect(start, 'right', 1.25),
+      const Rect.fromLTRB(2, 3, 5.25, 5),
+    );
+    expect(
+      elasticBlockRect(start, 'up', 0.75),
+      const Rect.fromLTRB(2, 2.25, 4, 5),
+    );
+  });
+
+  test('elastic block collapse interpolates the trailing edge', () {
+    const start = Rect.fromLTRB(1, 2, 7, 5);
+    const end = Rect.fromLTRB(6, 2, 7, 5);
+
+    expect(
+      elasticBlockRectTween(start, end, 0.5),
+      const Rect.fromLTRB(3.5, 2, 7, 5),
+    );
+    expect(elasticBlockRectTween(start, end, 1), end);
   });
 }

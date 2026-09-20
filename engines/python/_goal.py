@@ -13,18 +13,29 @@ from ._game_def import GameDef
 # Goal evaluator
 # ---------------------------------------------------------------------------
 
-def evaluate_goals(goals: list[dict], state: GameState, game: GameDef, pending_events: list[dict]) -> tuple[bool, dict[str, float]]:
-    """Return (all_done, {goalId: progress})."""
+def evaluate_goals(goals: list[dict], state: GameState, game: GameDef, pending_events: list[dict]) -> tuple[bool, dict[str, float], dict[str, bool]]:
+    """Return (all_done, {goalId: progress}, {goalId: satisfied}).
+
+    `satisfied` is computed here rather than derived by a caller from
+    `progress`, because the two aren't equivalent: a zero-target
+    `variable_threshold` goal (e.g. a budget that must reach exactly 0)
+    reports `progress` 1.0 unconditionally — there's no lower value to
+    normalize against — regardless of whether it's actually done. A lose
+    condition that asks "is goal X met" (e.g. `premature_success`) needs the
+    real boolean, not that placeholder.
+    """
     if not goals:
-        return False, {}
+        return False, {}, {}
     progress: dict[str, float] = {}
+    satisfied: dict[str, bool] = {}
     all_done = True
     for goal in goals:
         done, prog = _evaluate_goal(goal, state, game, pending_events)
         progress[goal["id"]] = prog
+        satisfied[goal["id"]] = done
         if not done:
             all_done = False
-    return all_done, progress
+    return all_done, progress, satisfied
 
 
 def _evaluate_goal(goal: dict, state: GameState, game: GameDef, pending_events: list[dict]) -> tuple[bool, float]:
@@ -410,14 +421,34 @@ def evaluate_lose(
     state: GameState,
     goals: list[dict] | None = None,
     game: GameDef | None = None,
+    goal_satisfied: dict[str, bool] | None = None,
 ) -> tuple[bool, str | None]:
     """Return (is_lost, reason | None)."""
+    goal_satisfied = goal_satisfied or {}
     for cond in lose_conditions:
         ctype = cond["type"]
         cfg = cond.get("config", {})
         if ctype == "max_actions":
             if state.action_count >= cfg.get("limit", 0):
                 return True, "max_actions"
+        elif ctype == "premature_success":
+            # Fires when the player's action satisfied `triggerGoalId` (e.g.
+            # a beam-puzzle's "hit" goal, which for a multi-target level only
+            # means *every* target lit) without having also satisfied every
+            # goal in `requiredGoalIds` — the level's other, less visible
+            # requirements (every reflector placed, every placed reflector
+            # actually on-path). Reuses the level's own `goals` array rather
+            # than duplicating that config: "the loose reading of the puzzle
+            # is already satisfied, but the real solution isn't" is generic
+            # beyond this one game — any puzzle whose ostensible goal is
+            # reachable by a shortcut that skips its real constraints can
+            # use this.
+            trigger_id = cfg["triggerGoalId"]
+            required_ids = cfg.get("requiredGoalIds", [])
+            triggered = goal_satisfied.get(trigger_id, False)
+            all_required_met = all(goal_satisfied.get(rid, False) for rid in required_ids)
+            if triggered and not all_required_met:
+                return True, f"premature_success:{trigger_id}"
         elif ctype == "variable_threshold":
             name = cfg.get("variable", "")
             target = cfg.get("target", 0)

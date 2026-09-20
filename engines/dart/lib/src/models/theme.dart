@@ -5,9 +5,10 @@ class GestureBinding {
       gesture; // swipe_cardinal, swipe_diagonal, tap_cell, button, key_press
   final String action;
   final String? buttonId;
-  final String? key; // for key_press: single character, e.g. "c"
+  final String? key; // for key_press: single character (e.g. "c") or "up"/"down"/"left"/"right"
   final Map<String, String>? paramMapping;
   final Map<String, dynamic>? params;
+  final bool showSelection;
 
   const GestureBinding({
     required this.gesture,
@@ -16,6 +17,7 @@ class GestureBinding {
     this.key,
     this.paramMapping,
     this.params,
+    this.showSelection = false,
   });
 
   factory GestureBinding.fromJson(Map<String, dynamic> j) => GestureBinding(
@@ -27,6 +29,7 @@ class GestureBinding {
             ? Map<String, String>.from(j['paramMapping'] as Map)
             : null,
         params: j['params'] as Map<String, dynamic>?,
+        showSelection: (j['showSelection'] as bool?) ?? false,
       );
 }
 

@@ -385,6 +385,15 @@ Player exceeds a maximum number of actions.
 #### `variable_threshold`
 Same as the goal type but triggers a loss.
 
+#### `premature_success`
+Fails the moment `triggerGoalId` is individually satisfied without every goal in `requiredGoalIds` also being satisfied — "the puzzle's ostensible success condition was reached by a shortcut that skips its real requirements." Reuses the level's own `goals` array rather than duplicating config, so it stays generic across any puzzle whose visible goal (reach a target, clear a board, ...) can be reached without also meeting quieter constraints the level actually cares about (every piece placed, every placed piece used, a full board pattern, ...).
+
+```json
+{ "type": "premature_success", "config": { "triggerGoalId": "hit", "requiredGoalIds": ["spend_backslash", "spend_forward_slash", "all_used"] } }
+```
+
+Example: a laser-mirror level whose `hit` goal is satisfied the instant the beam reaches its target(s) — including by a short, accidental route that never uses most of the reflectors the player placed. Pairing `premature_success` (`triggerGoalId: "hit"`) with the level's own `spend_*`/`all_used` goal ids as `requiredGoalIds` means reaching the target only *wins* when the full intended solution is also in place; reaching it any earlier is an immediate loss instead of a silent no-op. `requiredGoalIds` may reference any goal type, not just `variable_threshold` — whatever the level already declares.
+
 #### `board_state`
 A specific board condition is detected (e.g., an entity reaches a forbidden cell).
 

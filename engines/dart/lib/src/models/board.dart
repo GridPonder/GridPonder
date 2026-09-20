@@ -1,4 +1,5 @@
 import 'entity.dart';
+import 'json_copy.dart';
 import 'layer.dart';
 import 'position.dart';
 
@@ -50,7 +51,7 @@ class MultiCellObjectInstance {
         id: id,
         kind: kind,
         cells: List.from(cells),
-        params: Map<String, dynamic>.from(params),
+        params: deepCopyMap(params),
         cellSprites: Map.from(cellSprites),
       );
 
