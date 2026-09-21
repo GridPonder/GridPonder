@@ -52,11 +52,22 @@ class GameDef:
         }
 
         # Actions: list of {id, params: {name: {type, values}}, entityKind?, color?}
+        # entityKind accepts a single kind or a list of kinds — normalized to
+        # a list (or None) here so every consumer sees one shape.
+        def _entity_kinds(raw):
+            if raw is None:
+                return None
+            if isinstance(raw, str):
+                return [raw]
+            if isinstance(raw, list):
+                return raw
+            return None
+
         self.actions: list[dict] = [
             {
                 "id": a["id"],
                 "params": a.get("params", {}),
-                "entityKind": a.get("entityKind"),
+                "entityKind": _entity_kinds(a.get("entityKind")),
                 "color": a.get("color"),
             }
             for a in data.get("actions", [])

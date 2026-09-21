@@ -22,6 +22,11 @@ class ControlsWidget extends StatefulWidget {
   /// If non-null, only these action IDs are currently applicable.
   /// Others are rendered grayed out (but still tappable — engine rejects them).
   final Set<String>? availableActionIds;
+  /// Entity kinds currently present anywhere on the board. An action whose
+  /// `entityKind` requirement (see [ActionDef]) isn't met by this set is
+  /// omitted entirely, not just grayed out — e.g. the excavator's drop
+  /// button doesn't appear on a level with no excavator kind on the board.
+  final Set<String>? presentEntityKinds;
   /// Action ids to omit entirely rather than gray out — for a mechanic the
   /// current level hasn't introduced at all, not one that's merely
   /// inapplicable this turn. Distinct from [availableActionIds]: those still
@@ -57,6 +62,7 @@ class ControlsWidget extends StatefulWidget {
     required this.game,
     this.hintStatuses = const [],
     this.availableActionIds,
+    this.presentEntityKinds,
     this.hiddenActionIds,
     this.actionSprites,
     this.palette,
@@ -90,6 +96,10 @@ class _ControlsWidgetState extends State<ControlsWidget> {
         .where((a) => a.id != 'move' && a.id != 'diagonal_swap')
         .where((a) => !hidden.contains(a.id))
         .where((a) => !explicitlyHidden.contains(a.id))
+        .where((a) =>
+            a.entityKind == null ||
+            widget.presentEntityKinds == null ||
+            a.entityKind!.any(widget.presentEntityKinds!.contains))
         .toList();
   }
 
