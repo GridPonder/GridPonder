@@ -49,4 +49,28 @@ void main() {
     expect(size.width, 72); // 3 cols * 24px max cell size
     expect(size.height, 72);
   });
+
+  testWidgets('renders the selected target parameter as a label', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Scaffold(
+          body: TargetBoardRenderer(
+            targetLayers: {
+              'objects': [
+                [
+                  {'kind': 'cascade_cell', 'charge': 3},
+                ],
+              ],
+            },
+            matchParams: ['charge'],
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('3'), findsOneWidget);
+  });
 }

@@ -1944,6 +1944,71 @@ weight whatever entities it likes; nothing here knows about a particular game.
 
 ---
 
+### 2.26 `cascade_cells`
+
+**Purpose:** Add charge to one tapped cell, then resolve a deterministic series
+of synchronous threshold waves. Every cell carries its mutable charge, trigger
+threshold, and propagation-kernel name as entity parameters. Kernels are
+configured lists of local `[dx,dy]` offsets, so the same system supports
+orthogonal, diagonal, horizontal, vertical, and future finite neighbourhoods
+without game-specific branches.
+
+**Phase:** `action_resolution`. The click and every wave resolve atomically in
+one system call. The system deliberately does not spend one outer rules-engine
+cascade pass per wave: gameplay depth must not depend on `maxCascadeDepth`, and
+an over-limit transition must be able to emit `action_vetoed` and roll back the
+whole turn rather than accept a partially settled board.
+
+**Events emitted:** `cell_charged` for the click and each aggregated incoming
+update, `cascade_wave_started`, `cell_exploded`,
+`cascade_wave_completed`, and `cascade_settled`. Same-wave positions are sorted
+row-major only for deterministic logs; that order has no gameplay meaning.
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `action` | string | `"tap_cell"` | Position-carrying action that charges a cell. |
+| `cellLayer` | string | `"objects"` | Layer containing cascade cells. |
+| `cellTag` | string | `"cascade_cell"` | Tag identifying legal cells and propagation destinations. |
+| `chargeParam` | string | `"charge"` | Mutable non-negative integer entity parameter. |
+| `thresholdParam` | string | `"threshold"` | Positive integer entity parameter. |
+| `kernelParam` | string | `"kernel"` | String entity parameter naming one configured kernel. |
+| `clickDelta` | integer | `1` | Positive charge added by a legal click. |
+| `kernels` | object | PLUS/X/H/V map below | Kernel name to a finite list of integer `[dx,dy]` offsets. |
+| `maxWaves` | integer | `1000` | Defensive positive wave limit. Reaching it vetoes and rolls back the action. |
+
+Default kernels:
+
+```json
+{
+  "plus": [[0,-1], [1,0], [0,1], [-1,0]],
+  "x": [[-1,-1], [1,-1], [1,1], [-1,1]],
+  "h": [[-1,0], [1,0]],
+  "v": [[0,-1], [0,1]]
+}
+```
+
+**Wave algorithm:** after the click, take one snapshot and collect every cell
+with `charge >= threshold`. Each collected cell explodes once: subtract its
+threshold and emit `+1` through every configured offset. Sum all incoming
+charges by destination, then commit all subtractions and additions together.
+Cells made unstable by this commit wait until the next wave. A cell that remains
+unstable after subtraction may explode again in that next wave. Propagation to
+an out-of-bounds or non-`cellTag` destination dissipates.
+
+Malformed participating cells (negative/non-integer charge, non-positive or
+non-integer threshold, or an unknown kernel), malformed configuration, an
+invalid click target, and a wave-limit hit all veto the action transactionally.
+
+**Goal pairing:** use `board_match` with `matchParams: ["charge"]` for an exact
+stable target. Keep threshold and kernel static in the authored board; only
+charge belongs to the target transformation.
+
+**Reuse:** Any finite, deterministic threshold-propagation puzzle: energy
+networks, pressure release, population toppling, signal avalanches, or local
+automata driven by a single-cell input.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -1974,6 +2039,7 @@ weight whatever entities it likes; nothing here knows about a particular game.
 | Cell Rotation | `cell_rotation` | `action_resolution` | `rotate_cell` (configurable) |
 | Routed Motion | `routed_motion` | `npc_resolution` | (automatic once per accepted turn) |
 | Turn Cycle | `turn_cycle` | `action_resolution` + `npc_resolution` | configured accepted actions |
+| Cascade Cells | `cascade_cells` | `action_resolution` | `tap_cell(position)` (configurable) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 
@@ -2003,6 +2069,10 @@ obstacles, and a `variable_threshold` completed-target goal).
 
 ### Transformation-style games (pattern matching)
 `overlay_cursor` + `region_transform` (rotate + flip ops) + `flood_fill`
+
+### Threshold-cascade state transformation
+`cascade_cells` + parameter-aware `board_match`, optionally bounded by
+`max_actions`.
 
 ### Live route-planning games
 `cell_rotation` + `routed_motion` with `all_cleared` on the mover tag. Add

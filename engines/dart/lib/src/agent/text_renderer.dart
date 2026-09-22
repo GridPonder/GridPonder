@@ -147,6 +147,13 @@ class TextRenderer {
         kindSymbolOverrides: kindSymbolOverrides);
     if (stackedBlock.isNotEmpty) parts.add(stackedBlock);
 
+    final entityStateBlock = _buildEntityStateBlock(
+      state,
+      game,
+      kindSymbolOverrides: kindSymbolOverrides,
+    );
+    if (entityStateBlock.isNotEmpty) parts.add(entityStateBlock);
+
     final mcoBlock = _buildMcoBlock(state, game,
         kindSymbolOverrides: kindSymbolOverrides);
     if (mcoBlock.isNotEmpty) parts.add(mcoBlock);
@@ -355,6 +362,65 @@ class TextRenderer {
     }
     if (entries.isEmpty) return '';
     return 'Number values: ${entries.join('  ')}';
+  }
+
+  /// Lists per-entity parameters that do not fit in the one-character grid.
+  ///
+  /// The parameter selected by `symbolParam` already appears in the dedicated
+  /// number-values block, so this section exposes the remaining state (for
+  /// example a cascade cell's threshold and propagation kernel).
+  static String _buildEntityStateBlock(
+    LevelState state,
+    GameDefinition game, {
+    Map<String, String>? kindSymbolOverrides,
+  }) {
+    const preferredLayers = [
+      'actors',
+      'markers',
+      'objects',
+      'territory',
+    ];
+    final layerIds = <String>[
+      for (final layerId in preferredLayers)
+        if (state.board.layers.containsKey(layerId)) layerId,
+      for (final layerId in state.board.layers.keys)
+        if (!preferredLayers.contains(layerId) && layerId != 'ground') layerId,
+      if (state.board.layers.containsKey('ground')) 'ground',
+    ];
+
+    final entries = <String>[];
+    for (final layerId in layerIds) {
+      final layer = state.board.layers[layerId]!;
+      for (final entry in layer.entries()) {
+        final entity = entry.value;
+        if (entity.params.isEmpty) continue;
+        final kindDef = game.entityKinds[entity.kind];
+        final symbolParam = kindDef?.symbolParam;
+        final details = <String, dynamic>{
+          for (final param in entity.params.entries)
+            if (param.key != symbolParam) param.key: param.value,
+        };
+        if (details.isEmpty) continue;
+        final keys = details.keys.toList()..sort();
+        final rendered = keys.map((key) => '$key=${details[key]}').join(', ');
+        final name = kindSymbolOverrides != null
+            ? (kindSymbolOverrides[entity.kind] ?? '?')
+            : (kindDef?.uiName ?? entity.kind.replaceAll('_', ' '));
+        final pos = entry.key;
+        entries.add('  (${pos.x},${pos.y}) $name: $rendered');
+      }
+    }
+
+    final avatar = state.avatar;
+    if (avatar.enabled && avatar.position != null) {
+      final pos = avatar.position!;
+      entries.add(
+        '  (${pos.x},${pos.y}) avatar: facing=${avatar.facing.toJson()}',
+      );
+    }
+
+    if (entries.isEmpty) return '';
+    return 'Entity state:\n${entries.join('\n')}';
   }
 
   /// Renders each multi-cell object as a labeled block (separate from the grid).

@@ -201,6 +201,16 @@ def test_board_match_ignores_a_cell_naming_no_kind():
         _render(_board_match({"color": "red"}))
 
 
+def test_board_match_renders_selected_symbol_param_value():
+    game = _make_game()
+    game.entity_kinds["terr_wei"]["symbolParam"] = "charge"
+    state = _make_state(game, _PARTIAL)
+    level = _board_match({"kind": "terr_wei", "charge": 3})
+    level["goals"][0]["config"]["matchParams"] = ["charge"]
+    text = render_goals(level, state, game)
+    assert text.splitlines()[-1] == ".3.", text
+
+
 def run_all() -> bool:
     import traceback
 

@@ -112,4 +112,96 @@ void main() {
 
     expect(gridLine, equals('1W.'), reason: "expected '1W.', got '$gridLine'");
   });
+
+  test('entity state includes non-symbol parameters', () {
+    final game = GameDefinition.fromJson({
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+        {'id': 'actors', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'empty': {'layer': 'ground', 'symbol': '.'},
+        'watcher': {
+          'layer': 'actors',
+          'symbol': 'W',
+          'uiName': 'Watcher',
+        },
+      },
+    }, id: 'entity_state_test');
+    final level = LevelDefinition.fromJson({
+      'id': 'entity_state_test',
+      'board': {
+        'size': [2, 1],
+        'layers': {
+          'actors': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [1, 0],
+                'kind': 'watcher',
+                'behavior': 'stalk',
+                'gaze': 'left',
+              },
+            ],
+          },
+        },
+      },
+      'state': {'avatar': {'enabled': false}},
+      'goals': <dynamic>[],
+    }, game.layers);
+
+    final rendered = TextRenderer.render(TurnEngine(game, level).state, game);
+
+    expect(
+      rendered,
+      contains('(1,0) Watcher: behavior=stalk, gaze=left'),
+    );
+  });
+
+  test('anonymous entity state preserves dynamics without kind name', () {
+    final game = GameDefinition.fromJson({
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+        {'id': 'actors', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'empty': {'layer': 'ground', 'symbol': '.'},
+        'watcher': {
+          'layer': 'actors',
+          'symbol': 'W',
+          'uiName': 'Watcher',
+        },
+      },
+    }, id: 'anonymous_entity_state_test');
+    final level = LevelDefinition.fromJson({
+      'id': 'anonymous_entity_state_test',
+      'board': {
+        'size': [2, 1],
+        'layers': {
+          'actors': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [1, 0],
+                'kind': 'watcher',
+                'behavior': 'stalk',
+                'gaze': 'left',
+              },
+            ],
+          },
+        },
+      },
+      'state': {'avatar': {'enabled': false}},
+      'goals': <dynamic>[],
+    }, game.layers);
+
+    final rendered = TextRenderer.render(
+      TurnEngine(game, level).state,
+      game,
+      kindSymbolOverrides: const {'watcher': 'A'},
+    );
+
+    expect(rendered, contains('(1,0) A: behavior=stalk, gaze=left'));
+    expect(rendered, isNot(contains('Watcher')));
+  });
 }

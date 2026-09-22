@@ -178,4 +178,63 @@ void main() {
       expect(text, contains('9'));
     });
   });
+
+  test('board_match renders a selected symbol parameter value', () {
+    final game = GameDefinition.fromJson({
+      'layers': [
+        {'id': 'objects', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'cell': {
+          'layer': 'objects',
+          'tags': <String>[],
+          'symbol': 'C',
+          'symbolParam': 'charge',
+        },
+      },
+      'actions': <dynamic>[],
+      'systems': <dynamic>[],
+    }, id: 'param_target_renderer');
+    final board = Board.fromJson({
+      'size': [3, 1],
+      'layers': {
+        'objects': [
+          [
+            null,
+            {'kind': 'cell', 'charge': 0},
+            null
+          ]
+        ],
+      },
+    }, game.layers);
+    final state = LevelState.fromJson(const {}, board);
+    final level = LevelDefinition.fromJson({
+      'id': 'target',
+      'board': {
+        'size': [3, 1],
+        'layers': <String, dynamic>{},
+      },
+      'goals': [
+        {
+          'id': 'target',
+          'type': 'board_match',
+          'config': {
+            'targetLayers': {
+              'objects': [
+                [
+                  null,
+                  {'kind': 'cell', 'charge': 3},
+                  null
+                ]
+              ],
+            },
+            'matchParams': ['charge'],
+          },
+        },
+      ],
+    }, game.layers);
+
+    final text = LlmAgent.describeGoals(level, state, game);
+    expect(text.split('\n').last, '.3.');
+  });
 }

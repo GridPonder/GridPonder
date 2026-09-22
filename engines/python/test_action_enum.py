@@ -70,6 +70,41 @@ def test_engine_probe_filters_vetoed_and_no_effect_actions() -> None:
     assert engine.undo_depth == 0
 
 
+def test_position_parameters_enumerate_every_board_coordinate_row_major() -> None:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "floor"}
+            ],
+            "entityKinds": {
+                "floor": {"layer": "ground", "tags": [], "symbol": "."}
+            },
+            "actions": [
+                {
+                    "id": "tap_cell",
+                    "params": {"position": {"type": "position"}},
+                }
+            ],
+        }
+    )
+    engine = TurnEngine(
+        game,
+        {
+            "board": {"size": [2, 2], "layers": {}},
+            "state": {"avatar": {"enabled": False}},
+            "goals": [],
+        },
+    )
+
+    assert enumerate_actions(game, engine.state) == [
+        {"action": "tap_cell", "position": [0, 0]},
+        {"action": "tap_cell", "position": [1, 0]},
+        {"action": "tap_cell", "position": [0, 1]},
+        {"action": "tap_cell", "position": [1, 1]},
+    ]
+
+
 if __name__ == "__main__":
     test_engine_probe_filters_vetoed_and_no_effect_actions()
-    print("1 passed")
+    test_position_parameters_enumerate_every_board_coordinate_row_major()
+    print("2 passed")

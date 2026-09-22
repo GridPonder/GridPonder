@@ -206,6 +206,12 @@ def _render_target_grid(
     if height is None or width is None:
         return None
 
+    raw_match_params = config.get("matchParams", [])
+    match_params = (
+        {str(value) for value in raw_match_params}
+        if isinstance(raw_match_params, list)
+        else set()
+    )
     grid = [["." for _ in range(width)] for _ in range(height)]
     for layer_rows in target_layers.values():
         for y, row in enumerate(layer_rows):
@@ -213,10 +219,21 @@ def _render_target_grid(
                 kind_id = _target_cell_kind(cell)
                 if kind_id is None:
                     continue
-                if kind_to_label is not None:
+                kind_def = game_def.entity_kinds.get(kind_id)
+                symbol_param = kind_def.get("symbolParam") if kind_def else None
+                param_value = (
+                    cell.get(symbol_param)
+                    if isinstance(cell, dict)
+                    and isinstance(symbol_param, str)
+                    and symbol_param in match_params
+                    else None
+                )
+                if param_value is not None:
+                    rendered = str(param_value)
+                    sym = rendered if len(rendered) == 1 else "N"
+                elif kind_to_label is not None:
                     sym = kind_to_label.get(kind_id, kind_id[0])
                 else:
-                    kind_def = game_def.entity_kinds.get(kind_id)
                     sym = (kind_def.get("symbol") if kind_def else None) or kind_id[0]
                 grid[y][x] = sym
 

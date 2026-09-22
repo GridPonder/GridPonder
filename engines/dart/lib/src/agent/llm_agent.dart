@@ -669,6 +669,10 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     }
     if (height == null || width == null) return null;
 
+    final matchParams = (config['matchParams'] as List?)
+            ?.map((value) => value.toString())
+            .toSet() ??
+        const <String>{};
     final grid = List.generate(height, (_) => List.filled(width!, '.'));
 
     for (final layerEntry in targetLayers.entries) {
@@ -676,11 +680,36 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
       for (int y = 0; y < rows.length; y++) {
         final row = rows[y] as List;
         for (int x = 0; x < row.length; x++) {
-          final kindId = row[x] as String?;
+          final cell = row[x];
+          final String? kindId;
+          final Map? targetParams;
+          if (cell is String) {
+            kindId = cell;
+            targetParams = null;
+          } else if (cell is Map) {
+            kindId = cell['kind'] as String?;
+            targetParams = cell;
+          } else {
+            kindId = null;
+            targetParams = null;
+          }
           if (kindId == null) continue;
-          final sym = kindToLabel != null
-              ? (kindToLabel[kindId] ?? kindId[0])
-              : (game.entityKinds[kindId]?.symbol ?? kindId[0]);
+          final kindDef = game.entityKinds[kindId];
+          final symbolParam = kindDef?.symbolParam;
+          final paramValue = symbolParam != null &&
+                  matchParams.contains(symbolParam) &&
+                  targetParams != null
+              ? targetParams[symbolParam]
+              : null;
+          final String sym;
+          if (paramValue != null) {
+            final rendered = paramValue.toString();
+            sym = rendered.length == 1 ? rendered : 'N';
+          } else if (kindToLabel != null) {
+            sym = kindToLabel[kindId] ?? kindId[0];
+          } else {
+            sym = kindDef?.symbol ?? kindId[0];
+          }
           grid[y][x] = sym;
         }
       }

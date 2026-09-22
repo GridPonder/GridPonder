@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
 import '../animation/actor_facing.dart';
+import '../animation/cascade_playback.dart';
 import '../services/pack_service.dart';
 
 /// Resolves a colour name (e.g. "red") to a Color. Pack themes can override
@@ -533,6 +534,11 @@ class BoardRenderer extends StatelessWidget {
   /// bursts rather than every cell of the board underneath them.
   final ValueListenable<List<CellEffectPlayback>>? cellEffects;
 
+  /// Short-lived numeric feedback while a cascade event stream is replayed.
+  /// The board state underneath already contains the value for this phase;
+  /// this overlay makes the cause of that change visible to the player.
+  final Map<Position, CascadeCellFeedback> cascadeFeedbacks;
+
   const BoardRenderer({
     super.key,
     required this.state,
@@ -549,6 +555,7 @@ class BoardRenderer extends StatelessWidget {
     this.selectedCellPosition,
     this.lineOfSightFeedbacks = const [],
     this.cellEffects,
+    this.cascadeFeedbacks = const {},
     this.onCellHover,
     this.actionPreviews = const {},
     this.hoveredPreviewTarget,
@@ -816,6 +823,8 @@ class BoardRenderer extends StatelessWidget {
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
               if (selectedCellPosition case final selectedPos?)
                 _buildSelectionRing(selectedPos, cellSize, 'selected-cell'),
+              for (final entry in cascadeFeedbacks.entries)
+                _buildCascadeFeedback(entry.key, entry.value, cellSize),
               if (state.overlay != null)
                 _buildOverlay(state.overlay!, cellSize),
               if (lineOfSightFeedbacks.isNotEmpty)
@@ -1156,6 +1165,94 @@ class BoardRenderer extends StatelessWidget {
                 width: max(2.0, cellSize * 0.045),
               ),
               borderRadius: BorderRadius.circular(cellSize * 0.18),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCascadeFeedback(
+    Position pos,
+    CascadeCellFeedback feedback,
+    double cellSize,
+  ) {
+    final (color, label) = switch (feedback.kind) {
+      CascadePlaybackKind.clickCharge => (
+        const Color(0xFF64D8FF),
+        '+${feedback.delta}',
+      ),
+      CascadePlaybackKind.incomingCharge => (
+        const Color(0xFF83F28F),
+        '+${feedback.delta}',
+      ),
+      CascadePlaybackKind.explosion => (const Color(0xFFFFA726), '✶'),
+    };
+    return Positioned(
+      key: ValueKey('cascade-${feedback.pulseId}-${pos.x}-${pos.y}'),
+      left: pos.x * cellSize,
+      top: pos.y * cellSize,
+      width: cellSize,
+      height: cellSize,
+      child: IgnorePointer(
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: cascadePulseDuration,
+          builder: (context, progress, child) {
+            final opacity = progress < 0.5 ? progress * 2 : (1 - progress) * 2;
+            final scale = 0.78 + progress * 0.34;
+            return Opacity(
+              opacity: opacity.clamp(0.0, 1.0),
+              child: Transform.scale(scale: scale, child: child),
+            );
+          },
+          child: Padding(
+            padding: EdgeInsets.all(cellSize * 0.06),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: color.withValues(alpha: 0.18),
+                border: Border.all(
+                  color: color,
+                  width: max(2.0, cellSize * 0.055),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.55),
+                    blurRadius: cellSize * 0.16,
+                    spreadRadius: cellSize * 0.025,
+                  ),
+                ],
+              ),
+              child: Align(
+                alignment: feedback.kind == CascadePlaybackKind.explosion
+                    ? Alignment.center
+                    : Alignment.topRight,
+                child: Container(
+                  margin: EdgeInsets.all(cellSize * 0.03),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: cellSize * 0.075,
+                    vertical: cellSize * 0.015,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF17212B).withValues(alpha: 0.88),
+                    borderRadius: BorderRadius.circular(cellSize * 0.12),
+                  ),
+                  child: Text(
+                    label,
+                    style: TextStyle(
+                      color: color,
+                      fontSize:
+                          cellSize *
+                          (feedback.kind == CascadePlaybackKind.explosion
+                              ? 0.38
+                              : 0.23),
+                      height: 1,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ),
             ),
           ),
         ),
@@ -1621,7 +1718,9 @@ class _Cell extends StatelessWidget {
     // reverse, picking a `_up`/`_down`/`_left`/`_right` variant of the same
     // static head art so it connects flush to the first body segment.
     final spritePath =
-        (pos != null ? connectedBodySpritePath(kindDef, pos, bodyPaths) : null) ??
+        (pos != null
+            ? connectedBodySpritePath(kindDef, pos, bodyPaths)
+            : null) ??
         (pos != null
             ? connectedHeadSpritePath(kindDef, entity, pos, bodyPaths)
             : null) ??
@@ -1768,6 +1867,11 @@ class _Cell extends StatelessWidget {
       case 'circle_label':
         final c = color ?? _namedColor('green');
         final labelText = _resolveDisplayString(display['label'], entity) ?? '';
+        final badgeRaw = _resolveDisplayString(display['badge'], entity) ?? '';
+        final badgeMap = display['badgeMap'];
+        final badgeText = badgeMap is Map && badgeMap[badgeRaw] != null
+            ? badgeMap[badgeRaw].toString()
+            : badgeRaw;
         final isOverlay = display['overlay'] == true;
         if (isOverlay) {
           return Align(
@@ -1817,9 +1921,34 @@ class _Cell extends StatelessWidget {
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: cellSize * 0.36,
-                  shadows: const [
-                    Shadow(color: Colors.black87, blurRadius: 3),
-                  ],
+                  shadows: const [Shadow(color: Colors.black87, blurRadius: 3)],
+                ),
+              ),
+            if (badgeText.isNotEmpty)
+              Positioned(
+                left: cellSize * 0.07,
+                top: cellSize * 0.07,
+                child: Container(
+                  constraints: BoxConstraints(minWidth: cellSize * 0.27),
+                  padding: EdgeInsets.symmetric(
+                    horizontal: cellSize * 0.055,
+                    vertical: cellSize * 0.018,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xE61A2230),
+                    borderRadius: BorderRadius.circular(cellSize * 0.09),
+                    border: Border.all(color: Colors.white70, width: 1),
+                  ),
+                  child: Text(
+                    badgeText,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: cellSize * 0.19,
+                      height: 1,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
               ),
           ],
@@ -1855,7 +1984,8 @@ class _Cell extends StatelessWidget {
         final isOverlay = display['overlay'] == true;
         final bgColor = isOverlay
             ? Colors.transparent
-            : (_resolveDisplayColor(display['bgColor'], entity) ?? Colors.transparent);
+            : (_resolveDisplayColor(display['bgColor'], entity) ??
+                  Colors.transparent);
         return Stack(
           alignment: Alignment.center,
           children: [
@@ -1868,7 +1998,11 @@ class _Cell extends StatelessWidget {
                   shape: BoxShape.circle,
                   color: isOverlay ? c.withOpacity(0.72) : c,
                   boxShadow: [
-                    BoxShadow(color: c.withOpacity(0.6), blurRadius: 6, spreadRadius: 2),
+                    BoxShadow(
+                      color: c.withOpacity(0.6),
+                      blurRadius: 6,
+                      spreadRadius: 2,
+                    ),
                   ],
                 ),
               ),
@@ -1899,7 +2033,8 @@ class _Cell extends StatelessWidget {
       // The emoji provides the visual object; the label shows the value.
       case 'emoji_label':
         final emojiGlyph = display['emoji'] as String? ?? '';
-        final emojiLabel = _resolveDisplayString(display['label'], entity) ?? '';
+        final emojiLabel =
+            _resolveDisplayString(display['label'], entity) ?? '';
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.max,
@@ -2002,6 +2137,7 @@ class _Cell extends StatelessWidget {
 /// Pass [currentState] to highlight cells that already match the target.
 class TargetBoardRenderer extends StatelessWidget {
   final Map<String, dynamic> targetLayers;
+  final List<String> matchParams;
   final LevelState? currentState;
 
   /// Pack-specific colour overrides forwarded to [cellNamedColor]. Pass
@@ -2028,6 +2164,7 @@ class TargetBoardRenderer extends StatelessWidget {
   const TargetBoardRenderer({
     super.key,
     required this.targetLayers,
+    this.matchParams = const [],
     this.currentState,
     this.palette,
   });
@@ -2061,6 +2198,7 @@ class TargetBoardRenderer extends StatelessWidget {
                   x: x,
                   y: y,
                   targetLayers: targetLayers,
+                  matchParams: matchParams,
                   currentState: currentState,
                   palette: palette,
                   cellSize: cellSize,
@@ -2075,6 +2213,7 @@ class TargetBoardRenderer extends StatelessWidget {
 class _TargetCell extends StatelessWidget {
   final int x, y;
   final Map<String, dynamic> targetLayers;
+  final List<String> matchParams;
   final LevelState? currentState;
   final Map<String, String>? palette;
   final double cellSize;
@@ -2083,12 +2222,13 @@ class _TargetCell extends StatelessWidget {
     required this.x,
     required this.y,
     required this.targetLayers,
+    required this.matchParams,
     required this.cellSize,
     this.currentState,
     this.palette,
   });
 
-  String? _kindAt(String layerId) {
+  Map<String, dynamic>? _targetAt(String layerId) {
     final layer = targetLayers[layerId] as List?;
     if (layer == null || y >= layer.length) return null;
     final row = layer[y] as List?;
@@ -2097,29 +2237,39 @@ class _TargetCell extends StatelessWidget {
     // A target cell is either a bare kind or the full entry form the spec's own
     // example uses, `{"kind": "...", "<param>": ...}`. Casting straight to
     // String threw on the second one and took the whole goal panel down.
-    if (cell is String) return cell;
-    if (cell is Map) return cell['kind'] as String?;
+    if (cell is String) return {'kind': cell};
+    if (cell is Map && cell['kind'] is String) {
+      return Map<String, dynamic>.from(cell);
+    }
     return null;
   }
 
-  bool _matches(String targetKind, String layerId) {
+  bool _matches(Map<String, dynamic> target, String layerId) {
     final cs = currentState;
     if (cs == null) return false;
     final entity = cs.board.getEntity(layerId, Position(x, y));
-    return entity?.kind == targetKind;
+    if (entity?.kind != target['kind']) return false;
+    for (final name in matchParams) {
+      if (!target.containsKey(name) || entity?.param(name) != target[name]) {
+        return false;
+      }
+    }
+    return true;
   }
 
   @override
   Widget build(BuildContext context) {
     String? kind;
+    Map<String, dynamic>? target;
     bool matched = false;
     // Read whichever layers the goal actually declares — a pack may target
     // `ground` (terrain-shaping goals) just as well as `objects`.
     for (final layerId in targetLayers.keys) {
-      final k = _kindAt(layerId);
-      if (k != null) {
-        kind = k;
-        matched = _matches(k, layerId);
+      final candidate = _targetAt(layerId);
+      if (candidate != null) {
+        target = candidate;
+        kind = candidate['kind'] as String;
+        matched = _matches(candidate, layerId);
         break;
       }
     }
@@ -2133,13 +2283,18 @@ class _TargetCell extends StatelessWidget {
           BorderSide(color: Colors.black12, width: 0.5),
         ),
       ),
-      child: kind != null ? _buildTargetCell(kind) : null,
+      child: kind != null ? _buildTargetCell(kind, target!) : null,
     );
   }
 
-  Widget _buildTargetCell(String kind) {
+  Widget _buildTargetCell(String kind, Map<String, dynamic> target) {
     final color = _cellColor(kind);
-    final label = kind.startsWith('num_') ? kind.substring(4) : null;
+    String? label;
+    if (matchParams.length == 1 && target.containsKey(matchParams.single)) {
+      label = target[matchParams.single]?.toString();
+    } else if (kind.startsWith('num_')) {
+      label = kind.substring(4);
+    }
     return Container(
       margin: EdgeInsets.all(cellSize * 0.1),
       decoration: BoxDecoration(

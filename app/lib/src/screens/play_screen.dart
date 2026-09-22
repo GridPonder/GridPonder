@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:gridponder_engine/engine.dart';
 import 'package:llm_dart/llm_dart.dart';
 import '../animation/actor_facing.dart';
+import '../animation/cascade_playback.dart';
 import '../animation/motion_board.dart';
 import '../services/hint_service.dart';
 import '../services/pack_service.dart';
@@ -131,6 +132,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   LevelState? _preAnimState;
   Map<Position, String>? _animOverlays;
   List<LineOfSightFeedback> _lineOfSightFeedbacks = const [];
+  Map<Position, CascadeCellFeedback> _cascadeFeedbacks = const {};
+  int _cascadePulseId = 0;
   bool _animating = false;
   bool _resetRequested = false;
   bool _replaying = false;
@@ -428,6 +431,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     List<AnimationStep> avatarMoves,
     bool hasSlide,
   ) async {
+    await _playCascadePlayback(preState, result.events);
+    if (!mounted) return;
+
     // Stage-aware playback for the motion primitives, in the order the engine
     // resolved them. Built before the avatar walks because the movers in it
     // have to be held at their origins for the whole turn, not just their own
@@ -622,6 +628,61 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // _preAnimState from different turns is exactly the flicker this replay
     // was built to avoid, so it must finish before a later turn can start.
     await _playBeamReveal(preState, result.events);
+  }
+
+  /// Replays an atomically resolved cascade as visible causal phases. Values
+  /// first change on the clicked cell, then every wave shows its simultaneous
+  /// explosions followed by all incoming charge landing together.
+  Future<void> _playCascadePlayback(
+    LevelState preState,
+    List<GameEvent> events,
+  ) async {
+    final steps = cascadePlaybackSteps(events);
+    if (steps.isEmpty) return;
+
+    final animState = preState.copy();
+    animState.isWon = false;
+    animState.isLost = false;
+
+    for (final step in steps) {
+      if (!mounted) return;
+      final feedbacks = <Position, CascadeCellFeedback>{};
+      final pulseId = ++_cascadePulseId;
+      for (final change in step.changes) {
+        final entity = animState.board.getEntity(change.layer, change.position);
+        if (entity == null) continue;
+        final symbolParam =
+            widget.packService.game.entityKinds[entity.kind]?.symbolParam ??
+            'charge';
+        final params = Map<String, dynamic>.from(entity.params)
+          ..[symbolParam] = change.afterCharge;
+        animState.board.setEntity(
+          change.layer,
+          change.position,
+          EntityInstance(entity.kind, params),
+        );
+        feedbacks[change.position] = CascadeCellFeedback(
+          kind: step.kind,
+          delta: change.delta.abs(),
+          pulseId: pulseId,
+        );
+      }
+      setState(() {
+        _preAnimState = animState;
+        _cascadeFeedbacks = feedbacks;
+      });
+      await Future.delayed(
+        step.kind == CascadePlaybackKind.explosion
+            ? cascadeExplosionPhaseDuration
+            : cascadeChargePhaseDuration,
+      );
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = null;
+      _cascadeFeedbacks = const {};
+    });
   }
 
   /// The board to hold while motion plays: the finished turn, with [pending]
@@ -926,8 +987,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     LevelState preState,
     List<GameEvent> events,
   ) async {
-    final reveals =
-        events.where((e) => e.type == 'beam_cell_revealed').toList();
+    final reveals = events
+        .where((e) => e.type == 'beam_cell_revealed')
+        .toList();
     if (reveals.isEmpty) return;
 
     final finalState = _engine.state;
@@ -1756,6 +1818,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _avatarMotion.value = null;
     _cellEffects.value = const [];
     _lineOfSightFeedbacks = const [];
+    _cascadeFeedbacks = const {};
     _actorFacingAt = {};
     _actorFacingHistory.clear();
     _hiddenTransforms = const [];
@@ -1781,6 +1844,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _selectedMultiCellObjectId = null;
       _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
+      _cascadeFeedbacks = const {};
       _actorFacingAt = {};
     });
   }
@@ -2868,6 +2932,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                         selectedCellPosition: _selectedCellPosition,
                         lineOfSightFeedbacks: _lineOfSightFeedbacks,
                         cellEffects: _cellEffects,
+                        cascadeFeedbacks: _cascadeFeedbacks,
                         floodedColorOverride: _lastFloodColor,
                         avatarPositionOverride: _avatarSlidePos,
                         avatarMotion: _avatarMotion,
@@ -3171,7 +3236,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       alignment: WrapAlignment.center,
       children: [
         for (final r in readouts)
-          _buildReadoutChip(r, state.variables[r.variable], sprites[r.variable]),
+          _buildReadoutChip(
+            r,
+            state.variables[r.variable],
+            sprites[r.variable],
+          ),
       ],
     );
   }
@@ -3207,7 +3276,12 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(width: 8),
           labelSprite != null
-              ? Image(image: labelSprite, width: 16, height: 16, fit: BoxFit.contain)
+              ? Image(
+                  image: labelSprite,
+                  width: 16,
+                  height: 16,
+                  fit: BoxFit.contain,
+                )
               : Text(
                   readout.label,
                   style: TextStyle(
@@ -3291,6 +3365,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final descriptions = widget.packService.game.goalDescriptions;
     final showPreview = widget.packService.game.ui.showGoalPreview;
     Map<String, dynamic>? preview;
+    List<String> previewMatchParams = const [];
     final lines = <String>[];
     for (final goal in _levelDef.goals) {
       final targetLayers = goal.config['targetLayers'] as Map<String, dynamic>?;
@@ -3301,6 +3376,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           targetLayers != null &&
           preview == null) {
         preview = targetLayers;
+        previewMatchParams =
+            (goal.config['matchParams'] as List?)
+                ?.map((value) => value.toString())
+                .toList() ??
+            const [];
         continue;
       }
       lines.add(descriptions[goal.id] ?? goal.type.replaceAll('_', ' '));
@@ -3314,6 +3394,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           Center(
             child: TargetBoardRenderer(
               targetLayers: preview,
+              matchParams: previewMatchParams,
               currentState: state,
               palette: widget.packService.theme?.palette,
             ),
@@ -3925,8 +4006,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
             Text(
               _movesLabel(state),
               style: TextStyle(
-                color:
-                    state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
+                color: state.isLost
+                    ? Colors.red.shade600
+                    : Colors.grey.shade600,
                 fontSize: 13,
                 fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
               ),
@@ -3965,6 +4047,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildWinBanner() {
+    final reason = _levelDef.goals
+        .map((goal) => widget.packService.game.goalDescriptions[goal.id])
+        .whereType<String>()
+        .firstOrNull;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 14),
@@ -3984,6 +4070,13 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
               fontWeight: FontWeight.bold,
             ),
           ),
+          if (reason != null) ...[
+            const SizedBox(height: 4),
+            Text(
+              reason,
+              style: const TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,

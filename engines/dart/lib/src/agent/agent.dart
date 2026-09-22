@@ -111,7 +111,7 @@ class AgentObservation {
       game: game,
       level: level,
       state: state,
-      validActions: _enumerateActions(game, presentKinds),
+      validActions: _enumerateActions(game, state, presentKinds),
       boardText: TextRenderer.render(state, game,
           kindSymbolOverrides: kindSymbolOverrides),
       attemptNumber: attemptNumber,
@@ -123,7 +123,7 @@ class AgentObservation {
   }
 
   static List<GameAction> _enumerateActions(
-      GameDefinition game, Set<String> presentKinds) {
+      GameDefinition game, LevelState state, Set<String> presentKinds) {
     final actions = <GameAction>[];
     for (final actionDef in game.actions) {
       // Skip actions whose required entity kind is absent from the board.
@@ -139,6 +139,7 @@ class AgentObservation {
           actionDef.params.entries.toList(),
           {},
           actions,
+          state,
         );
       }
     }
@@ -150,6 +151,7 @@ class AgentObservation {
     List<MapEntry<String, ActionParamDef>> paramEntries,
     Map<String, dynamic> current,
     List<GameAction> out,
+    LevelState state,
   ) {
     if (paramEntries.isEmpty) {
       out.add(GameAction(actionId, Map.from(current)));
@@ -157,9 +159,20 @@ class AgentObservation {
     }
     final head = paramEntries.first;
     final tail = paramEntries.sublist(1);
-    final values = head.value.values ?? const <String>[];
+    final Iterable<dynamic> values = head.value.type == 'position'
+        ? [
+            for (var y = 0; y < state.board.height; y++)
+              for (var x = 0; x < state.board.width; x++) [x, y],
+          ]
+        : head.value.values ?? const <String>[];
     for (final value in values) {
-      _enumerate(actionId, tail, {...current, head.key: value}, out);
+      _enumerate(
+        actionId,
+        tail,
+        {...current, head.key: value},
+        out,
+        state,
+      );
     }
   }
 
