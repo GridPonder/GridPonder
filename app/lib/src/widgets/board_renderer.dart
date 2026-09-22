@@ -60,10 +60,16 @@ class CellEffectPlayback {
   final CellEffectDef def;
   final int frameIndex;
 
+  /// True once this effect's animated frames have finished and it is now
+  /// holding [CellEffectDef.lossImage] at rest instead (see that field's
+  /// doc comment). [frameIndex] is meaningless while this is true.
+  final bool showLossImage;
+
   const CellEffectPlayback({
     required this.position,
     required this.def,
     required this.frameIndex,
+    this.showLossImage = false,
   });
 }
 
@@ -831,20 +837,6 @@ class BoardRenderer extends StatelessWidget {
                 ),
               for (final feedback in lineOfSightFeedbacks)
                 _buildLineOfSightTargetFeedback(feedback, cellSize),
-              if (cellEffects case final effects?)
-                Positioned.fill(
-                  child: IgnorePointer(
-                    child: ValueListenableBuilder<List<CellEffectPlayback>>(
-                      valueListenable: effects,
-                      builder: (context, playing, _) => Stack(
-                        children: [
-                          for (final effect in playing)
-                            _buildCellEffect(effect, cellSize),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
               if (state.avatar.enabled && state.avatar.position != null)
                 if (avatarMotion case final motion?)
                   ValueListenableBuilder<AvatarMotion?>(
@@ -868,6 +860,28 @@ class BoardRenderer extends StatelessWidget {
                         : state.avatar,
                     cellSize,
                   ),
+              // Cell effects (explosions, bursts, ...) render above every
+              // other piece — including the avatar and actors layer beneath
+              // them — so a death/contact effect fully covers the collision
+              // it's masking instead of playing underneath a still-visible
+              // overlap. Effects that don't touch the avatar's own cell
+              // (the common case — terrain bursts, object removal) are
+              // unaffected by this being last: they never had anything to
+              // hide in the first place.
+              if (cellEffects case final effects?)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: ValueListenableBuilder<List<CellEffectPlayback>>(
+                      valueListenable: effects,
+                      builder: (context, playing, _) => Stack(
+                        children: [
+                          for (final effect in playing)
+                            _buildCellEffect(effect, cellSize),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
             ],
           ),
         );
@@ -1173,35 +1187,57 @@ class BoardRenderer extends StatelessWidget {
     final def = effect.def;
     final size = cellSize * def.scale;
     final inset = (cellSize - size) / 2;
-    final frames = def.frames < 1 ? 1 : def.frames;
-    final frame = effect.frameIndex.clamp(0, frames - 1);
+
+    Widget frameImage;
+    if (effect.showLossImage) {
+      final lossImage = def.lossImage;
+      if (lossImage == null) return const SizedBox.shrink();
+      frameImage = Image(
+        image: packService.resolvePackImage(lossImage),
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    } else if (def.framePaths case final paths? when paths.isNotEmpty) {
+      final frame = effect.frameIndex.clamp(0, paths.length - 1);
+      frameImage = Image(
+        image: packService.resolvePackImage(paths[frame]),
+        fit: BoxFit.cover,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+      );
+    } else if (def.sheet case final sheet?) {
+      final frames = def.frames < 1 ? 1 : def.frames;
+      final frame = effect.frameIndex.clamp(0, frames - 1);
+      frameImage = ClipRect(
+        child: Stack(
+          clipBehavior: Clip.hardEdge,
+          children: [
+            Positioned(
+              left: -frame * size,
+              top: 0,
+              width: size * frames,
+              height: size,
+              child: Image(
+                image: packService.resolvePackImage(sheet),
+                fit: BoxFit.fill,
+                filterQuality: FilterQuality.medium,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          ],
+        ),
+      );
+    } else {
+      return const SizedBox.shrink();
+    }
 
     return Positioned(
       left: effect.position.x * cellSize + inset,
       top: effect.position.y * cellSize + inset,
       width: size,
       height: size,
-      child: IgnorePointer(
-        child: ClipRect(
-          child: Stack(
-            clipBehavior: Clip.hardEdge,
-            children: [
-              Positioned(
-                left: -frame * size,
-                top: 0,
-                width: size * frames,
-                height: size,
-                child: Image(
-                  image: packService.resolvePackImage(def.sheet),
-                  fit: BoxFit.fill,
-                  filterQuality: FilterQuality.medium,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      child: IgnorePointer(child: frameImage),
     );
   }
 
@@ -1258,6 +1294,12 @@ class BoardRenderer extends StatelessWidget {
       top = (motion?.y ?? pos.y.toDouble()) * cellSize;
     }
 
+    final avatarFit = switch (packService.theme?.avatar?.fit) {
+      'cover' => BoxFit.cover,
+      'contain' => BoxFit.contain,
+      _ => BoxFit.contain,
+    };
+
     return Positioned(
       left: left,
       top: top,
@@ -1270,7 +1312,7 @@ class BoardRenderer extends StatelessWidget {
             child: themed.path != null
                 ? Image(
                     image: packService.resolvePackImage(themed.path!),
-                    fit: BoxFit.contain,
+                    fit: avatarFit,
                     errorBuilder: (_, __, ___) =>
                         _buildFallbackAvatar(fallbackAssetPath, size),
                   )

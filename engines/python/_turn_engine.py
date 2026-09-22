@@ -133,6 +133,11 @@ class TurnEngine:
         systems = instantiate_systems(effective_game)
         all_events: list[dict] = []
 
+        # Snapshot the avatar's pre-move position so phase 6 can detect a
+        # swap with a lethal-contact NPC (see
+        # GameState.avatar_position_at_turn_start).
+        state.avatar_position_at_turn_start = state.avatar.position
+
         # Phase 2: Action resolution
         for sys in systems:
             events = sys.execute_action_resolution(action, state, effective_game)

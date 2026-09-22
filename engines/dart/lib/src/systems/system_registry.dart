@@ -27,6 +27,7 @@ import 'support_collapse_system.dart';
 import 'terrain_edit_system.dart';
 import 'terrain_skip_system.dart';
 import 'tile_teleport_system.dart';
+import 'trailing_body_system.dart';
 import 'turn_cycle_system.dart';
 
 /// Creates a GameSystem instance from a SystemDef.
@@ -41,8 +42,7 @@ class SystemRegistry {
     'beam': (id, config) => BeamSystem(id: id, config: config),
     'cell_rotation': (id, _) => CellRotationSystem(id: id),
     'coupled_actors': (id, _) => CoupledActorsSystem(id: id),
-    'elastic_block': (id, config) =>
-        ElasticBlockSystem(id: id, config: config),
+    'elastic_block': (id, config) => ElasticBlockSystem(id: id, config: config),
     'individual_actors': (id, _) => IndividualActorsSystem(id: id),
     'push_objects': (id, _) => PushObjectsSystem(id: id),
     'portals': (id, _) => PortalsSystem(id: id),
@@ -65,6 +65,7 @@ class SystemRegistry {
     'ice_slide': (id, _) => IceSlideSystem(id: id),
     'sonar': (id, _) => SonarSystem(id: id),
     'terrain_edit': (id, _) => TerrainEditSystem(id: id),
+    'trailing_body': (id, config) => TrailingBodySystem(id: id, config: config),
     'turn_cycle': (id, _) => TurnCycleSystem(id: id),
   };
 

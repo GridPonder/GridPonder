@@ -463,7 +463,7 @@ class GameState:
         "board", "avatar", "variables", "overlay",
         "turn_count", "action_count", "pending_move",
         "sequence_indices", "once_fired_rules",
-        "is_won", "is_lost",
+        "is_won", "is_lost", "avatar_position_at_turn_start",
     )
 
     def __init__(
@@ -491,6 +491,14 @@ class GameState:
         self.once_fired_rules = once_fired_rules if once_fired_rules is not None else set()
         self.is_won = is_won
         self.is_lost = is_lost
+        # The avatar's position as of the start of the current turn, before
+        # phase 2 (action resolution) moves it. Set once per turn by
+        # TurnEngine.execute_turn. Lets phase 6 (NPC resolution) detect a
+        # swap — the avatar and a lethal-contact NPC each moving into the
+        # cell the other just vacated — which a same-cell check on final
+        # positions alone would miss. See
+        # follower_npcs.FollowerNpcsSystem._apply_npc_move.
+        self.avatar_position_at_turn_start: Optional[Pos] = None
 
     @classmethod
     def from_json(cls, state_json: dict, board: Board, game_defaults: dict) -> "GameState":
@@ -502,7 +510,7 @@ class GameState:
         return cls(board, avatar, variables, overlay)
 
     def copy(self) -> "GameState":
-        return GameState(
+        new_state = GameState(
             self.board.copy(),
             self.avatar.copy(),
             copy.deepcopy(self.variables),
@@ -515,6 +523,8 @@ class GameState:
             self.is_won,
             self.is_lost,
         )
+        new_state.avatar_position_at_turn_start = self.avatar_position_at_turn_start
+        return new_state
 
     def to_key(self) -> tuple:
         """Hashable snapshot for BFS/A* deduplication.

@@ -1,0 +1,70 @@
+{
+  "layers": [
+    { "id": "ground", "occupancy": "exactly_one", "default": "floor" },
+    { "id": "objects", "occupancy": "zero_or_one" },
+    { "id": "tail", "occupancy": "zero_or_one" }
+  ],
+  "entityKinds": {
+    "floor": { "layer": "ground", "tags": ["walkable"], "symbol": "." },
+    "container_a": { "layer": "objects", "tags": ["pickup"], "symbol": "1" },
+    "container_b": { "layer": "objects", "tags": ["pickup"], "symbol": "2" },
+    "flag": { "layer": "objects", "tags": ["goal"], "symbol": "F" },
+    "tail_segment_a_horizontal": { "layer": "tail", "tags": ["solid"], "symbol": "h" },
+    "tail_segment_a_vertical": { "layer": "tail", "tags": ["solid"], "symbol": "v" },
+    "tail_segment_a_corner_up_right": { "layer": "tail", "tags": ["solid"], "symbol": "u" },
+    "tail_segment_a_corner_right_down": { "layer": "tail", "tags": ["solid"], "symbol": "r" },
+    "tail_segment_a_corner_down_left": { "layer": "tail", "tags": ["solid"], "symbol": "d" },
+    "tail_segment_a_corner_left_up": { "layer": "tail", "tags": ["solid"], "symbol": "l" },
+    "tail_segment_b_horizontal": { "layer": "tail", "tags": ["solid"], "symbol": "H" },
+    "tail_segment_b_vertical": { "layer": "tail", "tags": ["solid"], "symbol": "V" },
+    "tail_segment_b_corner_up_right": { "layer": "tail", "tags": ["solid"], "symbol": "U" },
+    "tail_segment_b_corner_right_down": { "layer": "tail", "tags": ["solid"], "symbol": "R" },
+    "tail_segment_b_corner_down_left": { "layer": "tail", "tags": ["solid"], "symbol": "D" },
+    "tail_segment_b_corner_left_up": { "layer": "tail", "tags": ["solid"], "symbol": "L" }
+  },
+  "actions": [
+    {
+      "id": "move",
+      "params": { "direction": { "type": "direction", "values": ["up", "down", "left", "right"] } }
+    }
+  ],
+  "systems": [
+    {
+      "id": "navigation",
+      "type": "avatar_navigation",
+      "config": {
+        "solidLayers": ["objects", "tail"]
+      }
+    },
+    {
+      "id": "trail",
+      "type": "trailing_body",
+      "config": {
+        "moverTag": "avatar",
+        "lengthVariable": "cargoCount",
+        "bodyLayer": "tail",
+        "growthKindSource": "objects",
+        "growthTriggerTag": "pickup",
+        "growthColorParam": "color",
+        "segmentKindTemplate": "tail_segment_{color}_{shape}"
+      }
+    }
+  ],
+  "rules": [
+    {
+      "id": "pickup_container",
+      "on": "avatar_entered",
+      "where": { "position_has_tag": { "layer": "objects", "tag": "pickup" } },
+      "then": [
+        { "increment_variable": { "name": "cargoCount", "amount": 1 } },
+        { "destroy": { "position": "$event.position", "layer": "objects" } }
+      ]
+    }
+  ],
+  "defaults": {
+    "avatar": { "enabled": true },
+    "maxCascadeDepth": 2
+  },
+  "ui": { "showGoal": true },
+  "levelSequence": []
+}

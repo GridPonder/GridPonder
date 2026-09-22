@@ -1140,6 +1140,406 @@ void main() {
       );
     });
   });
+
+  group('follower_npcs movementBlockingLayers', () {
+    // `movementBlockingLayers` lets a patrol/clockwise behavior name extra layers
+    // whose `solid`-tagged entities block only that NPC — additive on top of
+    // the hardcoded `objects` check `solidBlocking` already performs, never a
+    // replacement for it. Empty (the default) must reproduce today's
+    // behaviour exactly, which the negative-control test below asserts.
+
+    GameDefinition movementBlockingLayersGame(Map<String, dynamic> behavior) {
+      final data = {
+        'id': 'com.gridponder.test_blocking_layers',
+        'layers': [
+          {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+          {'id': 'barrier_layer', 'occupancy': 'zero_or_one'},
+          {'id': 'actors', 'occupancy': 'zero_or_one'},
+        ],
+        'entityKinds': {
+          'empty': {
+            'layer': 'ground',
+            'tags': ['walkable'],
+            'symbol': '.',
+          },
+          'block': {
+            'layer': 'barrier_layer',
+            'tags': ['solid'],
+            'symbol': 'B',
+          },
+          'watcher': {
+            'layer': 'actors',
+            'tags': ['npc', 'solid'],
+            'symbol': 'W',
+          },
+        },
+        'actions': [
+          {
+            'id': 'move',
+            'params': {
+              'direction': {
+                'type': 'direction',
+                'values': ['up', 'down', 'left', 'right'],
+              },
+            },
+          },
+        ],
+        'systems': [
+          {
+            'id': 'navigation',
+            'type': 'avatar_navigation',
+            'config': <String, dynamic>{},
+          },
+          {
+            'id': 'npcs',
+            'type': 'follower_npcs',
+            'config': {
+              'behaviors': {'hunt': behavior},
+            },
+          },
+        ],
+      };
+      return GameDefinition.fromJson(data, id: 'test_blocking_layers');
+    }
+
+    // 3x2 board. The watcher sits at (1,0) facing right with a `block` entity
+    // on `barrier_layer` directly ahead at (2,0); the avatar parks on the row
+    // below, out of the way, so it never affects the watcher's own move.
+    Map<String, dynamic> movementBlockingLayersLevel() {
+      return {
+        'id': 'test_level',
+        'board': {
+          'size': [3, 2],
+          'layers': {
+            'barrier_layer': {
+              'format': 'sparse',
+              'entries': [
+                {
+                  'position': [2, 0],
+                  'kind': 'block',
+                },
+              ],
+            },
+            'actors': {
+              'format': 'sparse',
+              'entries': [
+                {
+                  'position': [1, 0],
+                  'kind': 'watcher',
+                  'behavior': 'hunt',
+                  'facing': 'right',
+                },
+              ],
+            },
+          },
+        },
+        'state': {
+          'avatar': {
+            'enabled': true,
+            'position': [0, 1],
+          },
+        },
+        'goals': <dynamic>[],
+        'loseConditions': <dynamic>[],
+      };
+    }
+
+    Position? watcherPos(TurnEngine engine) {
+      for (final entry in engine.state.board.layers['actors']!.entries()) {
+        if (entry.value.kind == 'watcher') return entry.key;
+      }
+      return null;
+    }
+
+    test('a patrol configured with movementBlockingLayers reverses off a solid on '
+        'that layer', () {
+      final game = movementBlockingLayersGame({
+        'type': 'patrol',
+        'movementBlockingLayers': ['barrier_layer'],
+      });
+      final engine = _engineFor(game, movementBlockingLayersLevel());
+
+      // The bottom edge blocks this move, so it only spends a beat — the
+      // avatar itself never moves (staying clear of the reverse cell above
+      // it, which the assertions below depend on).
+      engine.executeTurn(_move('down'));
+
+      // Forward (2,0) holds a solid `block` on barrier_layer, so the patrol
+      // must reverse to (0,0) instead of stepping onto it.
+      expect(watcherPos(engine), const Position(0, 0));
+      expect(
+        engine.state.board
+            .getEntity('actors', const Position(0, 0))!
+            .param('facing'),
+        'left',
+      );
+    });
+
+    test('without movementBlockingLayers set, the same entity on that layer does '
+        'not block the NPC', () {
+      // Negative control: proves the field is genuinely additive/opt-in,
+      // not accidentally always-on. Same board, same `block` entity on
+      // `barrier_layer`, but the behavior never names that layer, so the
+      // patrol walks straight through as if it were not there.
+      final game = movementBlockingLayersGame({'type': 'patrol'});
+      final engine = _engineFor(game, movementBlockingLayersLevel());
+
+      engine.executeTurn(_move('down'));
+
+      expect(watcherPos(engine), const Position(2, 0));
+      expect(
+        engine.state.board
+            .getEntity('actors', const Position(2, 0))!
+            .param('facing'),
+        'right',
+      );
+    });
+  });
+
+  group('avatar_navigation yieldingLayers', () {
+    // yieldingLayers lets the avatar step straight into a cell a
+    // patrol/clockwise follower_npcs NPC is genuinely vacating this same
+    // turn, instead of blocking the press and forcing the player to repeat
+    // it once the NPC has actually moved. It must never apply to a chasing
+    // behavior.
+
+    GameDefinition yieldGame(Map<String, dynamic> behavior) {
+      final data = {
+        'id': 'com.gridponder.test_yielding_layers',
+        'layers': [
+          {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+          {'id': 'actors', 'occupancy': 'zero_or_one'},
+        ],
+        'entityKinds': {
+          'empty': {
+            'layer': 'ground',
+            'tags': ['walkable'],
+            'symbol': '.',
+          },
+          'void': {
+            'layer': 'ground',
+            'tags': <String>[],
+            'symbol': '#',
+          },
+          'hazard': {
+            'layer': 'actors',
+            'tags': ['npc', 'solid'],
+            'symbol': 'X',
+          },
+        },
+        'actions': [
+          {
+            'id': 'move',
+            'params': {
+              'direction': {
+                'type': 'direction',
+                'values': ['up', 'down', 'left', 'right'],
+              },
+            },
+          },
+        ],
+        'systems': [
+          {
+            'id': 'navigation',
+            'type': 'avatar_navigation',
+            'config': {
+              'solidLayers': ['objects', 'actors'],
+              'yieldingLayers': ['actors'],
+            },
+          },
+          {
+            'id': 'npcs',
+            'type': 'follower_npcs',
+            'config': {
+              'behaviors': {'hunt': behavior},
+            },
+          },
+        ],
+      };
+      return GameDefinition.fromJson(data, id: 'test_yielding_layers');
+    }
+
+    // 3x2 board. Hazard sits in the top row, avatar directly below it, so
+    // the avatar's only route onto the hazard's cell is off the patrol
+    // axis — the same cell the hazard would reverse into is never the
+    // avatar's own starting cell.
+    Map<String, dynamic> yieldLevel({
+      required List<int> avatar,
+      required List<int> hazard,
+      required String facing,
+    }) {
+      return {
+        'id': 'test_level',
+        'board': {
+          'size': [3, 2],
+          'layers': {
+            'actors': {
+              'format': 'sparse',
+              'entries': [
+                {
+                  'position': hazard,
+                  'kind': 'hazard',
+                  'behavior': 'hunt',
+                  'facing': facing,
+                },
+              ],
+            },
+          },
+        },
+        'state': {
+          'avatar': {'enabled': true, 'position': avatar},
+        },
+        'goals': <dynamic>[],
+        'loseConditions': [
+          {
+            'type': 'variable_threshold',
+            'config': {
+              'variable': 'caught',
+              'target': 1,
+              'comparison': 'gte',
+            },
+          },
+        ],
+      };
+    }
+
+    Position? hazardPos(TurnEngine engine) {
+      for (final entry in engine.state.board.layers['actors']!.entries()) {
+        if (entry.value.kind == 'hazard') return entry.key;
+      }
+      return null;
+    }
+
+    test('lets the avatar in when a patrol vacates', () {
+      // The headline scenario: a patrol about to reverse off the board edge
+      // must not cost the player a wasted press.
+      //
+      // The hazard at (2,0) faces right into the edge, so this turn it
+      // reverses to (1,0). The avatar, parked below the hazard's cell, must
+      // be let straight in — in the same press, landing exactly where the
+      // hazard just left.
+      final game = yieldGame({'type': 'patrol'});
+      final engine = _engineFor(
+        game,
+        yieldLevel(avatar: [2, 1], hazard: [2, 0], facing: 'right'),
+      );
+
+      final result = engine.executeTurn(_move('up'));
+
+      expect(engine.state.avatar.position, const Position(2, 0));
+      expect(result.events.any((e) => e.type == 'avatar_entered'), isTrue);
+      expect(hazardPos(engine), const Position(1, 0));
+    });
+
+    test('lets the avatar in for clockwise too', () {
+      // Same headline scenario, clockwise behavior.
+      //
+      // The ringer faces "right" into the edge at (2,0); its next
+      // candidate, "down", lands on the avatar's OWN starting cell (2,1) —
+      // which the prediction (run before the avatar has moved) still sees
+      // as occupied, so it predicts the ringer rotates on to "left" ->
+      // (1,0) instead. Real npc_resolution runs after the avatar has
+      // already moved off (2,1), so the actual ringer takes the now-free
+      // "down" step to (2,1) instead. The predicted destination and the
+      // real one differ — but both agree the ringer leaves (2,0), which is
+      // the only thing this feature needs to get right: the avatar is let
+      // in either way, and the two never collide.
+      final game = yieldGame({'type': 'clockwise'});
+      final engine = _engineFor(
+        game,
+        yieldLevel(avatar: [2, 1], hazard: [2, 0], facing: 'right'),
+      );
+
+      final result = engine.executeTurn(_move('up'));
+
+      expect(engine.state.avatar.position, const Position(2, 0));
+      expect(result.events.any((e) => e.type == 'avatar_entered'), isTrue);
+      expect(hazardPos(engine), const Position(2, 1));
+    });
+
+    test('lethal patrol still catches an exact swap', () {
+      // Not the headline vacate case above: here the hazard's reversal
+      // target is the avatar's OWN starting cell, not some other cell off
+      // the patrol axis. Avatar and hazard trade cells in the same turn —
+      // final positions never overlap, so a same-cell check alone would
+      // miss it, but the two crossed paths exactly as if they'd collided
+      // head-on. A lethal-contact patrol must still catch the avatar here.
+      //
+      // 2x1 corridor. Hazard at (1,0) faces right into the edge, so it
+      // reverses to (0,0) — the avatar's own starting cell — while the
+      // avatar moves right into (1,0), the hazard's starting cell.
+      final game = yieldGame({'type': 'patrol', 'lethalContact': true});
+      final level =
+          yieldLevel(avatar: [0, 0], hazard: [1, 0], facing: 'right');
+      level['board']['size'] = [2, 1];
+      final engine = _engineFor(game, level);
+
+      final result = engine.executeTurn(_move('right'));
+
+      expect(result.events.any((e) => e.type == 'avatar_caught'), isTrue);
+      expect(engine.state.variables['caught'], 1);
+      expect(result.isLost, isTrue);
+    });
+
+    test('does not apply to chasing behaviors', () {
+      // Chasing behaviors keep blocking exactly as before.
+      //
+      // Predicting a toward_avatar NPC from here would be a real circular
+      // dependency (the avatar's move depends on where the NPC ends up,
+      // which depends on where the avatar ends up) — never attempted,
+      // regardless of yieldingLayers.
+      final game = yieldGame({
+        'type': 'toward_avatar',
+        'requiresLineOfSight': true,
+      });
+      final engine = _engineFor(
+        game,
+        yieldLevel(avatar: [2, 1], hazard: [2, 0], facing: 'right'),
+      );
+
+      final result = engine.executeTurn(_move('up'));
+
+      expect(engine.state.avatar.position, const Position(2, 1));
+      expect(result.events.any((e) => e.type == 'avatar_entered'), isFalse);
+    });
+
+    test('still blocks a fully boxed in patrol', () {
+      // A patrol that cannot even reverse (both directions blocked) is not
+      // vacating anything, so the avatar's move must still be blocked.
+      final game = yieldGame({'type': 'patrol'});
+      final level = yieldLevel(
+        avatar: [1, 1],
+        hazard: [1, 0],
+        facing: 'right',
+      );
+      // Wall the hazard in on both sides so neither forward nor reversed is
+      // legal.
+      level['board']['layers']['ground'] = {
+        'format': 'sparse',
+        'entries': [
+          {
+            'position': [0, 0],
+            'kind': 'void',
+          },
+          {
+            'position': [2, 0],
+            'kind': 'void',
+          },
+        ],
+      };
+      final engine = _engineFor(game, level);
+
+      final result = engine.executeTurn(_move('up'));
+
+      expect(engine.state.avatar.position, const Position(1, 1));
+      expect(result.events.any((e) => e.type == 'avatar_entered'), isFalse);
+      expect(
+        hazardPos(engine),
+        const Position(1, 0),
+        reason: 'boxed-in hazard must not have moved',
+      );
+    });
+  });
 }
 
 Position? _watcherPosition(TurnEngine engine) {

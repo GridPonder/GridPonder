@@ -113,6 +113,41 @@ class GameReadout {
       );
 }
 
+/// Config for showing the avatar/mover in the Goal panel alongside an
+/// ordered row of swatches for items it must collect in sequence.
+///
+/// Fully generic: any pack whose entity kinds carry a tag of the form
+/// `<stepTagPrefix>N` (N = 0, 1, 2, ...) and that tracks completed steps in
+/// a `state.variables` counter can opt in. Nothing here depends on any one
+/// pack's vocabulary — the mover sprite comes from the theme, the swatch
+/// colours come from each matching entity's own params.
+class MoverSequencePreviewConfig {
+  /// Tag prefix identifying step N via the tag `"<stepTagPrefix>N"`, e.g.
+  /// `"pickup_step_"` matches `"pickup_step_0"`, `"pickup_step_1"`, ...
+  final String stepTagPrefix;
+
+  /// Entity param read off each matching board entity for its swatch
+  /// colour, e.g. `"color"`. Falls back to the entity kind name if the
+  /// param is absent.
+  final String colorParam;
+
+  /// `state.variables` entry counting how many steps are already complete.
+  final String progressVariable;
+
+  const MoverSequencePreviewConfig({
+    required this.stepTagPrefix,
+    this.colorParam = 'color',
+    required this.progressVariable,
+  });
+
+  factory MoverSequencePreviewConfig.fromJson(Map<String, dynamic> j) =>
+      MoverSequencePreviewConfig(
+        stepTagPrefix: j['stepTagPrefix'] as String,
+        colorParam: j['colorParam'] as String? ?? 'color',
+        progressVariable: j['progressVariable'] as String,
+      );
+}
+
 /// UI display configuration for a game.
 class GameUiConfig {
   /// Whether to show the goal panel during play.
@@ -123,6 +158,11 @@ class GameUiConfig {
 
   /// Live variable chips shown during play, in declaration order.
   final List<GameReadout> readouts;
+
+  /// If set, the Goal panel draws the avatar/mover sprite followed by an
+  /// ordered row of swatches for the items it must collect, in place of the
+  /// default text/board-match preview. See [MoverSequencePreviewConfig].
+  final MoverSequencePreviewConfig? moverSequencePreview;
 
   /// Whether a `board_match` goal draws its target as a miniature board.
   ///
@@ -145,11 +185,14 @@ class GameUiConfig {
     this.readouts = const [],
     this.showGoalPreview = true,
     this.showMoves = true,
+    this.moverSequencePreview,
   });
 
   factory GameUiConfig.fromJson(Map<String, dynamic>? j) {
     if (j == null) return const GameUiConfig();
     final raw = j['readouts'];
+    final moverSequenceJson =
+        j['moverSequencePreview'] as Map<String, dynamic>?;
     return GameUiConfig(
       showGoal: (j['showGoal'] as bool?) ?? false,
       showGuide: (j['showGuide'] as bool?) ?? false,
@@ -161,6 +204,9 @@ class GameUiConfig {
             ].where((r) => r.variable.isNotEmpty).toList(),
       showGoalPreview: (j['showGoalPreview'] as bool?) ?? true,
       showMoves: (j['showMoves'] as bool?) ?? true,
+      moverSequencePreview: moverSequenceJson != null
+          ? MoverSequencePreviewConfig.fromJson(moverSequenceJson)
+          : null,
     );
   }
 }

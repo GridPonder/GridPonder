@@ -111,10 +111,23 @@ class AvatarThemeDef {
   final Map<String, Map<String, AvatarSpriteEntry>>
       sprites; // state → dir → entry
 
+  /// How the avatar's own sprite is fit into its cell. Every other board
+  /// sprite (tail segments, containers, ground tiles, ...) renders with
+  /// `BoxFit.cover`; the avatar has historically used `BoxFit.contain`
+  /// instead, which matters once a pack's avatar art is meant to butt
+  /// flush against edge-connector art on adjacent-cell sprites (e.g. a
+  /// vehicle head that must align pixel-for-pixel with a trailing body
+  /// segment) — `contain` can letterbox the avatar inside its cell in a
+  /// way `cover` does not, breaking that alignment even when the source
+  /// images themselves line up. Null keeps the existing `contain` default
+  /// so no pack's rendering changes unless it opts in.
+  final String? fit;
+
   const AvatarThemeDef({
     this.visible = true,
     this.sprite,
     this.sprites = const {},
+    this.fit,
   });
 
   factory AvatarThemeDef.fromJson(Map<String, dynamic> j) {
@@ -129,6 +142,7 @@ class AvatarThemeDef {
       visible: (j['visible'] as bool?) ?? true,
       sprite: j['sprite'] as String?,
       sprites: sprites,
+      fit: j['fit'] as String?,
     );
   }
 
@@ -143,20 +157,39 @@ class AvatarThemeDef {
 /// A sprite-strip animation played at a cell in response to an engine event.
 ///
 /// Purely presentational: the engine never reads this, and a client that does
-/// not implement effects simply ignores it. The strip is a single image of
-/// [frames] equal-width frames laid out left to right.
+/// not implement effects simply ignores it. The frames come from either a
+/// single sprite strip ([sheet], sliced into [frames] equal-width pieces —
+/// the original convention) or a list of standalone images ([framePaths],
+/// one full image per frame, no slicing) — whichever a pack's assets are
+/// shaped as. Exactly one of the two is expected to be set.
 class CellEffectDef {
-  /// Path to the horizontal sprite strip, relative to the pack.
-  final String sheet;
+  /// Path to the horizontal sprite strip, relative to the pack. Null when
+  /// [framePaths] is used instead.
+  final String? sheet;
 
-  /// Number of equal-width frames in the strip.
+  /// Number of equal-width frames in [sheet]. Ignored when [framePaths] is
+  /// set, where the frame count is simply that list's length.
   final int frames;
 
-  /// Total play time for one pass through the strip, in milliseconds.
+  /// Standalone per-frame image paths, played in order, relative to the
+  /// pack. An alternative to [sheet] for a pack whose frames were authored
+  /// as separate files rather than a single strip.
+  final List<String>? framePaths;
+
+  /// Total play time for one pass through the frames, in milliseconds.
   final int durationMs;
 
   /// Draw scale relative to one board cell (1.0 = exactly one cell).
   final double scale;
+
+  /// A static image, relative to the pack, kept on screen at this effect's
+  /// cell after its frames finish — but only when the turn that triggered
+  /// it also ended the level in a loss. Masks a lethal collision with a
+  /// wreck/aftermath image instead of reverting to the raw board (which
+  /// would otherwise show both parties still visually overlapping at the
+  /// point of contact) for as long as the level stays lost. An effect
+  /// without this set clears normally regardless of loss.
+  final String? lossImage;
 
   /// Optional payload filter. When present the effect only plays for events
   /// whose payload matches every key here (compared as strings), which is how
@@ -166,21 +199,31 @@ class CellEffectDef {
   final Map<String, String>? when;
 
   const CellEffectDef({
-    required this.sheet,
+    this.sheet,
     this.frames = 1,
+    this.framePaths,
     this.durationMs = 300,
     this.scale = 1.0,
+    this.lossImage,
     this.when,
   });
 
-  factory CellEffectDef.fromJson(Map<String, dynamic> j) => CellEffectDef(
-        sheet: j['sheet'] as String,
-        frames: (j['frames'] as num?)?.toInt() ?? 1,
-        durationMs: (j['durationMs'] as num?)?.toInt() ?? 300,
-        scale: (j['scale'] as num?)?.toDouble() ?? 1.0,
-        when: (j['when'] as Map?)
-            ?.map((k, v) => MapEntry(k.toString(), v.toString())),
-      );
+  factory CellEffectDef.fromJson(Map<String, dynamic> j) {
+    final framePaths = (j['framePaths'] as List?)
+        ?.map((e) => e as String)
+        .toList();
+    return CellEffectDef(
+      sheet: j['sheet'] as String?,
+      frames:
+          (j['frames'] as num?)?.toInt() ?? framePaths?.length ?? 1,
+      framePaths: framePaths,
+      durationMs: (j['durationMs'] as num?)?.toInt() ?? 300,
+      scale: (j['scale'] as num?)?.toDouble() ?? 1.0,
+      lossImage: j['lossImage'] as String?,
+      when: (j['when'] as Map?)
+          ?.map((k, v) => MapEntry(k.toString(), v.toString())),
+    );
+  }
 
   /// Whether this effect should play for [payload].
   bool matches(Map<String, dynamic> payload) {
@@ -218,6 +261,15 @@ class ThemeDef {
   /// they want to override or add.
   final Map<String, String> palette;
 
+  /// Presentation-only opt-in: when a turn moves both the avatar and an
+  /// `actors`-layer NPC at once (e.g. a hazard the avatar steps behind via
+  /// `avatar_navigation`'s `yieldingLayers`), play that NPC's own movement
+  /// animation to completion before starting the avatar's step animation,
+  /// instead of the default order (avatar walks first, NPCs animate after).
+  /// False/absent preserves the existing default order for every pack that
+  /// doesn't set this — it changes rendering timing only, never engine logic.
+  final bool npcsAnimateBeforeAvatar;
+
   const ThemeDef({
     this.controls,
     this.coverImage,
@@ -227,6 +279,7 @@ class ThemeDef {
     this.avatar,
     this.palette = const {},
     this.effects = const {},
+    this.npcsAnimateBeforeAvatar = false,
   });
 
   factory ThemeDef.fromJson(Map<String, dynamic> j) => ThemeDef(
@@ -257,5 +310,7 @@ class ThemeDef {
                 : [CellEffectDef.fromJson(v as Map<String, dynamic>)],
           ),
         ),
+        npcsAnimateBeforeAvatar:
+            (j['npcsAnimateBeforeAvatar'] as bool?) ?? false,
       );
 }

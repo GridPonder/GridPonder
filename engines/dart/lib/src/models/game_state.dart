@@ -63,6 +63,15 @@ class LevelState {
   int actionCount;
   PendingMove? pendingMove;
 
+  /// The avatar's position as of the start of the current turn, before
+  /// phase 2 (action resolution) moves it. Set once per turn by
+  /// `PhaseRunner.run`. Lets phase 6 (NPC resolution) detect a swap — the
+  /// avatar and a lethal-contact NPC each moving into the cell the other
+  /// just vacated — which a same-cell check on final positions alone would
+  /// miss, since after a swap neither party's landing cell matches the
+  /// other's. See `FollowerNpcsSystem._applyNpcMove`.
+  Position? avatarPositionAtTurnStart;
+
   /// Sequence goal progress: goalId → current index into the sequence.
   Map<String, int> sequenceIndices;
 
@@ -117,5 +126,5 @@ class LevelState {
         onceFiredRules: Set.from(onceFiredRules),
         isWon: isWon,
         isLost: isLost,
-      );
+      )..avatarPositionAtTurnStart = avatarPositionAtTurnStart;
 }

@@ -43,6 +43,10 @@ class PhaseRunner {
       return maxStage + 1;
     }
 
+    // Snapshot the avatar's pre-move position so phase 6 can detect a swap
+    // with a lethal-contact NPC (see LevelState.avatarPositionAtTurnStart).
+    state.avatarPositionAtTurnStart = state.avatar.position;
+
     // Phase 2: Action resolution
     for (final sys in systems) {
       final events = sys.executeActionResolution(action, state, effectiveGame);

@@ -474,6 +474,34 @@ All phases completed for this turn.
 |---------|------|-------------|
 | `turnNumber` | integer | Current turn count. |
 
+### `body_grown`
+A [`trailing_body`](04_systems.md#226-trailing_body) system added a segment
+because the mover consumed a growth-triggering entity this turn (the body's
+length increased, rather than merely sliding).
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell the new segment occupies (the cell the mover just left). |
+| `color` | string | The new segment's fixed color, read from the growth-trigger entity. |
+| `length` | integer | Total segment count immediately after this growth. |
+
+### `body_segment_added`
+A [`trailing_body`](04_systems.md#226-trailing_body) system placed a segment
+on `bodyLayer` this turn — fires on both a growth turn and an ordinary slide.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell the segment now occupies. |
+| `color` | string | The segment's fixed color. |
+
+### `body_segment_freed`
+A [`trailing_body`](04_systems.md#226-trailing_body) system cleared a cell
+that fell outside the body's current window — the cell is walkable again.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell that was cleared on `bodyLayer`. |
+
 ---
 
 ## 4. Condition Catalog

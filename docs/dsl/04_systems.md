@@ -54,6 +54,7 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `directions` | array of strings | `["up","down","left","right"]` | Allowed movement directions. |
 | `solidHandling` | string | `"block"` | What happens when moving into a solid cell: `"block"` (reject move) or `"delegate"` (let later systems handle, e.g. push or consume). |
 | `solidLayers` | array of strings | `["objects"]` | Layers checked for a `solid` blocker, in order; the first match wins. Packs that place blockers elsewhere — NPCs on `actors`, for instance — have to list that layer explicitly. |
+| `yieldingLayers` | array of strings | `[]` | Layers where a blocking entity is let through instead of blocking, if it's a `follower_npcs` `patrol`/`clockwise` NPC genuinely about to vacate that cell this same turn (predicted from board state as it stands at the start of the turn — see `follower_npcs`' shared step-prediction helper). Never applies to a chasing behavior (`toward_avatar`/`toward_tag`/`toward_color`) or to a shafted (train) member, both of which still block exactly as before — predicting a chasing behavior here would be a circular dependency on the avatar's own move. Empty by default, so this changes nothing for a pack that never sets it. |
 | `moveAction` | string | `"move"` | Which action id triggers navigation. |
 | `validGroundTags` | array of strings | `[]` | When non-empty, the target's ground cell must carry one of these tags. Empty keeps the void-only check, so packs that omit the field are unaffected. |
 | `groundLayer` | string | `"ground"` | Layer checked by `validGroundTags`. |
@@ -65,6 +66,7 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 3. Check ground layer — reject if `void`.
 4. If `validGroundTags` is non-empty, reject unless the `groundLayer` cell at the target carries one of those tags. This is how a game makes some non-void terrain unwalkable — landed debris, deep water, a roof you may stand beside but not on.
 5. Check the `solid` tag on each layer in `solidLayers`, in order:
+   - If the blocking entity's layer is listed in `yieldingLayers` and it resolves to a `follower_npcs` `patrol`/`clockwise` NPC that is predicted to move off this cell this turn, treat the cell as if it were empty and fall through to step 6.
    - `"block"`: reject move.
    - `"delegate"`: mark the move as pending. Emit `move_blocked` with the target position and blocker kind. Later phases (push) or rules (`resolve_move` effect) may complete or reject the pending move.
 6. If not blocked, move avatar to target. Emit `avatar_exited` for old position, `avatar_entered` for new position.
@@ -841,10 +843,11 @@ checked.
 | `type` | string | — | `toward_avatar`, `toward_tag`, `toward_color`, `patrol`, or `clockwise`. |
 | `frequency` | integer | `1` | Act only when `turnCount % frequency == 0`. The counter is incremented after this phase, so the first turn always acts. |
 | `solidBlocking` | boolean | `true` | Whether entities tagged `solid` on the `objects` layer block the NPC. |
+| `movementBlockingLayers` | array of strings | `[]` | `solidBlocking` only: extra layers, beyond the hardcoded `objects` layer, also checked for a `solid`-tagged entity that blocks the NPC. Additive — `objects` is always checked regardless of this field, so an empty list (the default) reproduces exactly today's behavior. Lets a level give a `patrol`/`clockwise` NPC an obstacle that blocks only that NPC (a marker on a level-specific layer the avatar never treats as solid), distinct from `requiresLineOfSight`'s own `blockingLayers` field below, which governs sight rather than movement. |
 | `targetTag` | string | — | `toward_tag` only: seek the nearest entity with this tag on the `objects` or `markers` layer. |
 | `targetColor` | string | — | `toward_color` only: seek the nearest entity whose `color` param matches, on the `objects` or `actors` layer. |
 | `requiresLineOfSight` | boolean | `false` | `toward_avatar` only: move only while the avatar is visible, using the same relation [`line_of_sight`](#213-line_of_sight) detects. Losing sight freezes the NPC where it stands. |
-| `blockingLayers` | array of strings | `["objects"]` | `requiresLineOfSight` only: layers checked for sight blockers. |
+| `blockingLayers` | array of strings | `["objects"]` | `requiresLineOfSight` only: layers checked for sight blockers. Governs sight, not movement — distinct from `solidBlocking`'s own `blockingLayers` field above. |
 | `blockingTags` | array of strings | `["solid"]` | `requiresLineOfSight` only: tags that break the sightline. Empty means every entity on those layers blocks. |
 | `multiCellObjectsBlock` | boolean | `true` | `requiresLineOfSight` only: whether a multi-cell object standing between the NPC and the avatar breaks the sightline. Both systems trace the line through one shared implementation, so this means here exactly what it means for [`line_of_sight`](#213-line_of_sight); the two used to answer differently for the same pair of cells. |
 | `lethalContact` | boolean | `false` | Allow the NPC to step onto the avatar. On contact it increments `contactVariable` and emits `avatar_caught`. When `false` the avatar's cell is impassable, so a seeking NPC with no other distance-reducing step stands still and a `patrol` or `clockwise` NPC turns around — which makes the avatar's body a usable, movable blocker. Applies to every behavior, so a patrolling hazard has to declare its lethality rather than inherit it. |
@@ -866,9 +869,10 @@ checked.
    heading is persistent state.
 4. A cell is impassable when out of bounds, `void` ground, occupied by another
    NPC's post-move position, blocked by a `solid` object under
-   `solidBlocking`, or occupied by the avatar unless `lethalContact` is set.
-   Every behavior shares this one test, so passability cannot drift between
-   them.
+   `solidBlocking` (on the `objects` layer, plus any layers named in
+   `movementBlockingLayers`), or occupied by the avatar unless `lethalContact` is
+   set. Every behavior shares this one test, so passability cannot drift
+   between them.
 5. Move the NPC and emit `npc_moved`. On lethal contact also bump
    `contactVariable` and emit `avatar_caught`.
 
@@ -1944,6 +1948,129 @@ weight whatever entities it likes; nothing here knows about a particular game.
 
 ---
 
+### 2.26 `trailing_body`
+
+**Purpose:** Make a mover drag a body of variable length behind it,
+classic-Snake style: the body always occupies exactly the mover's last `L`
+positions (`L` read fresh from a variable every turn), sliding forward each
+ordinary turn and growing by exactly one cell on a turn where the mover
+consumes a growth-triggering entity. Unlike a permanent-trail mechanic
+(Snake Tunnel's), cells behind the body's current tail end become walkable
+again as the mover advances — nothing is blocked for the rest of the level.
+
+**Phase:** `movement_resolution`, after the mover's own move has been
+resolved in `action_resolution`.
+
+Growth is detected **structurally**, not by comparing `lengthVariable`
+across turns. A pickup rule (Recipe A, [05_rules.md](05_rules.md)) that
+destroys the consumed entity and increments the length variable runs in
+`cascade_resolution` — one phase *after* this system. Reading
+`lengthVariable` in `movement_resolution` would therefore always be one
+phase stale within the pickup's own turn: the increment wouldn't be visible
+until the *following* turn, misattributing the growth to whatever ordinary
+move happens next. Instead, this system checks the board directly, at the
+mover's new cell, for an entity tagged `growthTriggerTag` on
+`growthKindSource` — still present, since the rule that will destroy it
+hasn't run yet this turn. `lengthVariable` is read fresh each turn only to
+reconcile drift between it and the structural trail (e.g. a level that
+starts the mover already carrying cargo) — never to detect this turn's own
+growth.
+
+**Events emitted:** `body_grown`, `body_segment_added`, `body_segment_freed`,
+`body_segment_unloaded` (one per segment spliced out of the chain this turn
+by landing on a matching unloader tile — see `unloadLayer` below), `tile_moved`
+(one per persisting segment that shifted exactly one cell this turn — every
+segment except a brand-new one coupling on, a lengthVariable-padded
+placeholder, or one pulled forward past a same-turn unload — so the generic
+rendering pipeline can glide the whole body in lockstep with the mover's own
+step animation instead of snapping it to rest a phase late)
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `moverLayer` | string | `"objects"` | Layer holding the tracked mover, when `moverTag` is not the reserved value `"avatar"`. |
+| `moverTag` | string | `"avatar"` | Tag identifying the mover entity. The reserved value `"avatar"` tracks `state.avatar` directly (ignoring `moverLayer`) — the common case, the player's own controlled character. Any other value scans `moverLayer` for the first entity carrying that tag, the same convention [`routed_motion`](#223-routed_motion) uses for its own movers, so a non-avatar actor (e.g. a driven vehicle on the `actors` layer) can grow a trailing body too. |
+| `lengthVariable` | string | required | Variable holding the current required body length. Read fresh every turn — the system never stores its own copy of "how long should I be." Used to reconcile drift (see Phase note above), not to detect this turn's growth. |
+| `bodyLayer` | string | `"tail"` | Layer where segment entities are written/rewritten each turn. |
+| `growthKindSource` | string | required | Layer to inspect at the mover's new cell each turn for a growth-triggering entity. |
+| `growthTriggerTag` | string | `"pickup"` | Tag an entity on `growthKindSource` must carry to count as this turn's growth trigger. |
+| `growthColorParam` | string | `"color"` | Per-instance param read off the growth-trigger entity to become the new segment's `{color}`. Falls back to the trigger entity's own `kind` string when the param is absent, so a game with a single body color can skip authoring it. |
+| `segmentKindTemplate` | string | `"segment"` | Template combining a segment's fixed color with its per-turn recomputed shape into the entity kind written to `bodyLayer`, via the literal placeholders `{color}` and `{shape}`, e.g. `"tail_segment_{color}_{shape}"`. `shape` is one of `horizontal`, `vertical`, `corner_up_right`, `corner_right_down`, `corner_down_left`, `corner_left_up` — the six-sprite convention this system was designed against — but the template can point at any kind-naming scheme a pack likes, or omit `{shape}` entirely for a game that only needs one look per color. |
+| `defaultSegmentKind` | string | none | Fallback **full kind string** (not a color) for a segment created without a structural growth event — used only to pad the body up to `lengthVariable` when the two disagree (typically a level that starts the mover already carrying cargo; unused when the mover always starts empty). Positions for this fallback are a best-effort placeholder (the mover's own starting cell, or the current tail's position for a mid-game reconcile) since no real trail exists to source them from. |
+| `unloadLayer` | string | none | Layer to check each segment's new position against for a matching unloader tile. Omitted (the default) disables unloading entirely — a pack that never sets this pays nothing here and every segment behaves exactly as if the fields below didn't exist. |
+| `unloadTag` | string | `"unloader"` | Tag an entity on `unloadLayer` must carry to act as an unloader. |
+| `unloadColorParam` | string | `"color"` | Per-instance param read off a candidate unloader entity and compared against the segment's own color. A segment only unloads at a tile whose value here equals its own color — the "specific connected container of the same color" rule. |
+
+**Behavior**, each turn (only when the mover's position actually changed
+this turn):
+
+1. Resolve the mover's current position and the position it held at the
+   start of this turn (tracked internally in state, in the "cell the cab
+   just left" sense hitch.md-style specs use).
+2. Check `growthKindSource` at the mover's *new* position for an entity
+   tagged `growthTriggerTag`. If found, this is a growth turn; the new
+   segment's color comes from `growthColorParam` on that entity (or its
+   `kind` as a fallback).
+3. Shift positions: prepend the cell the mover just left to the ordered
+   position list. On a growth turn, keep every existing position (nothing
+   drops — "the body doesn't slide" on the turn it grows) and append the
+   new color to the *end* of the color list, so the earliest-picked-up
+   cargo stays closest to the mover and each later pickup joins further
+   back — a new car couples onto the *back* of the train, it doesn't shove
+   its way to the front. On an ordinary turn, drop the farthest (last)
+   position, and leave the color list untouched — each existing segment's
+   fixed color moves forward into the position the segment ahead of it
+   just vacated, exactly like a real train's cars each pulling into the
+   spot the car ahead just left.
+4. When `unloadLayer` is configured, check each segment's freshly-computed
+   position against it: if an entity there carries `unloadTag` and its
+   `unloadColorParam` value equals that segment's own color, splice the
+   segment out of the chain entirely (not merely off the tail end) and emit
+   `body_segment_unloaded` at that position. Every segment behind the
+   spliced one is pulled forward to close the gap — each takes the position
+   slot the removed segment (or, transitively, whatever was between it and
+   them) would have occupied, so the chain stays contiguous: with
+   Red → Yellow → Blue, unloading Yellow leaves Red → Blue connected
+   directly, not Red<gap>Blue. This is purely structural — reconnection
+   doesn't touch `lengthVariable` or any other variable, and does not by
+   itself turn the unloader tile into anything else; a pack that wants the
+   tile to do something once triggered (revert to a loader, become
+   impassable, whatever) reacts to `body_segment_unloaded` with an ordinary
+   rule, the same way `activate_dropoff`-style rules already react to other
+   trailing_body events.
+5. Reconcile the resulting length against `lengthVariable` — pad with
+   `defaultSegmentKind` or trim from the tail — but only on a non-growth
+   turn (see Phase note above for why).
+6. Recompute every segment's shape from its up-to-two current neighbors
+   (the mover, for the segment closest to it) and rewrite its entity kind
+   via `segmentKindTemplate`, even for a segment whose position didn't
+   change this turn — its shape can still change because a neighbor moved.
+   A segment with only one real neighbor (the tail end) gets the straight
+   shape (`horizontal`/`vertical`) matching that one connection. Every
+   segment that persisted from before this turn *and* landed exactly one
+   cell from its own previous position emits `tile_moved` from its own old
+   position to its new one. A brand-new segment has no old position to
+   emit from; a segment pulled forward past a same-turn unload has one, but
+   it isn't one cell away, so neither animates — both simply appear at
+   rest.
+7. Clear `bodyLayer` at every position that fell out of the window this
+   turn — the natural tail-end drop, and any position an unload just
+   vacated.
+
+**Interaction with `avatar_navigation`:** add `bodyLayer` to
+[`avatar_navigation`](#21-avatar_navigation)'s `solidLayers`, and tag every
+segment kind `solid`, so the mover cannot step onto its own body. No new
+collision logic — this reuses the extension point Blind Spot's monster
+collision already added to `avatar_navigation`.
+
+**Reuse:** any game wanting a body/train/chain that trails a mover with a
+length tied to a resource or pickup count, without a permanent-trail
+mechanic's semantics — e.g. a "carry more, move slower/clumsier" variant, or
+anything themed around towing.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -1974,6 +2101,7 @@ weight whatever entities it likes; nothing here knows about a particular game.
 | Cell Rotation | `cell_rotation` | `action_resolution` | `rotate_cell` (configurable) |
 | Routed Motion | `routed_motion` | `npc_resolution` | (automatic once per accepted turn) |
 | Turn Cycle | `turn_cycle` | `action_resolution` + `npc_resolution` | configured accepted actions |
+| Trailing Body | `trailing_body` | `movement_resolution` | (automatic on mover movement) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 

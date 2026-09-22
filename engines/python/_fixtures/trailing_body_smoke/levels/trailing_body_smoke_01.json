@@ -1,0 +1,42 @@
+{
+  "id": "trailing_body_smoke_01",
+  "title": "Trailing Body Smoke",
+  "board": {
+    "size": [5, 5],
+    "layers": {
+      "objects": {
+        "format": "sparse",
+        "entries": [
+          {"position": [2, 0], "kind": "container_a", "color": "a"},
+          {"position": [2, 2], "kind": "container_b", "color": "b"},
+          {"position": [4, 4], "kind": "flag"}
+        ]
+      }
+    }
+  },
+  "state": {
+    "avatar": {"enabled": true, "position": [0, 0]},
+    "variables": {"cargoCount": 0}
+  },
+  "goals": [
+    {
+      "id": "reach_flag",
+      "type": "reach_target",
+      "config": {"targetKind": "flag"}
+    }
+  ],
+  "loseConditions": [],
+  "solution": {
+    "goldPath": [
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"},
+      {"action": "move", "direction": "up"},
+      {"action": "move", "direction": "right"},
+      {"action": "move", "direction": "down"}
+    ]
+  }
+}

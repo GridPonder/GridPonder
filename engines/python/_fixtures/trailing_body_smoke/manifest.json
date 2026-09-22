@@ -1,0 +1,10 @@
+{
+  "dslVersion": "0.12",
+  "packVersion": 1,
+  "gameId": "trailing_body_smoke",
+  "title": "Trailing Body Smoke Fixture",
+  "shortDescription": "Throwaway fixture exercising trailing_body for engine parity tests.",
+  "description": "Not a real pack. A truck picks up two colored containers in a row, sliding and turning a corner along the way, then bumps into its own tail before detouring around it to the flag — covering growth, an ordinary slide, a corner shape change, and a rejected self-collision move.",
+  "version": "1.0.0",
+  "minEngineVersion": "0.12.0"
+}

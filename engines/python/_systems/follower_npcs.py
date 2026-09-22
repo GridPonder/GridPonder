@@ -41,6 +41,152 @@ def _rotate_clockwise(current: str) -> str:
     return _CLOCKWISE_ORDER[(idx + 1) % len(_CLOCKWISE_ORDER)]
 
 
+# -- shared passability + step prediction ------------------------------------
+#
+# Module-level (not methods) because `avatar_navigation`'s `yieldingLayers`
+# check needs to call the exact same "what would this NPC do next" logic
+# without going through a FollowerNpcsSystem instance. Keeping these as plain
+# functions is what makes that a real shared implementation rather than a
+# second copy that can drift.
+
+def _no_solid_object(state: GameState, game: GameDef, pos: Pos) -> bool:
+    entity = state.board.get_entity("objects", pos)
+    if entity is None:
+        return True
+    return not game.has_tag(entity.kind, "solid")
+
+
+def _no_solid_on_layers(
+    state: GameState, game: GameDef, pos: Pos, layers,
+) -> bool:
+    """Whether [pos] is free of a `solid`-tagged entity on any of [layers].
+
+    Additive counterpart to `_no_solid_object`: those layers are checked on
+    top of (never instead of) the hardcoded `objects` check.
+    """
+    for layer_name in layers:
+        entity = state.board.get_entity(layer_name, pos)
+        if entity is not None and game.has_tag(entity.kind, "solid"):
+            return False
+    return True
+
+
+def _player_body_at(state: GameState, game: GameDef, pos: Pos) -> bool:
+    """Whether [pos] is part of the player's own body for contact/passability
+    purposes: either the avatar's own cell, or a `solid`-tagged entity on the
+    `tail` layer (a trailing_body segment — cargo the player is carrying). A
+    hazard's contact rule shouldn't care whether it hit the truck's cab or
+    the container riding behind it; both are "the player", so both use the
+    same lethal/blocking treatment.
+    """
+    if state.avatar.position == pos:
+        return True
+    entity = state.board.get_entity("tail", pos)
+    return entity is not None and game.has_tag(entity.kind, "solid")
+
+
+def _can_move_to(
+    pos: Pos,
+    state: GameState,
+    game: GameDef,
+    solid_blocking: bool,
+    occupied_after_move: set,
+    block_avatar: bool,
+    movement_blocking_layers=(),
+) -> bool:
+    board = state.board
+    if not board.is_in_bounds(pos):
+        return False
+    if board.is_void(pos):
+        return False
+    # Can't overlap with the avatar or its trailing cargo unless the
+    # behavior treats contact as lethal, in which case stepping onto
+    # either is the point.
+    if block_avatar and _player_body_at(state, game, pos):
+        return False
+    if pos in occupied_after_move:
+        return False
+    if solid_blocking and not _no_solid_object(state, game, pos):
+        return False
+    # Additional layers that block only whichever NPC behavior configured
+    # them — additive on top of the hardcoded `objects` check above, not a
+    # replacement for it.
+    if (solid_blocking and movement_blocking_layers
+            and not _no_solid_on_layers(state, game, pos, movement_blocking_layers)):
+        return False
+    return True
+
+
+def facing_of(npc_entity: Entity) -> str:
+    """An NPC's facing param, falling back to `right` when missing or unknown.
+
+    Public (no leading underscore): `avatar_navigation`'s `yieldingLayers`
+    check reads an NPC's current facing the same way before calling
+    `predict_circuit_step`.
+    """
+    facing = npc_entity.param("facing")
+    facing = "right" if facing is None else str(facing)
+    return facing if facing in _DIR_KEYS else "right"
+
+
+def predict_circuit_step(
+    behavior_type: str,
+    npc_pos: Pos,
+    facing: str,
+    state: GameState,
+    game: GameDef,
+    solid_blocking: bool,
+    occupied_after_move: set,
+    block_avatar: bool,
+    movement_blocking_layers=(),
+) -> tuple[Optional[Pos], str]:
+    """What a `patrol` or `clockwise` NPC would do next, from [npc_pos] facing
+    [facing], against board state exactly as it stands right now.
+
+    `patrol` and `clockwise` are the only two `follower_npcs` behaviors whose
+    decision depends solely on the NPC's own position/facing and the board —
+    never on where the avatar ends up this turn — which is what makes
+    predicting them safe. This is the ONE implementation of "what would this
+    NPC do next" for those two behaviors: it is pure (never mutates
+    `npc_entity` or the board) and returns `(next_position, resulting_facing)`.
+    `next_position` is None when the NPC is fully boxed in (patrol, can't
+    even reverse) or every rotation is blocked (clockwise); in that case
+    `resulting_facing` just echoes the facing passed in. Callers that want to
+    commit a move/facing change apply the result themselves.
+
+    Shared by `FollowerNpcsSystem`'s own turn resolution
+    (`_behavior_patrol`/`_behavior_clockwise`) and by
+    `AvatarNavigationSystem`'s `yieldingLayers` vacate check, so the two can
+    never drift out of sync.
+    """
+    if behavior_type == "clockwise":
+        for _ in range(len(_CLOCKWISE_ORDER)):
+            candidate = npc_pos.moved(facing)
+            if _can_move_to(
+                candidate, state, game, solid_blocking, occupied_after_move,
+                block_avatar, movement_blocking_layers,
+            ):
+                return candidate, facing
+            facing = _rotate_clockwise(facing)
+        return None, facing
+
+    # patrol: forward, else reversed, else stuck.
+    candidate = npc_pos.moved(facing)
+    if _can_move_to(
+        candidate, state, game, solid_blocking, occupied_after_move,
+        block_avatar, movement_blocking_layers,
+    ):
+        return candidate, facing
+    reversed_facing = dir_opposite(facing)
+    reversed_candidate = npc_pos.moved(reversed_facing)
+    if _can_move_to(
+        reversed_candidate, state, game, solid_blocking, occupied_after_move,
+        block_avatar, movement_blocking_layers,
+    ):
+        return reversed_candidate, reversed_facing
+    return None, facing
+
+
 class FollowerNpcsSystem(GameSystem):
     def __init__(self, sys_id: str):
         super().__init__(sys_id, "follower_npcs")
@@ -81,7 +227,7 @@ class FollowerNpcsSystem(GameSystem):
                 members, active, behaviors, state, game, occupied_after_move,
             ):
                 self._apply_npc_move(
-                    npc_pos, next_pos, npc_entity, state, contact_variable,
+                    npc_pos, next_pos, npc_entity, state, game, contact_variable,
                     occupied_after_move, events,
                 )
 
@@ -146,6 +292,9 @@ class FollowerNpcsSystem(GameSystem):
                 continue
 
             solid_blocking = behavior_def.get("solidBlocking", True)
+            movement_blocking_layers = [
+                str(l) for l in config_list(behavior_def, "movementBlockingLayers", [])
+            ]
 
             next_pos = self._compute_next_position(
                 npc_pos=npc_pos,
@@ -155,6 +304,7 @@ class FollowerNpcsSystem(GameSystem):
                 state=state,
                 game=game,
                 solid_blocking=solid_blocking,
+                movement_blocking_layers=movement_blocking_layers,
                 occupied_after_move=occupied_after_move,
                 sight=sight,
             )
@@ -165,7 +315,7 @@ class FollowerNpcsSystem(GameSystem):
 
             _report_sight_from(next_pos)
             self._apply_npc_move(
-                npc_pos, next_pos, npc_entity, state, contact_variable,
+                npc_pos, next_pos, npc_entity, state, game, contact_variable,
                 occupied_after_move, events,
             )
 
@@ -173,6 +323,7 @@ class FollowerNpcsSystem(GameSystem):
 
     def _apply_npc_move(
         self, npc_pos: Pos, next_pos: Pos, npc_entity: Entity, state: GameState,
+        game: GameDef,
         contact_variable: str, occupied_after_move: set, events: list[dict],
     ) -> None:
         """Commit one NPC step: board, occupancy, npc_moved, and contact.
@@ -181,7 +332,23 @@ class FollowerNpcsSystem(GameSystem):
         events for identical motion.
         """
         npc_id = f"spirit_{npc_pos.x}_{npc_pos.y}"
-        caught = state.avatar.position == next_pos
+        direct_caught = _player_body_at(state, game, next_pos)
+        # A swap: the avatar moved into npc_pos this same turn (already
+        # reflected in state.avatar.position, since avatar_navigation's phase
+        # runs first) while this NPC moves into the avatar's pre-move cell.
+        # Final positions never overlap in this case, so `direct_caught`
+        # alone misses it — but the two crossed paths exactly as if they'd
+        # collided head-on. Only reachable by a lethal-contact NPC: a
+        # blocking one can never predict a step onto the avatar's pre-move
+        # cell in the first place (see `_npc_is_vacating`'s `block_avatar` in
+        # avatar_navigation.py), so this never fires for behaviors that
+        # merely block.
+        swap_caught = (
+            not direct_caught
+            and state.avatar_position_at_turn_start == next_pos
+            and state.avatar.position == npc_pos
+        )
+        caught = direct_caught or swap_caught
 
         occupied_after_move.discard(npc_pos)
         occupied_after_move.add(next_pos)
@@ -265,11 +432,14 @@ class FollowerNpcsSystem(GameSystem):
             # seizure, because the size recorded at load no longer matches.
             if candidate in claimed:
                 return None
-            ok = self._can_move_to(
+            ok = _can_move_to(
                 candidate, state, game,
                 behavior_def.get("solidBlocking", True),
                 occupied_after_move,
                 block_avatar=not behavior_def.get("lethalContact", False),
+                movement_blocking_layers=[
+                    str(l) for l in config_list(behavior_def, "movementBlockingLayers", [])
+                ],
             )
             return candidate if ok else None
 
@@ -283,7 +453,7 @@ class FollowerNpcsSystem(GameSystem):
             claimed: set = set()
             out: list[Pos] = []
             for pos, entity in active:
-                facing = self._facing_of(entity)
+                facing = facing_of(entity)
                 if reversed_:
                     facing = dir_opposite(facing)
                 candidate = _legal(pos, entity, facing, claimed)
@@ -300,7 +470,7 @@ class FollowerNpcsSystem(GameSystem):
         reverse = _probe(True)
         if reverse is not None:
             for _, entity in members:  # the WHOLE train turns, not just the active
-                entity.params["facing"] = dir_opposite(self._facing_of(entity))
+                entity.params["facing"] = dir_opposite(facing_of(entity))
             return [(pos, e, c) for (pos, e), c in zip(active, reverse)]
 
         return []
@@ -373,7 +543,7 @@ class FollowerNpcsSystem(GameSystem):
         # vertical one is not on the horizontal one's row, and board order must
         # not decide which of the two gets checked.
         def on_line_of(pos: Pos, entity: Entity, other: Pos) -> bool:
-            if self._facing_of(entity) in ("left", "right"):
+            if facing_of(entity) in ("left", "right"):
                 return pos.y == other.y
             return pos.x == other.x
 
@@ -411,6 +581,7 @@ class FollowerNpcsSystem(GameSystem):
         game: GameDef,
         solid_blocking: bool,
         occupied_after_move: set,
+        movement_blocking_layers=(),
         sight: Optional[bool] = None,
     ) -> Optional[Pos]:
         # One flag governs every behavior: without it the avatar's cell is
@@ -430,6 +601,7 @@ class FollowerNpcsSystem(GameSystem):
             return self._ranked_step(
                 npc_pos, avatar_pos, state, game, solid_blocking,
                 occupied_after_move, block_avatar=block_avatar,
+                movement_blocking_layers=movement_blocking_layers,
             )
 
         if behavior_type == "toward_tag":
@@ -444,6 +616,7 @@ class FollowerNpcsSystem(GameSystem):
             return self._ranked_step(
                 npc_pos, target, state, game, solid_blocking,
                 occupied_after_move, block_avatar=block_avatar,
+                movement_blocking_layers=movement_blocking_layers,
             )
 
         if behavior_type == "toward_color":
@@ -458,54 +631,22 @@ class FollowerNpcsSystem(GameSystem):
             return self._ranked_step(
                 npc_pos, target, state, game, solid_blocking,
                 occupied_after_move, block_avatar=block_avatar,
+                movement_blocking_layers=movement_blocking_layers,
             )
 
         if behavior_type == "clockwise":
             return self._behavior_clockwise(
                 npc_pos, npc_entity, state, game, solid_blocking,
-                occupied_after_move, block_avatar,
+                occupied_after_move, block_avatar, movement_blocking_layers,
             )
 
         if behavior_type == "patrol":
             return self._behavior_patrol(
                 npc_pos, npc_entity, state, game, solid_blocking,
-                occupied_after_move, block_avatar,
+                occupied_after_move, block_avatar, movement_blocking_layers,
             )
 
         return None
-
-    # -- passability --------------------------------------------------------
-
-    def _no_solid_object(self, state: GameState, game: GameDef, pos: Pos) -> bool:
-        entity = state.board.get_entity("objects", pos)
-        if entity is None:
-            return True
-        return not game.has_tag(entity.kind, "solid")
-
-    def _can_move_to(
-        self,
-        pos: Pos,
-        state: GameState,
-        game: GameDef,
-        solid_blocking: bool,
-        occupied_after_move: set,
-        block_avatar: bool,
-    ) -> bool:
-        board = state.board
-        if not board.is_in_bounds(pos):
-            return False
-        if board.is_void(pos):
-            return False
-        # NOTE: only the avatar-seeking path refuses to enter the avatar's cell.
-        # The Dart implementation omits this check in the tag/color/clockwise/
-        # patrol branches, so the port keeps the asymmetry to stay in parity.
-        if block_avatar and state.avatar.position == pos:
-            return False
-        if pos in occupied_after_move:
-            return False
-        if solid_blocking and not self._no_solid_object(state, game, pos):
-            return False
-        return True
 
     # -- sight --------------------------------------------------------------
 
@@ -548,6 +689,7 @@ class FollowerNpcsSystem(GameSystem):
         solid_blocking: bool,
         occupied_after_move: set,
         block_avatar: bool,
+        movement_blocking_layers=(),
     ) -> Optional[Pos]:
         """First passable step that strictly reduces Manhattan distance.
 
@@ -567,9 +709,9 @@ class FollowerNpcsSystem(GameSystem):
             dist = _manhattan(candidate, target)
             if dist >= best_dist:
                 continue
-            if self._can_move_to(
+            if _can_move_to(
                 candidate, state, game, solid_blocking, occupied_after_move,
-                block_avatar,
+                block_avatar, movement_blocking_layers,
             ):
                 best_dist = dist
                 best = candidate
@@ -616,47 +758,28 @@ class FollowerNpcsSystem(GameSystem):
 
     # -- circuit behaviors --------------------------------------------------
 
-    def _facing_of(self, npc_entity: Entity) -> str:
-        facing = npc_entity.param("facing")
-        facing = "right" if facing is None else str(facing)
-        return facing if facing in _DIR_KEYS else "right"
-
     def _behavior_clockwise(
         self, npc_pos, npc_entity, state, game, solid_blocking,
-        occupied_after_move, block_avatar=True,
+        occupied_after_move, block_avatar=True, movement_blocking_layers=(),
     ) -> Optional[Pos]:
-        facing = self._facing_of(npc_entity)
-        for _ in range(len(_CLOCKWISE_ORDER)):
-            candidate = npc_pos.moved(facing)
-            if self._can_move_to(
-                candidate, state, game, solid_blocking, occupied_after_move,
-                block_avatar=block_avatar,
-            ):
-                npc_entity.params["facing"] = facing
-                return candidate
-            facing = _rotate_clockwise(facing)
-        return None
+        facing = facing_of(npc_entity)
+        next_pos, new_facing = predict_circuit_step(
+            "clockwise", npc_pos, facing, state, game, solid_blocking,
+            occupied_after_move, block_avatar, movement_blocking_layers,
+        )
+        if next_pos is not None:
+            npc_entity.params["facing"] = new_facing
+        return next_pos
 
     def _behavior_patrol(
         self, npc_pos, npc_entity, state, game, solid_blocking,
-        occupied_after_move, block_avatar=True,
+        occupied_after_move, block_avatar=True, movement_blocking_layers=(),
     ) -> Optional[Pos]:
-        facing = self._facing_of(npc_entity)
-
-        candidate = npc_pos.moved(facing)
-        if self._can_move_to(
-            candidate, state, game, solid_blocking, occupied_after_move,
-            block_avatar=block_avatar,
-        ):
-            return candidate
-
-        reversed_facing = dir_opposite(facing)
-        reversed_candidate = npc_pos.moved(reversed_facing)
-        if self._can_move_to(
-            reversed_candidate, state, game, solid_blocking, occupied_after_move,
-            block_avatar=block_avatar,
-        ):
-            npc_entity.params["facing"] = reversed_facing
-            return reversed_candidate
-
-        return None
+        facing = facing_of(npc_entity)
+        next_pos, new_facing = predict_circuit_step(
+            "patrol", npc_pos, facing, state, game, solid_blocking,
+            occupied_after_move, block_avatar, movement_blocking_layers,
+        )
+        if next_pos is not None and new_facing != facing:
+            npc_entity.params["facing"] = new_facing
+        return next_pos

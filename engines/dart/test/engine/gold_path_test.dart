@@ -206,6 +206,26 @@ void main() {
     }
   });
 
+  // --- trailing_body_smoke (throwaway trailing_body fixture) ---
+  group('trailing_body_smoke gold paths', () {
+    late LoadedPack pack;
+    setUpAll(
+      () => pack = _loadPack('../python/_fixtures/trailing_body_smoke'),
+    );
+
+    for (final levelId in const [
+      'trailing_body_smoke_01',
+    ]) {
+      test(
+        levelId,
+        () => _replayAndExpectWin(
+          _engineForLevel(pack, levelId),
+          _goldPath(pack, levelId),
+        ),
+      );
+    }
+  });
+
   group('undo/reset', () {
     late LoadedPack pack;
     setUpAll(() => pack = _loadPack('../../packs/carrot_quest'));

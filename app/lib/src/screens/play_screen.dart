@@ -31,6 +31,7 @@ import '../widgets/board_renderer.dart'
         elasticBlockRect,
         elasticBlockRectTween,
         elasticPushObjectTravel,
+        resolveAvatarSpriteChoice,
         resolveEntityMotionFrame;
 import '../widgets/balance_panel.dart';
 import '../widgets/controls_widget.dart';
@@ -85,6 +86,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   late LevelDefinition _levelDef;
   late TurnEngine _engine;
   late HintService _hintService;
+
+  /// Cache for [_moverSequenceColors]: the level's board layout never
+  /// changes for the lifetime of this screen, so the scan only needs to
+  /// run once even though the Goal panel rebuilds every turn.
+  List<String>? _moverSequenceColorsCache;
 
   /// Playtest lifecycle: level open/exit, attempts, and the `t`/`busy`/`at`
   /// stamps every event carries. See [PlaytestSession].
@@ -246,6 +252,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _levelDef = widget.packService.level(levelId);
     _engine = TurnEngine(widget.packService.game, _levelDef);
     _hintService = HintService(hintStops: _levelDef.solution.hintStops);
+    _moverSequenceColorsCache = null;
     _lastThinking = null;
     _lastResponse = null;
     _agentAttempt = 1;
@@ -417,7 +424,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     }
 
     await _playLineOfSightFeedback(result.events, generation);
-    await _playCellEffects(result.events, generation);
+    await _playCellEffects(result.events, generation, isLost: result.isLost);
   }
 
   /// Plays one accepted turn's motion — everything input waits on. The
@@ -469,10 +476,88 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       setState(() => _preAnimState = _heldBoard(pending: unplayed));
     }
 
+    // Presentation-only opt-in (`theme.json`'s `npcsAnimateBeforeAvatar`):
+    // some packs want an `actors`-layer NPC that moved this same turn (e.g.
+    // a hazard the avatar stepped behind via `avatar_navigation`'s
+    // `yieldingLayers`) to finish its own movement animation before the
+    // avatar's step animation starts, so the two never visibly overlap.
+    // Default (flag false/absent) leaves the order exactly as below: the
+    // avatar walks first, NPC movement plays later via the staged loop.
+    // Scoped to the ordinary one-cell-step case, since that's the only case
+    // where the avatar's own animation is awaited ahead of the staged loop
+    // at all (an ice slide has its own path below).
+    final npcsBeforeAvatar =
+        !hasSlide &&
+        avatarMoves.length == 1 &&
+        (widget.packService.theme?.npcsAnimateBeforeAvatar ?? false);
+    final preAvatarSteps = npcsBeforeAvatar
+        ? remaining
+              .where(
+                (s) =>
+                    (s.type == 'entity_move' || s.type == 'entity_path') &&
+                    (s.extra['layer'] as String? ?? 'objects') == 'actors',
+              )
+              .toList()
+        : const <AnimationStep>[];
+
+    // A `trailing_body` system's segments (see engines/dart's
+    // TrailingBodySystem) must glide in the very same motion as the
+    // avatar's own step — not a stage later, the way an ordinary mover's
+    // entity_move would — since the body is conceptually part of the
+    // avatar, not a separate actor it happens to share a turn with. Scoped
+    // to the same ordinary one-cell-step case as `npcsBeforeAvatar` above,
+    // the only case where the avatar's own animation runs on its own ahead
+    // of the staged loop at all.
+    final trailingBodyLayers = _trailingBodyLayers();
+    final trailSteps =
+        (!hasSlide && avatarMoves.length == 1 && trailingBodyLayers.isNotEmpty)
+        ? remaining
+              .where(
+                (s) =>
+                    s.type == 'entity_move' &&
+                    trailingBodyLayers.contains(
+                      s.extra['layer'] as String? ?? 'objects',
+                    ),
+              )
+              .toList()
+        : const <AnimationStep>[];
+
+    final postAvatarSteps = preAvatarSteps.isEmpty && trailSteps.isEmpty
+        ? remaining
+        : remaining
+              .where(
+                (s) => !preAvatarSteps.contains(s) && !trailSteps.contains(s),
+              )
+              .toList();
+
+    if (preAvatarSteps.isNotEmpty) {
+      await _playStagedAnimations(
+        preAvatarSteps,
+        travellers: travellers,
+        unplayed: unplayed,
+        pathTravellers: pathTravellers,
+      );
+      if (!mounted) return;
+    }
+
     // An ordinary one-cell step: walk it. (An ice slide is several avatar_move
-    // steps and has its own path below.)
+    // steps and has its own path below.) A trailing body's segments, if any
+    // moved this turn, walk in the exact same motion — same start, same
+    // finish — rather than waiting for the avatar to land first.
     if (!hasSlide && avatarMoves.length == 1) {
-      await _playAvatarStep(avatarMoves.single);
+      if (trailSteps.isEmpty) {
+        await _playAvatarStep(avatarMoves.single);
+      } else {
+        final inFlight = [
+          for (final step in trailSteps)
+            if (travellers[step] case final t?) t,
+        ];
+        unplayed.removeWhere(inFlight.contains);
+        await Future.wait([
+          _playAvatarStep(avatarMoves.single),
+          _playSlideMotion(trailSteps, inFlight: inFlight, stillPending: unplayed),
+        ]);
+      }
       if (!mounted) return;
     }
 
@@ -553,6 +638,59 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     }
 
     // Play each stage to completion before starting the next.
+    await _playStagedAnimations(
+      postAvatarSteps,
+      travellers: travellers,
+      unplayed: unplayed,
+      pathTravellers: pathTravellers,
+    );
+
+    if (remaining.isNotEmpty) {
+      if (!mounted) return;
+      setState(() {
+        _preAnimState = null;
+        _animOverlays = null;
+        _hiddenTransforms = const [];
+      });
+    }
+
+    // Kept inside motion (input still held) rather than promoted to the
+    // decorative players in _runAction: two overlapping beam reveals writing
+    // _preAnimState from different turns is exactly the flicker this replay
+    // was built to avoid, so it must finish before a later turn can start.
+    await _playBeamReveal(preState, result.events);
+  }
+
+  /// Board layers a `trailing_body` system (see engines/dart's
+  /// TrailingBodySystem) writes segments to in this pack — so
+  /// [_playTurnMotion] can carry that layer's `tile_moved` steps in the same
+  /// motion as the avatar's own step instead of leaving them to the later
+  /// staged pass. Empty for a pack with no such system, which changes
+  /// nothing for it.
+  Set<String> _trailingBodyLayers() => {
+    for (final s in widget.packService.game.systems)
+      if (s.enabled && s.type == 'trailing_body')
+        (s.config['bodyLayer'] as String?) ?? 'tail',
+  };
+
+  /// Plays [steps] (already sorted by stage, a subset or the whole of a
+  /// turn's `entity_move`/`entity_path`/`entity_animation` steps) as a
+  /// sequence of stage batches — each batch's movers travel together, and
+  /// the next batch waits for it to finish.
+  ///
+  /// [travellers] and [unplayed] are the whole turn's shared bookkeeping,
+  /// mutated in place as steps play. That is what lets this be called twice
+  /// in one turn (see `_playTurnMotion`'s `npcsBeforeAvatar` opt-in, which
+  /// plays a turn's `actors`-layer movement here before the avatar's own
+  /// step and the rest of the turn's steps here again afterward): a step
+  /// played in an earlier call is already removed from `unplayed` by the
+  /// time a later call computes what a still-pending mover should hide.
+  Future<void> _playStagedAnimations(
+    List<AnimationStep> steps, {
+    required Map<AnimationStep, TravellingEntity> travellers,
+    required List<TravellingEntity> unplayed,
+    required Set<TravellingEntity> pathTravellers,
+  }) async {
     int? currentStage;
     final stageBuf = <AnimationStep>[];
     Future<void> flushStage() async {
@@ -595,7 +733,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       stageBuf.clear();
     }
 
-    for (final step in remaining) {
+    for (final step in steps) {
       if (currentStage == null || step.stage == currentStage) {
         currentStage = step.stage;
         stageBuf.add(step);
@@ -607,21 +745,6 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       }
     }
     await flushStage();
-
-    if (remaining.isNotEmpty) {
-      if (!mounted) return;
-      setState(() {
-        _preAnimState = null;
-        _animOverlays = null;
-        _hiddenTransforms = const [];
-      });
-    }
-
-    // Kept inside motion (input still held) rather than promoted to the
-    // decorative players in _runAction: two overlapping beam reveals writing
-    // _preAnimState from different turns is exactly the flicker this replay
-    // was built to avoid, so it must finish before a later turn can start.
-    await _playBeamReveal(preState, result.events);
   }
 
   /// The board to hold while motion plays: the finished turn, with [pending]
@@ -801,7 +924,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   /// events — e.g. a burst on every `cell_transformed`. Purely presentational:
   /// packs opt in through `theme.json`'s `effects` block, and a pack that
   /// declares none costs nothing here.
-  Future<void> _playCellEffects(List<GameEvent> events, int generation) async {
+  Future<void> _playCellEffects(
+    List<GameEvent> events,
+    int generation, {
+    bool isLost = false,
+  }) async {
     if (!mounted || _effectGeneration != generation) return;
     final effects = widget.packService.theme?.effects;
     if (effects == null || effects.isEmpty) return;
@@ -874,7 +1001,26 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         }(),
     ]);
     if (!mounted || _effectGeneration != generation) return;
-    _cellEffects.value = const [];
+
+    // A lethal effect whose def names a lossImage keeps masking its cell
+    // with that static image rather than clearing to reveal the raw board —
+    // which at a fatal collision cell would otherwise show both parties
+    // still visually overlapping. Scoped to `isLost`: the same effect on a
+    // non-fatal trigger (if a pack ever reuses one) clears normally. Every
+    // other effect (no lossImage, or this turn didn't end the level) clears
+    // exactly as before. Held until `_clearPlaybackState` wipes it on the
+    // next reset/undo.
+    _cellEffects.value = [
+      for (final entry in cellsByDef.entries)
+        if (isLost && entry.key.lossImage != null)
+          for (final pos in entry.value)
+            CellEffectPlayback(
+              position: pos,
+              def: entry.key,
+              frameIndex: 0,
+              showLossImage: true,
+            ),
+    ];
   }
 
   Future<void> _playLineOfSightFeedback(
@@ -3282,6 +3428,35 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   }
 
   Widget _buildGoalContent(LevelState state) {
+    final moverPreviewCfg = widget.packService.game.ui.moverSequencePreview;
+    if (moverPreviewCfg != null) {
+      final colors = _moverSequenceColors(moverPreviewCfg);
+      if (colors.isNotEmpty) {
+        final achieved =
+            (state.variables[moverPreviewCfg.progressVariable] as num?)
+                    ?.toInt() ??
+                0;
+        final descriptions = widget.packService.game.goalDescriptions;
+        final lines = [
+          for (final goal in _levelDef.goals)
+            if ((descriptions[goal.id] ?? '').isNotEmpty) descriptions[goal.id]!,
+        ];
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(child: _buildMoverSequenceGoal(colors, achieved)),
+            if (lines.isNotEmpty) const SizedBox(height: 6),
+            for (final line in lines)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(line, style: const TextStyle(fontSize: 12)),
+              ),
+          ],
+        );
+      }
+    }
+
     // Sum and count constraint goals are rendered together (rows + cols in one view).
     final constraintGoals = _levelDef.goals
         .where(
@@ -3389,6 +3564,95 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           ),
         ),
       ),
+    );
+  }
+
+  /// The ordered colours for [GameUiConfig.moverSequencePreview]: for every
+  /// entity kind tagged `"<stepTagPrefix>N"`, its `colorParam` value (or the
+  /// kind name if unset), indexed by N. Scans the level's starting board —
+  /// not the live one — so a step's colour is still known after that step's
+  /// entity has been picked up and removed from the board.
+  List<String> _moverSequenceColors(MoverSequencePreviewConfig cfg) {
+    final cached = _moverSequenceColorsCache;
+    if (cached != null) return cached;
+
+    final game = widget.packService.game;
+    final byStep = <int, String>{};
+    final initial = _levelDef.initialState();
+    for (final layer in initial.board.layers.values) {
+      for (final entry in layer.entries()) {
+        final kind = entry.value.kind;
+        final tags = game.entityKinds[kind]?.tags ?? const <String>[];
+        for (final tag in tags) {
+          if (!tag.startsWith(cfg.stepTagPrefix)) continue;
+          final step = int.tryParse(tag.substring(cfg.stepTagPrefix.length));
+          if (step == null) continue;
+          byStep[step] =
+              (entry.value.param(cfg.colorParam) as String?) ?? kind;
+        }
+      }
+    }
+
+    final colors = <String>[];
+    for (var i = 0; byStep.containsKey(i); i++) {
+      colors.add(byStep[i]!);
+    }
+    return _moverSequenceColorsCache = colors;
+  }
+
+  Widget _buildMoverSequenceGoal(List<String> colors, int achievedCount) {
+    final avatarChoice = resolveAvatarSpriteChoice(
+      widget.packService.theme?.avatar,
+      'down',
+    );
+    final avatarImage = avatarChoice.path != null
+        ? widget.packService.resolvePackImage(avatarChoice.path!)
+        : null;
+
+    return Wrap(
+      alignment: WrapAlignment.center,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      runSpacing: 4,
+      children: [
+        if (avatarImage != null)
+          Padding(
+            padding: const EdgeInsets.only(right: 6),
+            child: SizedBox(
+              width: 30,
+              height: 30,
+              child: Image(image: avatarImage, fit: BoxFit.contain),
+            ),
+          ),
+        for (int i = 0; i < colors.length; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            child: _buildMoverSequenceSwatch(colors[i], i < achievedCount),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMoverSequenceSwatch(String color, bool achieved) {
+    final tint = cellNamedColor(color, palette: widget.packService.theme?.palette);
+    return Container(
+      width: 24,
+      height: 24,
+      decoration: BoxDecoration(
+        color: tint,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(
+          color: achieved ? Colors.amber.shade700 : Colors.black26,
+          width: achieved ? 2.5 : 1,
+        ),
+        boxShadow: const [
+          BoxShadow(color: Colors.black26, blurRadius: 1, offset: Offset(1, 1)),
+        ],
+      ),
+      child: achieved
+          ? const Center(
+              child: Icon(Icons.check, size: 14, color: Colors.white),
+            )
+          : null,
     );
   }
 
