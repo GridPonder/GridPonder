@@ -117,6 +117,12 @@ def _find_number_on_board(state: GameState, target: int):
 def _board_match(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
     target_layers = cfg.get("targetLayers", {})
     match_mode = cfg.get("matchMode", "exact_non_null")
+    raw_match_params = cfg.get("matchParams", [])
+    match_params = (
+        [str(value) for value in raw_match_params]
+        if isinstance(raw_match_params, list)
+        else []
+    )
     total = matched = 0
     for layer_id, target_data in target_layers.items():
         board_layer = state.board.layers.get(layer_id)
@@ -130,19 +136,32 @@ def _board_match(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, floa
                 actual = board_layer.get(Pos(x, y))
                 if match_mode == "exact_non_null":
                     te = Entity.from_json(target) if target else None
-                    if actual and te and actual.kind == te.kind:
+                    if _entity_matches_target(actual, te, match_params):
                         matched += 1
                 else:
                     if target is None and actual is None:
                         matched += 1
                     elif target is not None and actual is not None:
                         te = Entity.from_json(target)
-                        if actual.kind == te.kind:
+                        if _entity_matches_target(actual, te, match_params):
                             matched += 1
     if total == 0:
         return True, 1.0
     prog = matched / total
     return matched == total, prog
+
+
+def _entity_matches_target(
+    actual: Entity | None,
+    target: Entity | None,
+    match_params: list[str],
+) -> bool:
+    if actual is None or target is None or actual.kind != target.kind:
+        return False
+    for name in match_params:
+        if name not in target.params or actual.param(name) != target.param(name):
+            return False
+    return True
 
 
 def _variable_threshold(cfg: dict, state: GameState) -> tuple[bool, float]:

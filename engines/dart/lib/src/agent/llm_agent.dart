@@ -364,8 +364,8 @@ class LlmAgent implements GridPonderAgent {
     final Map<String, String> actionForward;
     if (anonymize) {
       final sorted = List<GameAction>.from(obs.validActions)
-        ..sort(
-            (a, b) => pyJsonDumps(a.toJson()).compareTo(pyJsonDumps(b.toJson())));
+        ..sort((a, b) =>
+            pyJsonDumps(a.toJson()).compareTo(pyJsonDumps(b.toJson())));
       actionForward = {
         for (int i = 0; i < sorted.length; i++)
           pyJsonDumps(sorted[i].toJson()): 'a${i + 1}',
@@ -507,7 +507,8 @@ $actionsDesc
       ex2 = n > 1 ? '{"action": "a$n"}' : ex1;
     } else {
       final va = obs.validActions;
-      ex1 = va.isNotEmpty ? pyJsonDumps(va.first.toJson()) : '{"action": "..."}';
+      ex1 =
+          va.isNotEmpty ? pyJsonDumps(va.first.toJson()) : '{"action": "..."}';
       ex2 = va.length > 1 ? pyJsonDumps(va.last.toJson()) : ex1;
     }
 
@@ -732,9 +733,8 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     bool anonymize = false,
     Map<String, String> kindToLabel = const {},
   }) {
-    String nameOf(String kind) => anonymize
-        ? (kindToLabel[kind] ?? kind)
-        : game.observationName(kind);
+    String nameOf(String kind) =>
+        anonymize ? (kindToLabel[kind] ?? kind) : game.observationName(kind);
 
     final lines = <String>[];
     Map<String, dynamic>? config;
@@ -759,9 +759,9 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     if (config != null) {
       final selectedKind = state.variables[
           config['selectedVariable'] as String? ?? 'selectedActorKind'];
-      final rawPos = state.variables[config['selectedPositionVariable']
-              as String? ??
-          'selectedActorPosition'];
+      final rawPos = state.variables[
+          config['selectedPositionVariable'] as String? ??
+              'selectedActorPosition'];
       final noSelection = selectedKind == null ||
           selectedKind == false ||
           selectedKind == 0 ||
@@ -1070,8 +1070,23 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     final exact = (config['matchMode'] ?? 'exact_non_null') == 'exact';
     final nullSymbol = exact ? '.' : '?';
     final anon = kindToLabel != null;
+    final matchParams = (config['matchParams'] as List?)
+            ?.map((value) => value.toString())
+            .toSet() ??
+        const <String>{};
 
-    String symbolFor(String kindId) {
+    String symbolFor(String kindId, [Object? cell]) {
+      final kindDef = game.entityKinds[kindId];
+      final symbolParam = kindDef?.symbolParam;
+      final paramValue = cell is Map &&
+              symbolParam != null &&
+              matchParams.contains(symbolParam)
+          ? cell[symbolParam]
+          : null;
+      if (paramValue != null) {
+        final rendered = paramValue.toString();
+        return rendered.length == 1 ? rendered : 'N';
+      }
       if (anon && kindToLabel.containsKey(kindId)) return kindToLabel[kindId]!;
       final sym = game.publicSymbol(kindId);
       return (sym != null && sym.isNotEmpty) ? sym : kindId[0];
@@ -1093,33 +1108,35 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     final also = <String>[];
     for (int y = 0; y < height; y++) {
       for (int x = 0; x < width; x++) {
-        final kindsHere = <String>[];
+        final cellsHere = <(String, Object?)>[];
         for (final layerId in layerOrder) {
           final rows = targetLayers[layerId] as List? ?? const [];
           if (y >= rows.length || rows[y] is! List) continue;
           final row = rows[y] as List;
           if (x >= row.length) continue;
-          final kind = _targetCellKind(row[x]);
-          if (kind != null) kindsHere.add(kind);
+          final cell = row[x];
+          final kind = _targetCellKind(cell);
+          if (kind != null) cellsHere.add((kind, cell));
         }
-        if (kindsHere.isEmpty) {
+        if (cellsHere.isEmpty) {
           nullUsed = true;
           continue;
         }
-        final top = kindsHere.first;
-        final sym = symbolFor(top);
+        final (top, topCell) = cellsHere.first;
+        final sym = symbolFor(top, topCell);
         grid[y][x] = sym;
         if (!gridKinds.contains((sym, top))) gridKinds.add((sym, top));
-        for (final other in kindsHere.skip(1)) {
+        for (final (other, otherCell) in cellsHere.skip(1)) {
           also.add(anon
-              ? '($x,$y) ${symbolFor(other)}'
-              : '($x,$y) ${symbolFor(other)}=${_kindName(game, other)}');
+              ? '($x,$y) ${symbolFor(other, otherCell)}'
+              : '($x,$y) ${symbolFor(other, otherCell)}=${_kindName(game, other)}');
         }
       }
     }
 
     final legend = <String>[];
-    if (nullUsed) legend.add(exact ? '.=must be empty' : '?=any (unconstrained)');
+    if (nullUsed)
+      legend.add(exact ? '.=must be empty' : '?=any (unconstrained)');
     for (final (sym, kind) in gridKinds) {
       final entry = anon ? sym : '$sym=${_kindName(game, kind)}';
       if (!legend.contains(entry)) legend.add(entry);

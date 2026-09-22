@@ -297,7 +297,8 @@ Board state matches a target pattern.
         [null, null, null]
       ]
     },
-    "matchMode": "exact_non_null"
+    "matchMode": "exact_non_null",
+    "matchParams": ["color"]
 }}
 ```
 
@@ -305,6 +306,13 @@ Board state matches a target pattern.
 |-------------|------|-------------|
 | `targetLayers` | object | Layer data in the same format as board layers. |
 | `matchMode` | string | `"exact"` (all cells match), `"exact_non_null"` (only non-null target cells must match). Default: `"exact_non_null"`. |
+| `matchParams` | array of strings | Optional entity parameters that must also equal the values named by each target cell. When absent, matching remains kind-only for backward compatibility. A non-null target that omits a selected parameter does not match. |
+
+`matchParams` is useful for parameterized entities whose mutable state remains
+on one kind, such as a numbered, coloured, oriented, or charged cell. The
+comparison is exact after JSON parsing; the goal does not coerce strings into
+numbers. Goal previews and agent-facing target grids use an entity kind's
+`symbolParam` when that parameter is selected.
 
 #### `variable_threshold`
 A variable reaches or exceeds a target value.

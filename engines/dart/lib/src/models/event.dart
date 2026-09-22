@@ -79,6 +79,59 @@ class GameEvent {
         'layer': layer,
       });
 
+  static GameEvent cellCharged(
+    Position pos, {
+    required int beforeCharge,
+    required int afterCharge,
+    required int delta,
+    required int wave,
+    required String source,
+    required String layer,
+  }) =>
+      GameEvent('cell_charged', {
+        'position': pos,
+        'beforeCharge': beforeCharge,
+        'afterCharge': afterCharge,
+        'delta': delta,
+        'wave': wave,
+        'source': source,
+        'layer': layer,
+      });
+
+  static GameEvent cascadeWaveStarted(int wave, List<Position> positions) =>
+      GameEvent('cascade_wave_started', {
+        'wave': wave,
+        'positions': positions,
+      });
+
+  static GameEvent cellExploded(
+    Position pos, {
+    required int beforeCharge,
+    required int afterCharge,
+    required int threshold,
+    required String kernel,
+    required int wave,
+    required String layer,
+  }) =>
+      GameEvent('cell_exploded', {
+        'position': pos,
+        'beforeCharge': beforeCharge,
+        'afterCharge': afterCharge,
+        'threshold': threshold,
+        'kernel': kernel,
+        'wave': wave,
+        'layer': layer,
+      });
+
+  static GameEvent cascadeWaveCompleted(int wave, List<Position> positions) =>
+      GameEvent('cascade_wave_completed', {
+        'wave': wave,
+        'positions': positions,
+      });
+
+  static GameEvent cascadeSettled(int waves) =>
+      GameEvent('cascade_settled', {'waves': waves});
+
   /// A body was on a cell whose ground gave way beneath it. `layer` is the
   /// board layer it was removed from, or `'avatar'` for the avatar — which
   /// stays on the board, because a lose condition ends the level in the same

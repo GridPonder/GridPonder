@@ -7,6 +7,7 @@ ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from engines.python._game_def import GameDef
+from engines.python._models import Board, GameState
 from engines.python._turn_engine import TurnEngine
 from engines.python.action_enum import enumerate_actions
 
@@ -181,9 +182,43 @@ def test_a_wait_that_changes_nothing_is_not_offered_without_a_slow_machine() -> 
     assert enumerate_actions(game, engine.state, engine=engine) == []
 
 
+def test_position_parameters_enumerate_every_board_coordinate_row_major() -> None:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "floor"}
+            ],
+            "entityKinds": {
+                "floor": {
+                    "layer": "ground",
+                    "tags": ["walkable"],
+                    "symbol": ".",
+                }
+            },
+            "actions": [
+                {
+                    "id": "tap_cell",
+                    "params": {"position": {"type": "position"}},
+                }
+            ],
+            "systems": [],
+        }
+    )
+    board = Board.from_json({"size": [2, 2], "layers": {}}, game.layers)
+    state = GameState.from_json({}, board, game.defaults)
+
+    assert enumerate_actions(game, state) == [
+        {"action": "tap_cell", "position": [0, 0]},
+        {"action": "tap_cell", "position": [1, 0]},
+        {"action": "tap_cell", "position": [0, 1]},
+        {"action": "tap_cell", "position": [1, 1]},
+    ]
+
+
 if __name__ == "__main__":
     test_engine_probe_filters_vetoed_and_no_effect_actions()
     test_retapping_the_selected_piece_is_not_offered()
     test_an_off_beat_wait_is_offered_when_a_slow_machine_is_on_the_board()
     test_a_wait_that_changes_nothing_is_not_offered_without_a_slow_machine()
-    print("4 passed")
+    test_position_parameters_enumerate_every_board_coordinate_row_major()
+    print("5 passed")

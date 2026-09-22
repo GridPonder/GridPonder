@@ -16,6 +16,7 @@ from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
 from .balance_regions import BalanceRegionsSystem
 from .beam import BeamSystem
+from .cascade_cells import CascadeCellsSystem
 from .cell_rotation import CellRotationSystem
 from .coupled_actors import CoupledActorsSystem
 from .elastic_block import ElasticBlockSystem
@@ -49,6 +50,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "avatar_navigation": lambda sys_id, _: AvatarNavigationSystem(sys_id),
     "balance_regions": lambda sys_id, _: BalanceRegionsSystem(sys_id),
     "beam": lambda sys_id, config: BeamSystem(sys_id, config),
+    "cascade_cells": lambda sys_id, config: CascadeCellsSystem(sys_id, config),
     "cell_rotation": lambda sys_id, _: CellRotationSystem(sys_id),
     "push_objects": lambda sys_id, _: PushObjectsSystem(sys_id),
     "portals": lambda sys_id, _: PortalsSystem(sys_id),

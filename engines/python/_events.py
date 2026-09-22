@@ -106,6 +106,68 @@ def cell_transformed(pos: Pos, from_kind: str, to_kind: str, layer: str) -> dict
     }
 
 
+def cell_charged(
+    pos: Pos,
+    before_charge: int,
+    after_charge: int,
+    delta: int,
+    wave: int,
+    source: str,
+    layer: str,
+) -> dict:
+    return {
+        "type": "cell_charged",
+        "position": pos,
+        "beforeCharge": before_charge,
+        "afterCharge": after_charge,
+        "delta": delta,
+        "wave": wave,
+        "source": source,
+        "layer": layer,
+    }
+
+
+def cascade_wave_started(wave: int, positions: list[Pos]) -> dict:
+    return {
+        "type": "cascade_wave_started",
+        "wave": wave,
+        "positions": positions,
+    }
+
+
+def cell_exploded(
+    pos: Pos,
+    before_charge: int,
+    after_charge: int,
+    threshold: int,
+    kernel: str,
+    wave: int,
+    layer: str,
+) -> dict:
+    return {
+        "type": "cell_exploded",
+        "position": pos,
+        "beforeCharge": before_charge,
+        "afterCharge": after_charge,
+        "threshold": threshold,
+        "kernel": kernel,
+        "wave": wave,
+        "layer": layer,
+    }
+
+
+def cascade_wave_completed(wave: int, positions: list[Pos]) -> dict:
+    return {
+        "type": "cascade_wave_completed",
+        "wave": wave,
+        "positions": positions,
+    }
+
+
+def cascade_settled(waves: int) -> dict:
+    return {"type": "cascade_settled", "waves": waves}
+
+
 def entity_fell(pos: Pos, kind: str, layer: str) -> dict:
     """A body was on a cell whose ground gave way beneath it.
 

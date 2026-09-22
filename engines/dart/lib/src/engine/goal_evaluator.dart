@@ -172,6 +172,10 @@ class GoalEvaluator {
     final targetLayers =
         goal.config['targetLayers'] as Map<String, dynamic>? ?? {};
     final matchMode = (goal.config['matchMode'] as String?) ?? 'exact_non_null';
+    final matchParams = (goal.config['matchParams'] as List?)
+            ?.map((value) => value.toString())
+            .toList() ??
+        const <String>[];
 
     int totalCells = 0;
     int matchedCells = 0;
@@ -191,7 +195,7 @@ class GoalEvaluator {
           final actual = boardLayer.getAt(Position(x, y));
           if (matchMode == 'exact_non_null') {
             final targetEntity = EntityInstance.fromJson(target);
-            if (actual != null && actual.kind == targetEntity.kind) {
+            if (_entityMatchesTarget(actual, targetEntity, matchParams)) {
               matchedCells++;
             }
           } else {
@@ -200,7 +204,9 @@ class GoalEvaluator {
               matchedCells++;
             } else if (target != null && actual != null) {
               final targetEntity = EntityInstance.fromJson(target);
-              if (actual.kind == targetEntity.kind) matchedCells++;
+              if (_entityMatchesTarget(actual, targetEntity, matchParams)) {
+                matchedCells++;
+              }
             }
           }
         }
@@ -210,6 +216,18 @@ class GoalEvaluator {
     if (totalCells == 0) return (true, 1.0);
     final prog = matchedCells / totalCells;
     return (matchedCells == totalCells, prog);
+  }
+
+  bool _entityMatchesTarget(
+      EntityInstance? actual, EntityInstance target, List<String> matchParams) {
+    if (actual == null || actual.kind != target.kind) return false;
+    for (final name in matchParams) {
+      if (!target.params.containsKey(name) ||
+          actual.param(name) != target.param(name)) {
+        return false;
+      }
+    }
+    return true;
   }
 
   (bool, double) _variableThreshold(GoalDef goal, LevelState state) {
