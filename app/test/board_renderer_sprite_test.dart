@@ -187,6 +187,65 @@ void main() {
     ]);
   });
 
+  test('resolves param-driven display connections to cell-edge vectors', () {
+    final display = <String, dynamic>{
+      'connections': '@param:kernel',
+      'connectionMap': {
+        'h': [
+          [-1, 0],
+          [1, 0],
+        ],
+        'x': [
+          [-2, -2],
+          [2, 2],
+        ],
+      },
+    };
+
+    expect(
+      resolveDisplayConnectionVectors(
+        display,
+        const EntityInstance('cell', {'kernel': 'h'}),
+      ),
+      const [Offset(-1, 0), Offset(1, 0)],
+    );
+    expect(
+      resolveDisplayConnectionVectors(
+        display,
+        const EntityInstance('cell', {'kernel': 'x'}),
+      ),
+      const [Offset(-1, -1), Offset(1, 1)],
+    );
+  });
+
+  test('ignores malformed or missing display connections', () {
+    final display = <String, dynamic>{
+      'connections': '@param:kernel',
+      'connectionMap': {
+        'bad': [
+          [0, 0],
+          [1],
+          ['right', 0],
+        ],
+      },
+    };
+
+    expect(
+      resolveDisplayConnectionVectors(
+        display,
+        const EntityInstance('cell', {'kernel': 'bad'}),
+      ),
+      isEmpty,
+    );
+    expect(
+      resolveDisplayConnectionVectors(
+        display,
+        const EntityInstance('cell', {'kernel': 'missing'}),
+      ),
+      isEmpty,
+    );
+  });
+
   test('elastic face reaches a crate before the crate starts moving', () {
     expect(
       elasticPushObjectTravel(

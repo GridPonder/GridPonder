@@ -1,5 +1,5 @@
 import 'dart:math';
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart' show ValueListenable, listEquals;
 import 'package:flutter/material.dart';
 import 'package:gridponder_engine/engine.dart';
 import '../animation/actor_facing.dart';
@@ -38,6 +38,49 @@ Color? _parsePaletteHex(String hex) {
   if (s.length != 8) return null;
   final v = int.tryParse(s, radix: 16);
   return v == null ? null : Color(v);
+}
+
+/// Resolves optional edge-to-edge connection vectors declared by an entity's
+/// display block. The display chooses a key (usually from an entity param),
+/// then maps that key to integer `[dx, dy]` vectors. Vectors are normalized so
+/// the painter always reaches the cell boundary, including diagonals.
+///
+/// Example:
+/// ```json
+/// "connections": "@param:kernel",
+/// "connectionMap": {"h": [[-1, 0], [1, 0]]}
+/// ```
+List<Offset> resolveDisplayConnectionVectors(
+  Map<String, dynamic> display,
+  EntityInstance entity,
+) {
+  final spec = display['connections'];
+  if (spec is! String) return const [];
+
+  final String? key;
+  if (spec.startsWith('@param:')) {
+    key = entity.param(spec.substring(7))?.toString();
+  } else {
+    key = spec;
+  }
+  if (key == null) return const [];
+
+  final connectionMap = display['connectionMap'];
+  if (connectionMap is! Map) return const [];
+  final rawVectors = connectionMap[key];
+  if (rawVectors is! List) return const [];
+
+  final result = <Offset>[];
+  for (final raw in rawVectors) {
+    if (raw is! List || raw.length != 2) continue;
+    final dx = raw[0];
+    final dy = raw[1];
+    if (dx is! num || dy is! num || (dx == 0 && dy == 0)) continue;
+    final scale = max(dx.abs(), dy.abs()).toDouble();
+    final vector = Offset(dx / scale, dy / scale);
+    if (!result.contains(vector)) result.add(vector);
+  }
+  return result;
 }
 
 class LineOfSightFeedback {
@@ -1613,16 +1656,28 @@ class _Cell extends StatelessWidget {
         ),
       );
     }
-    return Container(
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.black12, width: 0.5),
-      ),
-      child: Stack(
-        children: [
-          for (final layerId in resolveBoardLayerOrder(game))
-            if (!skipGround || layerId != 'ground') _layer(layerId, pos),
-        ],
-      ),
+    final layerOrder = resolveBoardLayerOrder(game);
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        // Paint the grid between the ground and interactive layers. Keeping
+        // the border out of Container.decoration avoids its implicit inset,
+        // so edge-connected displays can meet exactly at cell boundaries and
+        // naturally cover the grid line where a connection passes through.
+        for (final layerId in layerOrder)
+          if (layerId == 'ground' && !skipGround) _layer(layerId, pos),
+        const IgnorePointer(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              border: Border.fromBorderSide(
+                BorderSide(color: Colors.black12, width: 0.5),
+              ),
+            ),
+          ),
+        ),
+        for (final layerId in layerOrder)
+          if (layerId != 'ground') _layer(layerId, pos),
+      ],
     );
   }
 
@@ -1867,6 +1922,10 @@ class _Cell extends StatelessWidget {
       case 'circle_label':
         final c = color ?? _namedColor('green');
         final labelText = _resolveDisplayString(display['label'], entity) ?? '';
+        final connectionVectors = resolveDisplayConnectionVectors(
+          display,
+          entity,
+        );
         final badgeRaw = _resolveDisplayString(display['badge'], entity) ?? '';
         final badgeMap = display['badgeMap'];
         final badgeText = badgeMap is Map && badgeMap[badgeRaw] != null
@@ -1907,15 +1966,36 @@ class _Cell extends StatelessWidget {
         return Stack(
           alignment: Alignment.center,
           children: [
+            if (connectionVectors.isNotEmpty)
+              Positioned.fill(
+                child: ClipRect(
+                  child: CustomPaint(
+                    painter: _ConnectionRoadPainter(
+                      color: c,
+                      vectors: connectionVectors,
+                    ),
+                  ),
+                ),
+              ),
             Center(
               child: Container(
-                width: cellSize * 0.72,
-                height: cellSize * 0.72,
+                width: cellSize * (connectionVectors.isEmpty ? 0.72 : 0.6),
+                height: cellSize * (connectionVectors.isEmpty ? 0.72 : 0.6),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: c,
+                  border: connectionVectors.isEmpty
+                      ? null
+                      : Border.all(
+                          color: Color.lerp(c, Colors.white, 0.72)!,
+                          width: max(1.0, cellSize * 0.03),
+                        ),
                   boxShadow: [
-                    BoxShadow(color: c, blurRadius: 6, spreadRadius: 1),
+                    BoxShadow(
+                      color: c.withValues(alpha: 0.34),
+                      blurRadius: connectionVectors.isEmpty ? 6 : 10,
+                      spreadRadius: connectionVectors.isEmpty ? 1 : 1,
+                    ),
                   ],
                 ),
               ),
@@ -1930,7 +2010,7 @@ class _Cell extends StatelessWidget {
                   shadows: const [Shadow(color: Colors.black87, blurRadius: 3)],
                 ),
               ),
-            if (badgeText.isNotEmpty)
+            if (badgeText.isNotEmpty && connectionVectors.isEmpty)
               Positioned(
                 left: cellSize * 0.07,
                 top: cellSize * 0.07,
@@ -2132,6 +2212,47 @@ class _Cell extends StatelessWidget {
     'flag' => Icons.flag,
     _ => Icons.circle_outlined,
   };
+}
+
+class _ConnectionRoadPainter extends CustomPainter {
+  final Color color;
+  final List<Offset> vectors;
+
+  const _ConnectionRoadPainter({required this.color, required this.vectors});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final shortestSide = min(size.width, size.height);
+    final laneWidth = shortestSide * 0.24;
+    final glowPaint = Paint()
+      ..color = color.withValues(alpha: 0.16)
+      ..strokeWidth = laneWidth * 1.55
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, shortestSide * 0.045);
+    final surfacePaint = Paint()
+      ..color = Color.lerp(color, Colors.white, 0.6)!.withValues(alpha: 0.7)
+      ..strokeWidth = laneWidth
+      ..strokeCap = StrokeCap.round;
+    final highlightPaint = Paint()
+      ..color = Color.lerp(color, Colors.white, 0.86)!.withValues(alpha: 0.55)
+      ..strokeWidth = laneWidth * 0.34
+      ..strokeCap = StrokeCap.round;
+
+    for (final vector in vectors) {
+      final endpoint = Offset(
+        center.dx + vector.dx * size.width / 2,
+        center.dy + vector.dy * size.height / 2,
+      );
+      canvas.drawLine(center, endpoint, glowPaint);
+      canvas.drawLine(center, endpoint, surfacePaint);
+      canvas.drawLine(center, endpoint, highlightPaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _ConnectionRoadPainter oldDelegate) =>
+      oldDelegate.color != color || !listEquals(oldDelegate.vectors, vectors);
 }
 
 // ---------------------------------------------------------------------------
