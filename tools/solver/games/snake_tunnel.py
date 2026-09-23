@@ -83,7 +83,7 @@ def _extract_tunnels(level_json: dict) -> Dict[str, Pos]:
 def _snake_positions(state: ea.EngineState) -> List[Tuple[str, Pos]]:
     """Return [(snake_kind, pos), ...] for all snakes on the board."""
     gs = state.game_state
-    snakes_layer = gs.board.layers.get("snakes")
+    snakes_layer = gs.board.layers.get("actors")
     if snakes_layer is None:
         return []
     return [(e.kind, pos) for pos, e in snakes_layer.entries()]
