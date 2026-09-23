@@ -180,6 +180,90 @@ Map<String, dynamic> _makeElasticLevel() => {
       'goals': <dynamic>[],
     };
 
+GameDefinition _makeOcclusionGame() => GameDefinition.fromJson({
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'floor'},
+        {'id': 'objects', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'floor': {'layer': 'ground', 'symbol': '.', 'uiName': 'Open floor'},
+        'parking': {
+          'layer': 'ground',
+          'symbol': ':',
+          'uiName': 'Hidden parking floor',
+        },
+        'key': {
+          'layer': 'objects',
+          'symbol': 'K',
+          'uiName': 'Yellow key',
+        },
+        'door': {
+          'layer': 'objects',
+          'symbol': 'L',
+          'uiName': 'Locked door',
+        },
+        'slab': {
+          'layer': 'structures',
+          'tags': ['observation_occluder', 'public_piece'],
+          'symbol': 'B',
+          'uiName': 'Blue slab',
+        },
+      },
+      'actions': <dynamic>[],
+      'systems': <dynamic>[],
+    });
+
+Map<String, dynamic> _makeOcclusionLevel() => {
+      'id': 'occlusion',
+      'board': {
+        'size': [4, 1],
+        'layers': {
+          'ground': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'parking'
+              },
+              {
+                'position': [1, 0],
+                'kind': 'parking'
+              },
+            ],
+          },
+          'objects': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'key',
+                'owner': 'yellow'
+              },
+              {
+                'position': [1, 0],
+                'kind': 'door'
+              },
+            ],
+          },
+        },
+        'multiCellObjects': [
+          {
+            'id': 'slab_f_yellow_key',
+            'kind': 'slab',
+            'cells': [
+              [0, 0],
+              [1, 0],
+            ],
+            'params': {'axis': 'horizontal'},
+          },
+        ],
+      },
+      'state': {
+        'avatar': {'enabled': false}
+      },
+      'goals': <dynamic>[],
+    };
+
 void main() {
   test('territory symbol shown on owned empty cell and hidden under actor', () {
     final game = _makeGame();
@@ -224,5 +308,39 @@ void main() {
     expect(rendered, contains('Target 1 [1]: cells (1,0)'));
     expect(
         rendered, contains('completed and converted to Completed target wall'));
+  });
+
+  test('occluding public piece hides then reveals board contents', () {
+    final game = _makeOcclusionGame();
+    final engine = _engineFor(game, _makeOcclusionLevel());
+
+    final concealed = TextRenderer.render(engine.state, game);
+    expect(concealed.split('\n').first, equals('══..'));
+    for (final leaked in [
+      'Yellow key',
+      'Locked door',
+      'Hidden parking floor',
+      'slab_f_yellow_key',
+    ]) {
+      expect(concealed, isNot(contains(leaked)),
+          reason: 'concealed observation leaked $leaked');
+    }
+    expect(concealed, contains('Piece 1 [Blue slab]'));
+    expect(concealed, contains('axis: horizontal'));
+    expect(concealed, contains('footprint: (0,0) (1,0)'));
+
+    engine.state.board.multiCellObjects.first.cells
+      ..clear()
+      ..addAll([const Position(2, 0), const Position(3, 0)]);
+    final revealed = TextRenderer.render(engine.state, game);
+    expect(revealed.split('\n').first, equals('KL══'));
+    expect(revealed, contains('Yellow key'));
+    expect(revealed, contains('Locked door'));
+    expect(revealed, contains('Hidden parking floor'));
+
+    engine.state.board.setEntity('objects', const Position(0, 0), null);
+    final collected = TextRenderer.render(engine.state, game);
+    expect(collected.split('\n').first, equals(':L══'));
+    expect(collected, isNot(contains('Yellow key')));
   });
 }
