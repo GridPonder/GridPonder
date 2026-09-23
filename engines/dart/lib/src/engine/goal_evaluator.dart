@@ -519,6 +519,56 @@ class GoalEvaluator {
     return (counts, claimable);
   }
 
+  /// Per owner, how many of its cells connect orthogonally (through its own
+  /// cells) to its `connectionSources` cell. Null when the owner has no valid
+  /// source or does not hold it — counted as 0 connected cells, and the owner
+  /// is never connected. Mirrors `_balance_connected` in engines/python/_goal.py.
+  Map<String, int?> _balanceConnected(
+      Map<String, dynamic> cfg, Map<String, Set<Position>> positions) {
+    final rawSources = cfg['connectionSources'] as Map<String, dynamic>? ?? {};
+    final result = <String, int?>{};
+    for (final entry in positions.entries) {
+      final cells = entry.value;
+      final rawSource = rawSources[entry.key];
+      if (rawSource is! List || rawSource.length != 2) {
+        result[entry.key] = null;
+        continue;
+      }
+      final source = Position((rawSource[0] as num).toInt(),
+          (rawSource[1] as num).toInt());
+      if (!cells.contains(source)) {
+        result[entry.key] = null;
+        continue;
+      }
+      final reached = <Position>{source};
+      final frontier = <Position>[source];
+      while (frontier.isNotEmpty) {
+        final current = frontier.removeLast();
+        for (final neighbor in <Position>[
+          Position(current.x + 1, current.y),
+          Position(current.x - 1, current.y),
+          Position(current.x, current.y + 1),
+          Position(current.x, current.y - 1),
+        ]) {
+          if (cells.contains(neighbor) && reached.add(neighbor)) {
+            frontier.add(neighbor);
+          }
+        }
+      }
+      result[entry.key] = reached.length;
+    }
+    return result;
+  }
+
+  /// Per owner, cells connected to its source — the same count the win
+  /// condition uses when `requireConnected` is set (0 without a held source).
+  Map<String, int> balanceConnectedCounts(
+      Map<String, dynamic> cfg, LevelState state, GameDefinition game) {
+    final (_, positions, _) = _balanceTally(cfg, state, game);
+    return _balanceConnected(cfg, positions)
+        .map((owner, n) => MapEntry(owner, n ?? 0));
+  }
+
   /// Win when a territory layer is divided completely and into exactly-equal
   /// shares among the configured owners (or per requireComplete/requireEqual).
   ///
@@ -545,38 +595,15 @@ class GoalEvaluator {
     var connected = true;
     var connectedOwned = owned;
     if (requireConnected) {
-      connectedOwned = 0;
-      final rawSources =
-          goal.config['connectionSources'] as Map<String, dynamic>? ?? {};
+      final reachedByOwner = _balanceConnected(goal.config, positions);
+      connectedOwned = reachedByOwner.values
+          .whereType<int>()
+          .fold(0, (a, b) => a + b);
       for (final owner in owners) {
-        final cells = positions[owner]!;
-        final rawSource = rawSources[owner];
-        if (rawSource is! List || rawSource.length != 2) {
+        final reached = reachedByOwner[owner];
+        if (reached == null || reached != positions[owner]!.length) {
           connected = false;
-          continue;
         }
-        final source = Position.fromJson(rawSource);
-        if (!cells.contains(source)) {
-          connected = false;
-          continue;
-        }
-        final reached = <Position>{source};
-        final frontier = <Position>[source];
-        while (frontier.isNotEmpty) {
-          final current = frontier.removeLast();
-          for (final neighbor in <Position>[
-            Position(current.x + 1, current.y),
-            Position(current.x - 1, current.y),
-            Position(current.x, current.y + 1),
-            Position(current.x, current.y - 1),
-          ]) {
-            if (cells.contains(neighbor) && reached.add(neighbor)) {
-              frontier.add(neighbor);
-            }
-          }
-        }
-        connectedOwned += reached.length;
-        if (reached.length != cells.length) connected = false;
       }
     }
     final progressNumerator = requireConnected ? connectedOwned : owned;

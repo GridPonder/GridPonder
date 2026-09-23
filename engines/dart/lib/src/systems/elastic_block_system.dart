@@ -15,6 +15,95 @@ class ElasticBlockSystem extends GameSystem {
   const ElasticBlockSystem({required super.id, this.config})
       : super(type: 'elastic_block');
 
+  /// Public status of each configured target.
+  ///
+  /// Target geometry comes from the authored board, because a consumed
+  /// target's markers are gone from the live board.
+  @override
+  List<String> observationStatusLines(
+      LevelState state, GameDefinition game, Board initialBoard) {
+    final effectiveConfig = config ?? game.systemConfig(id, {});
+    final targets = effectiveConfig['targets'] as List? ?? const [];
+    if (targets.isEmpty) return const [];
+
+    final objectKind =
+        effectiveConfig['objectKind']?.toString() ?? 'elastic_block';
+    final objectName = game.observationName(objectKind);
+    MultiCellObjectInstance? block;
+    for (final mco in state.board.multiCellObjects) {
+      if (mco.kind == objectKind) {
+        block = mco;
+        break;
+      }
+    }
+    final blockCells = block?.cells.toSet() ?? <Position>{};
+    final completed = _stringSet(state.variables[
+        effectiveConfig['completedTargetIdsVariable']?.toString() ??
+            'completedTargetIds']);
+    final consumed = _stringSet(state.variables[
+        effectiveConfig['consumedTargetIdsVariable']?.toString() ??
+            'consumedTargetIds']);
+    final defaultLayer =
+        effectiveConfig['targetLayer']?.toString() ?? 'markers';
+
+    final lines = <String>[
+      'Target status (exact $objectName footprint match required):'
+    ];
+    for (final rawTarget in targets) {
+      if (rawTarget is! Map) continue;
+      final target = Map<String, dynamic>.from(rawTarget);
+      final markerKind = target['markerKind']?.toString() ?? '';
+      final targetId = target['id']?.toString() ?? markerKind;
+      if (markerKind.isEmpty || targetId.isEmpty) continue;
+      final markerLayer = target['markerLayer']?.toString() ?? defaultLayer;
+      final layer = initialBoard.layers[markerLayer];
+      if (layer == null) continue;
+      final cells = <Position>[
+        for (final entry in layer.entries())
+          if (entry.value.kind == markerKind) entry.key,
+      ]..sort((left, right) {
+          final byY = left.y.compareTo(right.y);
+          return byY != 0 ? byY : left.x.compareTo(right.x);
+        });
+      if (cells.isEmpty) continue;
+
+      final targetName = game.observationName(markerKind);
+      final symbol = game.publicSymbol(markerKind);
+      final displayName =
+          symbol != null ? '$targetName [$symbol]' : targetName;
+      final geometry = cells.map((cell) => '(${cell.x},${cell.y})').join(' ');
+      final overlap = cells.where(blockCells.contains).length;
+      final mode = target['onLeave']?.toString() ?? 'none';
+
+      final String status;
+      if (consumed.contains(targetId)) {
+        if (mode == 'wall') {
+          final wallName =
+              game.observationName(target['wallKind']?.toString() ?? 'wall');
+          status = 'completed and converted to $wallName after full vacancy';
+        } else if (mode == 'void') {
+          status = 'completed and converted to void after full vacancy';
+        } else {
+          status = 'completed and removed after full vacancy';
+        }
+      } else if (completed.contains(targetId)) {
+        final suffix = switch (mode) {
+          'wall' =>
+            '; becomes a wall only after the $objectName fully vacates it',
+          'void' =>
+            '; becomes void only after the $objectName fully vacates it',
+          _ => '',
+        };
+        status = 'completed, still occupied by $objectName$suffix';
+      } else {
+        status = 'unfinished ($overlap/${cells.length} cells covered)';
+      }
+      lines.add('  $displayName: cells $geometry; $status');
+    }
+
+    return lines.length > 1 ? lines : const [];
+  }
+
   @override
   List<GameEvent> executeActionResolution(
     GameAction action,

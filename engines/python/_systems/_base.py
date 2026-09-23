@@ -33,6 +33,55 @@ class GameSystem:
         """
         return []
 
+    def execute_derive_state(self, state: GameState, game: GameDef) -> None:
+        """Write variables that are pure functions of the settled state.
+
+        Runs once per accepted turn, after every system's NPC resolution and
+        the rules pass over NPC events (so after the board has finished
+        changing), and once at level load, after every system's load settle.
+        A system must only *read* the board here and write variables derived
+        from it: a derived variable adds nothing to the state key that the
+        board does not already determine, so solver dedup, undo and preview
+        are unaffected. Emits no events.
+        """
+        return None
+
+    def depends_on_turn_count(self, state: GameState, game: GameDef) -> bool:
+        """True when this system's behaviour in ``state`` reads the turn counter.
+
+        The state key excludes ``turn_count``, so two states with the same key
+        can still play differently when a system gates on the beat (an NPC
+        that acts every Nth turn). Callers that compare state keys — the
+        effectful-action probe — ask this to learn that a turn which only
+        advanced the counter still changed something. Default: no.
+        """
+        return False
+
+    # ── Observation hooks (text observations only; never change state) ──────
+
+    def observation_object_lines(self, mco, state: GameState, game: GameDef) -> list[str]:
+        """Public detail lines for one multi-cell object.
+
+        Printed indented under the object in the "Multi-cell objects" block,
+        in both named and anonymous mode, so they must not contain pack
+        vocabulary (kind ids, names, layer ids). Default: none.
+        """
+        return []
+
+    def observation_status_lines(
+        self,
+        state: GameState,
+        game: GameDef,
+        initial_board,
+    ) -> list[str]:
+        """A public status block this system maintains (header line first).
+
+        ``initial_board`` is a zero-argument callable returning the level's
+        authored board (built on first use). The renderer prints the block
+        only in named mode, one block per system in declaration order.
+        Default: none.
+        """
+        return []
 
 
 def config_list(config: dict, key: str, default: list) -> list:

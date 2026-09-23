@@ -193,6 +193,12 @@ class TurnEngine:
                 npc_events, state, effective_game, max_depth, systems,
             ))
 
+        # Derived state: variables that are pure functions of the board the
+        # turn has just finished with (readouts such as a pan's weight). Last,
+        # so nothing after it can make them stale.
+        for sys in systems:
+            sys.execute_derive_state(state, effective_game)
+
         # Phase 7: Goal evaluation
         #
         # A turn that only *selects* an actor changes no board state, so it is
@@ -287,8 +293,13 @@ class TurnEngine:
         a system settles the board the rules have already finished with.
         """
         effective_game = self._game.with_system_overrides(self._level.get("systemOverrides"))
-        for sys in instantiate_systems(effective_game):
+        systems = instantiate_systems(effective_game)
+        for sys in systems:
             sys.execute_load_settle(state, effective_game)
+        # Derived variables read the fully settled opening board, so they run
+        # only once every system has settled.
+        for sys in systems:
+            sys.execute_derive_state(state, effective_game)
 
     def _apply_load_cascade(self, state: GameState) -> None:
         """Fire ``object_placed`` events for every object on a non-ground layer
@@ -328,6 +339,16 @@ class TurnEngine:
         rules_engine = RulesEngine(self._game.rules, norm_level_rules)
         max_depth = self._game.defaults.get("maxCascadeDepth", 3)
         rules_engine.evaluate(initial_events, state, effective_game, max_depth, systems)
+
+    def turn_count_matters(self) -> bool:
+        """True when an enabled system's behaviour in the current state reads
+        the turn counter, which ``state_key`` leaves out (see
+        ``GameSystem.depends_on_turn_count``)."""
+        effective_game = self._game.with_system_overrides(self._level.get("systemOverrides"))
+        return any(
+            sys.depends_on_turn_count(self._state, effective_game)
+            for sys in instantiate_systems(effective_game)
+        )
 
     def state_key(self) -> tuple:
         """Hashable state snapshot for BFS/A* deduplication."""

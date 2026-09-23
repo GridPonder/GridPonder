@@ -299,7 +299,12 @@ class GameEvent {
 
   /// Signals that a system explicitly rejects the action (turn should not
   /// count as a move). Used by flood_fill when no adjacent target cells exist.
-  static GameEvent actionVetoed() => const GameEvent('action_vetoed', {});
+  /// An optional human-readable [reason] explains the refusal (runners show
+  /// it).
+  static GameEvent actionVetoed([String? reason]) =>
+      (reason == null || reason.isEmpty)
+          ? const GameEvent('action_vetoed', {})
+          : GameEvent('action_vetoed', {'reason': reason});
 
   /// A cell refused what an operation would have put on it. [kind] is the
   /// refused entity, [guardKind] the entity that refuses it. Emitted alongside

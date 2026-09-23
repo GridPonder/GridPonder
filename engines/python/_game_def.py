@@ -20,6 +20,27 @@ def _parse_effect(j: dict):
     return j  # store raw dict; effect.py executes it
 
 
+def _observation_kind_table(entity_kinds: dict[str, dict]) -> dict[str, str]:
+    """Map each kind sharing a public observation symbol to its group's
+    first-declared kind. Kinds with ``symbolParam`` render their value and
+    never join a group."""
+    shared = {
+        kind["observationSymbol"]
+        for kind in entity_kinds.values()
+        if kind.get("observationSymbol") and kind.get("symbolParam") is None
+    }
+    first_by_symbol: dict[str, str] = {}
+    table: dict[str, str] = {}
+    for kind_id, kind in entity_kinds.items():
+        if kind.get("symbolParam") is not None:
+            continue
+        symbol = kind.get("observationSymbol") or kind["symbol"]
+        if symbol not in shared:
+            continue
+        table[kind_id] = first_by_symbol.setdefault(symbol, kind_id)
+    return table
+
+
 # ---------------------------------------------------------------------------
 # GameDef
 # ---------------------------------------------------------------------------
@@ -114,8 +135,54 @@ class GameDef:
         # plots from the board"). Empty dict by default.
         self.goal_descriptions: dict[str, str] = data.get("goalDescriptions", {}) or {}
 
+        # `ui.readouts`: live `state.variables` values the pack surfaces during
+        # play, in declaration order. Mirrors Dart's GameUiConfig.readouts —
+        # non-object entries and entries without a variable are dropped.
+        self.ui_readouts: list[dict] = self._parse_readouts(data.get("ui"))
+
+    @staticmethod
+    def _parse_readouts(raw_ui) -> list[dict]:
+        if not isinstance(raw_ui, dict):
+            return []
+        raw = raw_ui.get("readouts")
+        if not isinstance(raw, list):
+            return []
+        readouts: list[dict] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            variable = entry.get("variable")
+            if not isinstance(variable, str) or not variable:
+                continue
+            label = entry.get("label")
+            blank = entry.get("blankWhen")
+            if isinstance(blank, bool) or not isinstance(blank, (int, float)):
+                blank = None
+            readouts.append({
+                "variable": variable,
+                "label": label if isinstance(label, str) else "",
+                "color": entry.get("color") if isinstance(entry.get("color"), str) else None,
+                "blankWhen": int(blank) if blank is not None else None,
+            })
+        return readouts
+
     @staticmethod
     def _parse_kind(kind_id: str, j: dict) -> dict:
+        observation_symbol = j.get("observationSymbol")
+        if observation_symbol is not None:
+            if not isinstance(observation_symbol, str):
+                raise ValueError(
+                    f'Entity kind "{kind_id}": observationSymbol must be a string'
+                )
+            if observation_symbol == "":
+                raise ValueError(
+                    f'Entity kind "{kind_id}": observationSymbol must not be empty'
+                )
+            if observation_symbol == "@":
+                raise ValueError(
+                    f'Entity kind "{kind_id}": observationSymbol "@" is '
+                    "reserved for the avatar"
+                )
         return {
             "id": kind_id,
             "layer": j.get("layer", "objects"),
@@ -123,6 +190,7 @@ class GameDef:
             "params": j.get("params", {}),
             "animations": j.get("animations", {}),
             "symbol": j.get("symbol", "?"),
+            "observationSymbol": observation_symbol,
             "symbolParam": j.get("symbolParam"),
             "sprite": j.get("sprite"),
             "spriteParam": j.get("spriteParam"),
@@ -136,6 +204,44 @@ class GameDef:
     def has_tag(self, kind_name: str, tag: str) -> bool:
         kind = self.entity_kinds.get(kind_name)
         return tag in (kind.get("tags", []) if kind else [])
+
+    def public_symbol(self, kind_id: str) -> str | None:
+        """The symbol text observations show for ``kind_id``.
+
+        ``observationSymbol`` when declared, else the unique authoring
+        ``symbol``. None for an unknown kind.
+        """
+        kind = self.entity_kinds.get(kind_id)
+        if kind is None:
+            return None
+        return kind.get("observationSymbol") or kind["symbol"]
+
+    def observation_kind(self, kind_id: str) -> str:
+        """The kind whose name and description represent ``kind_id`` publicly.
+
+        Kinds that show the same public symbol, where at least one of them
+        declares ``observationSymbol``, must stay indistinguishable in every
+        observation. They all present the first-declared kind (entityKinds
+        order) with that public symbol, so the printed name never depends on
+        which member happens to be on the board. Every other kind represents
+        itself.
+        """
+        table = self.__dict__.get("_observation_kind_table")
+        if table is None:
+            table = _observation_kind_table(self.entity_kinds)
+            self.__dict__["_observation_kind_table"] = table
+        return table.get(kind_id, kind_id)
+
+    def observation_name(self, kind_id: str) -> str:
+        """Public display name for ``kind_id`` (see observation_kind)."""
+        rep = self.observation_kind(kind_id)
+        kind = self.entity_kinds.get(rep)
+        return (kind.get("uiName") if kind else None) or rep.replace("_", " ")
+
+    def observation_description(self, kind_id: str) -> str | None:
+        """Public description for ``kind_id`` (see observation_kind)."""
+        kind = self.entity_kinds.get(self.observation_kind(kind_id))
+        return kind.get("description") if kind else None
 
     def system_config(self, system_id: str, overrides: Optional[dict] = None) -> dict:
         for s in self.systems:

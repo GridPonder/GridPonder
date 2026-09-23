@@ -242,7 +242,8 @@ A cell refused what an operation would have put on it — currently a
 [`region_transform`](04_systems.md#28-region_transform) `exchange` with a
 `restrict` config. It arrives with `action_vetoed`, so the board is unchanged
 and the turn is not spent; the event exists to explain the refusal, and a theme
-can give it a cell effect like any other.
+can give it a cell effect like any other. The accompanying `action_vetoed`
+carries the same explanation as a readable `reason` string.
 
 | Payload | Type | Description |
 |---------|------|-------------|

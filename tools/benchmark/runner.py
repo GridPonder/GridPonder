@@ -29,8 +29,8 @@ if str(_REPO_ROOT) not in sys.path:
 from engines.python.loader import load_pack
 from engines.python._turn_engine import TurnEngine
 from engines.python.text_renderer import render as render_board
-from engines.python.observation import build_prompt
-from engines.python.goal_renderer import render_goals
+from engines.python.observation import build_prompt, status_fingerprint
+from engines.python.goal_renderer import describe_loss, render_goals
 from engines.python.anon import (
     build_anon_action_shapes,
     build_anon_kind_to_label,
@@ -42,13 +42,13 @@ from engines.python.gold_path import gold_path_length
 
 # Image renderer is only imported on demand (Pillow may not be installed
 # on machines that only use text mode).
-_render_board_png = None
+_render_board_image = None
 def _get_renderer():
-    global _render_board_png
-    if _render_board_png is None:
-        from board_image import render_board_png
-        _render_board_png = render_board_png
-    return _render_board_png
+    global _render_board_image
+    if _render_board_image is None:
+        from board_image import render_board_image
+        _render_board_image = render_board_image
+    return _render_board_image
 
 _PACKS_DIR = _REPO_ROOT / "packs"
 # Two guards, because the two rejection kinds mean opposite things. Five
@@ -59,6 +59,15 @@ _PACKS_DIR = _REPO_ROOT / "packs"
 # the run there ends it before the agent has played at all.
 _MAX_CONSECUTIVE_SCHEMA = 5
 _MAX_CONSECUTIVE_ILLEGAL = 25
+
+# Short reasons for losses the runner itself decides (the engine's own losses
+# are described from the level's lose conditions by `describe_loss`).
+_REASON_HARNESS_CAP = "harness action cap reached"
+_REASON_TOTAL_BUDGET = "total action budget exhausted"
+_REASON_SCHEMA = "too many consecutive unparseable actions"
+_REASON_ILLEGAL = "too many consecutive rejected actions"
+_REASON_GIVE_UP = "given up"
+_REASON_PLAN_ENDED = "plan ended without solving the level"
 
 
 def _out(obj: dict) -> None:
@@ -268,14 +277,22 @@ def main() -> None:
     repeated_state_count = 0
 
     last_action: dict | None = None
+    # The label the agent submitted for last_action (anonymous runs): labels
+    # are renumbered every turn, so the new state's labels cannot name it.
+    last_action_label: str | None = None
     prev_board_text: str | None = None
     prev_inventory: str | None = None
+    prev_status: str | None = None
     current_anon_map: dict[str, dict] = {}
+    # How the previous attempt ended, shown once on the next attempt's first
+    # prompt; and the most recent submission when it was rejected.
+    previous_attempt: str | None = None
+    last_rejected: tuple[dict, str] | None = None
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def emit_state() -> None:
-        nonlocal current_anon_map
+        nonlocal current_anon_map, previous_attempt
         total_now = total_game_actions + give_up_count
         valid_actions = enumerate_actions(game_def, engine.state, engine=engine)
 
@@ -294,6 +311,7 @@ def main() -> None:
                 "board_text": render_board(
                     engine.state, game_def,
                     kind_symbol_overrides=kind_symbol_overrides,
+                    level_def=level_def,
                 ),
                 "goals": render_goals(
                     level_def, engine.state, game_def,
@@ -310,6 +328,13 @@ def main() -> None:
             _out(event)
             return
 
+        # The image is rendered first so the prompt can explain the marks
+        # it carries (selection ring, overlay frame, hidden-item insets).
+        png: bytes | None = None
+        image_marks: list[str] | None = None
+        if include_image:
+            png, image_marks = _get_renderer()(game_def, engine.state, pack_dir, level_def)
+
         prompt = build_prompt(
             game_def,
             level_def,
@@ -319,6 +344,7 @@ def main() -> None:
             last_action=last_action,
             previous_board_text=prev_board_text,
             previous_inventory=prev_inventory,
+            previous_status=prev_status,
             anonymize=anon,
             kind_symbol_overrides=kind_symbol_overrides,
             inference_mode=mode,
@@ -328,7 +354,13 @@ def main() -> None:
             text_board=(input_mode != "image"),
             attach_image=include_image,
             valid_actions=valid_actions,
+            previous_attempt=previous_attempt,
+            rejected_action=last_rejected[0] if last_rejected else None,
+            rejection_detail=last_rejected[1] if last_rejected else None,
+            image_marks=image_marks,
+            last_action_label=last_action_label if anon else None,
         )
+        previous_attempt = None
 
         event: dict = {
             "event": "state",
@@ -345,9 +377,8 @@ def main() -> None:
             "inference_mode": mode,
             "input_mode": input_mode,
         }
-        if include_image:
+        if png is not None:
             import base64
-            png = _get_renderer()(game_def, engine.state, pack_dir)
             event["image_b64"] = base64.b64encode(png).decode("ascii")
         if mode == "fixed-n":
             event["step_size"] = step_size
@@ -355,13 +386,23 @@ def main() -> None:
             event["max_n"] = max_n
         _out(event)
 
-    def do_reset(reason: str) -> None:
-        nonlocal attempt_number, last_action, prev_board_text, prev_inventory, seen_states
+    def do_reset(reason: str, loss_reason: str | None = None) -> None:
+        nonlocal attempt_number, last_action, prev_board_text, prev_inventory, prev_status, seen_states
+        nonlocal previous_attempt, last_rejected, last_action_label
         engine.reset()
         attempt_number += 1
         last_action = None
+        last_action_label = None
+        last_rejected = None
+        if reason == "lost":
+            previous_attempt = f"lost — {loss_reason}"
+        elif reason == "limit":
+            previous_attempt = f"ended — {_REASON_HARNESS_CAP}"
+        else:
+            previous_attempt = _REASON_GIVE_UP
         prev_board_text = None
         prev_inventory = None
+        prev_status = None
         seen_states = {engine.state_key()}
         _out({
             "event": "reset",
@@ -394,10 +435,13 @@ def main() -> None:
     def won_event() -> dict:
         return _terminal("won")
 
-    def lost_event() -> dict:
-        return _terminal("lost")
+    def lost_event(loss_reason: str) -> dict:
+        return {**_terminal("lost"), "loss_reason": loss_reason}
 
-    def end_attempt(reason: str) -> bool:
+    def engine_loss_reason(result) -> str:
+        return describe_loss(level_def, result.lose_reason, anonymize=anon)
+
+    def end_attempt(reason: str, loss_reason: str | None = None) -> bool:
         """Close the current attempt. True when that ends the whole run.
 
         A lost attempt used to end the run outright, which made "how often did
@@ -410,14 +454,22 @@ def main() -> None:
             losses += 1
         if attempt_number >= max_attempts:
             return True
-        do_reset(reason=reason)
+        do_reset(reason=reason, loss_reason=loss_reason)
         return False
 
-    def reject(action_input: dict, reason: str, detail: str) -> None:
-        """Emit one rejection under its counter. `reason` is schema|illegal."""
+    def reject(action_input: dict, reason: str, detail: str,
+               prompt_detail: str | None = None) -> None:
+        """Emit one rejection under its counter. `reason` is schema|illegal.
+
+        `prompt_detail` is what the next prompt says about it (defaults to
+        `detail`; anonymous runs pass a version that names no real action)."""
         nonlocal rejected_schema, rejected_illegal
         nonlocal consecutive_schema, consecutive_illegal
-        nonlocal prev_board_text, prev_inventory
+        nonlocal prev_board_text, prev_inventory, prev_status, last_rejected
+        last_rejected = (
+            {k: v for k, v in action_input.items() if k != "memory"},
+            prompt_detail if prompt_detail is not None else detail,
+        )
         if reason == "schema":
             rejected_schema += 1
             consecutive_schema += 1
@@ -426,12 +478,33 @@ def main() -> None:
             consecutive_illegal += 1
         prev_board_text = None
         prev_inventory = None
+        prev_status = None
         _out({
             "event": "rejected",
             "action": action_input,
             "reason": reason,
             "detail": detail,
         })
+
+    def illegal_details(real: dict, submitted: dict, result) -> tuple[str, str]:
+        """(event detail, prompt detail) for an engine rejection. An engine
+        reason carried on `action_vetoed` wins over the generic text. The
+        reason names kinds, so an anonymous run keeps the generic text, and
+        its event detail names the action by the label the agent submitted,
+        never the real action id (the harness shows the event detail to the
+        agent too)."""
+        veto_reason = next(
+            (e.get("reason") for e in result.events
+             if e.get("type") == "action_vetoed" and isinstance(e.get("reason"), str)
+             and e.get("reason")),
+            None,
+        )
+        if veto_reason is not None and not anon:
+            return veto_reason, veto_reason
+        if anon:
+            return f"{submitted.get('action')} is not legal in this state", "not legal in this state"
+        detail = f"{real['action']} is not legal in this state"
+        return detail, detail
 
     def resolve(action_input: dict) -> tuple[dict | None, str | None, dict | None]:
         """Turn one submitted action into (real_action, schema_error, params).
@@ -490,7 +563,7 @@ def main() -> None:
                 total_now = total_game_actions + give_up_count
                 do_reset(reason="voluntary")
                 if total_now >= limit_total:
-                    _out(lost_event())
+                    _out(lost_event(_REASON_TOTAL_BUDGET))
                     break
                 emit_state()
                 continue
@@ -498,8 +571,10 @@ def main() -> None:
             prev_board_text = render_board(
                 engine.state, game_def, include_legend=False,
                 kind_symbol_overrides=kind_symbol_overrides,
+                level_def=level_def,
             )
             prev_inventory = engine.state.avatar.item if engine.state.avatar.enabled else None
+            prev_status = status_fingerprint(game_def, level_def, engine.state)
 
             real, schema_error, game_params = resolve(
                 {k: v for k, v in inp.items() if k != "memory"}
@@ -507,7 +582,7 @@ def main() -> None:
             if schema_error is not None:
                 reject(inp, "schema", schema_error)
                 if consecutive_schema >= _MAX_CONSECUTIVE_SCHEMA:
-                    _out(lost_event())
+                    _out(lost_event(_REASON_SCHEMA))
                     break
                 emit_state()
                 continue
@@ -515,15 +590,17 @@ def main() -> None:
             result = engine.execute_turn(real["action"], game_params)
 
             if not result.accepted:
-                reject(inp, "illegal", f"{real['action']} is not legal in this state")
+                reject(inp, "illegal", *illegal_details(real, inp, result))
                 if consecutive_illegal >= _MAX_CONSECUTIVE_ILLEGAL:
-                    _out(lost_event())
+                    _out(lost_event(_REASON_ILLEGAL))
                     break
                 emit_state()
                 continue
 
             consecutive_schema = consecutive_illegal = 0
             last_action = real
+            last_action_label = action_id
+            last_rejected = None
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
             record_state()
@@ -532,15 +609,16 @@ def main() -> None:
                 _out(won_event())
                 break
             if engine.is_lost:
-                if end_attempt("lost"):
-                    _out(lost_event())
+                loss_reason = engine_loss_reason(result)
+                if end_attempt("lost", loss_reason):
+                    _out(lost_event(loss_reason))
                     break
             elif engine.state.action_count >= limit_per_attempt:
                 if end_attempt("limit"):
-                    _out(lost_event())
+                    _out(lost_event(_REASON_HARNESS_CAP))
                     break
             if total_now >= limit_total:
-                _out(lost_event())
+                _out(lost_event(_REASON_TOTAL_BUDGET))
                 break
             emit_state()
             continue
@@ -566,22 +644,24 @@ def main() -> None:
             if action_id == "give_up":
                 consecutive_schema = consecutive_illegal = 0
                 if mode == "full":
-                    _out(lost_event())
+                    _out(lost_event(_REASON_GIVE_UP))
                     outer_break = True
                 else:
                     give_up_count += 1
                     total_now = total_game_actions + give_up_count
                     do_reset(reason="voluntary")
                     if total_now >= limit_total:
-                        _out(lost_event())
+                        _out(lost_event(_REASON_TOTAL_BUDGET))
                         outer_break = True
                 break
 
             prev_board_text = render_board(
                 engine.state, game_def, include_legend=False,
                 kind_symbol_overrides=kind_symbol_overrides,
+                level_def=level_def,
             )
             prev_inventory = engine.state.avatar.item if engine.state.avatar.enabled else None
+            prev_status = status_fingerprint(game_def, level_def, engine.state)
 
             real, schema_error, game_params = resolve(
                 {k: v for k, v in action_input.items() if k != "memory"}
@@ -589,21 +669,23 @@ def main() -> None:
             if schema_error is not None:
                 reject(action_input, "schema", schema_error)
                 if consecutive_schema >= _MAX_CONSECUTIVE_SCHEMA:
-                    _out(lost_event())
+                    _out(lost_event(_REASON_SCHEMA))
                     outer_break = True
                 break
 
             result = engine.execute_turn(real["action"], game_params)
 
             if not result.accepted:
-                reject(action_input, "illegal", f"{real['action']} is not legal in this state")
+                reject(action_input, "illegal", *illegal_details(real, action_input, result))
                 if consecutive_illegal >= _MAX_CONSECUTIVE_ILLEGAL:
-                    _out(lost_event())
+                    _out(lost_event(_REASON_ILLEGAL))
                     outer_break = True
                 break
 
             consecutive_schema = consecutive_illegal = 0
             last_action = real
+            last_action_label = action_id
+            last_rejected = None
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
             record_state()
@@ -613,27 +695,28 @@ def main() -> None:
                 outer_break = True
                 break
             if engine.is_lost:
-                if end_attempt("lost"):
-                    _out(lost_event())
+                loss_reason = engine_loss_reason(result)
+                if end_attempt("lost", loss_reason):
+                    _out(lost_event(loss_reason))
                     outer_break = True
                     break
                 if total_now >= limit_total:
-                    _out(lost_event())
+                    _out(lost_event(_REASON_TOTAL_BUDGET))
                     outer_break = True
                 break
 
             if mode != "full" and engine.state.action_count >= limit_per_attempt:
                 if end_attempt("limit"):
-                    _out(lost_event())
+                    _out(lost_event(_REASON_HARNESS_CAP))
                     outer_break = True
                     break
                 if total_now >= limit_total:
-                    _out(lost_event())
+                    _out(lost_event(_REASON_TOTAL_BUDGET))
                     outer_break = True
                 break
 
             if total_now >= limit_total:
-                _out(lost_event())
+                _out(lost_event(_REASON_TOTAL_BUDGET))
                 outer_break = True
                 break
 
@@ -641,7 +724,7 @@ def main() -> None:
             break
 
         if mode == "full":
-            _out(lost_event())
+            _out(lost_event(_REASON_PLAN_ENDED))
             break
 
         emit_state()

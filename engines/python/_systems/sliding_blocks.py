@@ -12,6 +12,13 @@ class SlidingBlocksSystem(GameSystem):
         super().__init__(sys_id, "sliding_blocks")
         self._config = config
 
+    def observation_object_lines(self, mco, state: GameState, game: GameDef) -> list[str]:
+        """Expose a block's movement axis, which gates its moves."""
+        axis = mco.params.get("axis")
+        if isinstance(axis, str) and axis:
+            return [f"axis: {axis}"]
+        return []
+
     def execute_action_resolution(
         self,
         action: dict,

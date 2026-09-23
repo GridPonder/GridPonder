@@ -377,6 +377,12 @@ Optional conditions that cause the level to fail.
 ]
 ```
 
+Every lose condition may also carry an optional `description` string: a short, player-facing sentence saying why the level was lost when that condition fires (e.g. `"the lamp burned out"`). It is presentation only — engines never read it to decide a loss — and is additive: a condition without one gets a generic reason built from its type (`max_actions` → "move limit of N reached", `variable_threshold` → `loss condition "<variable>" reached`, and so on). Benchmark runners report it as the loss reason in named mode; anonymous runs always use the generic reason, since the description is written in the pack's own vocabulary.
+
+```json
+{ "type": "variable_threshold", "config": { "variable": "damage", "target": 3 }, "description": "the hull took three hits" }
+```
+
 ### Lose Condition Types
 
 #### `max_actions`

@@ -4,10 +4,14 @@ import 'dart:convert';
 import 'package:llm_dart/llm_dart.dart';
 
 import 'agent.dart';
+import 'py_format.dart';
+import 'text_renderer.dart';
 import '../engine/goal_evaluator.dart';
 import '../models/game_action.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
+import '../models/goal.dart';
+import '../models/position.dart';
 import '../models/level_definition.dart';
 
 /// Available Anthropic model IDs for the LLM agent.
@@ -137,6 +141,11 @@ class LlmAgent implements GridPonderAgent {
   /// The most recent prompt sent to the LLM. Null before the first call.
   String? lastPrompt;
 
+  /// Anonymous mode: the labels offered in the most recent prompt (encoded
+  /// action → label). The next observation's last action was chosen under
+  /// these labels, so it is echoed with them rather than the new state's.
+  Map<String, String> _lastLabels = const {};
+
   LlmAgent({
     required ChatCapability provider,
     required String displayName,
@@ -164,8 +173,17 @@ class LlmAgent implements GridPonderAgent {
       stepSize: stepSize,
       maxN: maxN,
       anonymize: anonymize,
+      lastActionLabel: anonymize && obs.lastAction != null
+          ? _lastLabels[pyJsonDumps(obs.lastAction!.toJson())]
+          : null,
     );
     lastPrompt = prompt;
+    if (anonymize) {
+      _lastLabels = {
+        for (final e in buildAnonReverseMap(obs.validActions).entries)
+          pyJsonDumps(e.value.toJson()): e.key,
+      };
+    }
 
     final thinkingBuffer = StringBuffer();
     final textBuffer = StringBuffer();
@@ -204,7 +222,7 @@ class LlmAgent implements GridPonderAgent {
     final anonMap = anonymize ? buildAnonReverseMap(obs.validActions) : null;
 
     if (inferenceMode == 'single') {
-      final action = _extractAction(responseText, obs, anonMap: anonMap);
+      final action = extractAction(responseText, obs, anonMap: anonMap);
       final memoryUpdate = _extractMemory(responseText);
       if (memoryUpdate != null) _memory = memoryUpdate;
       yield AgentActCompleted(
@@ -215,7 +233,7 @@ class LlmAgent implements GridPonderAgent {
       );
     } else {
       final (actions, memoryUpdate) =
-          _extractActionList(responseText, obs, anonMap: anonMap);
+          extractActionList(responseText, obs, anonMap: anonMap);
       if (memoryUpdate != null) _memory = memoryUpdate;
       yield AgentActCompleted(
         AgentActResult(actions,
@@ -229,7 +247,10 @@ class LlmAgent implements GridPonderAgent {
   /// Parses a multi-action LLM response. Returns (actions, memoryUpdate).
   /// Accepts: bare JSON array, {"actions":[...]}, or single {"action":"..."}.
   /// When [anonMap] is provided, action labels (a1, a2, …) are reverse-mapped.
-  (List<GameAction>, String?) _extractActionList(
+  /// A reply that cannot be parsed, or names no offered action, yields the
+  /// [unrecognisedAction] sentinel instead of silently playing some other
+  /// action; [AgentRunner] spends no action on it.
+  static (List<GameAction>, String?) extractActionList(
       String text, AgentObservation obs,
       {Map<String, GameAction>? anonMap}) {
     // Strip <think>...</think> blocks and markdown code fences.
@@ -280,14 +301,7 @@ class LlmAgent implements GridPonderAgent {
     }
 
     if (rawList == null || rawList.isEmpty) {
-      return (
-        [
-          obs.validActions.isNotEmpty
-              ? obs.validActions.first
-              : GameAction('noop', {})
-        ],
-        null
-      );
+      return (const [unrecognisedAction], null);
     }
 
     final result = <GameAction>[];
@@ -317,16 +331,7 @@ class LlmAgent implements GridPonderAgent {
       if (match != null) result.add(match);
     }
 
-    if (result.isEmpty) {
-      return (
-        [
-          obs.validActions.isNotEmpty
-              ? obs.validActions.first
-              : GameAction('noop', {})
-        ],
-        memoryUpdate
-      );
-    }
+    if (result.isEmpty) return (const [unrecognisedAction], memoryUpdate);
     return (result, memoryUpdate);
   }
 
@@ -337,6 +342,9 @@ class LlmAgent implements GridPonderAgent {
   ///
   /// When [anonymize] is true, entity kind names, action IDs, and game
   /// description are replaced with opaque labels (ARC-AGI style).
+  /// [lastActionLabel] is the label the agent submitted for the last action;
+  /// anonymous prompts echo it (falling back to a lookup among the current
+  /// labels, which renumber every turn, when it is absent).
   static String buildPrompt(
     AgentObservation obs, {
     String memory = '',
@@ -344,19 +352,23 @@ class LlmAgent implements GridPonderAgent {
     int stepSize = 3,
     int? maxN,
     bool anonymize = false,
+    String? previousAttempt,
+    Map<String, dynamic>? rejectedAction,
+    String? rejectionDetail,
+    String? lastActionLabel,
   }) {
     // ── Anon maps ────────────────────────────────────────────────────────────
     final kindToLabel =
         anonymize ? buildAnonKindToLabel(obs.game) : const <String, String>{};
-    // Forward map: jsonEncoded action → anon label (a1, a2, …)
+    // Forward map: Python-JSON-encoded action → anon label (a1, a2, …)
     final Map<String, String> actionForward;
     if (anonymize) {
       final sorted = List<GameAction>.from(obs.validActions)
         ..sort(
-            (a, b) => jsonEncode(a.toJson()).compareTo(jsonEncode(b.toJson())));
+            (a, b) => pyJsonDumps(a.toJson()).compareTo(pyJsonDumps(b.toJson())));
       actionForward = {
         for (int i = 0; i < sorted.length; i++)
-          jsonEncode(sorted[i].toJson()): 'a${i + 1}',
+          pyJsonDumps(sorted[i].toJson()): 'a${i + 1}',
       };
     } else {
       actionForward = {};
@@ -374,52 +386,97 @@ class LlmAgent implements GridPonderAgent {
     // ── Actions desc ──────────────────────────────────────────────────────────
     final actionsDesc = anonymize
         ? obs.validActions.map((a) {
-            final label = actionForward[jsonEncode(a.toJson())] ?? '?';
+            final label = actionForward[pyJsonDumps(a.toJson())] ?? '?';
             return '{"action": "$label"}';
           }).join(', ')
-        : obs.validActions.map((a) => jsonEncode(a.toJson())).join(', ');
+        : obs.validActions.map((a) => pyJsonDumps(a.toJson())).join(', ');
+
+    // ── Board unchanged? ──────────────────────────────────────────────────────
+    final inv =
+        obs.state.avatar.enabled ? obs.state.avatar.inventory.slot : null;
+    var boardUnchanged = false;
+    if (obs.lastAction != null &&
+        rejectedAction == null &&
+        obs.previousBoardText != null) {
+      // Same render inputs as the caller's previousBoardText (the runners
+      // pass the level), so a system status block that renders in both never
+      // makes an unchanged board look changed.
+      final currentBare = TextRenderer.render(obs.state, obs.game,
+          includeLegend: false,
+          kindSymbolOverrides: anonymize ? kindToLabel : null,
+          level: obs.level);
+      boardUnchanged = currentBare == obs.previousBoardText &&
+          inv == obs.previousInventory &&
+          (obs.previousStatus == null ||
+              obs.previousStatus ==
+                  statusFingerprint(obs.game, obs.level, obs.state));
+    }
 
     // ── Inventory / moves ─────────────────────────────────────────────────────
-    final inv = obs.state.avatar.inventory.slot;
-    final inventoryLine = inv != null ? '\nInventory: $inv' : '';
+    // The inventory holds a kind id; an anonymous prompt shows its alias, as
+    // the board and legend do, so the raw kind name never leaks.
+    String shownItem(String item) =>
+        anonymize ? (kindToLabel[item] ?? item) : item;
+    final inventoryLine = inv != null ? '\nInventory: ${shownItem(inv)}' : '';
 
-    final movesLine = obs.level.loseConditions.isNotEmpty
-        ? '\nMoves this attempt: ${obs.state.actionCount}'
-        : '';
+    final movesLine = statusLines(obs.game, obs.level, obs.state,
+        anonymize: anonymize, kindToLabel: kindToLabel);
 
     final memorySection =
         memory.isNotEmpty ? '\nMEMORY FROM PREVIOUS ACTION:\n$memory\n' : '';
 
     final prevInventoryLine = obs.previousInventory != null
-        ? '\nInventory: ${obs.previousInventory}'
+        ? '\nInventory: ${shownItem(obs.previousInventory!)}'
         : '';
 
     // ── Last action section ───────────────────────────────────────────────────
-    final String lastActionLabel;
+    // In anonymous mode, prefer the label the agent submitted: labels are
+    // numbered over the state an action was chosen in, so the new state's
+    // labels can name it differently or not at all.
+    final String lastActionShown;
     if (obs.lastAction != null && anonymize) {
-      final label = actionForward[jsonEncode(obs.lastAction!.toJson())] ?? '?';
-      lastActionLabel = '{"action": "$label"}';
+      final label = (lastActionLabel != null && lastActionLabel.isNotEmpty)
+          ? lastActionLabel
+          : actionForward[pyJsonDumps(obs.lastAction!.toJson())] ?? '?';
+      lastActionShown = '{"action": "$label"}';
     } else if (obs.lastAction != null) {
-      lastActionLabel = jsonEncode(obs.lastAction!.toJson());
+      lastActionShown = pyJsonDumps(obs.lastAction!.toJson());
     } else {
-      lastActionLabel = '';
+      lastActionShown = '';
     }
 
-    final lastActionSection = obs.lastAction != null
-        ? '''
-LAST ACTION: $lastActionLabel
+    final String lastActionSection;
+    if (rejectedAction != null) {
+      // The action exactly as submitted (an anonymous label in anon mode).
+      final rejectedLabel = pyJsonDumps(
+          Map<String, dynamic>.from(rejectedAction)..remove('memory'));
+      lastActionSection = 'LAST ACTION: $rejectedLabel — REJECTED '
+          '(${rejectionDetail == null || rejectionDetail.isEmpty ? 'not legal in this state' : rejectionDetail}); '
+          'no action was spent, the board is unchanged.\n'
+          'CURRENT BOARD:\n'
+          '${obs.boardText}$inventoryLine$movesLine';
+    } else if (obs.lastAction != null) {
+      final unchangedLine = boardUnchanged ? '\nThe board did not change.' : '';
+      lastActionSection = '''
+LAST ACTION: $lastActionShown
 BOARD BEFORE:
 ${obs.previousBoardText}$prevInventoryLine
 
 BOARD AFTER (current):
-${obs.boardText}$inventoryLine$movesLine
+${obs.boardText}$inventoryLine$movesLine$unchangedLine
 
 Compare the two boards to understand exactly what your last action did (tiles removed, pushed, merged, etc.).
 ${(inv != null || obs.previousInventory != null) ? 'If your inventory changed, note what was gained or lost.\n' : ''}Update your memory with any new observations about game mechanics or level layout.
-Memory is your only way to retain knowledge across actions.'''
-        : '''
-CURRENT BOARD (first move of this attempt):
+Memory is your only way to retain knowledge across actions.''';
+    } else {
+      final previousAttemptLine =
+          (previousAttempt != null && previousAttempt.isNotEmpty)
+              ? 'PREVIOUS ATTEMPT: $previousAttempt\n'
+              : '';
+      lastActionSection = '''
+${previousAttemptLine}CURRENT BOARD (first move of this attempt):
 ${obs.boardText}$inventoryLine$movesLine''';
+    }
 
     // ── Header ────────────────────────────────────────────────────────────────
     final titleLine = anonymize
@@ -450,12 +507,20 @@ $actionsDesc
       ex2 = n > 1 ? '{"action": "a$n"}' : ex1;
     } else {
       final va = obs.validActions;
-      ex1 = va.isNotEmpty ? jsonEncode(va.first.toJson()) : '{"action": "..."}';
-      ex2 = va.length > 1 ? jsonEncode(va.last.toJson()) : ex1;
+      ex1 = va.isNotEmpty ? pyJsonDumps(va.first.toJson()) : '{"action": "..."}';
+      ex2 = va.length > 1 ? pyJsonDumps(va.last.toJson()) : ex1;
     }
 
-    return '$header\n\n${_promptTail(inferenceMode, stepSize, maxN, ex1: ex1, ex2: ex2)}';
+    return '$header\n\n$coordinatesNote\n'
+        '${_promptTail(inferenceMode, stepSize, maxN, ex1: ex1, ex2: ex2)}';
   }
+
+  /// The coordinate convention, stated once in every text-mode prompt.
+  /// Mirrors `_COORDINATES_NOTE` in engines/python/observation.py.
+  static const coordinatesNote =
+      'Coordinates: a position [x, y] (written (x,y) under the board) is column '
+      'x, row y; (0,0) is the top-left cell, x grows to the right and y grows '
+      'downward.';
 
   static String _promptTail(
     String inferenceMode,
@@ -514,7 +579,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     }
   }
 
-  /// A semicolon-separated description of every goal on the level.
+  /// A description of every goal on the level (joined by [joinGoalParts]).
   ///
   /// Mirror of `render_goals` in engines/python/goal_renderer.py. Split out of
   /// [buildPrompt] so the text an agent is given can be tested on its own —
@@ -531,10 +596,14 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     for (final g in level.goals) {
       // Per-game goal-text override (set in game.json `goalDescriptions`).
       // Skipped in anonymise mode since the override may name entities.
+      // Goal types with live progress keep it after the override text, so a
+      // hand-written description never hides how close the board is.
       if (!anonymize) {
         final override = game.goalDescriptions[g.id];
         if (override != null) {
-          goalParts.add(override);
+          final progress = _goalProgress(g.type, g.id, g.config, state, game);
+          goalParts
+              .add(progress != null ? '$override (now: $progress)' : override);
           continue;
         }
       }
@@ -556,9 +625,10 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
             goalParts.add('Arrange tiles to match the target pattern');
           }
         case 'sequence_match':
-          final sequence =
-              (g.config['sequence'] as List?)?.map((e) => e as int).toList() ??
-                  [];
+          final sequence = (g.config['sequence'] as List?)
+                  ?.map((e) => (e as num).toInt())
+                  .toList() ??
+              [];
           final matched = state.sequenceIndices[g.id] ?? 0;
           final done = sequence.take(matched).map((n) => '✓$n').join(', ');
           final pending = sequence.skip(matched).map((n) => '$n').join(', ');
@@ -566,8 +636,8 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
             if (done.isNotEmpty) done,
             if (pending.isNotEmpty) pending
           ].join(', ');
-          goalParts.add(
-              'Merge numbers in sequence [$progress] ($matched/${sequence.length} done)');
+          goalParts.add('Merge numbers in sequence [$progress] '
+              '(${_sequenceProgress(g.id, g.config, state)})');
         case 'all_cleared':
           final kindId = g.config['kind'] as String?;
           final tag = g.config['tag'] as String?;
@@ -585,11 +655,262 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         case 'param_match':
           goalParts.add(_describeParamMatch(game, g.config,
               kindToLabel: anonymize ? kindToLabel : null));
+        case 'variable_threshold':
+          goalParts.add(_describeVariableThreshold(g.config, state,
+              anonymize: anonymize));
         default:
           goalParts.add(g.type);
       }
     }
-    return goalParts.join('; ');
+    return joinGoalParts(goalParts);
+  }
+
+  /// Joins goal descriptions with "; ", except that a goal following a
+  /// multi-line one (a target grid ending in its legend) starts on its own
+  /// line instead of being appended to that goal's last line. Mirror of
+  /// `join_goal_parts` in engines/python/goal_renderer.py.
+  static String joinGoalParts(List<String> parts) {
+    final out = StringBuffer();
+    for (var i = 0; i < parts.length; i++) {
+      if (i > 0) out.write(parts[i - 1].contains('\n') ? '\n' : '; ');
+      out.write(parts[i]);
+    }
+    return out.toString();
+  }
+
+  /// Limit of the level's first `max_actions` lose condition, if any.
+  static int? _maxActionsLimit(LevelDefinition level) {
+    for (final c in level.loseConditions) {
+      if (c.type != 'max_actions') continue;
+      final limit = c.config['limit'];
+      if (limit is int) return limit;
+    }
+    return null;
+  }
+
+  /// Renders a state variable for the status block. Integral doubles print as
+  /// integers so the text matches however the number was stored. Mirrors
+  /// `_format_value` in engines/python/observation.py.
+  static String formatValue(Object? value) {
+    if (value is bool) return value ? 'true' : 'false';
+    if (value is int) return '$value';
+    if (value is double) {
+      if (value.isFinite && value == value.truncateToDouble()) {
+        return '${value.toInt()}';
+      }
+      return pyRepr(value);
+    }
+    if (value is String) return value;
+    return pyJsonDumps(value, compact: true);
+  }
+
+  /// The status lines that say something about the board, for deciding
+  /// whether an action changed anything: every [statusLines] line except the
+  /// move counter (a spent action alone is not a change). Rendered with real
+  /// names — the anonymous labels are a bijection, so equality is the same.
+  /// Mirrors `status_fingerprint` in engines/python/observation.py.
+  static String statusFingerprint(
+      GameDefinition game, LevelDefinition level, LevelState state) {
+    return statusLines(game, level, state)
+        .split('\n')
+        .where((l) => l.isNotEmpty && !l.startsWith('Moves this attempt:'))
+        .join('\n');
+  }
+
+  /// Public status lines printed under the board, each prefixed by a newline.
+  ///
+  /// In order: the move counter (`k of N allowed` when the level has a
+  /// `max_actions` lose condition; the bare count when it has other lose
+  /// conditions only; nothing otherwise), the `individual_actors` selection
+  /// and per-actor budgets when that system is enabled for the level, then
+  /// every `ui.readouts` entry the pack declares. No other variable is
+  /// printed. Mirrors `status_lines` in engines/python/observation.py.
+  static String statusLines(
+    GameDefinition game,
+    LevelDefinition level,
+    LevelState state, {
+    bool anonymize = false,
+    Map<String, String> kindToLabel = const {},
+  }) {
+    String nameOf(String kind) => anonymize
+        ? (kindToLabel[kind] ?? kind)
+        : game.observationName(kind);
+
+    final lines = <String>[];
+    Map<String, dynamic>? config;
+    for (final system
+        in game.withSystemOverrides(level.systemOverrides).systems) {
+      if (system.type == 'individual_actors' && system.enabled) {
+        config = system.config;
+        break;
+      }
+    }
+    // A turn that only selects a piece is not charged (actionCount skips
+    // it), so say so wherever pieces are selected.
+    final freeTap = config != null ? ' (a tap that only selects is free)' : '';
+    final limit = _maxActionsLimit(level);
+    if (limit != null) {
+      lines.add(
+          'Moves this attempt: ${state.actionCount} of $limit allowed$freeTap');
+    } else if (level.loseConditions.isNotEmpty) {
+      lines.add('Moves this attempt: ${state.actionCount}$freeTap');
+    }
+
+    if (config != null) {
+      final selectedKind = state.variables[
+          config['selectedVariable'] as String? ?? 'selectedActorKind'];
+      final rawPos = state.variables[config['selectedPositionVariable']
+              as String? ??
+          'selectedActorPosition'];
+      final noSelection = selectedKind == null ||
+          selectedKind == false ||
+          selectedKind == 0 ||
+          (selectedKind is String && selectedKind.isEmpty) ||
+          (selectedKind is Iterable && selectedKind.isEmpty) ||
+          (selectedKind is Map && selectedKind.isEmpty);
+      if (noSelection) {
+        lines.add('Selected: none');
+      } else if (rawPos is List && rawPos.length >= 2) {
+        final x = (rawPos[0] as num).toInt();
+        final y = (rawPos[1] as num).toInt();
+        final entity = state.board.getEntity(
+            config['actorLayer'] as String? ?? 'actors', Position(x, y));
+        if (entity != null && entity.kind == selectedKind) {
+          lines.add('Selected: ${nameOf(pyStr(selectedKind))} at ($x,$y)');
+        } else {
+          lines.add(
+              'Selected: none (the piece selected at ($x,$y) is gone or changed)');
+        }
+      } else {
+        lines.add('Selected: ${nameOf(pyStr(selectedKind))}');
+      }
+
+      final budgets = config['budgets'];
+      if (budgets is Map && budgets.isNotEmpty) {
+        final rawRemaining = state.variables[
+            config['budgetVariable'] as String? ?? 'actorMovesRemaining'];
+        final remaining = rawRemaining is Map ? rawRemaining : const {};
+        final parts = [
+          for (final e in budgets.entries)
+            '${nameOf(pyStr(e.key))} ${formatValue(remaining.containsKey(e.key) ? remaining[e.key] : e.value)}'
+        ];
+        lines.add('Moves left: ${parts.join(', ')}');
+      }
+    }
+
+    final readouts = game.ui.readouts;
+    for (int i = 0; i < readouts.length; i++) {
+      final readout = readouts[i];
+      if (!state.variables.containsKey(readout.variable)) continue;
+      final value = state.variables[readout.variable];
+      final blank = readout.blankWhen;
+      final shown = (blank != null && value is num && value == blank)
+          ? '-'
+          : formatValue(value);
+      final label = anonymize ? 'Readout ${i + 1}' : readout.label;
+      lines.add('$label: $shown');
+    }
+
+    return lines.map((l) => '\n$l').join();
+  }
+
+  /// Player-facing reason for an engine loss. Mirrors `describe_loss` in
+  /// engines/python/goal_renderer.py: [loseReason] is the engine's reason code
+  /// (`max_actions`, `variable_threshold:<variable>`,
+  /// `premature_success:<goalId>`, `balance_budget_exhausted`,
+  /// `balance_unreachable`), matched to the first lose condition of the same
+  /// type (and variable / trigger goal). Named mode prefers that condition's
+  /// `description`; otherwise a generic sentence is built from its type, with
+  /// variable and goal names replaced by `#<i>` in anonymous mode.
+  static String describeLoss(LevelDefinition level, String? loseReason,
+      {bool anonymize = false}) {
+    final code = loseReason ?? '';
+    final colon = code.indexOf(':');
+    final ctype = colon < 0 ? code : code.substring(0, colon);
+    final key = colon < 0 ? '' : code.substring(colon + 1);
+    var index = 0;
+    LoseConditionDef? cond;
+    for (int i = 0; i < level.loseConditions.length; i++) {
+      final candidate = level.loseConditions[i];
+      if (candidate.type != ctype) continue;
+      final cfg = candidate.config;
+      if (ctype == 'variable_threshold' &&
+          key.isNotEmpty &&
+          cfg['variable'] != key) {
+        continue;
+      }
+      if (ctype == 'premature_success' &&
+          key.isNotEmpty &&
+          cfg['triggerGoalId'] != key) {
+        continue;
+      }
+      index = i + 1;
+      cond = candidate;
+      break;
+    }
+
+    if (cond != null && !anonymize) {
+      final description = cond.description;
+      if (description != null && description.isNotEmpty) return description;
+    }
+
+    final cfg = cond?.config ?? const <String, dynamic>{};
+    String orKey(Object? v) =>
+        (v == null || v == '' || v == false || v == 0) ? key : pyStr(v);
+    switch (ctype) {
+      case 'max_actions':
+        return 'move limit of ${cfg.containsKey('limit') ? pyStr(cfg['limit']) : '?'} reached';
+      case 'variable_threshold':
+        final name = anonymize ? '#$index' : orKey(cfg['variable']);
+        return 'loss condition "$name" reached';
+      case 'balance_budget_exhausted':
+        return "a piece's remaining moves can no longer complete its share";
+      case 'balance_unreachable':
+        return 'the balance goal became unreachable';
+      case 'premature_success':
+        final name = anonymize ? '#$index' : orKey(cfg['triggerGoalId']);
+        return 'goal "$name" was met before the other required goals';
+      case '':
+        return 'the level was lost';
+    }
+    final name = anonymize ? '#$index' : ctype;
+    return 'loss condition "$name" reached';
+  }
+
+  /// Describe a numeric threshold goal and expose its live value. A pack's
+  /// `goalDescriptions` override replaces this sentence; its live progress
+  /// then comes from [_goalProgress] as the shared `(now: ...)` suffix.
+  /// Mirrors `_describe_variable_threshold` in goal_renderer.py.
+  static String _describeVariableThreshold(
+      Map<String, dynamic> config, LevelState state,
+      {bool anonymize = false}) {
+    final variable = config['variable']?.toString() ?? 'value';
+    final comparison = config['comparison']?.toString() ?? 'gte';
+    final target = pyStr(config['target'] ?? 0);
+    final current = pyStr(state.variables[variable] ?? 0);
+
+    final subject =
+        anonymize ? 'Required value' : variable.replaceAll('_', ' ');
+    final requirement = switch (comparison) {
+      'eq' => 'equal $target',
+      'gte' => 'reach at least $target',
+      'lte' => 'stay at or below $target',
+      _ => 'satisfy $comparison $target',
+    };
+    return '$subject must $requirement (current: $current)';
+  }
+
+  /// Live progress of a `variable_threshold` goal: `current/target` for an
+  /// at-least goal, else the current value and the requirement. Mirrors
+  /// `_variable_threshold_progress`.
+  static String _variableThresholdProgress(
+      Map<String, dynamic> config, LevelState state) {
+    final variable = config['variable']?.toString() ?? 'value';
+    final comparison = config['comparison']?.toString() ?? 'gte';
+    final target = pyStr(config['target'] ?? 0);
+    final current = pyStr(state.variables[variable] ?? 0);
+    if (comparison == 'gte') return '$current/$target';
+    return '$current; required: $comparison $target';
   }
 
   static String _listNames(List<String> names) {
@@ -635,58 +956,179 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
       head = 'Claim cells for $listed';
     }
 
-    final (counts, claimable) =
-        GoalEvaluator().balanceCounts(config, state, game);
     if (owners.isEmpty) return head;
-    final tally = [
-      for (int i = 0; i < owners.length; i++)
-        '${names[i]} ${counts[owners[i]] ?? 0}'
-    ].join(', ');
-    final owned = counts.values.fold(0, (a, b) => a + b);
-    if (claimable != 0) {
-      return '$head ($tally — $owned of $claimable claimed)';
+    final progress = _balanceProgress(config, state, game, names);
+    var full = head;
+    if ((config['requireConnected'] as bool?) ?? false) {
+      final sources = config['connectionSources'] as Map? ?? const {};
+      final listedSources = [
+        for (int i = 0; i < owners.length; i++)
+          '${names[i]} ${_formatSource(sources[owners[i]])}'
+      ].join(', ');
+      full = '$head, and each owner\'s cells must connect orthogonally to its '
+          'source cell [$listedSources]';
     }
-    return '$head ($tally)';
+    return '$full ($progress)';
   }
 
-  /// Renders the targetLayers config of a board_match goal as an ASCII grid.
-  /// Returns null if the config has no renderable target.
-  /// When [kindToLabel] is provided, entity kinds are shown as their labels.
+  static String _formatSource(Object? raw) {
+    if (raw is List && raw.length == 2) {
+      return '(${(raw[0] as num).toInt()},${(raw[1] as num).toInt()})';
+    }
+    return '-';
+  }
+
+  /// The counts clause of a balance goal: cells per owner (connected/owned per
+  /// owner when `requireConnected`), then `N of M claimed`. Counted by the same
+  /// functions the win condition uses. Mirrors `_balance_progress`.
+  static String _balanceProgress(Map<String, dynamic> config, LevelState state,
+      GameDefinition game, List<String> names) {
+    final owners = (config['owners'] as List?)?.cast<String>() ?? [];
+    final evaluator = GoalEvaluator();
+    final (counts, claimable) = evaluator.balanceCounts(config, state, game);
+    final String tally;
+    if ((config['requireConnected'] as bool?) ?? false) {
+      final connected = evaluator.balanceConnectedCounts(config, state, game);
+      final cells = [
+        for (int i = 0; i < owners.length; i++)
+          '${names[i]} ${connected[owners[i]] ?? 0}/${counts[owners[i]] ?? 0}'
+      ];
+      if (cells.isNotEmpty) cells[0] = '${cells[0]} connected';
+      tally = cells.join(', ');
+    } else {
+      tally = [
+        for (int i = 0; i < owners.length; i++)
+          '${names[i]} ${counts[owners[i]] ?? 0}'
+      ].join(', ');
+    }
+    final owned = counts.values.fold(0, (a, b) => a + b);
+    if (claimable != 0) return '$tally — $owned of $claimable claimed';
+    return tally;
+  }
+
+  static String _sequenceProgress(
+      String goalId, Map<String, dynamic> config, LevelState state) {
+    final sequence = config['sequence'] as List? ?? const [];
+    final matched = state.sequenceIndices[goalId] ?? 0;
+    return '$matched/${sequence.length} done';
+  }
+
+  /// Live progress appended to a `goalDescriptions` override, or null for goal
+  /// types that carry no progress clause. Mirrors `_goal_progress`.
+  static String? _goalProgress(String type, String goalId,
+      Map<String, dynamic> config, LevelState state, GameDefinition game) {
+    if (type == 'balance') {
+      final owners = (config['owners'] as List?)?.cast<String>() ?? [];
+      if (owners.isEmpty) return null;
+      final names = [for (final o in owners) _resolveEntityName(game, o, null)];
+      return _balanceProgress(config, state, game, names);
+    }
+    if (type == 'sequence_match') {
+      return _sequenceProgress(goalId, config, state);
+    }
+    if (type == 'variable_threshold') {
+      return _variableThresholdProgress(config, state);
+    }
+    return null;
+  }
+
+  /// Kind named by one `targetLayers` cell, or null for an unset one. A cell
+  /// is a bare kind or the entry form `{"kind": "...", "<param>": ...}`.
+  static String? _targetCellKind(Object? cell) {
+    if (cell is String) return cell;
+    if (cell is Map) {
+      final kind = cell['kind'];
+      return kind is String ? kind : null;
+    }
+    return null;
+  }
+
+  /// Public name of a target kind: kinds sharing an observationSymbol all
+  /// present their group's stable name. Mirrors `_kind_name`.
+  static String _kindName(GameDefinition game, String kindId) =>
+      game.observationName(kindId);
+
+  /// The target pattern of a `board_match` goal, plus the lines that make it
+  /// readable: which cells are free, which are required, and what every symbol
+  /// in it means — including kinds that are not on the current board.
+  ///
+  /// `exact_non_null` (the default) leaves a null target cell unconstrained,
+  /// so a cell null in every target layer renders `?`; `exact` requires it to
+  /// be empty, so it keeps `.`. Where several target layers constrain one cell
+  /// the grid shows the topmost (board-renderer order) and `Also required:`
+  /// lists the rest. Mirrors `_render_target_grid` in goal_renderer.py.
   static String? _renderTargetGrid(
       GameDefinition game, Map<String, dynamic> config,
       {Map<String, String>? kindToLabel}) {
-    final targetLayers = config['targetLayers'] as Map<String, dynamic>?;
+    final targetLayers = config['targetLayers'] as Map?;
     if (targetLayers == null || targetLayers.isEmpty) return null;
 
-    // Collect the dimensions from any layer.
-    int? height;
-    int? width;
-    for (final rows in targetLayers.values) {
-      final rowList = rows as List;
-      height = rowList.length;
-      width = (rowList.first as List).length;
-      break;
+    final firstRows = targetLayers.values.first as List;
+    final height = firstRows.length;
+    final width = firstRows.isNotEmpty ? (firstRows.first as List).length : 0;
+
+    final exact = (config['matchMode'] ?? 'exact_non_null') == 'exact';
+    final nullSymbol = exact ? '.' : '?';
+    final anon = kindToLabel != null;
+
+    String symbolFor(String kindId) {
+      if (anon && kindToLabel.containsKey(kindId)) return kindToLabel[kindId]!;
+      final sym = game.publicSymbol(kindId);
+      return (sym != null && sym.isNotEmpty) ? sym : kindId[0];
     }
-    if (height == null || width == null) return null;
 
-    final grid = List.generate(height, (_) => List.filled(width!, '.'));
+    final declared = [for (final l in game.layers) l.id];
+    final inBoardOrder = [
+      for (final l in declared)
+        if (targetLayers.containsKey(l)) l,
+    ];
+    for (final l in targetLayers.keys) {
+      if (!inBoardOrder.contains(l)) inBoardOrder.add(l as String);
+    }
+    final layerOrder = TextRenderer.orderLayerIds(inBoardOrder, game);
 
-    for (final layerEntry in targetLayers.entries) {
-      final rows = layerEntry.value as List;
-      for (int y = 0; y < rows.length; y++) {
-        final row = rows[y] as List;
-        for (int x = 0; x < row.length; x++) {
-          final kindId = row[x] as String?;
-          if (kindId == null) continue;
-          final sym = kindToLabel != null
-              ? (kindToLabel[kindId] ?? kindId[0])
-              : (game.entityKinds[kindId]?.symbol ?? kindId[0]);
-          grid[y][x] = sym;
+    final grid = List.generate(height, (_) => List.filled(width, nullSymbol));
+    var nullUsed = false;
+    final gridKinds = <(String, String)>[];
+    final also = <String>[];
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        final kindsHere = <String>[];
+        for (final layerId in layerOrder) {
+          final rows = targetLayers[layerId] as List? ?? const [];
+          if (y >= rows.length || rows[y] is! List) continue;
+          final row = rows[y] as List;
+          if (x >= row.length) continue;
+          final kind = _targetCellKind(row[x]);
+          if (kind != null) kindsHere.add(kind);
+        }
+        if (kindsHere.isEmpty) {
+          nullUsed = true;
+          continue;
+        }
+        final top = kindsHere.first;
+        final sym = symbolFor(top);
+        grid[y][x] = sym;
+        if (!gridKinds.contains((sym, top))) gridKinds.add((sym, top));
+        for (final other in kindsHere.skip(1)) {
+          also.add(anon
+              ? '($x,$y) ${symbolFor(other)}'
+              : '($x,$y) ${symbolFor(other)}=${_kindName(game, other)}');
         }
       }
     }
 
-    return grid.map((row) => row.join()).join('\n');
+    final legend = <String>[];
+    if (nullUsed) legend.add(exact ? '.=must be empty' : '?=any (unconstrained)');
+    for (final (sym, kind) in gridKinds) {
+      final entry = anon ? sym : '$sym=${_kindName(game, kind)}';
+      if (!legend.contains(entry)) legend.add(entry);
+    }
+
+    final lines = [for (final row in grid) row.join()];
+    lines.add('Target legend: ${legend.join(', ')}');
+    if (also.isNotEmpty) lines.add('Also required: ${also.join(', ')}');
+    return lines.join('\n');
   }
 
   static String _describeSumConstraint(Map<String, dynamic> config) {
@@ -698,15 +1140,15 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     final scopeLabel = switch (scope) {
       'all_rows' => 'every row',
       'all_cols' => 'every column',
-      'row' => 'row ${index ?? '?'}',
-      'col' => 'column ${index ?? '?'}',
+      'row' => 'row ${index != null ? pyStr(index) : '?'}',
+      'col' => 'column ${index != null ? pyStr(index) : '?'}',
       _ => scope,
     };
     final opLabel = switch (comparison) {
-      'eq' => '= $target',
-      'gte' => '≥ $target',
-      'lte' => '≤ $target',
-      _ => '$comparison $target',
+      'eq' => '= ${pyStr(target)}',
+      'gte' => '≥ ${pyStr(target)}',
+      'lte' => '≤ ${pyStr(target)}',
+      _ => '$comparison ${pyStr(target)}',
     };
     return '$scopeLabel sums to $opLabel';
   }
@@ -721,8 +1163,8 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     final scopeLabel = switch (scope) {
       'all_rows' => 'every row',
       'all_cols' => 'every column',
-      'row' => 'row ${index ?? '?'}',
-      'col' => 'column ${index ?? '?'}',
+      'row' => 'row ${index != null ? pyStr(index) : '?'}',
+      'col' => 'column ${index != null ? pyStr(index) : '?'}',
       _ => scope,
     };
     final predicateLabel = switch (predicate) {
@@ -755,7 +1197,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     String _name(String? kindId, String fallback) {
       if (kindId == null) return fallback;
       if (kindToLabel != null) return kindToLabel[kindId] ?? kindId;
-      return game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
+      return game.observationName(kindId);
     }
 
     final markerName = _name(markerKind, 'target');
@@ -764,10 +1206,12 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     if (checkParam == 'sides' && checkValue == 15) {
       return 'Fill every $markerName cell with a complete $checkName (all 4 sides connected)';
     }
-    return 'Place a $checkName on every $markerName where $checkParam = $checkValue';
+    return 'Place a $checkName on every $markerName where $checkParam = ${pyStr(checkValue)}';
   }
 
-  GameAction _extractAction(String text, AgentObservation obs,
+  /// Parses a single-action reply; see [extractActionList] for the
+  /// [unrecognisedAction] fallback.
+  static GameAction extractAction(String text, AgentObservation obs,
       {Map<String, GameAction>? anonMap}) {
     final jsonMatch = RegExp(r'\{[^}]+\}').firstMatch(text);
     if (jsonMatch != null) {
@@ -794,9 +1238,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         }
       } catch (_) {}
     }
-    return obs.validActions.isNotEmpty
-        ? obs.validActions.first
-        : GameAction('noop', {});
+    return unrecognisedAction;
   }
 
   /// Returns the UI name of the entity identified by [kindId] or [tag].
@@ -805,12 +1247,12 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
   static String _resolveEntityName(
       GameDefinition game, String? kindId, String? tag) {
     if (kindId != null) {
-      return game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
+      return game.observationName(kindId);
     }
     if (tag != null) {
       for (final entry in game.entityKinds.entries) {
         if (entry.value.tags.contains(tag)) {
-          return entry.value.uiName ?? entry.key.replaceAll('_', ' ');
+          return game.observationName(entry.key);
         }
       }
       return tag;

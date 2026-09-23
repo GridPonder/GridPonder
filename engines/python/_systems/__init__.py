@@ -107,9 +107,28 @@ def instantiate_systems(game: GameDef, overrides: Optional[dict] = None) -> list
     return systems
 
 
+def observation_systems(game: GameDef, overrides: Optional[dict] = None) -> list[GameSystem]:
+    """Enabled systems in declaration order, for observation hooks.
+
+    Unlike instantiate_systems this never raises: an unsupported type is
+    skipped, matching Dart's SystemRegistry.instantiate.
+    """
+    effective_game = game.with_system_overrides(overrides)
+    systems = []
+    for sys_def in effective_game.systems:
+        if not sys_def.get("enabled", True):
+            continue
+        factory = _REGISTRY.get(sys_def["type"])
+        if factory is None:
+            continue
+        systems.append(factory(sys_def["id"], effective_game.system_config(sys_def["id"])))
+    return systems
+
+
 __all__ = [
     "GameSystem",
     "instantiate_systems",
+    "observation_systems",
     "supported_system_types",
     "unsupported_system_types",
 ]

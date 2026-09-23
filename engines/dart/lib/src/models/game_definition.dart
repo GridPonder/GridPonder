@@ -105,11 +105,13 @@ class GameReadout {
     this.blankWhen,
   });
 
+  // Tolerant of malformed fields, like the Python parser (`_parse_readouts`):
+  // a wrongly typed field is treated as absent rather than failing the load.
   factory GameReadout.fromJson(Map<String, dynamic> j) => GameReadout(
-        variable: j['variable'] as String? ?? '',
-        label: j['label'] as String? ?? '',
-        color: j['color'] as String?,
-        blankWhen: (j['blankWhen'] as num?)?.toInt(),
+        variable: j['variable'] is String ? j['variable'] as String : '',
+        label: j['label'] is String ? j['label'] as String : '',
+        color: j['color'] is String ? j['color'] as String : null,
+        blankWhen: j['blankWhen'] is num ? (j['blankWhen'] as num).toInt() : null,
       );
 }
 
@@ -191,6 +193,30 @@ class GameDefaults {
 /// Parsed game.json — the shared game definition.
 /// [id], [title] and [description] are injected from manifest.json by [PackLoader],
 /// not read from game.json.
+/// Observation-identity tables, cached per entityKinds map (shared by every
+/// [GameDefinition.withSystemOverrides] copy).
+final Expando<Map<String, String>> _observationKindTables =
+    Expando<Map<String, String>>('observationKinds');
+
+Map<String, String> _buildObservationKindTable(
+    Map<String, EntityKindDef> entityKinds) {
+  final shared = <String>{
+    for (final kind in entityKinds.values)
+      if (kind.observationSymbol != null && kind.symbolParam == null)
+        kind.observationSymbol!,
+  };
+  final firstBySymbol = <String, String>{};
+  final table = <String, String>{};
+  for (final entry in entityKinds.entries) {
+    final kind = entry.value;
+    if (kind.symbolParam != null) continue;
+    final symbol = kind.observationSymbol ?? kind.symbol;
+    if (!shared.contains(symbol)) continue;
+    table[entry.key] = firstBySymbol.putIfAbsent(symbol, () => entry.key);
+  }
+  return table;
+}
+
 class GameDefinition {
   final String id;
   final String title;
@@ -283,6 +309,38 @@ class GameDefinition {
   }
 
   EntityKindDef? getKind(String name) => entityKinds[name];
+
+  /// The symbol text observations show for [kindId]: `observationSymbol`
+  /// when declared, else the unique authoring `symbol`. Null for an unknown
+  /// kind.
+  String? publicSymbol(String kindId) {
+    final kind = entityKinds[kindId];
+    return kind == null ? null : (kind.observationSymbol ?? kind.symbol);
+  }
+
+  /// The kind whose name and description represent [kindId] publicly.
+  ///
+  /// Kinds that show the same public symbol, where at least one of them
+  /// declares `observationSymbol`, must stay indistinguishable in every
+  /// observation. They all present the first-declared kind (entityKinds
+  /// order) with that public symbol, so the printed name never depends on
+  /// which member happens to be on the board. Every other kind represents
+  /// itself. Mirrors Python `GameDef.observation_kind`.
+  String observationKind(String kindId) {
+    final table = _observationKindTables[entityKinds] ??=
+        _buildObservationKindTable(entityKinds);
+    return table[kindId] ?? kindId;
+  }
+
+  /// Public display name for [kindId] (see [observationKind]).
+  String observationName(String kindId) {
+    final rep = observationKind(kindId);
+    return entityKinds[rep]?.uiName ?? rep.replaceAll('_', ' ');
+  }
+
+  /// Public description for [kindId] (see [observationKind]).
+  String? observationDescription(String kindId) =>
+      entityKinds[observationKind(kindId)]?.description;
 
   bool hasTag(String kindName, String tag) =>
       entityKinds[kindName]?.hasTag(tag) ?? false;

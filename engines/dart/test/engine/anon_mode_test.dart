@@ -83,6 +83,16 @@ void main() {
       );
     });
 
+    test('buildPrompt shows the max-actions allowance', () {
+      final engine = TurnEngine(gameDef, levelDef);
+      final obs = AgentObservation.build(gameDef, levelDef, engine.state);
+
+      expect(
+        LlmAgent.buildPrompt(obs),
+        contains('Moves this attempt: 0 of 5 allowed'),
+      );
+    });
+
     test('buildPrompt anonymize=true hides game title and entity names', () {
       final engine = TurnEngine(gameDef, levelDef);
       final kindMap = buildAnonKindToLabel(gameDef);

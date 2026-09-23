@@ -47,6 +47,13 @@ class EntityKindDef {
   /// wide characters (emoji, CJK) must not be used as they break grid alignment.
   final String symbol;
 
+  /// Optional symbol exposed by text observations instead of [symbol].
+  ///
+  /// Unlike [symbol], this value may be shared by multiple entity kinds. This
+  /// lets mechanically distinct hidden states present the same public state
+  /// (for example, two yellow signal phases with different next phases).
+  final String? observationSymbol;
+
   /// If set, the text symbol is taken from this instance parameter at render
   /// time instead of [symbol]. Used for entities whose symbol varies by value
   /// (e.g. number tiles show their numeric value). [symbol] still acts as the
@@ -102,6 +109,7 @@ class EntityKindDef {
     required this.layer,
     required this.tags,
     required this.symbol,
+    this.observationSymbol,
     this.sprite,
     this.params = const {},
     this.animations = const {},
@@ -125,6 +133,20 @@ class EntityKindDef {
       throw FormatException(
           'Entity kind "$id": symbol "@" is reserved for the avatar');
     }
+    final rawObservationSymbol = j['observationSymbol'];
+    if (rawObservationSymbol != null && rawObservationSymbol is! String) {
+      throw FormatException(
+          'Entity kind "$id": observationSymbol must be a string');
+    }
+    final observationSymbol = rawObservationSymbol as String?;
+    if (observationSymbol != null && observationSymbol.isEmpty) {
+      throw FormatException(
+          'Entity kind "$id": observationSymbol must not be empty');
+    }
+    if (observationSymbol == '@') {
+      throw FormatException('Entity kind "$id": observationSymbol "@" is '
+          'reserved for the avatar');
+    }
     final rawParams = j['params'] as Map<String, dynamic>? ?? {};
     final rawAnims = j['animations'] as Map<String, dynamic>? ?? {};
     return EntityKindDef(
@@ -139,6 +161,7 @@ class EntityKindDef {
       uiName: j['uiName'] as String?,
       description: j['description'] as String?,
       symbol: symbol,
+      observationSymbol: observationSymbol,
       symbolParam: j['symbolParam'] as String?,
       spriteParam: j['spriteParam'] as String?,
       motion: (j['motion'] as Map?)?.cast<String, dynamic>() ?? const {},

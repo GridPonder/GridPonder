@@ -100,6 +100,13 @@ class PhaseRunner {
       _collectAnimationsFromList(npcCascade, state, animations, baseStage);
     }
 
+    // Derived state: variables that are pure functions of the board the turn
+    // has just finished with (readouts such as a pan's weight). Last, so
+    // nothing after it can make them stale.
+    for (final sys in systems) {
+      sys.executeDeriveState(state, effectiveGame);
+    }
+
     // Phase 7: Goal evaluation
     //
     // A turn that only *selects* an actor changes no board state, so it is not

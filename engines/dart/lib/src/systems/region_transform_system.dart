@@ -7,6 +7,10 @@ import '../models/position.dart';
 import '../models/direction.dart';
 import '../models/entity.dart';
 
+/// A kind's display name, as the text renderer's legend shows it.
+String _displayName(GameDefinition game, String kind) =>
+    game.entityKinds[kind]?.uiName ?? kind.replaceAll('_', ' ');
+
 class RegionTransformSystem extends GameSystem {
   const RegionTransformSystem({required super.id})
       : super(type: 'region_transform');
@@ -62,7 +66,8 @@ class RegionTransformSystem extends GameSystem {
     }
 
     if (matchedOpType == 'exchange') {
-      return _exchange(matchedOp, state, ox, oy, overlayWidth, overlayHeight);
+      return _exchange(
+          matchedOp, state, game, ox, oy, overlayWidth, overlayHeight);
     }
 
     final List<GameEvent> events = [];
@@ -137,6 +142,7 @@ class RegionTransformSystem extends GameSystem {
   List<GameEvent> _exchange(
     Map<String, dynamic> op,
     LevelState state,
+    GameDefinition game,
     int ox,
     int oy,
     int w,
@@ -185,6 +191,7 @@ class RegionTransformSystem extends GameSystem {
       final fromLayer = checkId == layerIds[0] ? second : first;
       final table = checkId == layerIds[0] ? toFirst : toSecond;
       final blocked = <GameEvent>[];
+      final refusals = <String>[];
       for (int dy = 0; dy < h; dy++) {
         for (int dx = 0; dx < w; dx++) {
           final pos = Position(ox + dx, oy + dy);
@@ -201,10 +208,12 @@ class RegionTransformSystem extends GameSystem {
           if (permitted.contains(incoming.kind)) continue;
           blocked.add(
               GameEvent.cellBlocked(pos, checkId, incoming.kind, guard.kind));
+          refusals.add('${_displayName(game, guard.kind)} at '
+              '(${pos.x},${pos.y}) refuses ${_displayName(game, incoming.kind)}');
         }
       }
       if (blocked.isNotEmpty) {
-        return [...blocked, GameEvent.actionVetoed()];
+        return [...blocked, GameEvent.actionVetoed(refusals.join('; '))];
       }
     }
 

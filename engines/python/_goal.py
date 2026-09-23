@@ -361,6 +361,48 @@ def balance_counts(cfg: dict, state: GameState) -> tuple[dict[str, int], int]:
     return counts, claimable
 
 
+def _balance_connected(
+    cfg: dict, positions: dict[str, set]
+) -> dict[str, int | None]:
+    """Per owner, how many of its cells connect orthogonally (through its own
+    cells) to its ``connectionSources`` cell. ``None`` when the owner has no
+    valid source or does not hold it — counted as 0 connected cells, and the
+    owner is never connected."""
+    raw_sources = cfg.get("connectionSources", {})
+    result: dict[str, int | None] = {}
+    for owner, cells in positions.items():
+        raw_source = raw_sources.get(owner)
+        if not isinstance(raw_source, (list, tuple)) or len(raw_source) != 2:
+            result[owner] = None
+            continue
+        source = Pos(int(raw_source[0]), int(raw_source[1]))
+        if source not in cells:
+            result[owner] = None
+            continue
+        reached = {source}
+        frontier = [source]
+        while frontier:
+            current = frontier.pop()
+            for neighbor in (
+                Pos(current.x + 1, current.y),
+                Pos(current.x - 1, current.y),
+                Pos(current.x, current.y + 1),
+                Pos(current.x, current.y - 1),
+            ):
+                if neighbor in cells and neighbor not in reached:
+                    reached.add(neighbor)
+                    frontier.append(neighbor)
+        result[owner] = len(reached)
+    return result
+
+
+def balance_connected_counts(cfg: dict, state: GameState) -> dict[str, int]:
+    """Per owner, cells connected to its source — the same count the win
+    condition uses when ``requireConnected`` is set (0 without a held source)."""
+    _counts, positions, _claimable = _balance_tally(cfg, state)
+    return {o: (n or 0) for o, n in _balance_connected(cfg, positions).items()}
+
+
 def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
     """Win when a territory layer is divided completely and into exactly-equal
     shares among the configured owners (or per requireComplete/requireEqual).
@@ -377,32 +419,11 @@ def _balance(cfg: dict, state: GameState, game: GameDef) -> tuple[bool, float]:
     connected = True
     connected_owned = owned
     if cfg.get("requireConnected", False):
-        connected_owned = 0
-        raw_sources = cfg.get("connectionSources", {})
+        reached_by_owner = _balance_connected(cfg, positions)
+        connected_owned = sum(n for n in reached_by_owner.values() if n is not None)
         for owner, cells in positions.items():
-            raw_source = raw_sources.get(owner)
-            if not isinstance(raw_source, (list, tuple)) or len(raw_source) != 2:
-                connected = False
-                continue
-            source = Pos(int(raw_source[0]), int(raw_source[1]))
-            if source not in cells:
-                connected = False
-                continue
-            reached = {source}
-            frontier = [source]
-            while frontier:
-                current = frontier.pop()
-                for neighbor in (
-                    Pos(current.x + 1, current.y),
-                    Pos(current.x - 1, current.y),
-                    Pos(current.x, current.y + 1),
-                    Pos(current.x, current.y - 1),
-                ):
-                    if neighbor in cells and neighbor not in reached:
-                        reached.add(neighbor)
-                        frontier.append(neighbor)
-            connected_owned += len(reached)
-            if len(reached) != len(cells):
+            reached = reached_by_owner[owner]
+            if reached is None or reached != len(cells):
                 connected = False
     progress_numerator = connected_owned if cfg.get("requireConnected", False) else owned
     progress = progress_numerator / claimable if claimable else 0.0

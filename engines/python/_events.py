@@ -304,7 +304,11 @@ def cells_flooded(cells: list[Pos]) -> dict:
     return {"type": "cells_flooded", "cells": cells}
 
 
-def action_vetoed() -> dict:
+def action_vetoed(reason: str | None = None) -> dict:
+    """The action is refused and the turn is not spent. An optional
+    human-readable `reason` explains the refusal (runners show it)."""
+    if reason:
+        return {"type": "action_vetoed", "reason": reason}
     return {"type": "action_vetoed"}
 
 

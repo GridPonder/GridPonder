@@ -12,6 +12,12 @@ from .. import _events as ev
 from ._base import GameSystem, config_list
 
 
+def _display_name(game: GameDef, kind: str) -> str:
+    """A kind's display name, as the text renderer's legend shows it."""
+    kind_def = game.entity_kinds.get(kind) or {}
+    return kind_def.get("uiName") or kind.replace("_", " ")
+
+
 class RegionTransformSystem(GameSystem):
     def __init__(self, sys_id: str):
         super().__init__(sys_id, "region_transform")
@@ -47,7 +53,7 @@ class RegionTransformSystem(GameSystem):
                         return []
 
         if matched_op_type == "exchange":
-            return self._exchange(matched_op, state, ox, oy, ow, oh)
+            return self._exchange(matched_op, state, game, ox, oy, ow, oh)
 
         dir_str = action.get("params", {}).get("direction")
 
@@ -76,7 +82,8 @@ class RegionTransformSystem(GameSystem):
 
         return [ev.region_transformed(matched_op_type)]
 
-    def _exchange(self, op: dict, state: GameState, ox: int, oy: int, w: int, h: int) -> list[dict]:
+    def _exchange(self, op: dict, state: GameState, game: GameDef,
+                  ox: int, oy: int, w: int, h: int) -> list[dict]:
         """Swap the contents of two layers cell by cell inside the overlay.
 
         `pairs` translates kinds on the way across: `[first, second]` turns a
@@ -126,6 +133,7 @@ class RegionTransformSystem(GameSystem):
             from_layer = second if check_id == layer_ids[0] else first
             table = to_first if check_id == layer_ids[0] else to_second
             blocked: list[dict] = []
+            refusals: list[str] = []
             for dy in range(h):
                 for dx in range(w):
                     p = Pos(ox + dx, oy + dy)
@@ -144,8 +152,11 @@ class RegionTransformSystem(GameSystem):
                     if incoming is None or incoming.kind in list(allowed):
                         continue
                     blocked.append(ev.cell_blocked(p, check_id, incoming.kind, guard.kind))
+                    refusals.append(
+                        f"{_display_name(game, guard.kind)} at ({p.x},{p.y}) refuses "
+                        f"{_display_name(game, incoming.kind)}")
             if blocked:
-                return blocked + [ev.action_vetoed()]
+                return blocked + [ev.action_vetoed("; ".join(refusals))]
 
         events: list[dict] = []
         for dy in range(h):

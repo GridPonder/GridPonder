@@ -73,6 +73,15 @@ class TurnEngine {
         : TurnResult.rejected(_state, events: result.events);
   }
 
+  /// True when an enabled system's behaviour in the current state reads the
+  /// turn counter, which the state key leaves out (see
+  /// [GameSystem.dependsOnTurnCount]).
+  bool turnCountMatters() {
+    final effectiveGame = game.withSystemOverrides(level.systemOverrides);
+    return SystemRegistry.instantiate(effectiveGame, null)
+        .any((sys) => sys.dependsOnTurnCount(_state, effectiveGame));
+  }
+
   /// Undo the last action.
   bool undo() {
     if (_history.isEmpty) return false;
@@ -99,8 +108,14 @@ class TurnEngine {
   /// settle must run regardless.
   void _applySystemLoadSettle() {
     final effectiveGame = game.withSystemOverrides(level.systemOverrides);
-    for (final sys in SystemRegistry.instantiate(effectiveGame, null)) {
+    final systems = SystemRegistry.instantiate(effectiveGame, null);
+    for (final sys in systems) {
       sys.executeLoadSettle(_state, effectiveGame);
+    }
+    // Derived variables read the fully settled opening board, so they run only
+    // once every system has settled.
+    for (final sys in systems) {
+      sys.executeDeriveState(_state, effectiveGame);
     }
   }
 
