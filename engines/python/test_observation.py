@@ -89,7 +89,7 @@ def _status(game, level, engine, anon=False) -> list[str]:
 def test_initial_status_block():
     game, level, engine = _setup()
     assert _status(game, level, engine) == [
-        "Moves this attempt: 0 of 11 allowed",
+        "Moves this attempt: 0 of 11 allowed (a tap that only selects is free)",
         "Selected: none",
         "Moves left: Red piece 3, Blue piece 2",
         "Heat: -",
@@ -103,7 +103,7 @@ def test_selection_and_budget_after_moves():
     assert engine.execute_turn("move", {"direction": "right"}).accepted
     engine.state.variables["heat"] = 4
     assert _status(game, level, engine) == [
-        "Moves this attempt: 1 of 11 allowed",
+        "Moves this attempt: 1 of 11 allowed (a tap that only selects is free)",
         "Selected: Red piece at (1,0)",
         "Moves left: Red piece 2, Blue piece 2",
         "Heat: 4",
@@ -125,7 +125,7 @@ def test_anonymous_status_block_uses_labels():
     engine.execute_turn("tap_cell", {"position": [0, 1]})
     lines = _status(game, level, engine, anon=True)
     assert lines == [
-        "Moves this attempt: 0 of 11 allowed",
+        "Moves this attempt: 0 of 11 allowed (a tap that only selects is free)",
         f"Selected: {labels['blue']} at (0,1)",
         f"Moves left: {labels['red']} 3, {labels['blue']} 2",
         "Readout 1: -",
@@ -221,7 +221,7 @@ def test_board_did_not_change_note():
                           last_action={"action": "move", "direction": "down"},
                           previous_board_text=before,
                           previous_status=before_status)
-    assert ("Moves this attempt: 1 of 11 allowed\nSelected: Blue piece at (0,1)\n"
+    assert ("Moves this attempt: 1 of 11 allowed (a tap that only selects is free)\nSelected: Blue piece at (0,1)\n"
             "Moves left: Red piece 3, Blue piece 2\nHeat: -\nGauge: 2\n"
             "The board did not change.\n\nCompare the two boards") in prompt, prompt
 

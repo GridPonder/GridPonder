@@ -16,7 +16,7 @@ Each system declares which phase(s) it participates in. During a turn, phases ex
 | 4 | `interaction_resolution` | Reserved for future systems. In v0.5, item/environment interactions are handled by rules in phase 5. |
 | 5 | `cascade_resolution` | Chain effects: rules evaluate, emitters fire, gravity settles. Repeats up to `maxCascadeDepth`. |
 | 6 | `npc_resolution` | Autonomous NPC behavior executes. |
-| 7 | `goal_evaluation` | Win and lose conditions are checked. |
+| 7 | `goal_evaluation` | Win and lose conditions are checked on the same resulting state; a loss wins the tie (an action that completes the goals while breaking a lose condition is a loss), except that a winning move may spend the last action a `max_actions` limit allows. |
 
 **Derived state.** Between phases 6 and 7 — after every system's NPC resolution
 and the rules pass over NPC events, so once the board has finished changing —

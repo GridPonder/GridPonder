@@ -22,6 +22,14 @@ _IMAGE_BOARD_NOTE = (
     "coordinates to refer to specific cells.)"
 )
 
+# Text-mode prompts spell out the coordinate convention once; image mode
+# says it in _IMAGE_BOARD_NOTE.
+_COORDINATES_NOTE = (
+    "Coordinates: a position [x, y] (written (x,y) under the board) is column "
+    "x, row y; (0,0) is the top-left cell, x grows to the right and y grows "
+    "downward."
+)
+
 # Image mode attaches only the current board, so the BOARD BEFORE slot says
 # so instead of pointing at an image that is not there.
 _IMAGE_PREVIOUS_NOTE = (
@@ -294,8 +302,9 @@ def build_prompt(
         ex2 = json.dumps(valid_actions[-1], sort_keys=True) if len(valid_actions) > 1 else ex1
 
     tail = _prompt_tail(inference_mode, step_size, max_n, ex1=ex1, ex2=ex2)
+    coordinates = f"{_COORDINATES_NOTE}\n" if text_board else ""
 
-    return f"{header}\n\n{tail}"
+    return f"{header}\n\n{coordinates}{tail}"
 
 
 def _max_actions_limit(level_def: dict) -> int | None:
@@ -366,13 +375,17 @@ def status_lines(
         return game_def.observation_name(kind)
 
     lines: list[str] = []
+    config = _individual_actors_config(game_def, level_def)
+    # A turn that only selects a piece is not charged (action_count skips
+    # it), so say so wherever pieces are selected.
+    free_tap = " (a tap that only selects is free)" if config is not None else ""
     limit = _max_actions_limit(level_def)
     if limit is not None:
-        lines.append(f"Moves this attempt: {state.action_count} of {limit} allowed")
+        lines.append(
+            f"Moves this attempt: {state.action_count} of {limit} allowed{free_tap}")
     elif level_def.get("loseConditions"):
-        lines.append(f"Moves this attempt: {state.action_count}")
+        lines.append(f"Moves this attempt: {state.action_count}{free_tap}")
 
-    config = _individual_actors_config(game_def, level_def)
     if config is not None:
         selected_kind = state.variables.get(
             config.get("selectedVariable", "selectedActorKind"))

@@ -225,17 +225,22 @@ class TurnEngine:
         goals = self._level.get("goals", []) or []
         lose_conditions = self._level.get("loseConditions", []) or []
 
+        # Goals and lose conditions are judged on the same resulting state,
+        # and a loss wins the tie: an action that completes the goals while
+        # breaking a lose condition is a loss. The one exception is
+        # `max_actions`, whose limit is the move allowance itself — a winning
+        # move that spends the last allowed action is inside the allowance.
         is_won, goal_progress, goal_satisfied = evaluate_goals(goals, state, effective_game, all_events)
         if is_won:
+            lose_conditions = [
+                c for c in lose_conditions if c.get("type") != "max_actions"
+            ]
+        is_lost, lose_reason = evaluate_lose(
+            lose_conditions, state, goals, effective_game, goal_satisfied)
+        if is_lost:
+            state.is_lost = True
+        elif is_won:
             state.is_won = True
-
-        is_lost = False
-        lose_reason = None
-        if not state.is_won:
-            is_lost, lose_reason = evaluate_lose(
-                lose_conditions, state, goals, effective_game, goal_satisfied)
-            if is_lost:
-                state.is_lost = True
 
         all_events.append(ev.turn_ended(state.turn_count))
         self._state = state

@@ -686,7 +686,7 @@ void main() {
   group('E. status block', () {
     test('initial status block', () {
       expect(_setup().status(), [
-        'Moves this attempt: 0 of 11 allowed',
+        'Moves this attempt: 0 of 11 allowed (a tap that only selects is free)',
         'Selected: none',
         'Moves left: Red piece 3, Blue piece 2',
         'Heat: -',
@@ -704,7 +704,7 @@ void main() {
       expect(o.act('move', {'direction': 'right'}), isTrue);
       o.engine.state.variables['heat'] = 4;
       expect(o.status(), [
-        'Moves this attempt: 1 of 11 allowed',
+        'Moves this attempt: 1 of 11 allowed (a tap that only selects is free)',
         'Selected: Red piece at (1,0)',
         'Moves left: Red piece 2, Blue piece 2',
         'Heat: 4',
@@ -730,7 +730,7 @@ void main() {
       });
       final lines = o.status(anon: true);
       expect(lines, [
-        'Moves this attempt: 0 of 11 allowed',
+        'Moves this attempt: 0 of 11 allowed (a tap that only selects is free)',
         'Selected: ${labels['blue']} at (0,1)',
         'Moves left: ${labels['red']} 3, ${labels['blue']} 2',
         'Readout 1: -',
@@ -890,7 +890,7 @@ void main() {
       expect(
           prompt,
           contains(
-              'Moves this attempt: 1 of 11 allowed\nSelected: Blue piece at (0,1)\n'
+              'Moves this attempt: 1 of 11 allowed (a tap that only selects is free)\nSelected: Blue piece at (0,1)\n'
               'Moves left: Red piece 3, Blue piece 2\nHeat: -\nGauge: 2\n'
               'The board did not change.\n\nCompare the two boards'));
     });

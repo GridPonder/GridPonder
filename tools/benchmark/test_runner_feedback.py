@@ -115,7 +115,7 @@ def test_rejected_action_section_replaces_before_after():
 def test_board_did_not_change_note_and_allowance():
     events = _run([_SELECT, _LEFT])
     prompt = [e for e in events if e["event"] == "state"][-1]["prompt"]
-    assert ("Moves this attempt: 1 of 2 allowed\nSelected: Red piece at (0,0)\n"
+    assert ("Moves this attempt: 1 of 2 allowed (a tap that only selects is free)\nSelected: Red piece at (0,0)\n"
             "The board did not change.\n") in prompt, prompt
 
 
@@ -259,13 +259,13 @@ def test_image_mode_keeps_feedback_and_status_without_the_grid():
     assert ("BOARD BEFORE:\n(Not shown: only the current board is attached as an image.)\n"
             ) in selected, selected
     assert ("Image marks: a gold ring marks the selected piece.\n"
-            "Moves this attempt: 0 of 2 allowed\nSelected: Red piece at (0,0)\n\n"
+            "Moves this attempt: 0 of 2 allowed (a tap that only selects is free)\nSelected: Red piece at (0,0)\n\n"
             ) in selected, selected
     assert "The board did not change." not in selected
     assert "Compare the two boards" not in selected
     # The edge bump is accepted, costs a move and changes nothing.
     bumped = states[3]["prompt"]
-    assert "Moves this attempt: 1 of 2 allowed\nSelected: Red piece at (0,0)\n" in bumped
+    assert "Moves this attempt: 1 of 2 allowed (a tap that only selects is free)\nSelected: Red piece at (0,0)\n" in bumped
     assert "The board did not change.\n" in bumped
     # The second attempt opens with the previous attempt's loss.
     assert ("PREVIOUS ATTEMPT: lost — move limit of 2 reached\n"

@@ -9,6 +9,12 @@ import 'py_format.dart';
 import 'text_renderer.dart';
 
 /// The result of one agent action, including optional reasoning and memory.
+/// What an agent returns when the model's reply cannot be parsed or names no
+/// offered action. [AgentRunner] treats it as a rejected action: nothing is
+/// executed and no action is spent (it still counts toward `maxSteps`, so a
+/// model that never answers cleanly cannot loop forever).
+const unrecognisedAction = GameAction('_unrecognised_reply', {});
+
 class AgentActResult {
   /// All actions chosen by the agent this turn (one or more).
   final List<GameAction> actions;
@@ -525,6 +531,11 @@ class AgentRunner {
           break;
         }
 
+        if (action.actionId == unrecognisedAction.actionId) {
+          totalSteps++;
+          continue;
+        }
+
         try {
           engine.executeTurn(action);
         } catch (_) {
@@ -618,8 +629,17 @@ Map<String, GameAction> buildAnonReverseMap(List<GameAction> validActions) {
 }
 
 /// Converts a 0-based index to a label: 0→A, 1→B, …, 25→Z, 26→AA, 27→AB, …
+/// One character per label, so an anonymous grid stays aligned however many
+/// kinds a pack has: A-Z, then a-z, then digits, then a few printable symbols
+/// that no grid, legend or stacked-cell syntax uses. Mirrors `_ANON_ALPHABET`
+/// in engines/python/anon.py.
+const _anonAlphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+    'abcdefghijklmnopqrstuvwxyz'
+    '0123456789'
+    r'!$%&*<>^~';
+
 String _anonIndexToLabel(int i) {
-  if (i < 26) return String.fromCharCode(65 + i);
-  return String.fromCharCode(65 + (i ~/ 26) - 1) +
-      String.fromCharCode(65 + (i % 26));
+  if (i < _anonAlphabet.length) return _anonAlphabet[i];
+  // Beyond the alphabet: Greek capitals (still one narrow character).
+  return String.fromCharCode(0x391 + i - _anonAlphabet.length);
 }

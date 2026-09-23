@@ -222,7 +222,7 @@ class LlmAgent implements GridPonderAgent {
     final anonMap = anonymize ? buildAnonReverseMap(obs.validActions) : null;
 
     if (inferenceMode == 'single') {
-      final action = _extractAction(responseText, obs, anonMap: anonMap);
+      final action = extractAction(responseText, obs, anonMap: anonMap);
       final memoryUpdate = _extractMemory(responseText);
       if (memoryUpdate != null) _memory = memoryUpdate;
       yield AgentActCompleted(
@@ -233,7 +233,7 @@ class LlmAgent implements GridPonderAgent {
       );
     } else {
       final (actions, memoryUpdate) =
-          _extractActionList(responseText, obs, anonMap: anonMap);
+          extractActionList(responseText, obs, anonMap: anonMap);
       if (memoryUpdate != null) _memory = memoryUpdate;
       yield AgentActCompleted(
         AgentActResult(actions,
@@ -247,7 +247,10 @@ class LlmAgent implements GridPonderAgent {
   /// Parses a multi-action LLM response. Returns (actions, memoryUpdate).
   /// Accepts: bare JSON array, {"actions":[...]}, or single {"action":"..."}.
   /// When [anonMap] is provided, action labels (a1, a2, …) are reverse-mapped.
-  (List<GameAction>, String?) _extractActionList(
+  /// A reply that cannot be parsed, or names no offered action, yields the
+  /// [unrecognisedAction] sentinel instead of silently playing some other
+  /// action; [AgentRunner] spends no action on it.
+  static (List<GameAction>, String?) extractActionList(
       String text, AgentObservation obs,
       {Map<String, GameAction>? anonMap}) {
     // Strip <think>...</think> blocks and markdown code fences.
@@ -298,14 +301,7 @@ class LlmAgent implements GridPonderAgent {
     }
 
     if (rawList == null || rawList.isEmpty) {
-      return (
-        [
-          obs.validActions.isNotEmpty
-              ? obs.validActions.first
-              : GameAction('noop', {})
-        ],
-        null
-      );
+      return (const [unrecognisedAction], null);
     }
 
     final result = <GameAction>[];
@@ -335,16 +331,7 @@ class LlmAgent implements GridPonderAgent {
       if (match != null) result.add(match);
     }
 
-    if (result.isEmpty) {
-      return (
-        [
-          obs.validActions.isNotEmpty
-              ? obs.validActions.first
-              : GameAction('noop', {})
-        ],
-        memoryUpdate
-      );
-    }
+    if (result.isEmpty) return (const [unrecognisedAction], memoryUpdate);
     return (result, memoryUpdate);
   }
 
@@ -524,8 +511,16 @@ $actionsDesc
       ex2 = va.length > 1 ? pyJsonDumps(va.last.toJson()) : ex1;
     }
 
-    return '$header\n\n${_promptTail(inferenceMode, stepSize, maxN, ex1: ex1, ex2: ex2)}';
+    return '$header\n\n$coordinatesNote\n'
+        '${_promptTail(inferenceMode, stepSize, maxN, ex1: ex1, ex2: ex2)}';
   }
+
+  /// The coordinate convention, stated once in every text-mode prompt.
+  /// Mirrors `_COORDINATES_NOTE` in engines/python/observation.py.
+  static const coordinatesNote =
+      'Coordinates: a position [x, y] (written (x,y) under the board) is column '
+      'x, row y; (0,0) is the top-left cell, x grows to the right and y grows '
+      'downward.';
 
   static String _promptTail(
     String inferenceMode,
@@ -742,13 +737,6 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         : game.observationName(kind);
 
     final lines = <String>[];
-    final limit = _maxActionsLimit(level);
-    if (limit != null) {
-      lines.add('Moves this attempt: ${state.actionCount} of $limit allowed');
-    } else if (level.loseConditions.isNotEmpty) {
-      lines.add('Moves this attempt: ${state.actionCount}');
-    }
-
     Map<String, dynamic>? config;
     for (final system
         in game.withSystemOverrides(level.systemOverrides).systems) {
@@ -757,6 +745,17 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         break;
       }
     }
+    // A turn that only selects a piece is not charged (actionCount skips
+    // it), so say so wherever pieces are selected.
+    final freeTap = config != null ? ' (a tap that only selects is free)' : '';
+    final limit = _maxActionsLimit(level);
+    if (limit != null) {
+      lines.add(
+          'Moves this attempt: ${state.actionCount} of $limit allowed$freeTap');
+    } else if (level.loseConditions.isNotEmpty) {
+      lines.add('Moves this attempt: ${state.actionCount}$freeTap');
+    }
+
     if (config != null) {
       final selectedKind = state.variables[
           config['selectedVariable'] as String? ?? 'selectedActorKind'];
@@ -1210,7 +1209,9 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     return 'Place a $checkName on every $markerName where $checkParam = ${pyStr(checkValue)}';
   }
 
-  GameAction _extractAction(String text, AgentObservation obs,
+  /// Parses a single-action reply; see [extractActionList] for the
+  /// [unrecognisedAction] fallback.
+  static GameAction extractAction(String text, AgentObservation obs,
       {Map<String, GameAction>? anonMap}) {
     final jsonMatch = RegExp(r'\{[^}]+\}').firstMatch(text);
     if (jsonMatch != null) {
@@ -1237,9 +1238,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         }
       } catch (_) {}
     }
-    return obs.validActions.isNotEmpty
-        ? obs.validActions.first
-        : GameAction('noop', {});
+    return unrecognisedAction;
   }
 
   /// Returns the UI name of the entity identified by [kindId] or [tag].

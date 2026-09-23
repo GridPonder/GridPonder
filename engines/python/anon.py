@@ -4,10 +4,23 @@ import json
 from typing import Any
 
 
+# One character per label, so an anonymous grid stays aligned however many
+# kinds a pack has: A-Z, then a-z, then digits, then a few printable symbols
+# that no grid, legend or stacked-cell syntax uses ('.', '?', '@', '·', '=',
+# '+', '(', ')', ',', ':' and the multi-cell glyphs are all avoided).
+_ANON_ALPHABET = (
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    "abcdefghijklmnopqrstuvwxyz"
+    "0123456789"
+    "!$%&*<>^~"
+)
+
+
 def _anon_index_to_label(i: int) -> str:
-    if i < 26:
-        return chr(65 + i)
-    return chr(65 + i // 26 - 1) + chr(65 + i % 26)
+    if i < len(_ANON_ALPHABET):
+        return _ANON_ALPHABET[i]
+    # Beyond the alphabet: Greek capitals (still one narrow character).
+    return chr(0x391 + i - len(_ANON_ALPHABET))
 
 
 def build_anon_kind_to_label(game_def) -> dict[str, str]:
