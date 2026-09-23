@@ -534,7 +534,10 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
       if (!anonymize) {
         final override = game.goalDescriptions[g.id];
         if (override != null) {
-          goalParts.add(override);
+          goalParts.add(g.type == 'variable_threshold'
+              ? _describeVariableThreshold(g.config, state,
+                  description: override)
+              : override);
           continue;
         }
       }
@@ -585,11 +588,40 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         case 'param_match':
           goalParts.add(_describeParamMatch(game, g.config,
               kindToLabel: anonymize ? kindToLabel : null));
+        case 'variable_threshold':
+          goalParts.add(_describeVariableThreshold(g.config, state,
+              anonymize: anonymize));
         default:
           goalParts.add(g.type);
       }
     }
     return goalParts.join('; ');
+  }
+
+  static String _describeVariableThreshold(
+      Map<String, dynamic> config, LevelState state,
+      {String? description, bool anonymize = false}) {
+    final variable = config['variable']?.toString() ?? 'value';
+    final comparison = config['comparison']?.toString() ?? 'gte';
+    final target = config['target'] ?? 0;
+    final current = state.variables[variable] ?? 0;
+
+    if (description != null) {
+      if (comparison == 'gte') {
+        return '$description (progress: $current/$target)';
+      }
+      return '$description (current: $current; required: $comparison $target)';
+    }
+
+    final subject =
+        anonymize ? 'Required value' : variable.replaceAll('_', ' ');
+    final requirement = switch (comparison) {
+      'eq' => 'equal $target',
+      'gte' => 'reach at least $target',
+      'lte' => 'stay at or below $target',
+      _ => 'satisfy $comparison $target',
+    };
+    return '$subject must $requirement (current: $current)';
   }
 
   static String _listNames(List<String> names) {

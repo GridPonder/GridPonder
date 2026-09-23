@@ -68,7 +68,12 @@ def build_prompt(
 
     # ── Board text (current) ──────────────────────────────────────────────────
     if text_board:
-        board_text = render_board(state, game_def, kind_symbol_overrides=kind_symbol_overrides)
+        board_text = render_board(
+            state,
+            game_def,
+            kind_symbol_overrides=kind_symbol_overrides,
+            level_def=level_def,
+        )
     else:
         board_text = _IMAGE_BOARD_NOTE
         if previous_board_text is not None:

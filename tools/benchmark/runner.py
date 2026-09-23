@@ -294,6 +294,7 @@ def main() -> None:
                 "board_text": render_board(
                     engine.state, game_def,
                     kind_symbol_overrides=kind_symbol_overrides,
+                    level_def=level_def,
                 ),
                 "goals": render_goals(
                     level_def, engine.state, game_def,
@@ -498,6 +499,7 @@ def main() -> None:
             prev_board_text = render_board(
                 engine.state, game_def, include_legend=False,
                 kind_symbol_overrides=kind_symbol_overrides,
+                level_def=level_def,
             )
             prev_inventory = engine.state.avatar.item if engine.state.avatar.enabled else None
 
@@ -580,6 +582,7 @@ def main() -> None:
             prev_board_text = render_board(
                 engine.state, game_def, include_legend=False,
                 kind_symbol_overrides=kind_symbol_overrides,
+                level_def=level_def,
             )
             prev_inventory = engine.state.avatar.item if engine.state.avatar.enabled else None
 

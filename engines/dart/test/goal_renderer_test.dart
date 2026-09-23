@@ -178,4 +178,48 @@ void main() {
       expect(text, contains('9'));
     });
   });
+
+  group('variable threshold goal text', () {
+    LevelDefinition makeThresholdLevel(GameDefinition game) =>
+        LevelDefinition.fromJson({
+          'id': 'threshold',
+          'board': {
+            'size': [3, 3],
+            'layers': <String, dynamic>{},
+          },
+          'goals': [
+            {
+              'id': 'complete_targets',
+              'type': 'variable_threshold',
+              'config': {
+                'variable': 'completedTargetCount',
+                'comparison': 'gte',
+                'target': 4,
+              },
+            },
+          ],
+        }, game.layers);
+
+    test('describes the requirement instead of exposing its type name', () {
+      final game = _makeGame();
+      final state = _makeState(game);
+      state.variables['completedTargetCount'] = 1;
+      final text =
+          LlmAgent.describeGoals(makeThresholdLevel(game), state, game);
+      expect(text, isNot('variable_threshold'));
+      expect(text, contains('1'));
+      expect(text, contains('4'));
+    });
+
+    test('pack override keeps dynamic progress', () {
+      final game = _makeGame();
+      game.goalDescriptions['complete_targets'] =
+          'Cover every required target exactly';
+      final state = _makeState(game);
+      state.variables['completedTargetCount'] = 2;
+      final text =
+          LlmAgent.describeGoals(makeThresholdLevel(game), state, game);
+      expect(text, 'Cover every required target exactly (progress: 2/4)');
+    });
+  });
 }

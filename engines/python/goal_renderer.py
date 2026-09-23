@@ -24,7 +24,13 @@ def render_goals(
         # Per-game goal-text override (set in game.json `goalDescriptions`).
         # Skipped in anonymise mode since the override may name entities.
         if not anonymize and goal_id in overrides:
-            goal_parts.append(overrides[goal_id])
+            override = overrides[goal_id]
+            if goal_type == "variable_threshold":
+                goal_parts.append(
+                    _describe_variable_threshold(config, state, description=override)
+                )
+            else:
+                goal_parts.append(override)
             continue
 
         if goal_type == "reach_target":
@@ -85,10 +91,51 @@ def render_goals(
                 )
             )
 
+        elif goal_type == "variable_threshold":
+            goal_parts.append(
+                _describe_variable_threshold(
+                    config,
+                    state,
+                    anonymize=anonymize,
+                )
+            )
+
         else:
             goal_parts.append(goal_type)
 
     return "; ".join(goal_parts)
+
+
+def _describe_variable_threshold(
+    config: dict,
+    state,
+    *,
+    description: str | None = None,
+    anonymize: bool = False,
+) -> str:
+    """Describe a numeric threshold and expose its live progress.
+
+    Packs may provide the human part through ``goalDescriptions``. The shared
+    renderer still owns the dynamic suffix so precise pack prose cannot hide
+    whether the requirement is unfinished or complete.
+    """
+    variable = str(config.get("variable", "value"))
+    comparison = str(config.get("comparison", "gte"))
+    target = config.get("target", 0)
+    current = state.variables.get(variable, 0)
+
+    if description is not None:
+        if comparison == "gte":
+            return f"{description} (progress: {current}/{target})"
+        return f"{description} (current: {current}; required: {comparison} {target})"
+
+    subject = "Required value" if anonymize else variable.replace("_", " ")
+    requirement = {
+        "eq": f"equal {target}",
+        "gte": f"reach at least {target}",
+        "lte": f"stay at or below {target}",
+    }.get(comparison, f"satisfy {comparison} {target}")
+    return f"{subject} must {requirement} (current: {current})"
 
 
 def _list_names(names: list[str]) -> str:

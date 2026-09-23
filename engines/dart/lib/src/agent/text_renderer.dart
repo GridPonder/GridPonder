@@ -1,6 +1,9 @@
+import '../models/board.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
+import '../models/level_definition.dart';
 import '../models/position.dart';
+import '../models/system_def.dart';
 
 /// Renders a [LevelState] as a compact text grid using Unicode symbols.
 ///
@@ -32,7 +35,11 @@ class TextRenderer {
   /// When [kindSymbolOverrides] is provided, entity kind IDs are rendered
   /// using the mapped symbol instead of the game-defined symbol (anonymous mode).
   static String render(LevelState state, GameDefinition game,
-      {bool includeLegend = true, Map<String, String>? kindSymbolOverrides}) {
+      {bool includeLegend = true,
+      Map<String, String>? kindSymbolOverrides,
+      LevelDefinition? level}) {
+    final effectiveGame =
+        level == null ? game : game.withSystemOverrides(level.systemOverrides);
     final board = state.board;
     final w = board.width;
     final h = board.height;
@@ -70,7 +77,11 @@ class TextRenderer {
             cellSet.contains(Position(cell.x + 1, cell.y));
         final v = cellSet.contains(Position(cell.x, cell.y - 1)) ||
             cellSet.contains(Position(cell.x, cell.y + 1));
-        mcoSymbols[cell] = (h && !v) ? '═' : (!h && v) ? '║' : '╬';
+        mcoSymbols[cell] = (h && !v)
+            ? '═'
+            : (!h && v)
+                ? '║'
+                : '╬';
       }
     }
 
@@ -98,7 +109,7 @@ class TextRenderer {
         for (final layerId in layerOrder) {
           final entity = board.getEntity(layerId, pos);
           if (entity == null) continue;
-          final kindDef = game.entityKinds[entity.kind];
+          final kindDef = effectiveGame.entityKinds[entity.kind];
           String? sym;
           if (kindDef == null) {
             sym = entity.kind[0].toUpperCase();
@@ -132,24 +143,32 @@ class TextRenderer {
     final parts = <String>[gridStr];
 
     if (includeLegend) {
-      final legend = _buildLegend(state, game, gridAvatarPos != null,
+      final legend = _buildLegend(state, effectiveGame, gridAvatarPos != null,
           kindSymbolOverrides: kindSymbolOverrides);
-      parts.add('Each character is one cell, each line is one row. Legend: $legend');
+      parts.add(
+          'Each character is one cell, each line is one row. Legend: $legend');
     }
 
-    final numbersBlock = _buildNumbersBlock(state, game);
+    final numbersBlock = _buildNumbersBlock(state, effectiveGame);
     if (numbersBlock.isNotEmpty) parts.add(numbersBlock);
 
-    final overlayBlock = _buildOverlayBlock(state, game, kindSymbolOverrides: kindSymbolOverrides);
+    final overlayBlock = _buildOverlayBlock(state, effectiveGame,
+        kindSymbolOverrides: kindSymbolOverrides);
     if (overlayBlock.isNotEmpty) parts.add(overlayBlock);
 
-    final stackedBlock = _buildStackedBlock(state, game, gridAvatarPos,
+    final stackedBlock = _buildStackedBlock(
+        state, effectiveGame, gridAvatarPos, mcoSymbols,
         kindSymbolOverrides: kindSymbolOverrides);
     if (stackedBlock.isNotEmpty) parts.add(stackedBlock);
 
-    final mcoBlock = _buildMcoBlock(state, game,
+    final mcoBlock = _buildMcoBlock(state, effectiveGame,
         kindSymbolOverrides: kindSymbolOverrides);
     if (mcoBlock.isNotEmpty) parts.add(mcoBlock);
+
+    final targetStatusBlock = _buildElasticTargetStatusBlock(
+        state, effectiveGame, level,
+        kindSymbolOverrides: kindSymbolOverrides);
+    if (targetStatusBlock.isNotEmpty) parts.add(targetStatusBlock);
 
     return parts.join('\n\n');
   }
@@ -188,9 +207,8 @@ class TextRenderer {
             label = '? (exact value in "Number values")';
           } else {
             final name = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
-            final extra = kindDef.description != null
-                ? '; ${kindDef.description}'
-                : '';
+            final extra =
+                kindDef.description != null ? '; ${kindDef.description}' : '';
             label = '$name (exact value in "Number values"$extra)';
           }
         } else if (kindSymbolOverrides != null &&
@@ -199,9 +217,8 @@ class TextRenderer {
           label = '?';
         } else {
           sym = kindDef.symbol;
-          final desc = kindDef.description != null
-              ? ' (${kindDef.description})'
-              : '';
+          final desc =
+              kindDef.description != null ? ' (${kindDef.description})' : '';
           label = '${kindDef.uiName ?? kindDef.id.replaceAll('_', ' ')}$desc';
         }
 
@@ -211,8 +228,21 @@ class TextRenderer {
     }
 
     if (state.board.multiCellObjects.isNotEmpty) {
-      seen['║/═'] = 'pipe body';
-      seen['▲/▼/◄/►'] = 'pipe exit (arrow = exit direction)';
+      final labels = <String>[];
+      for (final mco in state.board.multiCellObjects) {
+        final label = kindSymbolOverrides != null
+            ? '?'
+            : (game.entityKinds[mco.kind]?.uiName ??
+                mco.kind.replaceAll('_', ' '));
+        if (!labels.contains(label)) labels.add(label);
+      }
+      seen['║/═/╬'] = labels.length == 1
+          ? '${labels.first} body'
+          : 'multi-cell object body';
+      if (state.board.multiCellObjects
+          .any((mco) => mco.params['exitPosition'] != null)) {
+        seen['▲/▼/◄/►'] = 'multi-cell object exit (arrow = exit direction)';
+      }
     }
 
     return seen.entries.map((e) => '${e.key}=${e.value}').join('  ');
@@ -245,7 +275,9 @@ class TextRenderer {
           if (kindDef == null) continue;
           if (kindDef.symbolParam != null) {
             final paramVal = entity.param(kindDef.symbolParam!);
-            sym = paramVal != null ? _valueToChar(paramVal as int) : kindDef.symbol;
+            sym = paramVal != null
+                ? _valueToChar(paramVal as int)
+                : kindDef.symbol;
           } else if (kindSymbolOverrides != null &&
               kindSymbolOverrides.containsKey(entity.kind)) {
             sym = kindSymbolOverrides[entity.kind]!;
@@ -266,8 +298,8 @@ class TextRenderer {
 
   /// Reports cells where more than one layer has a visible entity, so the LLM
   /// knows the grid symbol hides additional content beneath it.
-  static String _buildStackedBlock(
-      LevelState state, GameDefinition game, Position? avatarPos,
+  static String _buildStackedBlock(LevelState state, GameDefinition game,
+      Position? avatarPos, Map<Position, String> mcoSymbols,
       {Map<String, String>? kindSymbolOverrides}) {
     final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
     final entries = <String>[];
@@ -309,12 +341,33 @@ class TextRenderer {
           // Skip void/empty cells. In anon mode the symbol may be overridden,
           // so check both the display symbol and the original game symbol.
           final originalSym = kindDef?.symbol ?? sym;
-          if (sym == '.' || sym == ' ' || originalSym == '.' || originalSym == ' ') continue;
+          if (sym == '.' ||
+              sym == ' ' ||
+              originalSym == '.' ||
+              originalSym == ' ') continue;
           symbols.add('$sym($label)');
         }
 
         // Avatar counts as an extra layer on top (only when shown in grid).
         if (avatarPos == pos) symbols.insert(0, '@(avatar)');
+
+        final mcoSymbol = mcoSymbols[pos];
+        if (mcoSymbol != null) {
+          MultiCellObjectInstance? mco;
+          for (final item in state.board.multiCellObjects) {
+            if (item.cells.contains(pos)) {
+              mco = item;
+              break;
+            }
+          }
+          final label = kindSymbolOverrides != null
+              ? '?'
+              : (mco == null
+                  ? 'multi-cell object'
+                  : (game.entityKinds[mco.kind]?.uiName ??
+                      mco.kind.replaceAll('_', ' ')));
+          symbols.add('$mcoSymbol($label)');
+        }
 
         if (symbols.length >= 2) {
           entries.add('  ($x,$y): ${symbols.join(' + ')}');
@@ -324,6 +377,106 @@ class TextRenderer {
 
     if (entries.isEmpty) return '';
     return 'Stacked cells (grid shows only top symbol):\n${entries.join('\n')}';
+  }
+
+  static String _buildElasticTargetStatusBlock(
+      LevelState state, GameDefinition game, LevelDefinition? level,
+      {Map<String, String>? kindSymbolOverrides}) {
+    if (level == null || kindSymbolOverrides != null) return '';
+
+    SystemDef? system;
+    for (final candidate in game.systems) {
+      if (candidate.type == 'elastic_block' && candidate.enabled) {
+        system = candidate;
+        break;
+      }
+    }
+    if (system == null) return '';
+    final config = system.config;
+    final targets = config['targets'] as List? ?? const [];
+    if (targets.isEmpty) return '';
+
+    final objectKind = config['objectKind']?.toString() ?? 'elastic_block';
+    final objectName =
+        game.entityKinds[objectKind]?.uiName ?? objectKind.replaceAll('_', ' ');
+    MultiCellObjectInstance? block;
+    for (final mco in state.board.multiCellObjects) {
+      if (mco.kind == objectKind) {
+        block = mco;
+        break;
+      }
+    }
+    final blockCells = block?.cells.toSet() ?? <Position>{};
+    final completedKey = config['completedTargetIdsVariable']?.toString() ??
+        'completedTargetIds';
+    final consumedKey =
+        config['consumedTargetIdsVariable']?.toString() ?? 'consumedTargetIds';
+    final completed = (state.variables[completedKey] as List? ?? const [])
+        .map((value) => value.toString())
+        .toSet();
+    final consumed = (state.variables[consumedKey] as List? ?? const [])
+        .map((value) => value.toString())
+        .toSet();
+    final defaultLayer = config['targetLayer']?.toString() ?? 'markers';
+    final initialBoard = level.initialState().board;
+
+    final lines = <String>[
+      'Target status (exact $objectName footprint match required):'
+    ];
+    for (final rawTarget in targets) {
+      if (rawTarget is! Map) continue;
+      final target = Map<String, dynamic>.from(rawTarget);
+      final markerKind = target['markerKind']?.toString() ?? '';
+      final targetId = target['id']?.toString() ?? markerKind;
+      if (markerKind.isEmpty || targetId.isEmpty) continue;
+      final markerLayer = target['markerLayer']?.toString() ?? defaultLayer;
+      final layer = initialBoard.layers[markerLayer];
+      if (layer == null) continue;
+      final cells = <Position>[
+        for (final entry in layer.entries())
+          if (entry.value.kind == markerKind) entry.key,
+      ]..sort((left, right) {
+          final byY = left.y.compareTo(right.y);
+          return byY != 0 ? byY : left.x.compareTo(right.x);
+        });
+      if (cells.isEmpty) continue;
+
+      final markerDef = game.entityKinds[markerKind];
+      final targetName = markerDef?.uiName ?? markerKind.replaceAll('_', ' ');
+      final displayName =
+          markerDef == null ? targetName : '$targetName [${markerDef.symbol}]';
+      final geometry = cells.map((cell) => '(${cell.x},${cell.y})').join(' ');
+      final overlap = cells.where(blockCells.contains).length;
+      final mode = target['onLeave']?.toString() ?? 'none';
+
+      late final String status;
+      if (consumed.contains(targetId)) {
+        if (mode == 'wall') {
+          final wallKind = target['wallKind']?.toString() ?? 'wall';
+          final wallName = game.entityKinds[wallKind]?.uiName ??
+              wallKind.replaceAll('_', ' ');
+          status = 'completed and converted to $wallName after full vacancy';
+        } else if (mode == 'void') {
+          status = 'completed and converted to void after full vacancy';
+        } else {
+          status = 'completed and removed after full vacancy';
+        }
+      } else if (completed.contains(targetId)) {
+        final suffix = switch (mode) {
+          'wall' =>
+            '; becomes a wall only after the $objectName fully vacates it',
+          'void' =>
+            '; becomes void only after the $objectName fully vacates it',
+          _ => '',
+        };
+        status = 'completed, still occupied by $objectName$suffix';
+      } else {
+        status = 'unfinished ($overlap/${cells.length} cells covered)';
+      }
+      lines.add('  $displayName: cells $geometry; $status');
+    }
+
+    return lines.length > 1 ? lines.join('\n') : '';
   }
 
   /// Returns the grid symbol for a numeric tile value.
@@ -403,8 +556,9 @@ class TextRenderer {
       if (queue != null) {
         final currentIndex = (mco.params['currentIndex'] as int?) ?? 0;
         final remaining = queue.skip(currentIndex).toList();
-        final spawnStr =
-            spawnPos != null ? ' (next spawns at (${spawnPos.x},${spawnPos.y}))' : '';
+        final spawnStr = spawnPos != null
+            ? ' (next spawns at (${spawnPos.x},${spawnPos.y}))'
+            : '';
         if (remaining.isNotEmpty) {
           final queueStr = remaining.map((v) => '$v').join(' → ');
           sb.writeln('    queue$spawnStr: $queueStr');
