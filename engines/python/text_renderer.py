@@ -161,7 +161,7 @@ def _get_symbol(entity, kind_def: dict | None, kind_symbol_overrides: dict | Non
         return _VISIBLE_SPACE if symbol.isspace() else symbol
     if kind_symbol_overrides and entity.kind in kind_symbol_overrides:
         return kind_symbol_overrides[entity.kind]
-    symbol = kind_def["symbol"]
+    symbol = kind_def.get("observationSymbol") or kind_def["symbol"]
     return _VISIBLE_SPACE if symbol.isspace() else symbol
 
 
@@ -248,7 +248,7 @@ def _build_legend(
                 sym = kind_symbol_overrides[entity.kind]
                 label = "?"
             else:
-                sym = kind_def["symbol"]
+                sym = kind_def.get("observationSymbol") or kind_def["symbol"]
                 if sym.isspace():
                     sym = _VISIBLE_SPACE
                 desc = kind_def.get("description")
@@ -373,7 +373,7 @@ def _build_stacked_block(
                         sym = kind_symbol_overrides[entity.kind]
                         label = "?"
                     else:
-                        sym = kind_def["symbol"]
+                        sym = kind_def.get("observationSymbol") or kind_def["symbol"]
                         if sym.isspace():
                             sym = _VISIBLE_SPACE
                         label = kind_def.get("uiName") or entity.kind.replace("_", " ")
@@ -509,7 +509,7 @@ def _build_elastic_target_status_block(
             continue
         marker_def = game_def.entity_kinds.get(marker_kind, {})
         target_name = marker_def.get("uiName") or marker_kind.replace("_", " ")
-        symbol = marker_def.get("symbol")
+        symbol = marker_def.get("observationSymbol") or marker_def.get("symbol")
         display_name = f"{target_name} [{symbol}]" if symbol else target_name
         geometry = " ".join(f"({cell.x},{cell.y})" for cell in cells)
         overlap = len(block_cells.intersection(cells))

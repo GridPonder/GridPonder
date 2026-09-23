@@ -436,4 +436,73 @@ void main() {
     expect(rendered,
         contains('[markers] O(Powered core) + [territory] c(Powered conduit)'));
   });
+
+  test('shared observation symbol hides internal phase', () {
+    final game = GameDefinition.fromJson({
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'floor'},
+        {'id': 'markers', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'floor': {'layer': 'ground', 'symbol': '.'},
+        'yellow_to_green': {
+          'layer': 'markers',
+          'symbol': 'A',
+          'observationSymbol': 'Y',
+          'uiName': 'Yellow signal',
+        },
+        'yellow_to_red': {
+          'layer': 'markers',
+          'symbol': 'B',
+          'observationSymbol': 'Y',
+          'uiName': 'Yellow signal',
+        },
+      },
+      'actions': <dynamic>[],
+      'systems': <dynamic>[],
+    });
+    final level = {
+      'id': 'hidden-phase',
+      'board': {
+        'size': [2, 1],
+        'layers': {
+          'markers': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'yellow_to_green'
+              },
+              {
+                'position': [1, 0],
+                'kind': 'yellow_to_red'
+              },
+            ],
+          },
+        },
+      },
+      'state': {
+        'avatar': {'enabled': false}
+      },
+      'goals': <dynamic>[],
+    };
+
+    final state = _engineFor(game, level).state;
+    final rendered = TextRenderer.render(state, game);
+    expect(rendered.split('\n').first, equals('YY'));
+    expect('Y=Yellow signal'.allMatches(rendered), hasLength(1));
+    expect(rendered.toLowerCase(), isNot(contains('yellow to green')));
+    expect(rendered.toLowerCase(), isNot(contains('yellow to red')));
+
+    final anonymous = TextRenderer.render(
+      state,
+      game,
+      includeLegend: false,
+      kindSymbolOverrides: {
+        'yellow_to_green': 'C',
+        'yellow_to_red': 'D',
+      },
+    );
+    expect(anonymous.split('\n').first, equals('CD'));
+  });
 }

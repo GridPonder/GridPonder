@@ -16,12 +16,14 @@ import '../models/system_def.dart';
 /// position is shown in the Active region block instead) and cell content is
 /// displayed at every position without bracket corner markers.
 ///
-/// The text symbol for each entity kind is defined by [EntityKindDef.symbol]
-/// in game.json. All symbols must be single Unicode characters with display
-/// width 1 (narrow). The only hardcoded symbol is '@' for the avatar (an
-/// engine concept, not an entity kind). Entity kinds with [EntityKindDef.symbolParam]
-/// are rendered as 'N' in the grid; their exact values appear in the
-/// "Number values" block below the grid.
+/// The text symbol for each entity kind is defined by
+/// [EntityKindDef.observationSymbol] when present, otherwise by
+/// [EntityKindDef.symbol]. Observation symbols may intentionally be shared by
+/// hidden internal states. All symbols must be single Unicode characters with
+/// display width 1 (narrow). The only hardcoded symbol is '@' for the avatar
+/// (an engine concept, not an entity kind). Entity kinds with
+/// [EntityKindDef.symbolParam] are rendered as 'N' in the grid; their exact
+/// values appear in the "Number values" block below the grid.
 ///
 /// Multi-cell objects (e.g. pipes) are rendered with direction-aware symbols
 /// in the grid (═ horizontal, ║ vertical, ╬ junction, ▲▼◄► exit — arrow
@@ -130,7 +132,7 @@ class TextRenderer {
               kindSymbolOverrides.containsKey(entity.kind)) {
             sym = kindSymbolOverrides[entity.kind];
           } else {
-            sym = kindDef.symbol;
+            sym = kindDef.observationSymbol ?? kindDef.symbol;
           }
           if (layerId == 'ground') {
             groundSymbol = sym;
@@ -260,7 +262,7 @@ class TextRenderer {
           sym = kindSymbolOverrides[entity.kind]!;
           label = '?';
         } else {
-          sym = kindDef.symbol;
+          sym = kindDef.observationSymbol ?? kindDef.symbol;
           final desc =
               kindDef.description != null ? ' (${kindDef.description})' : '';
           label = '${kindDef.uiName ?? kindDef.id.replaceAll('_', ' ')}$desc';
@@ -335,7 +337,7 @@ class TextRenderer {
               kindSymbolOverrides.containsKey(entity.kind)) {
             sym = kindSymbolOverrides[entity.kind]!;
           } else {
-            sym = kindDef.symbol;
+            sym = kindDef.observationSymbol ?? kindDef.symbol;
           }
           break;
         }
@@ -393,7 +395,7 @@ class TextRenderer {
               sym = kindSymbolOverrides[entity.kind]!;
               label = '?';
             } else {
-              sym = kindDef.symbol;
+              sym = kindDef.observationSymbol ?? kindDef.symbol;
               label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
             }
             // Skip void/empty cells. In anon mode the symbol may be
@@ -506,8 +508,9 @@ class TextRenderer {
 
       final markerDef = game.entityKinds[markerKind];
       final targetName = markerDef?.uiName ?? markerKind.replaceAll('_', ' ');
-      final displayName =
-          markerDef == null ? targetName : '$targetName [${markerDef.symbol}]';
+      final displayName = markerDef == null
+          ? targetName
+          : '$targetName [${markerDef.observationSymbol ?? markerDef.symbol}]';
       final geometry = cells.map((cell) => '(${cell.x},${cell.y})').join(' ');
       final overlap = cells.where(blockCells.contains).length;
       final mode = target['onLeave']?.toString() ?? 'none';
