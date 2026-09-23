@@ -123,6 +123,7 @@ class GameDef:
             "params": j.get("params", {}),
             "animations": j.get("animations", {}),
             "symbol": j.get("symbol", "?"),
+            "observationSymbol": j.get("observationSymbol"),
             "symbolParam": j.get("symbolParam"),
             "sprite": j.get("sprite"),
             "spriteParam": j.get("spriteParam"),

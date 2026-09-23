@@ -495,6 +495,63 @@ def test_declared_layer_order_and_stacks_preserve_circuit_state() -> None:
     ) in rendered
 
 
+def test_shared_observation_symbol_hides_internal_phase() -> None:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+                {"id": "markers", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "floor": {"layer": "ground", "symbol": "."},
+                "yellow_to_green": {
+                    "layer": "markers",
+                    "symbol": "A",
+                    "observationSymbol": "Y",
+                    "uiName": "Yellow signal",
+                },
+                "yellow_to_red": {
+                    "layer": "markers",
+                    "symbol": "B",
+                    "observationSymbol": "Y",
+                    "uiName": "Yellow signal",
+                },
+            },
+        }
+    )
+    level = {
+        "board": {
+            "size": [2, 1],
+            "layers": {
+                "markers": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [0, 0], "kind": "yellow_to_green"},
+                        {"position": [1, 0], "kind": "yellow_to_red"},
+                    ],
+                }
+            },
+        },
+        "state": {"avatar": {"enabled": False}},
+        "goals": [],
+    }
+
+    state = TurnEngine(game, level).state
+    rendered = text_renderer.render(state, game)
+    assert rendered.splitlines()[0] == "YY"
+    assert rendered.count("Y=Yellow signal") == 1
+    assert "yellow to green" not in rendered.lower()
+    assert "yellow to red" not in rendered.lower()
+
+    anonymous = text_renderer.render(
+        state,
+        game,
+        include_legend=False,
+        kind_symbol_overrides={"yellow_to_green": "C", "yellow_to_red": "D"},
+    )
+    assert anonymous.splitlines()[0] == "CD"
+
+
 def run_all() -> bool:
     tests = [
         test_territory_symbol_shown_on_owned_empty_cell_and_hidden_under_actor,
@@ -505,6 +562,7 @@ def run_all() -> bool:
         test_consumed_target_reports_original_geometry_and_wall_state,
         test_occluding_public_piece_hides_then_reveals_board_contents,
         test_declared_layer_order_and_stacks_preserve_circuit_state,
+        test_shared_observation_symbol_hides_internal_phase,
     ]
     passed = 0
     failed = 0
