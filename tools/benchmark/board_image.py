@@ -33,7 +33,10 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from engines.python._models import Pos as _Pos
-from engines.python.text_renderer import order_layer_ids
+from engines.python.text_renderer import (
+    observation_concealed_positions,
+    order_layer_ids,
+)
 
 
 CELL_PX = 64
@@ -84,7 +87,10 @@ def render_board_image(
     pack_dir = Path(pack_dir)
     base_dir = pack_dir.parent / "gridponder-base" / "sprites" / "tiles"
     theme = _load_theme(pack_dir)
-    ctx = _Ctx(game_def, state, pack_dir, base_dir, theme)
+    # Cells under an observation_occluder piece: the text grid shows only the
+    # piece there, so the image draws nothing below it either.
+    concealed_positions = observation_concealed_positions(state, game_def)
+    ctx = _Ctx(game_def, state, pack_dir, base_dir, theme, concealed_positions)
 
     width_cells = state.board.width
     height_cells = state.board.height
@@ -116,7 +122,7 @@ def render_board_image(
 
     # Region outlines: stroke the perimeter of every contiguous group of
     # cells whose kind has `outline` set in game.json.
-    _draw_region_outlines(draw, game_def, state)
+    _draw_region_outlines(draw, game_def, state, concealed_positions)
 
     # The piece the player has selected (individual_actors), as the app's
     # selection ring does.
@@ -156,10 +162,12 @@ _HIDDEN_COVER = 0.6               # fraction of an item covered to call it hidde
 
 
 class _Ctx:
-    __slots__ = ("game_def", "state", "pack_dir", "base_dir", "theme", "palette", "raw_kinds")
+    __slots__ = ("game_def", "state", "pack_dir", "base_dir", "theme", "palette", "raw_kinds",
+                 "concealed")
 
-    def __init__(self, game_def, state, pack_dir, base_dir, theme):
+    def __init__(self, game_def, state, pack_dir, base_dir, theme, concealed=frozenset()):
         self.game_def = game_def
+        self.concealed = concealed
         self.state = state
         self.pack_dir = pack_dir
         self.base_dir = base_dir
@@ -173,11 +181,11 @@ def _cell_origin(x: int, y: int) -> tuple[int, int]:
     return AXIS_PX + PADDING + x * CELL_PX, AXIS_PX + PADDING + y * CELL_PX
 
 
-def _layer_order(state) -> list[str]:
-    """The board's layers bottom to top (ground first), in the same order the
-    text grid picks a cell's top item (`order_layer_ids`), so a text+image
-    prompt shows the same item on top in both renderings."""
-    top_to_bottom = order_layer_ids(list(state.board.layers))
+def _layer_order(game_def, state) -> list[str]:
+    """The board's layers bottom to top (ground first), in the same declared
+    order the text grid picks a cell's top item (`order_layer_ids`), so a
+    text+image prompt shows the same item on top in both renderings."""
+    top_to_bottom = order_layer_ids(list(state.board.layers), game_def)
     return ["ground", *[layer for layer in reversed(top_to_bottom) if layer != "ground"]]
 
 
@@ -205,6 +213,20 @@ def _cell_tile(ctx: _Ctx, x: int, y: int) -> tuple[Image.Image, bool]:
     # (tile, may_be_hidden) bottom to top
     stack: list[tuple[Image.Image, bool]] = []
 
+    if pos in ctx.concealed:
+        # Under an observation_occluder piece nothing below is drawn — not
+        # even as a hidden-item inset — so a partly transparent piece sprite
+        # cannot reveal what the text grid conceals.
+        stack.append((_solid(_EMPTY_FILL), False))
+        for mco in state.board.multi_cell_objects:
+            if pos in mco.cells and game_def.has_tag(mco.kind, "observation_occluder"):
+                kind_def = game_def.entity_kinds.get(mco.kind, {})
+                stack.append((_entity_tile(ctx, mco.kind, kind_def, mco.params, None), False))
+        _stack_avatar(ctx, stack, x, y)
+        for item, _ in stack:
+            tile.alpha_composite(item)
+        return tile, False
+
     ground = state.board.get_entity("ground", pos)
     if ground is None:
         stack.append((_solid(_EMPTY_FILL), False))
@@ -224,16 +246,12 @@ def _cell_tile(ctx: _Ctx, x: int, y: int) -> tuple[Image.Image, bool]:
         kind_def = game_def.entity_kinds.get(mco.kind, {})
         stack.append((_entity_tile(ctx, mco.kind, kind_def, mco.params, None), False))
 
-    for layer in _layer_order(state)[1:]:
+    for layer in _layer_order(game_def, state)[1:]:
         ent = state.board.get_entity(layer, pos)
         if ent is not None:
             stack.append((_layer_tile(ctx, layer, ent), ent.kind != _layer_default(game_def, layer)))
 
-    avatar = getattr(state, "avatar", None)
-    if (avatar is not None and getattr(avatar, "enabled", False)
-            and avatar.position is not None
-            and avatar.position.x == x and avatar.position.y == y):
-        stack.append((_avatar_tile(ctx, avatar.facing), False))
+    _stack_avatar(ctx, stack, x, y)
 
     for item, _ in stack:
         tile.alpha_composite(item)
@@ -258,6 +276,14 @@ def _cell_tile(ctx: _Ctx, x: int, y: int) -> tuple[Image.Image, bool]:
             d.rectangle((ix0 - 3, iy0 - 3, ix0 + _INSET_PX + 2, iy0 + _INSET_PX + 2),
                         outline=(20, 20, 20), width=1)
     return tile, bool(hidden)
+
+
+def _stack_avatar(ctx: _Ctx, stack: list, x: int, y: int) -> None:
+    avatar = getattr(ctx.state, "avatar", None)
+    if (avatar is not None and getattr(avatar, "enabled", False)
+            and avatar.position is not None
+            and avatar.position.x == x and avatar.position.y == y):
+        stack.append((_avatar_tile(ctx, avatar.facing), False))
 
 
 def _covered_fraction(item: Image.Image, above: list[Image.Image]) -> float:
@@ -428,7 +454,7 @@ def _load_raw_kinds(pack_dir: Path) -> dict:
         return {}
 
 
-def _draw_region_outlines(draw, game_def, state):
+def _draw_region_outlines(draw, game_def, state, concealed_positions):
     """Stroke the outer perimeter of every contiguous region of cells whose
     kind has `outline` set. For each cell in such a region we draw a line on
     each side whose neighbour is NOT in the region; stitched together this
@@ -447,11 +473,13 @@ def _draw_region_outlines(draw, game_def, state):
         def in_set(x, y):
             if x < 0 or y < 0:
                 return False
+            if _Pos(x, y) in concealed_positions:
+                return False
             e = layer.get(_Pos(x, y))
             return e is not None and e.kind == kind_id
 
         for pos, ent in layer.entries():
-            if ent.kind != kind_id:
+            if ent.kind != kind_id or pos in concealed_positions:
                 continue
             x0, y0 = _cell_origin(pos.x, pos.y)
             x1 = x0 + CELL_PX
@@ -498,8 +526,13 @@ def _procedural_object(canvas, draw, kind, kind_def, params, x0, y0, ctx=None):
     if display and _draw_from_display(draw, display, kind, params, x0, y0, cx, cy, ctx):
         return
 
-    # Generic fallback: labelled badge (first letter of kind).
-    label = kind[:1].upper() if kind else "?"
+    # Generic fallback: labelled badge (first letter of kind). Kinds sharing
+    # an observationSymbol are badged by their group's public kind, so the
+    # image never tells them apart where the text cannot.
+    public = kind
+    if ctx is not None and kind and hasattr(ctx.game_def, "observation_kind"):
+        public = ctx.game_def.observation_kind(kind)
+    label = public[:1].upper() if public else "?"
     font = _font(int(CELL_PX * 0.45))
     draw.ellipse((x0 + 8, y0 + 8, x0 + CELL_PX - 8, y0 + CELL_PX - 8), fill="#94a3b8", outline=(50, 50, 50))
     draw.text((cx, cy), label, fill="white", font=font, anchor="mm")

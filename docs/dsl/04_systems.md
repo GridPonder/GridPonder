@@ -42,6 +42,23 @@ Systems interact through:
 
 Systems never call each other directly.
 
+### Observation Hooks
+
+A system may publish text for agent observations; this never changes state.
+Two optional hooks exist, with identical behavior in both engines:
+
+- **Object detail lines** — printed indented under a multi-cell object in the
+  "Multi-cell objects" block, in named and anonymous mode, so they must not
+  contain pack vocabulary. Lines from all systems are printed in system
+  declaration order; a line repeated by several systems prints once.
+- **Status block** — a header line plus entries, printed after the
+  multi-cell object block in named mode only. Each enabled system's block is
+  printed separately, in system declaration order.
+
+Built-in users: `sliding_blocks` (object detail `axis: <axis>` when the
+object's `axis` param is a non-empty string) and `elastic_block` (target
+status block).
+
 ### Config Override
 
 Levels may override specific config fields per system via `systemOverrides`. Overrides are shallow-merged onto the game-level config.
@@ -1498,7 +1515,16 @@ rectangle. `onLeave` is `"none"`, `"void"`, or `"wall"`; the latter two use
    target never reactivates.
 
 The target state is stored in ordinary variables, so it participates in solver
-state identity and survives engine copies. Packs that only need deformation can
+state identity and survives engine copies.
+
+**Observation:** in named mode the system publishes a status block
+([observation hooks](#observation-hooks)): the header
+`Target status (exact <object> footprint match required):`, then one line per
+target with its authored cells (from the level's `board`, so a consumed target
+keeps its geometry) and `unfinished (<covered>/<total> cells covered)`,
+`completed, still occupied by <object>`, or `completed and converted to ...
+after full vacancy`. Names follow the
+[shared observation symbol](02_game.md#shared-observation-symbols) rule. Packs that only need deformation can
 leave `targets` empty and use another goal system.
 
 ---

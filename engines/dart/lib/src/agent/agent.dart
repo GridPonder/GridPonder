@@ -113,7 +113,7 @@ class AgentObservation {
       state: state,
       validActions: enumerateActions(game, state, engine: engine),
       boardText: TextRenderer.render(state, game,
-          kindSymbolOverrides: kindSymbolOverrides),
+          kindSymbolOverrides: kindSymbolOverrides, level: level),
       attemptNumber: attemptNumber,
       totalActionsAllAttempts: totalActionsAllAttempts,
       lastAction: lastAction,
@@ -491,7 +491,9 @@ class AgentRunner {
 
       // Capture board state before the batch so the next prompt has before/after.
       final batchPrevBoard = TextRenderer.render(engine.state, engine.game,
-          includeLegend: false, kindSymbolOverrides: kindSymbolOverrides);
+          includeLegend: false,
+          kindSymbolOverrides: kindSymbolOverrides,
+          level: engine.level);
       final batchPrevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
@@ -581,17 +583,22 @@ class AgentRunner {
 
 /// Builds a deterministic entity-kind → single-letter label map.
 /// All kind IDs from [game] are sorted alphabetically and assigned A, B, C, …
-/// Entities whose game-defined symbol is '.' (empty) or ' ' (void) are
+/// Entities whose public symbol is '.' (empty) or ' ' (void) are
 /// excluded — they keep their original symbol so the board stays readable.
+/// Kinds that share a public observation symbol (see
+/// [GameDefinition.observationKind]) share one label, so anonymous mode
+/// conceals exactly what named mode conceals.
 /// Used to anonymise board symbols, legend entries, and goal descriptions.
 Map<String, String> buildAnonKindToLabel(GameDefinition game) {
   final sortedKinds = game.entityKinds.keys.toList()..sort();
   final map = <String, String>{};
+  final groupLabels = <String, String>{};
   int labelIndex = 0;
   for (final kindId in sortedKinds) {
-    final sym = game.entityKinds[kindId]?.symbol ?? '';
+    final sym = game.publicSymbol(kindId) ?? '';
     if (sym == '.' || sym == ' ') continue; // keep original — "empty" stays
-    map[kindId] = _anonIndexToLabel(labelIndex++);
+    map[kindId] = groupLabels.putIfAbsent(game.observationKind(kindId),
+        () => _anonIndexToLabel(labelIndex++));
   }
   return map;
 }

@@ -14,6 +14,14 @@ class SlidingBlocksSystem extends GameSystem {
   const SlidingBlocksSystem({required super.id, this.config})
       : super(type: 'sliding_blocks');
 
+  /// Expose a block's movement axis, which gates its moves.
+  @override
+  List<String> observationObjectLines(MultiCellObjectInstance mco,
+      LevelState state, GameDefinition game) {
+    final axis = mco.params['axis'];
+    return axis is String && axis.isNotEmpty ? ['axis: $axis'] : const [];
+  }
+
   @override
   List<GameEvent> executeActionResolution(
     GameAction action,

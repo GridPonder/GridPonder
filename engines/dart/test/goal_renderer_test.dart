@@ -178,4 +178,100 @@ void main() {
       expect(text, contains('9'));
     });
   });
+
+  group('variable threshold goal text', () {
+    LevelDefinition makeThresholdLevel(GameDefinition game) =>
+        LevelDefinition.fromJson({
+          'id': 'threshold',
+          'board': {
+            'size': [3, 3],
+            'layers': <String, dynamic>{},
+          },
+          'goals': [
+            {
+              'id': 'complete_targets',
+              'type': 'variable_threshold',
+              'config': {
+                'variable': 'completedTargetCount',
+                'comparison': 'gte',
+                'target': 4,
+              },
+            },
+          ],
+        }, game.layers);
+
+    test('describes the requirement instead of exposing its type name', () {
+      final game = _makeGame();
+      final state = _makeState(game);
+      state.variables['completedTargetCount'] = 1;
+      final text =
+          LlmAgent.describeGoals(makeThresholdLevel(game), state, game);
+      expect(text, isNot('variable_threshold'));
+      expect(text, contains('1'));
+      expect(text, contains('4'));
+    });
+
+    test('pack override keeps dynamic progress', () {
+      final game = _makeGame();
+      game.goalDescriptions['complete_targets'] =
+          'Cover every required target exactly';
+      final state = _makeState(game);
+      state.variables['completedTargetCount'] = 2;
+      final text =
+          LlmAgent.describeGoals(makeThresholdLevel(game), state, game);
+      expect(text, 'Cover every required target exactly (now: 2/4)');
+    });
+  });
+
+  test('goal text uses the shared symbol public identity', () {
+    final game = GameDefinition.fromJson({
+      'layers': [
+        {'id': 'objects', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'lamp_a': {
+          'layer': 'objects',
+          'symbol': 'a',
+          'observationSymbol': 'Y',
+          'uiName': 'Amber lamp'
+        },
+        'lamp_b': {
+          'layer': 'objects',
+          'symbol': 'b',
+          'observationSymbol': 'Y',
+          'uiName': 'Secret lamp'
+        },
+      },
+    });
+    final level = LevelDefinition.fromJson({
+      'id': 'shared',
+      'board': {
+        'size': [2, 1],
+        'layers': <String, dynamic>{},
+      },
+      'goals': [
+        {
+          'id': 'reach',
+          'type': 'reach_target',
+          'config': {'targetKind': 'lamp_b'},
+        },
+        {
+          'id': 'match',
+          'type': 'board_match',
+          'config': {
+            'targetLayers': {
+              'objects': [
+                ['lamp_a', 'lamp_b'],
+              ],
+            },
+          },
+        },
+      ],
+    }, game.layers);
+    final text = LlmAgent.describeGoals(level, level.initialState(), game);
+    expect(text, contains('Reach the Amber lamp'));
+    expect(text.split('\n'), contains('YY'));
+    expect(text.split('\n'), contains('Target legend: Y=Amber lamp'));
+    expect(text, isNot(contains('Secret')));
+  });
 }

@@ -411,9 +411,13 @@ class LlmAgent implements GridPonderAgent {
     if (obs.lastAction != null &&
         rejectedAction == null &&
         obs.previousBoardText != null) {
+      // Same render inputs as the caller's previousBoardText (the runners
+      // pass the level), so a system status block that renders in both never
+      // makes an unchanged board look changed.
       final currentBare = TextRenderer.render(obs.state, obs.game,
           includeLegend: false,
-          kindSymbolOverrides: anonymize ? kindToLabel : null);
+          kindSymbolOverrides: anonymize ? kindToLabel : null,
+          level: obs.level);
       boardUnchanged = currentBare == obs.previousBoardText &&
           inv == obs.previousInventory &&
           (obs.previousStatus == null ||
@@ -656,6 +660,9 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
         case 'param_match':
           goalParts.add(_describeParamMatch(game, g.config,
               kindToLabel: anonymize ? kindToLabel : null));
+        case 'variable_threshold':
+          goalParts.add(_describeVariableThreshold(g.config, state,
+              anonymize: anonymize));
         default:
           goalParts.add(g.type);
       }
@@ -732,7 +739,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
   }) {
     String nameOf(String kind) => anonymize
         ? (kindToLabel[kind] ?? kind)
-        : (game.entityKinds[kind]?.uiName ?? kind.replaceAll('_', ' '));
+        : game.observationName(kind);
 
     final lines = <String>[];
     final limit = _maxActionsLimit(level);
@@ -871,6 +878,42 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     return 'loss condition "$name" reached';
   }
 
+  /// Describe a numeric threshold goal and expose its live value. A pack's
+  /// `goalDescriptions` override replaces this sentence; its live progress
+  /// then comes from [_goalProgress] as the shared `(now: ...)` suffix.
+  /// Mirrors `_describe_variable_threshold` in goal_renderer.py.
+  static String _describeVariableThreshold(
+      Map<String, dynamic> config, LevelState state,
+      {bool anonymize = false}) {
+    final variable = config['variable']?.toString() ?? 'value';
+    final comparison = config['comparison']?.toString() ?? 'gte';
+    final target = pyStr(config['target'] ?? 0);
+    final current = pyStr(state.variables[variable] ?? 0);
+
+    final subject =
+        anonymize ? 'Required value' : variable.replaceAll('_', ' ');
+    final requirement = switch (comparison) {
+      'eq' => 'equal $target',
+      'gte' => 'reach at least $target',
+      'lte' => 'stay at or below $target',
+      _ => 'satisfy $comparison $target',
+    };
+    return '$subject must $requirement (current: $current)';
+  }
+
+  /// Live progress of a `variable_threshold` goal: `current/target` for an
+  /// at-least goal, else the current value and the requirement. Mirrors
+  /// `_variable_threshold_progress`.
+  static String _variableThresholdProgress(
+      Map<String, dynamic> config, LevelState state) {
+    final variable = config['variable']?.toString() ?? 'value';
+    final comparison = config['comparison']?.toString() ?? 'gte';
+    final target = pyStr(config['target'] ?? 0);
+    final current = pyStr(state.variables[variable] ?? 0);
+    if (comparison == 'gte') return '$current/$target';
+    return '$current; required: $comparison $target';
+  }
+
   static String _listNames(List<String> names) {
     if (names.isEmpty) return 'the owners';
     if (names.length == 1) return names.first;
@@ -984,6 +1027,9 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     if (type == 'sequence_match') {
       return _sequenceProgress(goalId, config, state);
     }
+    if (type == 'variable_threshold') {
+      return _variableThresholdProgress(config, state);
+    }
     return null;
   }
 
@@ -998,8 +1044,10 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     return null;
   }
 
+  /// Public name of a target kind: kinds sharing an observationSymbol all
+  /// present their group's stable name. Mirrors `_kind_name`.
   static String _kindName(GameDefinition game, String kindId) =>
-      game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
+      game.observationName(kindId);
 
   /// The target pattern of a `board_match` goal, plus the lines that make it
   /// readable: which cells are free, which are required, and what every symbol
@@ -1026,7 +1074,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
 
     String symbolFor(String kindId) {
       if (anon && kindToLabel.containsKey(kindId)) return kindToLabel[kindId]!;
-      final sym = game.entityKinds[kindId]?.symbol;
+      final sym = game.publicSymbol(kindId);
       return (sym != null && sym.isNotEmpty) ? sym : kindId[0];
     }
 
@@ -1038,7 +1086,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     for (final l in targetLayers.keys) {
       if (!inBoardOrder.contains(l)) inBoardOrder.add(l as String);
     }
-    final layerOrder = TextRenderer.orderLayerIds(inBoardOrder);
+    final layerOrder = TextRenderer.orderLayerIds(inBoardOrder, game);
 
     final grid = List.generate(height, (_) => List.filled(width, nullSymbol));
     var nullUsed = false;
@@ -1150,7 +1198,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     String _name(String? kindId, String fallback) {
       if (kindId == null) return fallback;
       if (kindToLabel != null) return kindToLabel[kindId] ?? kindId;
-      return game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
+      return game.observationName(kindId);
     }
 
     final markerName = _name(markerKind, 'target');
@@ -1200,12 +1248,12 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
   static String _resolveEntityName(
       GameDefinition game, String? kindId, String? tag) {
     if (kindId != null) {
-      return game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
+      return game.observationName(kindId);
     }
     if (tag != null) {
       for (final entry in game.entityKinds.entries) {
         if (entry.value.tags.contains(tag)) {
-          return entry.value.uiName ?? entry.key.replaceAll('_', ' ');
+          return game.observationName(entry.key);
         }
       }
       return tag;

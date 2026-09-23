@@ -93,6 +93,15 @@ def render_goals(
                 )
             )
 
+        elif goal_type == "variable_threshold":
+            goal_parts.append(
+                _describe_variable_threshold(
+                    config,
+                    state,
+                    anonymize=anonymize,
+                )
+            )
+
         else:
             goal_parts.append(goal_type)
 
@@ -109,6 +118,44 @@ def join_goal_parts(parts: list[str]) -> str:
             out += "\n" if "\n" in parts[i - 1] else "; "
         out += part
     return out
+
+
+def _describe_variable_threshold(
+    config: dict,
+    state,
+    *,
+    anonymize: bool = False,
+) -> str:
+    """Describe a numeric threshold goal and expose its live value.
+
+    A pack's `goalDescriptions` override replaces this sentence; its live
+    progress then comes from `_goal_progress` as the shared `(now: ...)`
+    suffix.
+    """
+    variable = str(config.get("variable", "value"))
+    comparison = str(config.get("comparison", "gte"))
+    target = config.get("target", 0)
+    current = state.variables.get(variable, 0)
+
+    subject = "Required value" if anonymize else variable.replace("_", " ")
+    requirement = {
+        "eq": f"equal {target}",
+        "gte": f"reach at least {target}",
+        "lte": f"stay at or below {target}",
+    }.get(comparison, f"satisfy {comparison} {target}")
+    return f"{subject} must {requirement} (current: {current})"
+
+
+def _variable_threshold_progress(config: dict, state) -> str:
+    """Live progress of a `variable_threshold` goal: `current/target` for an
+    at-least goal, else the current value and the requirement."""
+    variable = str(config.get("variable", "value"))
+    comparison = str(config.get("comparison", "gte"))
+    target = config.get("target", 0)
+    current = state.variables.get(variable, 0)
+    if comparison == "gte":
+        return f"{current}/{target}"
+    return f"{current}; required: {comparison} {target}"
 
 
 def _list_names(names: list[str]) -> str:
@@ -219,17 +266,18 @@ def _goal_progress(goal_type: str, goal_id: str, config: dict, state, game_def) 
         return _balance_progress(config, state, names)
     if goal_type == "sequence_match":
         return _sequence_progress(goal_id, config, state)
+    if goal_type == "variable_threshold":
+        return _variable_threshold_progress(config, state)
     return None
 
 
 def _resolve_entity_name(game_def, kind_id: str | None, tag: str | None) -> str:
     if kind_id is not None:
-        kind_def = game_def.entity_kinds.get(kind_id)
-        return (kind_def.get("uiName") if kind_def else None) or kind_id.replace("_", " ")
+        return game_def.observation_name(kind_id)
     if tag is not None:
         for k_id, k_def in game_def.entity_kinds.items():
             if tag in k_def.get("tags", []):
-                return k_def.get("uiName") or k_id.replace("_", " ")
+                return game_def.observation_name(k_id)
         return tag
     return "target"
 
@@ -265,16 +313,17 @@ def _target_cell_kind(cell) -> str | None:
 
 def _target_layer_order(game_def, target_layers: dict) -> list[str]:
     """Target layer ids top-to-bottom, using the board renderer's ordering
-    (layers in game.json order stand in for board order)."""
+    (the declared game.json order, as the text grid and board image use)."""
     declared = [layer["id"] for layer in getattr(game_def, "layers", [])]
     in_board_order = [lid for lid in declared if lid in target_layers]
     in_board_order += [lid for lid in target_layers if lid not in in_board_order]
-    return order_layer_ids(in_board_order)
+    return order_layer_ids(in_board_order, game_def)
 
 
 def _kind_name(game_def, kind_id: str) -> str:
-    kind_def = game_def.entity_kinds.get(kind_id)
-    return (kind_def.get("uiName") if kind_def else None) or kind_id.replace("_", " ")
+    """Public name of a target kind: kinds sharing an observationSymbol all
+    present their group's stable name (GameDef.observation_name)."""
+    return game_def.observation_name(kind_id)
 
 
 def _render_target_grid(
@@ -312,8 +361,8 @@ def _render_target_grid(
         # symbols) keep their own symbol, exactly as on the board.
         if anon and kind_id in kind_to_label:
             return kind_to_label[kind_id]
-        kind_def = game_def.entity_kinds.get(kind_id)
-        return (kind_def.get("symbol") if kind_def else None) or kind_id[0]
+        symbol = game_def.public_symbol(kind_id)
+        return symbol if symbol else kind_id[0]
 
     layer_order = _target_layer_order(game_def, target_layers)
     grid = [[null_symbol for _ in range(width)] for _ in range(height)]
@@ -436,8 +485,7 @@ def _describe_param_match(
             return fallback
         if kind_to_label is not None:
             return kind_to_label.get(kind_id, kind_id)
-        kind_def = game_def.entity_kinds.get(kind_id)
-        return (kind_def.get("uiName") if kind_def else None) or kind_id.replace("_", " ")
+        return game_def.observation_name(kind_id)
 
     marker_name = _name(marker_kind, "target")
     check_name = _name(check_kind, "piece")

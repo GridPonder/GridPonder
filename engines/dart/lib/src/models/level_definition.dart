@@ -73,6 +73,10 @@ class LevelDefinition {
         MapEntry(k, Map<String, dynamic>.from(v as Map)));
   }
 
+  /// The authored board, parsed once at load. Read-only: callers that need
+  /// a mutable board use [initialState].
+  Board get initialBoard => _boardTemplate;
+
   /// Creates a fresh initial level state from the board template + state JSON.
   LevelState initialState() =>
       LevelState.fromJson(_stateJson, _boardTemplate.copy());

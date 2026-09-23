@@ -112,9 +112,13 @@ def build_prompt(
     # ── Board unchanged? (compared before any image-mode substitution) ────────
     board_unchanged = False
     if last_action is not None and rejected_action is None and previous_board_text is not None:
+        # Same render inputs as the caller's previous_board_text (runner.py
+        # passes level_def), so a system status block that renders in both
+        # never makes an unchanged board look changed.
         current_bare = render_board(
             state, game_def, include_legend=False,
             kind_symbol_overrides=kind_symbol_overrides,
+            level_def=level_def,
         )
         current_inv = state.avatar.item if state.avatar.enabled else None
         board_unchanged = (
@@ -127,7 +131,12 @@ def build_prompt(
     # ── Board text (current) ──────────────────────────────────────────────────
     marks_sentence = _image_marks_sentence(image_marks) if attach_image else ""
     if text_board:
-        board_text = render_board(state, game_def, kind_symbol_overrides=kind_symbol_overrides)
+        board_text = render_board(
+            state,
+            game_def,
+            kind_symbol_overrides=kind_symbol_overrides,
+            level_def=level_def,
+        )
     else:
         board_text = _IMAGE_BOARD_NOTE
         if marks_sentence:
@@ -354,8 +363,7 @@ def status_lines(
     def name_of(kind: str) -> str:
         if anonymize:
             return kind_to_label.get(kind, kind)
-        kind_def = game_def.entity_kinds.get(kind)
-        return (kind_def.get("uiName") if kind_def else None) or kind.replace("_", " ")
+        return game_def.observation_name(kind)
 
     lines: list[str] = []
     limit = _max_actions_limit(level_def)

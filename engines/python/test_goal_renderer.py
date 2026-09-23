@@ -162,6 +162,40 @@ def test_a_pack_that_wrote_its_own_description_still_gets_it():
                     "Shu territory 2, Wu territory 2 — 7 of 9 claimed)"), text
 
 
+# ── variable-threshold wording and live progress ─────────────────────────
+
+def _variable_threshold_goal() -> dict:
+    return {"goals": [{
+        "id": "complete_targets",
+        "type": "variable_threshold",
+        "config": {
+            "variable": "completedTargetCount",
+            "comparison": "gte",
+            "target": 4,
+        },
+    }]}
+
+
+def test_variable_threshold_is_described_instead_of_exposing_its_type_name():
+    game = _make_game()
+    state = _make_state(game, _PARTIAL)
+    state.variables["completedTargetCount"] = 1
+    text = render_goals(_variable_threshold_goal(), state, game)
+    assert text != "variable_threshold"
+    assert "1" in text and "4" in text
+
+
+def test_variable_threshold_override_keeps_dynamic_progress():
+    game = _make_game()
+    game.goal_descriptions = {
+        "complete_targets": "Cover every required target exactly"
+    }
+    state = _make_state(game, _PARTIAL)
+    state.variables["completedTargetCount"] = 2
+    text = render_goals(_variable_threshold_goal(), state, game)
+    assert text == "Cover every required target exactly (now: 2/4)"
+
+
 # ── board_match target cells ──────────────────────────────────────────────
 
 def _board_match(cell) -> dict:
@@ -455,6 +489,38 @@ def test_single_line_goals_still_join_with_semicolons():
         "Reach the Landed Pod; Arrange tiles to match the target pattern:\n")
     assert join_goal_parts([]) == "" and join_goal_parts(["a"]) == "a"
     assert join_goal_parts(["a\nb", "c", "d"]) == "a\nb\nc; d"
+
+
+# ── shared observation symbols ───────────────────────────────────────────
+
+def _shared_symbol_game() -> GameDef:
+    return GameDef.from_dict(
+        {
+            "layers": [{"id": "objects", "occupancy": "zero_or_one"}],
+            "entityKinds": {
+                "lamp_a": {"layer": "objects", "symbol": "a", "observationSymbol": "Y", "uiName": "Amber lamp"},
+                "lamp_b": {"layer": "objects", "symbol": "b", "observationSymbol": "Y", "uiName": "Secret lamp"},
+            },
+        }
+    )
+
+
+def test_goal_text_uses_the_shared_symbol_public_identity():
+    game = _shared_symbol_game()
+    board = Board.from_json({"size": [2, 1], "layers": {}}, game.layers)
+    state = GameState.from_json({}, board, game.defaults)
+    level = {
+        "goals": [
+            {"id": "reach", "type": "reach_target", "config": {"targetKind": "lamp_b"}},
+            {"id": "match", "type": "board_match", "config": {"targetLayers": {"objects": [["lamp_a", "lamp_b"]]}}},
+        ]
+    }
+    text = render_goals(level, state, game)
+    assert "Reach the Amber lamp" in text
+    lines = text.splitlines()
+    assert "YY" in lines, text
+    assert "Target legend: Y=Amber lamp" in lines, text
+    assert "Secret" not in text
 
 
 def run_all() -> bool:

@@ -473,7 +473,9 @@ Future<void> main(List<String> arguments) async {
       }
 
       prevBoardText = TextRenderer.render(engine.state, gameDef,
-          includeLegend: false, kindSymbolOverrides: kindSymbolOverrides);
+          includeLegend: false,
+          kindSymbolOverrides: kindSymbolOverrides,
+          level: levelDef);
       prevInventory = currentInventory();
       prevStatus = LlmAgent.statusFingerprint(gameDef, levelDef, engine.state);
 
@@ -571,7 +573,9 @@ Future<void> main(List<String> arguments) async {
       }
 
       prevBoardText = TextRenderer.render(engine.state, gameDef,
-          includeLegend: false, kindSymbolOverrides: kindSymbolOverrides);
+          includeLegend: false,
+          kindSymbolOverrides: kindSymbolOverrides,
+          level: levelDef);
       prevInventory = currentInventory();
       prevStatus = LlmAgent.statusFingerprint(gameDef, levelDef, engine.state);
 

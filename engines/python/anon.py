@@ -13,18 +13,26 @@ def _anon_index_to_label(i: int) -> str:
 def build_anon_kind_to_label(game_def) -> dict[str, str]:
     """Sort entity kind IDs alphabetically and assign A, B, C, … labels.
 
-    Kinds whose symbol is '.' or ' ' are excluded (they keep their original
-    symbol so the board stays readable).
+    Kinds whose public symbol is '.' or ' ' are excluded (they keep their
+    original symbol so the board stays readable). Kinds that share a public
+    observation symbol (see GameDef.observation_kind) share one label, so
+    anonymous mode conceals exactly what named mode conceals.
     """
     sorted_kinds = sorted(game_def.entity_kinds.keys())
     result: dict[str, str] = {}
+    group_labels: dict[str, str] = {}
     label_index = 0
     for kind_id in sorted_kinds:
-        sym = game_def.entity_kinds[kind_id].get("symbol", "")
+        sym = game_def.public_symbol(kind_id) or ""
         if sym in (".", " "):
             continue
-        result[kind_id] = _anon_index_to_label(label_index)
-        label_index += 1
+        group = game_def.observation_kind(kind_id)
+        label = group_labels.get(group)
+        if label is None:
+            label = _anon_index_to_label(label_index)
+            label_index += 1
+            group_labels[group] = label
+        result[kind_id] = label
     return result
 
 

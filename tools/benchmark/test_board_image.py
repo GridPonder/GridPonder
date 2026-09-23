@@ -1,5 +1,6 @@
-"""Board image renderer: theme palette colours, the text grid's layer order,
-the selected-piece ring, the overlay frame and hidden-item insets.
+"""Board image renderer: theme palette colours, the text grid's declared
+layer order, the selected-piece ring, the overlay frame, hidden-item insets,
+and observation_occluder concealment.
 
 Builds a throwaway pack (no sprites, `display` blocks only) and renders it.
 """
@@ -19,8 +20,9 @@ for p in (str(REPO_ROOT), str(BENCH_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from board_image import AXIS_PX, CELL_PX, PADDING, render_board_image  # noqa: E402
-from engines.python._models import OverlayCursor  # noqa: E402
+from board_image import AXIS_PX, CELL_PX, PADDING, render_board_image, render_board_png  # noqa: E402
+from engines.python._game_def import GameDef  # noqa: E402
+from engines.python._models import OverlayCursor, Pos  # noqa: E402
 from engines.python._turn_engine import TurnEngine  # noqa: E402
 from engines.python.loader import load_pack  # noqa: E402
 from engines.python.text_renderer import render as render_board  # noqa: E402
@@ -30,8 +32,7 @@ _PALETTE = {"team_tint": "#123456", "gold": "#abcdef", "special": "#fedcba"}
 _GAME = {
     "layers": [
         {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
-        # Declared order puts `upper` above `lower`; the text grid ranks
-        # unknown layers in board order, so `lower` is the top item.
+        # Declared bottom to top: `upper` draws above `lower`.
         {"id": "lower", "occupancy": "zero_or_one"},
         {"id": "upper", "occupancy": "zero_or_one"},
         {"id": "actors", "occupancy": "zero_or_one"},
@@ -129,23 +130,21 @@ def test_display_colours_resolve_through_the_theme_palette():
 
 def test_layers_draw_in_the_text_grid_order():
     img, _, row = _render(with_text=True)
-    # Unknown layers rank in board order in the text grid, so the tint (in
-    # `lower`) is the top item at (1,0) there and in the image, although
-    # `upper` is declared after `lower`.
-    assert row[1] == "t"
-    assert _px(img, 1, 0) == _hex(_PALETTE["team_tint"])
-
-
-def test_known_layer_priority_beats_declared_order_as_in_the_text_grid():
-    # `markers` is declared below `objects`, but the text grid ranks markers
-    # above objects; the image must show the same top item.
-    img, _, row = _render(rename={"lower": "markers", "upper": "objects"}, with_text=True)
-    assert row[1] == "t"
-    assert _px(img, 1, 0) == _hex(_PALETTE["team_tint"])
-    # Declared order and priority agree the other way round.
-    img, _, row = _render(rename={"lower": "objects", "upper": "markers"}, with_text=True)
+    # `upper` is declared after `lower`, so the cover is the top item at
+    # (1,0) in the text grid and in the image.
     assert row[1] == "c"
     assert _px(img, 1, 0) == _hex(_PALETTE["gold"])
+
+
+def test_declared_order_beats_layer_names_as_in_the_text_grid():
+    # Layer ids carry no built-in priority: whatever is declared later is on
+    # top, in both renderings.
+    for rename in ({"lower": "markers", "upper": "objects"},
+                   {"lower": "objects", "upper": "markers"},
+                   {"lower": "objects", "upper": "territory"}):
+        img, _, row = _render(rename=rename, with_text=True)
+        assert row[1] == "c", rename
+        assert _px(img, 1, 0) == _hex(_PALETTE["gold"]), rename
 
 
 def test_image_top_item_matches_the_text_grid_in_every_cell():
@@ -164,9 +163,9 @@ def test_hidden_item_gets_an_inset_and_is_reported():
     img, marks = _render()
     assert "hidden" in marks
     # (2,0): the special floor is fully covered by the tint; its inset sits
-    # in the lower-left corner. (1,0): the cover under the tint is inset too.
+    # in the lower-left corner. (1,0): the tint under the cover is inset too.
     assert _px(img, 2, 0, dx=10, dy=CELL_PX - 12) == _hex(_PALETTE["special"])
-    assert _px(img, 1, 0, dx=10, dy=CELL_PX - 12) == _hex(_PALETTE["gold"])
+    assert _px(img, 1, 0, dx=10, dy=CELL_PX - 12) == _hex(_PALETTE["team_tint"])
     # (0,0): the tint covers only the default floor, which is never inset.
     assert _px(img, 0, 0, dx=10, dy=CELL_PX - 12) == _hex(_PALETTE["team_tint"])
 
@@ -197,6 +196,156 @@ def test_overlay_frame_is_drawn_and_reported():
     img, marks = _render(overlay)
     assert "overlay" in marks
     assert _px(img, 0, 0, dx=3, dy=CELL_PX // 2) == (255, 179, 0)
+
+
+def _make_engine() -> tuple[GameDef, TurnEngine]:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+                {"id": "objects", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "floor": {
+                    "layer": "ground",
+                    "symbol": ".",
+                    "display": {"type": "fill", "color": "green"},
+                },
+                "parking": {
+                    "layer": "ground",
+                    "symbol": ":",
+                    "display": {"type": "fill", "color": "pink"},
+                },
+                "key": {
+                    "layer": "objects",
+                    "symbol": "K",
+                    "display": {"type": "fill", "color": "yellow"},
+                },
+                "slab": {
+                    "layer": "structures",
+                    "tags": ["observation_occluder", "public_piece"],
+                    "symbol": "B",
+                    "display": {"type": "fill", "color": "blue"},
+                },
+            },
+        }
+    )
+    level = {
+        "board": {
+            "size": [2, 1],
+            "layers": {
+                "ground": {
+                    "format": "sparse",
+                    "entries": [{"position": [0, 0], "kind": "parking"}],
+                },
+                "objects": {
+                    "format": "sparse",
+                    "entries": [{"position": [0, 0], "kind": "key"}],
+                },
+            },
+            "multiCellObjects": [
+                {"id": "secret_key_cover", "kind": "slab", "cells": [[0, 0]]}
+            ],
+        },
+        "state": {"avatar": {"enabled": False}},
+        "goals": [],
+    }
+    return game, TurnEngine(game, level)
+
+
+def _cell_center(png: bytes, x: int, y: int) -> tuple[int, int, int]:
+    image = Image.open(io.BytesIO(png)).convert("RGB")
+    px = AXIS_PX + PADDING + x * CELL_PX + CELL_PX // 2
+    py = AXIS_PX + PADDING + y * CELL_PX + CELL_PX // 2
+    return image.getpixel((px, py))
+
+
+def test_occluder_hides_then_reveals_and_collected_key_stays_absent() -> None:
+    game, engine = _make_engine()
+    pack_dir = REPO_ROOT / "tools" / "benchmark" / "_no_pack_assets"
+
+    concealed = render_board_png(game, engine.state, pack_dir)
+    assert _cell_center(concealed, 0, 0) == (37, 99, 235)
+    engine.state.board.set_entity("objects", Pos(0, 0), None)
+    concealed_without_key = render_board_png(game, engine.state, pack_dir)
+    assert concealed_without_key == concealed
+    # Nothing under the occluder is inset or reported as hidden.
+    _, marks = render_board_image(game, engine.state, pack_dir)
+    assert "hidden" not in marks
+
+    game, engine = _make_engine()
+    engine.state.board.multi_cell_objects[0].cells = [Pos(1, 0)]
+    revealed = render_board_png(game, engine.state, pack_dir)
+    assert _cell_center(revealed, 0, 0) == (234, 179, 8)
+
+    engine.state.board.set_entity("objects", Pos(0, 0), None)
+    collected = render_board_png(game, engine.state, pack_dir)
+    assert _cell_center(collected, 0, 0) == (236, 72, 153)
+
+
+def test_declared_layer_order_controls_the_visible_top_entity() -> None:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+                {"id": "territory", "occupancy": "zero_or_one"},
+                {"id": "markers", "occupancy": "zero_or_one"},
+                {"id": "objects", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "floor": {
+                    "layer": "ground",
+                    "symbol": ".",
+                    "display": {"type": "fill", "color": "pink"},
+                },
+                "conduit": {
+                    "layer": "territory",
+                    "symbol": "c",
+                    "display": {"type": "fill", "color": "green"},
+                },
+                "contact": {
+                    "layer": "markers",
+                    "symbol": "A",
+                    "display": {"type": "fill", "color": "yellow"},
+                },
+                "prism": {
+                    "layer": "objects",
+                    "symbol": "P",
+                    "display": {"type": "fill", "color": "blue"},
+                },
+            },
+        }
+    )
+    level = {
+        "board": {
+            "size": [1, 1],
+            "layers": {
+                "territory": {
+                    "format": "sparse",
+                    "entries": [{"position": [0, 0], "kind": "conduit"}],
+                },
+                "markers": {
+                    "format": "sparse",
+                    "entries": [{"position": [0, 0], "kind": "contact"}],
+                },
+                "objects": {
+                    "format": "sparse",
+                    "entries": [{"position": [0, 0], "kind": "prism"}],
+                },
+            },
+        },
+        "state": {"avatar": {"enabled": False}},
+        "goals": [],
+    }
+    engine = TurnEngine(game, level)
+    pack_dir = REPO_ROOT / "tools" / "benchmark" / "_no_pack_assets"
+
+    with_prism = render_board_png(game, engine.state, pack_dir)
+    assert _cell_center(with_prism, 0, 0) == (37, 99, 235)
+
+    engine.state.board.set_entity("objects", Pos(0, 0), None)
+    without_prism = render_board_png(game, engine.state, pack_dir)
+    assert _cell_center(without_prism, 0, 0) == (234, 179, 8)
 
 
 if __name__ == "__main__":

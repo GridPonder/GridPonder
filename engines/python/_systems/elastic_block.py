@@ -30,6 +30,80 @@ class ElasticBlockSystem(GameSystem):
         super().__init__(sys_id, "elastic_block")
         self._config = config
 
+    def observation_status_lines(
+        self,
+        state: GameState,
+        game: GameDef,
+        initial_board,
+    ) -> list[str]:
+        """Public status of each configured target.
+
+        Target geometry comes from the authored board, because a consumed
+        target's markers are gone from the live board.
+        """
+        config = self._config if self._config is not None else game.system_config(self.id)
+        targets = config_list(config, "targets", [])
+        if not targets:
+            return []
+
+        object_kind = str(_cfg(config, "objectKind", "elastic_block"))
+        object_name = game.observation_name(object_kind)
+        block = next(
+            (mco for mco in state.board.multi_cell_objects if mco.kind == object_kind),
+            None,
+        )
+        block_cells = set(block.cells) if block is not None else set()
+        completed = _string_set(state.variables.get(
+            str(_cfg(config, "completedTargetIdsVariable", "completedTargetIds")), []
+        ))
+        consumed = _string_set(state.variables.get(
+            str(_cfg(config, "consumedTargetIdsVariable", "consumedTargetIds")), []
+        ))
+        default_layer = str(_cfg(config, "targetLayer", "markers"))
+
+        lines = [f"Target status (exact {object_name} footprint match required):"]
+        for raw in targets:
+            if not isinstance(raw, dict):
+                continue
+            marker_kind = str(_cfg(raw, "markerKind", ""))
+            target_id = str(_cfg(raw, "id", marker_kind))
+            if not marker_kind or not target_id:
+                continue
+            marker_layer = str(_cfg(raw, "markerLayer", default_layer))
+            cells = sorted(
+                _target_cells_on(initial_board(), marker_layer, marker_kind),
+                key=lambda cell: (cell.y, cell.x),
+            )
+            if not cells:
+                continue
+            target_name = game.observation_name(marker_kind)
+            symbol = game.public_symbol(marker_kind)
+            display_name = f"{target_name} [{symbol}]" if symbol else target_name
+            geometry = " ".join(f"({cell.x},{cell.y})" for cell in cells)
+            overlap = len(block_cells.intersection(cells))
+            mode = str(_cfg(raw, "onLeave", "none"))
+
+            if target_id in consumed:
+                if mode == "wall":
+                    wall_name = game.observation_name(str(_cfg(raw, "wallKind", "wall")))
+                    status = f"completed and converted to {wall_name} after full vacancy"
+                elif mode == "void":
+                    status = "completed and converted to void after full vacancy"
+                else:
+                    status = "completed and removed after full vacancy"
+            elif target_id in completed:
+                suffix = ""
+                if mode == "wall":
+                    suffix = f"; becomes a wall only after the {object_name} fully vacates it"
+                elif mode == "void":
+                    suffix = f"; becomes void only after the {object_name} fully vacates it"
+                status = f"completed, still occupied by {object_name}{suffix}"
+            else:
+                status = f"unfinished ({overlap}/{len(cells)} cells covered)"
+            lines.append(f"  {display_name}: cells {geometry}; {status}")
+
+        return lines if len(lines) > 1 else []
+
     def execute_action_resolution(
         self,
         action: dict,
@@ -336,7 +410,11 @@ def _apply_pushes(
 
 
 def _target_cells(state: GameState, layer_id: str, marker_kind: str) -> set[Pos]:
-    layer = state.board.layers.get(layer_id)
+    return _target_cells_on(state.board, layer_id, marker_kind)
+
+
+def _target_cells_on(board, layer_id: str, marker_kind: str) -> set[Pos]:
+    layer = board.layers.get(layer_id)
     if layer is None:
         return set()
     return {pos for pos, entity in layer.entries() if entity.kind == marker_kind}

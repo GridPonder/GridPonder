@@ -75,7 +75,7 @@ Defines the board's layer stack. Each layer has a name and occupancy rule.
 | `occupancy` | string | **yes** | `"exactly_one"` (every cell has a value) or `"zero_or_one"` (cells may be null). |
 | `default` | string | no | Default cell value for `exactly_one` layers. Default: `"empty"`. |
 
-The layer order defines rendering order (first = bottom). The avatar is not part of any layer — it is rendered separately on top.
+The layer order defines rendering order (first = bottom). The avatar is not part of any layer — it is rendered separately on top. Text and benchmark-image observations use this same order; when several visible entities share a cell, the text grid shows the topmost one and the stacked-cell detail lists every visible entity from top to bottom: the avatar, the non-ground layers, a multi-cell object (drawn above `ground` and below every other layer), then `ground`. Ground under a multi-cell object is treated as that object's background and is not listed. In named mode each entry is prefixed with its layer id (`[avatar]` for the avatar, `[multi-cell]` for a multi-cell object); anonymous mode omits the prefix, because layer ids are pack vocabulary.
 
 Layer ids are free-form, but a few names carry conventional meaning that built-in systems default to: `ground` (walkable/solid terrain), `objects` (pushables, pickups, number tiles), `markers` (goal/anchor markers), `actors` (layer entities moved by [`coupled_actors`](04_systems.md#211-coupled_actors) or selected/moved by [`individual_actors`](04_systems.md#212-individual_actors)), and `territory` (per-owner claim marks written by actor systems' optional `claim` config and read by the [`balance` goal](03_levels.md#goals)). All of these are configurable per-system via `config` — the names above are only the defaults.
 
@@ -226,6 +226,7 @@ Defines all entity types used by this game. Levels reference kinds by their key 
 | `sprite` | string or null | no | Path to sprite asset. `null` means invisible/transparent. May contain a `{paramName}` placeholder when used with `spriteParam`. |
 | `spriteParam` | string | no | If set, the `{paramName}` placeholder in `sprite` is substituted with this instance parameter's value at render time. Used for entities whose appearance varies by a numeric or string param (e.g. box fragments show different PNG tiles per sides bitmask). `sprite` must contain `{paramName}` when this field is set. |
 | `symbol` | string | **yes** | Single Unicode character used in text grid representations (`TextRenderer`). Must be unique within a game; `@` is reserved for the avatar. Use narrow (display-width 1) characters only — basic ASCII, box-drawing (`═║╬`), math symbols (`≈`), or similar. Wide characters (emoji, CJK) break grid alignment and must not be used. |
+| `observationSymbol` | string | no | Public symbol used by text observations instead of `symbol`. It may be shared by multiple kinds so distinct internal states can remain visually indistinguishable (for example, two yellow phases with different successors). `symbol` remains the unique engine/authoring identity. Must be a non-empty string other than `@`. See [Shared observation symbols](#shared-observation-symbols). |
 | `symbolParam` | string | no | If set, the symbol is taken from this instance parameter at render time instead of `symbol`. Used for entities whose symbol varies by value (e.g. number tiles show their numeric digit). `symbol` acts as the legend label and fallback. |
 | `params` | object | no | Parameterized fields that instances may set. Each param defines its `type` and optionally `required`. |
 | `description` | string | no | Human-readable description. |
@@ -436,6 +437,30 @@ Standard tags for v0.5:
 | `target_marker` | Non-blocking marker for NPC targeting |
 
 Games may define custom tags beyond these.
+
+Two optional tags define player-facing multi-cell observation behavior:
+
+| Tag | Meaning |
+|-----|---------|
+| `observation_occluder` | Treat the multi-cell object as opaque: ordinary board-layer contents below its footprint are omitted from the text grid, legend, stack/state details, and benchmark image (including its hidden-item insets and region outlines) until uncovered. |
+| `public_piece` | Identify the object as a numbered piece instead of exposing its authoring `id`; text observations include its public kind and current footprint, plus any detail lines the systems acting on it publish (for example `sliding_blocks` prints a non-empty `axis`). |
+
+These tags affect observation rendering only. They do not change collision,
+movement, collection, or goal semantics.
+
+### Shared observation symbols
+
+Kinds that show the same public symbol (`observationSymbol`, or `symbol` when
+none is declared), where at least one of them declares `observationSymbol`,
+form one **public identity**. Every observation presents the whole group as
+its **first-declared** member (in `entityKinds` order): the legend, the
+stacked-cell detail, per-entity state, system status blocks, the `Selected:`
+status line, and goal text (including a `board_match` target grid, its
+`Target legend:` and `Also required:` lines) print the public symbol and that
+kind's `uiName` (or id) and `description`, whichever member is on the board. Declare the group's neutral public face first, for example a kind
+whose `uiName` is "Yellow signal" rather than "Yellow (turns green)".
+Anonymous mode gives the whole group one letter. Kinds with `symbolParam`
+never join a group.
 
 ### Multi-Cell Object Kinds
 
