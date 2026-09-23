@@ -75,7 +75,7 @@ Defines the board's layer stack. Each layer has a name and occupancy rule.
 | `occupancy` | string | **yes** | `"exactly_one"` (every cell has a value) or `"zero_or_one"` (cells may be null). |
 | `default` | string | no | Default cell value for `exactly_one` layers. Default: `"empty"`. |
 
-The layer order defines rendering order (first = bottom). The avatar is not part of any layer — it is rendered separately on top.
+The layer order defines rendering order (first = bottom). The avatar is not part of any layer — it is rendered separately on top. Text and benchmark-image observations use this same order; when several visible entities share a cell, the text grid shows the topmost one and the stacked-cell detail lists every board-layer entity from top to bottom with its layer id.
 
 Layer ids are free-form, but a few names carry conventional meaning that built-in systems default to: `ground` (walkable/solid terrain), `objects` (pushables, pickups, number tiles), `markers` (goal/anchor markers), `actors` (layer entities moved by [`coupled_actors`](04_systems.md#211-coupled_actors) or selected/moved by [`individual_actors`](04_systems.md#212-individual_actors)), and `territory` (per-owner claim marks written by actor systems' optional `claim` config and read by the [`balance` goal](03_levels.md#goals)). All of these are configurable per-system via `config` — the names above are only the defaults.
 

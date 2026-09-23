@@ -99,3 +99,67 @@ class BoardImageVisibilityTest(unittest.TestCase):
         engine.state.board.set_entity("objects", Pos(0, 0), None)
         collected = render_board_png(game, engine.state, pack_dir)
         self.assertEqual(_cell_center(collected, 0, 0), (236, 72, 153))
+
+    def test_declared_layer_order_controls_the_visible_top_entity(self) -> None:
+        game = GameDef.from_dict(
+            {
+                "layers": [
+                    {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+                    {"id": "territory", "occupancy": "zero_or_one"},
+                    {"id": "markers", "occupancy": "zero_or_one"},
+                    {"id": "objects", "occupancy": "zero_or_one"},
+                ],
+                "entityKinds": {
+                    "floor": {
+                        "layer": "ground",
+                        "symbol": ".",
+                        "display": {"type": "fill", "color": "pink"},
+                    },
+                    "conduit": {
+                        "layer": "territory",
+                        "symbol": "c",
+                        "display": {"type": "fill", "color": "green"},
+                    },
+                    "contact": {
+                        "layer": "markers",
+                        "symbol": "A",
+                        "display": {"type": "fill", "color": "yellow"},
+                    },
+                    "prism": {
+                        "layer": "objects",
+                        "symbol": "P",
+                        "display": {"type": "fill", "color": "blue"},
+                    },
+                },
+            }
+        )
+        level = {
+            "board": {
+                "size": [1, 1],
+                "layers": {
+                    "territory": {
+                        "format": "sparse",
+                        "entries": [{"position": [0, 0], "kind": "conduit"}],
+                    },
+                    "markers": {
+                        "format": "sparse",
+                        "entries": [{"position": [0, 0], "kind": "contact"}],
+                    },
+                    "objects": {
+                        "format": "sparse",
+                        "entries": [{"position": [0, 0], "kind": "prism"}],
+                    },
+                },
+            },
+            "state": {"avatar": {"enabled": False}},
+            "goals": [],
+        }
+        engine = TurnEngine(game, level)
+        pack_dir = ROOT / "tools" / "benchmark" / "_no_pack_assets"
+
+        with_prism = render_board_png(game, engine.state, pack_dir)
+        self.assertEqual(_cell_center(with_prism, 0, 0), (37, 99, 235))
+
+        engine.state.board.set_entity("objects", Pos(0, 0), None)
+        without_prism = render_board_png(game, engine.state, pack_dir)
+        self.assertEqual(_cell_center(without_prism, 0, 0), (234, 179, 8))

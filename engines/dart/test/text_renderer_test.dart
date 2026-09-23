@@ -9,8 +9,8 @@ GameDefinition _makeGame() {
     'id': 'com.gridponder.test_text_renderer',
     'layers': [
       {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
-      {'id': 'actors', 'occupancy': 'zero_or_one'},
       {'id': 'territory', 'occupancy': 'zero_or_one'},
+      {'id': 'actors', 'occupancy': 'zero_or_one'},
     ],
     'entityKinds': {
       'empty': {
@@ -286,7 +286,8 @@ void main() {
     expect(rendered, contains('║/═/╬=Bellows body'));
     expect(rendered, isNot(contains('pipe body')));
     expect(rendered, isNot(contains('pipe exit')));
-    expect(rendered, contains('1(Target 1) + ╬(Bellows)'));
+    expect(
+        rendered, contains('[markers] 1(Target 1) + [structures] ╬(Bellows)'));
     expect(rendered, contains('completed, still occupied by Bellows'));
     expect(rendered,
         contains('becomes a wall only after the Bellows fully vacates it'));
@@ -342,5 +343,97 @@ void main() {
     final collected = TextRenderer.render(engine.state, game);
     expect(collected.split('\n').first, equals(':L══'));
     expect(collected, isNot(contains('Yellow key')));
+  });
+
+  test('declared layer order and stacks preserve circuit state', () {
+    final game = GameDefinition.fromJson({
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'floor'},
+        {'id': 'territory', 'occupancy': 'zero_or_one'},
+        {'id': 'markers', 'occupancy': 'zero_or_one'},
+        {'id': 'objects', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'floor': {'layer': 'ground', 'symbol': '.'},
+        'conduit': {
+          'layer': 'territory',
+          'symbol': 'c',
+          'uiName': 'Powered conduit',
+        },
+        'contact': {
+          'layer': 'markers',
+          'symbol': 'A',
+          'uiName': 'Closed contact',
+        },
+        'core': {
+          'layer': 'markers',
+          'symbol': 'O',
+          'uiName': 'Powered core',
+        },
+        'prism': {
+          'layer': 'objects',
+          'symbol': 'P',
+          'uiName': 'Prism',
+        },
+      },
+      'actions': <dynamic>[],
+      'systems': <dynamic>[],
+    });
+    final level = {
+      'id': 'circuit-layers',
+      'board': {
+        'size': [2, 1],
+        'layers': {
+          'territory': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'conduit'
+              },
+              {
+                'position': [1, 0],
+                'kind': 'conduit'
+              },
+            ],
+          },
+          'markers': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'contact'
+              },
+              {
+                'position': [1, 0],
+                'kind': 'core'
+              },
+            ],
+          },
+          'objects': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'prism'
+              },
+            ],
+          },
+        },
+      },
+      'state': {
+        'avatar': {'enabled': false}
+      },
+      'goals': <dynamic>[],
+    };
+
+    final rendered = TextRenderer.render(_engineFor(game, level).state, game);
+    expect(rendered.split('\n').first, equals('PO'));
+    expect(
+        rendered,
+        contains('[objects] P(Prism) + [markers] A(Closed contact) + '
+            '[territory] c(Powered conduit)'));
+    expect(rendered,
+        contains('[markers] O(Powered core) + [territory] c(Powered conduit)'));
   });
 }
