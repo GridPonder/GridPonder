@@ -45,4 +45,13 @@ abstract class GameSystem {
   /// determine, so solver dedup, undo and preview are unaffected. Emits no
   /// events.
   void executeDeriveState(LevelState state, GameDefinition game) {}
+
+  /// True when this system's behaviour in [state] reads the turn counter.
+  ///
+  /// The state key excludes `turnCount`, so two states with the same key can
+  /// still play differently when a system gates on the beat (an NPC that acts
+  /// every Nth turn). Callers that compare state keys — the effectful-action
+  /// probe — ask this to learn that a turn which only advanced the counter
+  /// still changed something. Default: no.
+  bool dependsOnTurnCount(LevelState state, GameDefinition game) => false;
 }

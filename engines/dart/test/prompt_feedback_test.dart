@@ -294,6 +294,7 @@ class _Obs {
     GameAction? lastAction,
     String? previousBoardText,
     String? previousInventory,
+    String? previousStatus,
     String? previousAttempt,
     Map<String, dynamic>? rejectedAction,
     String? rejectionDetail,
@@ -303,6 +304,7 @@ class _Obs {
         lastAction: lastAction,
         previousBoardText: previousBoardText,
         previousInventory: previousInventory,
+        previousStatus: previousStatus,
         kindSymbolOverrides: anon ? buildAnonKindToLabel(game) : null);
     return LlmAgent.buildPrompt(obs,
         anonymize: anon,
@@ -727,18 +729,61 @@ void main() {
       });
       final before =
           TextRenderer.render(o.engine.state, o.game, includeLegend: false);
+      final beforeStatus =
+          LlmAgent.statusFingerprint(o.game, o.level, o.engine.state);
       // Blue moving down leaves the board: blocked, but accepted and counted.
+      // Only the move counter changed, which is not a change to the board.
       expect(o.act('move', {'direction': 'down'}), isTrue);
       expect(o.engine.state.actionCount, 1);
       final prompt = o.prompt(
           lastAction: const GameAction('move', {'direction': 'down'}),
-          previousBoardText: before);
+          previousBoardText: before,
+          previousStatus: beforeStatus);
       expect(
           prompt,
           contains(
               'Moves this attempt: 1 of 11 allowed\nSelected: Blue piece at (0,1)\n'
               'Moves left: Red piece 3, Blue piece 2\nHeat: -\nGauge: 2\n'
               'The board did not change.\n\nCompare the two boards'));
+    });
+
+    test('status fingerprint drops only the move counter', () {
+      final o = _setup();
+      expect(LlmAgent.statusFingerprint(o.game, o.level, o.engine.state),
+          'Selected: none\nMoves left: Red piece 3, Blue piece 2\nHeat: -\nGauge: 2');
+    });
+
+    test('a selection change has no note', () {
+      // Selecting redraws no cell, but `Selected:` changed: not "no change".
+      final o = _setup();
+      final before =
+          TextRenderer.render(o.engine.state, o.game, includeLegend: false);
+      final beforeStatus =
+          LlmAgent.statusFingerprint(o.game, o.level, o.engine.state);
+      o.act('tap_cell', {
+        'position': [0, 0]
+      });
+      expect(TextRenderer.render(o.engine.state, o.game, includeLegend: false),
+          before);
+      const tap = GameAction('tap_cell', {
+        'position': [0, 0]
+      });
+      final prompt = o.prompt(
+          lastAction: tap,
+          previousBoardText: before,
+          previousStatus: beforeStatus);
+      expect(prompt, contains('Selected: Red piece at (0,0)'));
+      expect(prompt, isNot(contains('The board did not change.')));
+      // Anonymous prompts decide the same way (labels are a bijection).
+      final anonBefore = TextRenderer.render(o.engine.state, o.game,
+          includeLegend: false,
+          kindSymbolOverrides: buildAnonKindToLabel(o.game));
+      final anon = o.prompt(
+          lastAction: tap,
+          previousBoardText: anonBefore,
+          previousStatus: beforeStatus,
+          anon: true);
+      expect(anon, isNot(contains('The board did not change.')));
     });
 
     test('changed board has no note', () {

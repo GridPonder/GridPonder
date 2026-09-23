@@ -438,7 +438,11 @@ chooses which side of the exchange is inspected (default `layers[0]`).
 
 A refused cell emits `cell_blocked` (position, `layer`, the refused `kind` and
 the refusing `guardKind`) next to `action_vetoed`, so a theme can flash the cell
-that said no. Because the whole region is inspected first, a restriction can
+that said no. The `action_vetoed` event carries a human-readable `reason` built
+from the kinds' display names (`uiName`, else the id with `_` as spaces), one
+clause per refused cell joined by `; `, e.g.
+`"plate yellow at (1,1) refuses ink blue"`; the benchmark runners show it as the
+rejection detail (never in anonymous runs, since it names kinds). Because the whole region is inspected first, a restriction can
 never half-apply an exchange, and every legal exchange stays reversible.
 
 **Behavior:**
@@ -850,7 +854,7 @@ checked.
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `type` | string | — | `toward_avatar`, `toward_tag`, `toward_color`, `patrol`, or `clockwise`. |
-| `frequency` | integer | `1` | Act only when `turnCount % frequency == 0`. The counter is incremented after this phase, so the first turn always acts. |
+| `frequency` | integer | `1` | Act only when `turnCount % frequency == 0`. The counter is incremented after this phase, so the first turn always acts. The turn counter is not part of the state key, so while an NPC with `frequency > 1` is on the board the system reports that its behaviour depends on the counter (`depends_on_turn_count` / `dependsOnTurnCount`); the benchmark's valid-action probe then counts a turn that only advanced the beat (e.g. an off-beat `wait`) as effectful. |
 | `solidBlocking` | boolean | `true` | Whether entities tagged `solid` on the `objects` layer block the NPC. |
 | `targetTag` | string | — | `toward_tag` only: seek the nearest entity with this tag on the `objects` or `markers` layer. |
 | `targetColor` | string | — | `toward_color` only: seek the nearest entity whose `color` param matches, on the `objects` or `actors` layer. |

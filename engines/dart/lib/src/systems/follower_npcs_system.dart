@@ -372,6 +372,22 @@ class FollowerNpcsSystem extends GameSystem {
     return out;
   }
 
+  /// True when an NPC on the board runs a behavior with frequency > 1: its
+  /// next step depends on the beat, which the state key leaves out.
+  @override
+  bool dependsOnTurnCount(LevelState state, GameDefinition game) {
+    final config = game.systemConfig(id, {});
+    final behaviorsConfig = config['behaviors'] as Map<String, dynamic>? ?? {};
+    for (final entry in _npcEntries(state, game, config)) {
+      final behaviorDef =
+          behaviorsConfig[entry.value.param('behavior')?.toString()];
+      if (behaviorDef is Map && ((behaviorDef['frequency'] as int?) ?? 1) > 1) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /// Every NPC on the actors layer, in board order.
   ///
   /// Shared by the turn pass and load settle so both agree on what an NPC is.

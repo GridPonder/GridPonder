@@ -28,7 +28,12 @@ def enumerate_actions(game_def, state, engine=None) -> list[dict[str, Any]]:
             _enumerate(action_def["id"], list(params_def.items()), {}, actions, state)
     if engine is None:
         return actions
-    return [action for action in actions if _is_effectful(engine, action)]
+    # Asked once per state: whether a turn that only advances the counter
+    # still changes what the board will do next.
+    matters = getattr(engine, "turn_count_matters", None)
+    beat_matters = bool(matters()) if callable(matters) else False
+    return [action for action in actions
+            if _is_effectful(engine, action, beat_matters)]
 
 
 def _enumerate(
@@ -56,18 +61,29 @@ def _enumerate(
         _enumerate(action_id, rest, {**current, name: value}, out, state)
 
 
-def _is_effectful(engine, action: dict[str, Any]) -> bool:
+#: Events that do not by themselves make an action effectful: the pipeline's
+#: tick, and a selection event that re-selects what is already selected (a
+#: real selection change also changes the state key).
+_NON_EFFECT_EVENTS = frozenset({"turn_ended", "actor_selected"})
+
+
+def _is_effectful(engine, action: dict[str, Any], beat_matters: bool = False) -> bool:
+    """Accepted AND (state key changed OR a meaningful event OR won OR lost OR
+    the turn counter advanced while some system's behaviour depends on it)."""
     before = engine.state_key()
+    turns_before = engine.state.turn_count
     action_id = action["action"]
     params = {key: value for key, value in action.items() if key != "action"}
     result = engine.execute_turn(action_id, params)
     if not result.accepted:
         return False
     after = engine.state_key()
+    beat_advanced = beat_matters and engine.state.turn_count != turns_before
     meaningful_event = any(
-        event.get("type") != "turn_ended" for event in result.events
+        event.get("type") not in _NON_EFFECT_EVENTS for event in result.events
     )
     restored = engine.undo()
     if not restored:
         raise RuntimeError(f"Action probe could not restore state for {action!r}")
-    return before != after or meaningful_event or result.is_won or result.is_lost
+    return (before != after or meaningful_event or beat_advanced
+            or result.is_won or result.is_lost)

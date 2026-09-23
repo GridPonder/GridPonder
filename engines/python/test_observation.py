@@ -20,7 +20,7 @@ from engines.python._game_def import GameDef
 from engines.python._models import Pos
 from engines.python._turn_engine import TurnEngine
 from engines.python.anon import build_anon_kind_to_label
-from engines.python.observation import build_prompt, status_lines
+from engines.python.observation import build_prompt, status_fingerprint, status_lines
 from engines.python.text_renderer import render
 
 
@@ -194,15 +194,48 @@ def test_board_did_not_change_note():
     game, level, engine = _setup()
     engine.execute_turn("tap_cell", {"position": [0, 1]})
     before = render(engine.state, game, include_legend=False)
+    before_status = status_fingerprint(game, level, engine.state)
     # Blue moving down leaves the board: blocked, but accepted and counted.
+    # Only the move counter changed, which is not a change to the board.
     result = engine.execute_turn("move", {"direction": "down"})
     assert result.accepted and engine.state.action_count == 1
     prompt = build_prompt(game, level, engine.state,
                           last_action={"action": "move", "direction": "down"},
-                          previous_board_text=before)
+                          previous_board_text=before,
+                          previous_status=before_status)
     assert ("Moves this attempt: 1 of 11 allowed\nSelected: Blue piece at (0,1)\n"
             "Moves left: Red piece 3, Blue piece 2\nHeat: -\nGauge: 2\n"
             "The board did not change.\n\nCompare the two boards") in prompt, prompt
+
+
+def test_status_fingerprint_drops_only_the_move_counter():
+    game, level, engine = _setup()
+    assert status_fingerprint(game, level, engine.state) == (
+        "Selected: none\nMoves left: Red piece 3, Blue piece 2\nHeat: -\nGauge: 2")
+
+
+def test_a_selection_change_has_no_note():
+    """Selecting redraws no cell, but `Selected:` changed: not "no change"."""
+    game, level, engine = _setup()
+    before = render(engine.state, game, include_legend=False)
+    before_status = status_fingerprint(game, level, engine.state)
+    engine.execute_turn("tap_cell", {"position": [0, 0]})
+    assert render(engine.state, game, include_legend=False) == before
+    prompt = build_prompt(game, level, engine.state,
+                          last_action={"action": "tap_cell", "position": [0, 0]},
+                          previous_board_text=before,
+                          previous_status=before_status)
+    assert "Selected: Red piece at (0,0)" in prompt, prompt
+    assert "The board did not change." not in prompt, prompt
+    # Anonymous prompts decide the same way (labels are a bijection).
+    labels = build_anon_kind_to_label(game)
+    anon_before = render(engine.state, game, include_legend=False,
+                         kind_symbol_overrides=labels)
+    anon = build_prompt(game, level, engine.state, anonymize=True,
+                        last_action={"action": "tap_cell", "position": [0, 0]},
+                        previous_board_text=anon_before,
+                        previous_status=before_status)
+    assert "The board did not change." not in anon, anon
 
 
 def test_changed_board_has_no_note():

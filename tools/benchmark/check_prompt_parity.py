@@ -291,16 +291,40 @@ def compare_steps(py_steps, dart_steps, ignore: set[str]) -> list:
     return problems
 
 
+def _accepted_but_unoffered(named_steps: list[list[dict]], actions: list[dict]) -> set[int]:
+    """Gold indices the named run accepted although its state did not offer
+    them. An accepted action the enumerator leaves out is one it judged to
+    have no effect (e.g. re-tapping the selected piece), so an anonymous run —
+    which can only submit offered labels — skips it and reaches the same
+    state."""
+    skip: set[int] = set()
+    for i, action in enumerate(actions):
+        if i + 1 >= len(named_steps):
+            break
+        before = named_steps[i][-1]
+        if before.get("event") != "state":
+            break
+        offered = canon_actions(before.get("valid_actions"))
+        rejected = any(e.get("event") == "rejected" for e in named_steps[i + 1])
+        if json.dumps(action, sort_keys=True) not in offered and not rejected:
+            skip.add(i)
+    return skip
+
+
 def check_level(job, args, dart_cmd_base, py_cmd_base):
     packs_dir, pack, level_id, level = job
     actions = gold_actions(level)
-    items = [("act", a) for a in actions]
     results = []
+    skip: set[int] = set()
     for mode in args.modes:
         anon = mode == "anon"
+        items = [("act", a) for i, a in enumerate(actions)
+                 if not (anon and i in skip)]
         common = ["--pack", pack, "--level", level_id,
                   "--packs-dir", str(packs_dir)] + (["--anon"] if anon else [])
         py_steps = drive(py_cmd_base + common, items, anon, stop_on_unoffered=True)
+        if not anon:
+            skip = _accepted_but_unoffered(py_steps, actions)
         dart_steps = drive(dart_cmd_base + common, items, anon, stop_on_unoffered=True)
         problems = []
         if actions:
@@ -308,7 +332,7 @@ def check_level(job, args, dart_cmd_base, py_cmd_base):
                 if steps[-1][-1].get("event") != "won":
                     problems.append(("final", "gold_not_won", [
                         f"{side}: gold path ended with {steps[-1][-1].get('event')!r} "
-                        f"after {len(steps) - 1}/{len(actions)} actions"]))
+                        f"after {len(steps) - 1}/{len(items)} actions"]))
         problems += compare_steps(py_steps, dart_steps, args.ignore_sections)
         results.append((mode, len(py_steps), problems))
     return pack, level_id, results
@@ -321,7 +345,8 @@ def check_level(job, args, dart_cmd_base, py_cmd_base):
 # is not offered), ("raw", payload) submits the payload as-is in both modes,
 # ("batch", [actions]) submits a multi-action payload. `expect` lists
 # substrings that must occur in the Python run's output (prompts and events),
-# so a scenario proves it exercised the path it is named after.
+# so a scenario proves it exercised the path it is named after; `absent` lists
+# substrings that must not occur.
 SCENARIOS = [
     {
         "name": "loss with a second attempt, then a final loss",
@@ -344,8 +369,30 @@ SCENARIOS = [
         "pack": "liftprint", "level": "lp_011", "args": [],
         "items": [("gold", 7), ("act", {"action": "press"}),
                   ("act", {"action": "move", "direction": "up"})],
-        "expect": {"named": ["REJECTED (press is not legal in this state); no action was spent"],
+        "expect": {"named": ["REJECTED (plate yellow at (1,1) refuses ink blue); no action was spent"],
                    "anon": ["REJECTED (unknown action label 'a999')"]},
+    },
+    {
+        "name": "harness rejection carries the engine veto reason",
+        "pack": "liftprint", "level": "lp_011",
+        "args": ["--observation", "harness"],
+        "items": [("gold", 7), ("raw", {"action": "press"})],
+        "modes": ["named"],
+        "expect": {"named": ['"detail": "plate yellow at (1,1) refuses ink blue"']},
+    },
+    {
+        "name": "selecting a piece is a change; re-tapping it is not offered",
+        "pack": "pincer", "level": "pc_001", "args": [],
+        "items": [("gold", 1), ("gold", 1)],
+        "expect": {"named": ["Selected: "]},
+        "absent": {"named": ["The board did not change."]},
+    },
+    {
+        "name": "a held slow train still offers wait",
+        "pack": "escapement", "level": "esc_022", "args": [],
+        "items": [("gold", 6), ("act", {"action": "wait"})],
+        "expect": {"named": ['{"action": "wait"}']},
+        "absent": {"anon": ["unknown action label"]},
     },
     {
         "name": "move before any piece is selected",
@@ -436,6 +483,9 @@ def run_scenarios(args, packs_dirs, dart_cmd, py_cmd):
             for needle in sc.get("expect", {}).get(mode, []):
                 if needle not in blob:
                     problems.append(("scenario", "expectation", [f"python output lacks {needle!r}"]))
+            for needle in sc.get("absent", {}).get(mode, []):
+                if needle in blob:
+                    problems.append(("scenario", "expectation", [f"python output has {needle!r}"]))
             n_events = sum(len(s) for s in py_steps)
             total += 1
             status = "ok" if not problems else f"{len(problems)} problem(s)"

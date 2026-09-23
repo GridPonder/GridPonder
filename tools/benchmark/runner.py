@@ -29,7 +29,7 @@ if str(_REPO_ROOT) not in sys.path:
 from engines.python.loader import load_pack
 from engines.python._turn_engine import TurnEngine
 from engines.python.text_renderer import render as render_board
-from engines.python.observation import build_prompt
+from engines.python.observation import build_prompt, status_fingerprint
 from engines.python.goal_renderer import describe_loss, render_goals
 from engines.python.anon import (
     build_anon_action_shapes,
@@ -279,6 +279,7 @@ def main() -> None:
     last_action: dict | None = None
     prev_board_text: str | None = None
     prev_inventory: str | None = None
+    prev_status: str | None = None
     current_anon_map: dict[str, dict] = {}
     # How the previous attempt ended, shown once on the next attempt's first
     # prompt; and the most recent submission when it was rejected.
@@ -339,6 +340,7 @@ def main() -> None:
             last_action=last_action,
             previous_board_text=prev_board_text,
             previous_inventory=prev_inventory,
+            previous_status=prev_status,
             anonymize=anon,
             kind_symbol_overrides=kind_symbol_overrides,
             inference_mode=mode,
@@ -380,7 +382,7 @@ def main() -> None:
         _out(event)
 
     def do_reset(reason: str, loss_reason: str | None = None) -> None:
-        nonlocal attempt_number, last_action, prev_board_text, prev_inventory, seen_states
+        nonlocal attempt_number, last_action, prev_board_text, prev_inventory, prev_status, seen_states
         nonlocal previous_attempt, last_rejected
         engine.reset()
         attempt_number += 1
@@ -394,6 +396,7 @@ def main() -> None:
             previous_attempt = _REASON_GIVE_UP
         prev_board_text = None
         prev_inventory = None
+        prev_status = None
         seen_states = {engine.state_key()}
         _out({
             "event": "reset",
@@ -456,7 +459,7 @@ def main() -> None:
         `detail`; anonymous runs pass a version that names no real action)."""
         nonlocal rejected_schema, rejected_illegal
         nonlocal consecutive_schema, consecutive_illegal
-        nonlocal prev_board_text, prev_inventory, last_rejected
+        nonlocal prev_board_text, prev_inventory, prev_status, last_rejected
         last_rejected = (
             {k: v for k, v in action_input.items() if k != "memory"},
             prompt_detail if prompt_detail is not None else detail,
@@ -469,6 +472,7 @@ def main() -> None:
             consecutive_illegal += 1
         prev_board_text = None
         prev_inventory = None
+        prev_status = None
         _out({
             "event": "rejected",
             "action": action_input,
@@ -478,14 +482,16 @@ def main() -> None:
 
     def illegal_details(real: dict, result) -> tuple[str, str]:
         """(event detail, prompt detail) for an engine rejection. An engine
-        reason carried on `action_vetoed` wins over the generic text."""
+        reason carried on `action_vetoed` wins over the generic text. The
+        reason names kinds, so an anonymous run keeps the generic text (the
+        harness shows the event detail to the agent too)."""
         veto_reason = next(
             (e.get("reason") for e in result.events
              if e.get("type") == "action_vetoed" and isinstance(e.get("reason"), str)
              and e.get("reason")),
             None,
         )
-        if veto_reason is not None:
+        if veto_reason is not None and not anon:
             return veto_reason, veto_reason
         detail = f"{real['action']} is not legal in this state"
         return detail, ("not legal in this state" if anon else detail)
@@ -557,6 +563,7 @@ def main() -> None:
                 kind_symbol_overrides=kind_symbol_overrides,
             )
             prev_inventory = engine.state.avatar.item if engine.state.avatar.enabled else None
+            prev_status = status_fingerprint(game_def, level_def, engine.state)
 
             real, schema_error, game_params = resolve(
                 {k: v for k, v in inp.items() if k != "memory"}
@@ -641,6 +648,7 @@ def main() -> None:
                 kind_symbol_overrides=kind_symbol_overrides,
             )
             prev_inventory = engine.state.avatar.item if engine.state.avatar.enabled else None
+            prev_status = status_fingerprint(game_def, level_def, engine.state)
 
             real, schema_error, game_params = resolve(
                 {k: v for k, v in action_input.items() if k != "memory"}

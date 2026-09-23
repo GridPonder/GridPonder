@@ -54,6 +54,7 @@ def build_prompt(
     last_action: dict | None = None,
     previous_board_text: str | None = None,
     previous_inventory: str | None = None,
+    previous_status: str | None = None,
     anonymize: bool = False,
     kind_symbol_overrides: dict[str, str] | None = None,
     inference_mode: str = "single",
@@ -83,6 +84,10 @@ def build_prompt(
     rejected; the prompt says so and shows only the current board.
     image_marks: the marks the attached image carries (as reported by
     board_image.render_board_image); explained next to the image note.
+    previous_status: `status_fingerprint` of the state before last_action.
+    "The board did not change." is printed only when the board text, the
+    inventory and this fingerprint are all unchanged (None skips the status
+    comparison).
     """
     if valid_actions is None:
         valid_actions = enumerate_actions(game_def, state)
@@ -108,7 +113,10 @@ def build_prompt(
         )
         current_inv = state.avatar.item if state.avatar.enabled else None
         board_unchanged = (
-            current_bare == previous_board_text and current_inv == previous_inventory
+            current_bare == previous_board_text
+            and current_inv == previous_inventory
+            and (previous_status is None
+                 or previous_status == status_fingerprint(game_def, level_def, state))
         )
 
     # ── Board text (current) ──────────────────────────────────────────────────
@@ -306,6 +314,17 @@ def _individual_actors_config(game_def, level_def: dict) -> dict | None:
         if system.get("type") == "individual_actors" and system.get("enabled", True):
             return system.get("config") or {}
     return None
+
+
+def status_fingerprint(game_def, level_def: dict, state) -> str:
+    """The status lines that say something about the board, for deciding
+    whether an action changed anything: every `status_lines` line except the
+    move counter (a spent action alone is not a change). Rendered with real
+    names — the anonymous labels are a bijection, so equality is the same."""
+    return "\n".join(
+        line for line in status_lines(game_def, level_def, state).split("\n")
+        if line and not line.startswith("Moves this attempt:")
+    )
 
 
 def status_lines(
