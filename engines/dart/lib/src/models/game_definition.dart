@@ -105,11 +105,13 @@ class GameReadout {
     this.blankWhen,
   });
 
+  // Tolerant of malformed fields, like the Python parser (`_parse_readouts`):
+  // a wrongly typed field is treated as absent rather than failing the load.
   factory GameReadout.fromJson(Map<String, dynamic> j) => GameReadout(
-        variable: j['variable'] as String? ?? '',
-        label: j['label'] as String? ?? '',
-        color: j['color'] as String?,
-        blankWhen: (j['blankWhen'] as num?)?.toInt(),
+        variable: j['variable'] is String ? j['variable'] as String : '',
+        label: j['label'] is String ? j['label'] as String : '',
+        color: j['color'] is String ? j['color'] as String : null,
+        blankWhen: j['blankWhen'] is num ? (j['blankWhen'] as num).toInt() : null,
       );
 }
 

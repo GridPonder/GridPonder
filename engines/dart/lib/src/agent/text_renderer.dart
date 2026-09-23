@@ -1,6 +1,8 @@
+import '../models/entity.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/position.dart';
+import 'py_format.dart';
 
 /// Renders a [LevelState] as a compact text grid using Unicode symbols.
 ///
@@ -24,6 +26,59 @@ import '../models/position.dart';
 /// below the grid that includes remaining queue contents.
 class TextRenderer {
   static const _avatarSymbol = '@';
+
+  /// Built-in layer priority, highest first. Mirrors `_LAYER_ORDER` in
+  /// engines/python/text_renderer.py.
+  static const _layerOrder = [
+    'actors',
+    'markers',
+    'objects',
+    'territory',
+    'ground'
+  ];
+
+  /// Shown in place of a whitespace symbol so a cell never renders blank.
+  static const _visibleSpace = '·';
+
+  /// Layers in drawing priority, highest first: the known non-ground layers
+  /// in [_layerOrder] order, then every other board layer in board order
+  /// (pack-declared layers such as `ink` or `plate`), then ground. Mirrors
+  /// `_ordered_layers` in engines/python/text_renderer.py.
+  static List<String> orderedLayers(LevelState state) =>
+      orderLayerIds(state.board.layers.keys.toList());
+
+  /// Top-to-bottom drawing order for layers given in board order: the known
+  /// non-ground layers in [_layerOrder] order, then every other layer in the
+  /// order given, then ground. Mirrors `order_layer_ids` in the Python port.
+  static List<String> orderLayerIds(List<String> layerIds) {
+    return [
+      for (final l in _layerOrder)
+        if (l != 'ground' && layerIds.contains(l)) l,
+      for (final l in layerIds)
+        if (!_layerOrder.contains(l) && l != 'ground') l,
+      if (layerIds.contains('ground')) 'ground',
+    ];
+  }
+
+  static bool _isSpace(String s) => s.isNotEmpty && s.trim().isEmpty;
+
+  static String _visible(String s) => _isSpace(s) ? _visibleSpace : s;
+
+  /// Grid symbol for one entity. Mirrors `_get_symbol` in the Python port.
+  static String _symbolFor(EntityInstance entity, EntityKindDef? kindDef,
+      Map<String, String>? kindSymbolOverrides) {
+    if (kindDef == null) return entity.kind[0].toUpperCase();
+    if (kindDef.symbolParam != null) {
+      // Number tiles always render as 'N' regardless of anon mode.
+      final paramVal = entity.param(kindDef.symbolParam!);
+      return _visible(paramVal != null ? 'N' : kindDef.symbol);
+    }
+    if (kindSymbolOverrides != null &&
+        kindSymbolOverrides.containsKey(entity.kind)) {
+      return kindSymbolOverrides[entity.kind]!;
+    }
+    return _visible(kindDef.symbol);
+  }
 
   /// Render the board to a text string.
   ///
@@ -74,7 +129,7 @@ class TextRenderer {
       }
     }
 
-    final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
+    final layerOrder = orderedLayers(state);
 
     final lines = <String>[];
     for (int y = 0; y < h; y++) {
@@ -89,31 +144,17 @@ class TextRenderer {
         }
 
         // Find the most prominent symbol, with priority:
-        //   avatar > objects/markers/actors > MCO body > ground
+        //   avatar > non-ground layers > MCO body > ground
         // MCO is placed above ground so pipe shapes are visible even when
         // the ground layer is void/empty.
-        String? objectSymbol; // from actors, markers, or objects layers
+        String? objectSymbol; // from the first non-ground layer with content
         String? groundSymbol; // from ground layer only
         final mcoSymbol = mcoSymbols[pos];
         for (final layerId in layerOrder) {
           final entity = board.getEntity(layerId, pos);
           if (entity == null) continue;
-          final kindDef = game.entityKinds[entity.kind];
-          String? sym;
-          if (kindDef == null) {
-            sym = entity.kind[0].toUpperCase();
-          } else if (kindDef.symbolParam != null) {
-            // Number tiles always render as 'N' regardless of anon mode.
-            final paramVal = entity.param(kindDef.symbolParam!);
-            sym = paramVal != null
-                ? _valueToChar(paramVal as int)
-                : kindDef.symbol;
-          } else if (kindSymbolOverrides != null &&
-              kindSymbolOverrides.containsKey(entity.kind)) {
-            sym = kindSymbolOverrides[entity.kind];
-          } else {
-            sym = kindDef.symbol;
-          }
+          final sym = _symbolFor(
+              entity, game.entityKinds[entity.kind], kindSymbolOverrides);
           if (layerId == 'ground') {
             groundSymbol = sym;
           } else {
@@ -146,6 +187,10 @@ class TextRenderer {
     final stackedBlock = _buildStackedBlock(state, game, gridAvatarPos,
         kindSymbolOverrides: kindSymbolOverrides);
     if (stackedBlock.isNotEmpty) parts.add(stackedBlock);
+
+    final entityStateBlock = _buildEntityStateBlock(state, game,
+        kindSymbolOverrides: kindSymbolOverrides);
+    if (entityStateBlock.isNotEmpty) parts.add(entityStateBlock);
 
     final mcoBlock = _buildMcoBlock(state, game,
         kindSymbolOverrides: kindSymbolOverrides);
@@ -198,7 +243,7 @@ class TextRenderer {
           sym = kindSymbolOverrides[entity.kind]!;
           label = '?';
         } else {
-          sym = kindDef.symbol;
+          sym = _visible(kindDef.symbol);
           final desc = kindDef.description != null
               ? ' (${kindDef.description})'
               : '';
@@ -231,7 +276,7 @@ class TextRenderer {
     final x2 = overlay.x + overlay.width - 1;
     final y2 = overlay.y + overlay.height - 1;
 
-    const layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
+    final layerOrder = orderedLayers(state);
     final rows = <String>[];
     for (int dy = 0; dy < overlay.height; dy++) {
       final buf = StringBuffer();
@@ -243,15 +288,7 @@ class TextRenderer {
           if (entity == null) continue;
           final kindDef = game.entityKinds[entity.kind];
           if (kindDef == null) continue;
-          if (kindDef.symbolParam != null) {
-            final paramVal = entity.param(kindDef.symbolParam!);
-            sym = paramVal != null ? _valueToChar(paramVal as int) : kindDef.symbol;
-          } else if (kindSymbolOverrides != null &&
-              kindSymbolOverrides.containsKey(entity.kind)) {
-            sym = kindSymbolOverrides[entity.kind]!;
-          } else {
-            sym = kindDef.symbol;
-          }
+          sym = _symbolFor(entity, kindDef, kindSymbolOverrides);
           break;
         }
         buf.write(sym);
@@ -269,7 +306,7 @@ class TextRenderer {
   static String _buildStackedBlock(
       LevelState state, GameDefinition game, Position? avatarPos,
       {Map<String, String>? kindSymbolOverrides}) {
-    final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
+    final layerOrder = orderedLayers(state);
     final entries = <String>[];
 
     final w = state.board.width;
@@ -292,9 +329,7 @@ class TextRenderer {
                 : entity.kind.replaceAll('_', ' ');
           } else if (kindDef.symbolParam != null) {
             final paramVal = entity.param(kindDef.symbolParam!);
-            sym = paramVal != null
-                ? _valueToChar(paramVal as int)
-                : kindDef.symbol;
+            sym = paramVal != null ? 'N' : kindDef.symbol;
             label = kindSymbolOverrides != null
                 ? '?'
                 : (kindDef.uiName ?? kindDef.id.replaceAll('_', ' '));
@@ -303,13 +338,13 @@ class TextRenderer {
             sym = kindSymbolOverrides[entity.kind]!;
             label = '?';
           } else {
-            sym = kindDef.symbol;
+            sym = _visible(kindDef.symbol);
             label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
           }
-          // Skip void/empty cells. In anon mode the symbol may be overridden,
+          // Skip empty cells. In anon mode the symbol may be overridden,
           // so check both the display symbol and the original game symbol.
           final originalSym = kindDef?.symbol ?? sym;
-          if (sym == '.' || sym == ' ' || originalSym == '.' || originalSym == ' ') continue;
+          if (sym == '.' || originalSym == '.') continue;
           symbols.add('$sym($label)');
         }
 
@@ -326,9 +361,42 @@ class TextRenderer {
     return 'Stacked cells (grid shows only top symbol):\n${entries.join('\n')}';
   }
 
-  /// Returns the grid symbol for a numeric tile value.
-  /// Always 'N' — exact values are listed in the "Number values" block.
-  static String _valueToChar(int v) => 'N';
+  /// Exposes per-entity state that one grid symbol cannot encode: every
+  /// instance parameter other than the kind's `symbolParam` (whose value is
+  /// already listed under "Number values"), plus the avatar's facing.
+  /// Mirrors `_build_entity_state_block` in engines/python/text_renderer.py.
+  static String _buildEntityStateBlock(LevelState state, GameDefinition game,
+      {Map<String, String>? kindSymbolOverrides}) {
+    final entries = <String>[];
+    for (final layerId in orderedLayers(state)) {
+      final layer = state.board.layers[layerId];
+      if (layer == null) continue;
+      for (final entry in layer.entries()) {
+        final entity = entry.value;
+        if (entity.params.isEmpty) continue;
+        final kindDef = game.entityKinds[entity.kind];
+        final symbolParam = kindDef?.symbolParam;
+        final keys = entity.params.keys.where((k) => k != symbolParam).toList()
+          ..sort();
+        if (keys.isEmpty) continue;
+        final name = kindSymbolOverrides != null
+            ? (kindSymbolOverrides[entity.kind] ?? '?')
+            : (kindDef?.uiName ?? entity.kind.replaceAll('_', ' '));
+        final rendered =
+            keys.map((k) => '$k=${pyStr(entity.params[k])}').join(', ');
+        entries.add('  (${entry.key.x},${entry.key.y}) $name: $rendered');
+      }
+    }
+
+    final avatar = state.avatar;
+    if (avatar.enabled && avatar.position != null) {
+      entries.add('  (${avatar.position!.x},${avatar.position!.y}) avatar: '
+          'facing=${avatar.facing.toJson()}');
+    }
+
+    if (entries.isEmpty) return '';
+    return 'Entity state:\n${entries.join('\n')}';
+  }
 
   /// Lists all number-valued tiles with their exact decimal values.
   /// Appears below the legend so the LLM always knows precise values even when
@@ -337,7 +405,7 @@ class TextRenderer {
     final entries = <String>[];
     final w = state.board.width;
     final h = state.board.height;
-    const layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
+    final layerOrder = orderedLayers(state);
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
         final pos = Position(x, y);
@@ -348,7 +416,7 @@ class TextRenderer {
           if (kindDef?.symbolParam == null) continue;
           final paramVal = entity.param(kindDef!.symbolParam!);
           if (paramVal == null) break;
-          entries.add('($x,$y)=${paramVal as int}');
+          entries.add('($x,$y)=${pyStr(paramVal)}');
           break;
         }
       }
@@ -406,7 +474,7 @@ class TextRenderer {
         final spawnStr =
             spawnPos != null ? ' (next spawns at (${spawnPos.x},${spawnPos.y}))' : '';
         if (remaining.isNotEmpty) {
-          final queueStr = remaining.map((v) => '$v').join(' → ');
+          final queueStr = remaining.map(pyStr).join(' → ');
           sb.writeln('    queue$spawnStr: $queueStr');
         } else {
           sb.writeln('    queue$spawnStr: (empty)');

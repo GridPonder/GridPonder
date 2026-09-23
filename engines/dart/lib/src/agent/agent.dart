@@ -1,11 +1,10 @@
-import 'dart:convert';
-
 import '../engine/turn_engine.dart';
 import '../models/game_action.dart';
 import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/level_definition.dart';
 import '../models/position.dart';
+import 'py_format.dart';
 import 'text_renderer.dart';
 
 /// The result of one agent action, including optional reasoning and memory.
@@ -98,20 +97,13 @@ class AgentObservation {
     String? previousBoardText,
     String? previousInventory,
     Map<String, String>? kindSymbolOverrides,
+    TurnEngine? engine,
   }) {
-    // Collect entity kinds currently present on the board for action filtering.
-    final presentKinds = <String>{};
-    for (final layer in state.board.layers.values) {
-      for (final entry in layer.entries()) {
-        presentKinds.add(entry.value.kind);
-      }
-    }
-
     return AgentObservation(
       game: game,
       level: level,
       state: state,
-      validActions: _enumerateActions(game, presentKinds),
+      validActions: enumerateActions(game, state, engine: engine),
       boardText: TextRenderer.render(state, game,
           kindSymbolOverrides: kindSymbolOverrides),
       attemptNumber: attemptNumber,
@@ -122,8 +114,32 @@ class AgentObservation {
     );
   }
 
-  static List<GameAction> _enumerateActions(
-      GameDefinition game, Set<String> presentKinds) {
+  /// Every action the agent may submit in [state].
+  ///
+  /// Mirrors `enumerate_actions` in engines/python/action_enum.py — the two
+  /// runners must offer identical lists. Actions whose `entityKind` is absent
+  /// from the board are skipped. Parameters with a fixed `values` list are
+  /// expanded over those values; `position` parameters over every board cell
+  /// in row-major order (y, then x).
+  ///
+  /// When [engine] is given (its state must be [state]), each syntactic
+  /// candidate is probed with [TurnEngine.previewTurn] — which never touches
+  /// the live state — and kept only when it is effectful: accepted AND (the
+  /// state key changed OR it emitted an event other than `turn_ended` OR it
+  /// won OR it lost).
+  static List<GameAction> enumerateActions(
+    GameDefinition game,
+    LevelState state, {
+    TurnEngine? engine,
+  }) {
+    // Collect entity kinds currently present on the board for action filtering.
+    final presentKinds = <String>{};
+    for (final layer in state.board.layers.values) {
+      for (final entry in layer.entries()) {
+        presentKinds.add(entry.value.kind);
+      }
+    }
+
     final actions = <GameAction>[];
     for (final actionDef in game.actions) {
       // Skip actions whose required entity kind(s) are all absent from the board.
@@ -139,10 +155,13 @@ class AgentObservation {
           actionDef.params.entries.toList(),
           {},
           actions,
+          state,
         );
       }
     }
-    return actions;
+    if (engine == null) return actions;
+    final beforeKey = stateKey(engine.state, game);
+    return actions.where((a) => _isEffectful(engine, game, a, beforeKey)).toList();
   }
 
   static void _enumerate(
@@ -150,6 +169,7 @@ class AgentObservation {
     List<MapEntry<String, ActionParamDef>> paramEntries,
     Map<String, dynamic> current,
     List<GameAction> out,
+    LevelState state,
   ) {
     if (paramEntries.isEmpty) {
       out.add(GameAction(actionId, Map.from(current)));
@@ -157,10 +177,86 @@ class AgentObservation {
     }
     final head = paramEntries.first;
     final tail = paramEntries.sublist(1);
-    final values = head.value.values ?? const <String>[];
-    for (final value in values) {
-      _enumerate(actionId, tail, {...current, head.key: value}, out);
+    final List<Object> values;
+    if (head.value.type == 'position') {
+      values = [
+        for (int y = 0; y < state.board.height; y++)
+          for (int x = 0; x < state.board.width; x++) [x, y],
+      ];
+    } else {
+      values = head.value.values ?? const <String>[];
     }
+    for (final value in values) {
+      _enumerate(actionId, tail, {...current, head.key: value}, out, state);
+    }
+  }
+
+  static bool _isEffectful(
+      TurnEngine engine, GameDefinition game, GameAction action, String before) {
+    final result = engine.previewTurn(action);
+    if (!result.accepted) return false;
+    if (result.isWon || result.isLost) return true;
+    if (result.events.any((e) => e.type != 'turn_ended')) return true;
+    return stateKey(result.newState, game) != before;
+  }
+
+  /// Canonical string of the parts of [state] that define a distinct game
+  /// state — the equivalent of Python's `GameState.to_key()`: every
+  /// non-default board entity (with params), multi-cell objects, avatar
+  /// (enabled, position, facing, item), variables and the overlay cursor.
+  /// Turn and action counters and the won/lost flags are excluded.
+  static String stateKey(LevelState state, GameDefinition game) {
+    final defaults = <String, String?>{
+      for (final def in game.layers)
+        def.id: def.isExactlyOne ? (def.defaultKind ?? 'empty') : null,
+    };
+    final layerIds = state.board.layers.keys.toList()..sort();
+    final board = [
+      for (final id in layerIds)
+        [
+          id,
+          [
+            for (final e in state.board.layers[id]!.entries())
+              if (!(e.value.kind == defaults[id] && e.value.params.isEmpty))
+                [e.key.x, e.key.y, e.value.kind, _canon(e.value.params)],
+          ],
+        ],
+    ];
+    final mcos = [
+      for (final m in state.board.multiCellObjects)
+        [
+          m.id,
+          m.kind,
+          [for (final c in m.cells) [c.x, c.y]],
+          _canon(m.params),
+        ],
+    ];
+    final av = state.avatar;
+    final ov = state.overlay;
+    return pyJsonDumps([
+      board,
+      mcos,
+      [
+        av.enabled,
+        av.position == null ? null : [av.position!.x, av.position!.y],
+        av.facing.toJson(),
+        av.inventory.slot,
+      ],
+      _canon(state.variables),
+      ov == null ? null : [ov.x, ov.y, ov.width, ov.height],
+    ]);
+  }
+
+  /// Normalises values so that equal Python values compare equal here
+  /// (Python treats `1 == 1.0`; JSON decoding may yield either).
+  static Object? _canon(Object? v) {
+    if (v is double && v == v.truncateToDouble() && v.abs() < 1e15) {
+      return v.toInt();
+    }
+    if (v is Map) return {for (final e in v.entries) '${e.key}': _canon(e.value)};
+    if (v is Iterable) return [for (final x in v) _canon(x)];
+    if (v is Position) return [v.x, v.y];
+    return v;
   }
 
   Map<String, dynamic> toJson() {
@@ -346,6 +442,7 @@ class AgentRunner {
         previousBoardText: previousBoardText,
         previousInventory: previousInventory,
         kindSymbolOverrides: kindSymbolOverrides,
+        engine: engine,
       );
 
       AgentActResult? result;
@@ -468,10 +565,11 @@ Map<String, String> buildAnonKindToLabel(GameDefinition game) {
 
 /// Builds a reverse map from anonymous action label (a1, a2, …) to the
 /// corresponding [GameAction]. Actions are sorted by their JSON representation
-/// for determinism, then labelled a1, a2, …
+/// (Python `json.dumps(a, sort_keys=True)`, so labels match the Python runner),
+/// then labelled a1, a2, …
 Map<String, GameAction> buildAnonReverseMap(List<GameAction> validActions) {
   final sorted = List<GameAction>.from(validActions)
-    ..sort((a, b) => jsonEncode(a.toJson()).compareTo(jsonEncode(b.toJson())));
+    ..sort((a, b) => pyJsonDumps(a.toJson()).compareTo(pyJsonDumps(b.toJson())));
   final map = <String, GameAction>{};
   for (int i = 0; i < sorted.length; i++) {
     map['a${i + 1}'] = sorted[i];
