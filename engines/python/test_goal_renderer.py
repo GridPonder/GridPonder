@@ -235,6 +235,36 @@ def test_board_match_ignores_a_cell_naming_no_kind():
         _render(_board_match({"color": "red"}))
 
 
+# ── shared observation symbols ───────────────────────────────────────────
+
+def _shared_symbol_game() -> GameDef:
+    return GameDef.from_dict(
+        {
+            "layers": [{"id": "objects", "occupancy": "zero_or_one"}],
+            "entityKinds": {
+                "lamp_a": {"layer": "objects", "symbol": "a", "observationSymbol": "Y", "uiName": "Amber lamp"},
+                "lamp_b": {"layer": "objects", "symbol": "b", "observationSymbol": "Y", "uiName": "Secret lamp"},
+            },
+        }
+    )
+
+
+def test_goal_text_uses_the_shared_symbol_public_identity():
+    game = _shared_symbol_game()
+    board = Board.from_json({"size": [2, 1], "layers": {}}, game.layers)
+    state = GameState.from_json({}, board, game.defaults)
+    level = {
+        "goals": [
+            {"id": "reach", "type": "reach_target", "config": {"targetKind": "lamp_b"}},
+            {"id": "match", "type": "board_match", "config": {"targetLayers": {"objects": [["lamp_a", "lamp_b"]]}}},
+        ]
+    }
+    text = render_goals(level, state, game)
+    assert "Reach the Amber lamp" in text
+    assert text.splitlines()[-1] == "YY"
+    assert "Secret" not in text
+
+
 def run_all() -> bool:
     import traceback
 

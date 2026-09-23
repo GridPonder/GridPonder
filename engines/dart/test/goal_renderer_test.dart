@@ -222,4 +222,55 @@ void main() {
       expect(text, 'Cover every required target exactly (progress: 2/4)');
     });
   });
+
+  test('goal text uses the shared symbol public identity', () {
+    final game = GameDefinition.fromJson({
+      'layers': [
+        {'id': 'objects', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'lamp_a': {
+          'layer': 'objects',
+          'symbol': 'a',
+          'observationSymbol': 'Y',
+          'uiName': 'Amber lamp'
+        },
+        'lamp_b': {
+          'layer': 'objects',
+          'symbol': 'b',
+          'observationSymbol': 'Y',
+          'uiName': 'Secret lamp'
+        },
+      },
+    });
+    final level = LevelDefinition.fromJson({
+      'id': 'shared',
+      'board': {
+        'size': [2, 1],
+        'layers': <String, dynamic>{},
+      },
+      'goals': [
+        {
+          'id': 'reach',
+          'type': 'reach_target',
+          'config': {'targetKind': 'lamp_b'},
+        },
+        {
+          'id': 'match',
+          'type': 'board_match',
+          'config': {
+            'targetLayers': {
+              'objects': [
+                ['lamp_a', 'lamp_b'],
+              ],
+            },
+          },
+        },
+      ],
+    }, game.layers);
+    final text = LlmAgent.describeGoals(level, level.initialState(), game);
+    expect(text, contains('Reach the Amber lamp'));
+    expect(text.split('\n').last, equals('YY'));
+    expect(text, isNot(contains('Secret')));
+  });
 }

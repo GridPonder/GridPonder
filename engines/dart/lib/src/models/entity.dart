@@ -133,7 +133,12 @@ class EntityKindDef {
       throw FormatException(
           'Entity kind "$id": symbol "@" is reserved for the avatar');
     }
-    final observationSymbol = j['observationSymbol'] as String?;
+    final rawObservationSymbol = j['observationSymbol'];
+    if (rawObservationSymbol != null && rawObservationSymbol is! String) {
+      throw FormatException(
+          'Entity kind "$id": observationSymbol must be a string');
+    }
+    final observationSymbol = rawObservationSymbol as String?;
     if (observationSymbol != null && observationSymbol.isEmpty) {
       throw FormatException(
           'Entity kind "$id": observationSymbol must not be empty');

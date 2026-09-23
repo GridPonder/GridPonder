@@ -198,12 +198,11 @@ def _describe_balance(
 
 def _resolve_entity_name(game_def, kind_id: str | None, tag: str | None) -> str:
     if kind_id is not None:
-        kind_def = game_def.entity_kinds.get(kind_id)
-        return (kind_def.get("uiName") if kind_def else None) or kind_id.replace("_", " ")
+        return game_def.observation_name(kind_id)
     if tag is not None:
         for k_id, k_def in game_def.entity_kinds.items():
             if tag in k_def.get("tags", []):
-                return k_def.get("uiName") or k_id.replace("_", " ")
+                return game_def.observation_name(k_id)
         return tag
     return "target"
 
@@ -263,8 +262,7 @@ def _render_target_grid(
                 if kind_to_label is not None:
                     sym = kind_to_label.get(kind_id, kind_id[0])
                 else:
-                    kind_def = game_def.entity_kinds.get(kind_id)
-                    sym = (kind_def.get("symbol") if kind_def else None) or kind_id[0]
+                    sym = game_def.public_symbol(kind_id) or kind_id[0]
                 grid[y][x] = sym
 
     return "\n".join("".join(row) for row in grid)
@@ -347,8 +345,7 @@ def _describe_param_match(
             return fallback
         if kind_to_label is not None:
             return kind_to_label.get(kind_id, kind_id)
-        kind_def = game_def.entity_kinds.get(kind_id)
-        return (kind_def.get("uiName") if kind_def else None) or kind_id.replace("_", " ")
+        return game_def.observation_name(kind_id)
 
     marker_name = _name(marker_kind, "target")
     check_name = _name(check_kind, "piece")

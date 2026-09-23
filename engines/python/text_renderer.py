@@ -4,6 +4,7 @@ Renders a GameState as a compact Unicode grid string.
 """
 from __future__ import annotations
 from ._models import Board, GameState, Pos
+from ._systems import observation_systems
 
 _AVATAR_SYMBOL = "@"
 _VISIBLE_SPACE = "·"
@@ -32,12 +33,14 @@ def render(
 
     # Build position→symbol map for multi-cell objects.
     mco_symbols: dict[Pos, str] = {}
+    mco_owners: dict[Pos, object] = {}
     for mco in board.multi_cell_objects:
         exit_list = mco.params.get("exitPosition")
         exit_pos = Pos(int(exit_list[0]), int(exit_list[1])) if exit_list else None
         exit_dir = mco.params.get("exitDirection")
         cell_set = set(mco.cells)
         for cell in mco.cells:
+            mco_owners[cell] = mco
             if cell == exit_pos:
                 arrow = {"up": "▲", "left": "◄", "right": "►"}.get(exit_dir or "", "▼")
                 mco_symbols[cell] = arrow
@@ -54,6 +57,9 @@ def render(
 
     concealed_positions = _observation_concealed_positions(state, effective_game)
     layer_order = _ordered_layers(state, effective_game)
+    systems = observation_systems(
+        game_def, level_def.get("systemOverrides") if level_def is not None else None
+    )
 
     lines = []
     for y in range(h):
@@ -93,7 +99,6 @@ def render(
             grid_avatar_pos is not None,
             kind_symbol_overrides,
             concealed_positions,
-            layer_order,
         )
         parts.append(f"Each character is one cell, each line is one row. Legend: {legend}")
 
@@ -120,6 +125,7 @@ def render(
         grid_avatar_pos,
         kind_symbol_overrides,
         mco_symbols,
+        mco_owners,
         concealed_positions,
         layer_order,
     )
@@ -136,18 +142,18 @@ def render(
     if entity_state_block:
         parts.append(entity_state_block)
 
-    mco_block = _build_mco_block(state, effective_game, kind_symbol_overrides)
+    mco_block = _build_mco_block(state, effective_game, kind_symbol_overrides, systems)
     if mco_block:
         parts.append(mco_block)
 
-    target_status_block = _build_elastic_target_status_block(
-        state,
-        effective_game,
-        level_def,
-        kind_symbol_overrides,
-    )
-    if target_status_block:
-        parts.append(target_status_block)
+    # System-maintained status blocks (named mode only: their text names
+    # pack kinds). One block per system, in declaration order.
+    if level_def is not None and kind_symbol_overrides is None:
+        initial_board = _lazy_initial_board(level_def, effective_game)
+        for system in systems:
+            lines = system.observation_status_lines(state, effective_game, initial_board)
+            if lines:
+                parts.append("\n".join(lines))
 
     return "\n\n".join(parts)
 
@@ -221,14 +227,15 @@ def _build_legend(
     has_avatar: bool,
     kind_symbol_overrides,
     concealed_positions: set[Pos],
-    layer_order: list[str],
 ) -> str:
     seen: dict[str, str] = {}
     if has_avatar:
         seen[_AVATAR_SYMBOL] = "avatar (you)"
 
-    for layer_id in layer_order:
-        layer = state.board.layers[layer_id]
+    # Board layer order (not grid priority): a legend entry's text never
+    # depends on which layer is scanned first, since shared observation
+    # symbols resolve to one board-independent public identity.
+    for layer in state.board.layers.values():
         for pos, entity in layer.entries():
             if pos in concealed_positions:
                 continue
@@ -251,39 +258,32 @@ def _build_legend(
                 sym = kind_def.get("observationSymbol") or kind_def["symbol"]
                 if sym.isspace():
                     sym = _VISIBLE_SPACE
-                desc = kind_def.get("description")
-                name = kind_def.get("uiName") or entity.kind.replace("_", " ")
+                desc = game_def.observation_description(entity.kind)
+                name = game_def.observation_name(entity.kind)
                 label = f"{name} ({desc})" if desc else name
             if sym in seen or _is_legend_redundant(sym, label):
                 continue
             seen[sym] = label
 
     if state.board.multi_cell_objects:
+        # One kind on the board: name it. Several kinds, or anonymous mode:
+        # the neutral "multi-cell object".
         labels: list[str] = []
         for mco in state.board.multi_cell_objects:
-            if kind_symbol_overrides is not None:
-                label = "?"
-            else:
-                kind_def = game_def.entity_kinds.get(mco.kind)
-                label = (
-                    (kind_def.get("uiName") if kind_def else None)
-                    or mco.kind.replace("_", " ")
-                )
+            label = game_def.observation_name(mco.kind)
             if label not in labels:
                 labels.append(label)
-        body_label = (
-            f"{labels[0]} body"
-            if len(labels) == 1
-            else "multi-cell object body"
+        noun = (
+            labels[0]
+            if len(labels) == 1 and kind_symbol_overrides is None
+            else "multi-cell object"
         )
-        seen["║/═/╬"] = body_label
+        seen["║/═/╬"] = f"{noun} body"
         if any(
             mco.params.get("exitPosition")
             for mco in state.board.multi_cell_objects
         ):
-            seen["▲/▼/◄/►"] = (
-                "multi-cell object exit (arrow = exit direction)"
-            )
+            seen["▲/▼/◄/►"] = f"{noun} exit (arrow = exit direction)"
 
     return "  ".join(f"{k}={v}" for k, v in seen.items())
 
@@ -346,14 +346,32 @@ def _build_stacked_block(
     avatar_pos: Pos | None,
     kind_symbol_overrides,
     mco_symbols: dict[Pos, str],
+    mco_owners: dict[Pos, object],
     concealed_positions: set[Pos],
     layer_order: list[str],
 ) -> str:
+    """List every visible entity of cells where the grid hides something.
+
+    Entries run top to bottom in grid priority: avatar, non-ground layers
+    (declared order reversed), a multi-cell object, then ground. Ground under
+    a multi-cell object is its background: it never creates a line on its
+    own (a pipe over void is not a stack), but is listed last when the cell
+    has a line anyway. Under an ``observation_occluder`` object nothing below
+    is listed. Named mode
+    prefixes each entry with its layer id; anonymous mode omits it, since
+    layer ids are pack vocabulary.
+    """
+    anonymous = kind_symbol_overrides is not None
+
+    def tagged(layer: str, text: str) -> str:
+        return text if anonymous else f"[{layer}] {text}"
+
     entries_list: list[str] = []
     for y in range(state.board.height):
         for x in range(state.board.width):
             pos = Pos(x, y)
             symbols: list[str] = []
+            ground: list[str] = []
             if pos not in concealed_positions:
                 for layer_id in layer_order:
                     entity = state.board.get_entity(layer_id, pos)
@@ -362,62 +380,40 @@ def _build_stacked_block(
                     kind_def = game_def.entity_kinds.get(entity.kind)
                     if kind_def is None:
                         sym = entity.kind[0].upper()
-                        label = "?" if kind_symbol_overrides else entity.kind.replace("_", " ")
+                        label = "?" if anonymous else entity.kind.replace("_", " ")
                     elif kind_def.get("symbolParam") is not None:
                         param_val = entity.params.get(kind_def["symbolParam"])
                         sym = "N" if param_val is not None else kind_def["symbol"]
-                        label = "?" if kind_symbol_overrides else (
+                        label = "?" if anonymous else (
                             kind_def.get("uiName") or entity.kind.replace("_", " ")
                         )
-                    elif kind_symbol_overrides and entity.kind in kind_symbol_overrides:
+                    elif anonymous and entity.kind in kind_symbol_overrides:
                         sym = kind_symbol_overrides[entity.kind]
                         label = "?"
                     else:
                         sym = kind_def.get("observationSymbol") or kind_def["symbol"]
                         if sym.isspace():
                             sym = _VISIBLE_SPACE
-                        label = kind_def.get("uiName") or entity.kind.replace("_", " ")
+                        label = "?" if anonymous else game_def.observation_name(entity.kind)
 
-                    original_sym = kind_def["symbol"] if kind_def else sym
+                    original_sym = game_def.public_symbol(entity.kind) if kind_def else sym
                     if sym == "." or original_sym == ".":
                         continue
-                    symbols.append(f"[{layer_id}] {sym}({label})")
+                    entry = tagged(layer_id, f"{sym}({label})")
+                    (ground if layer_id == "ground" else symbols).append(entry)
 
             if avatar_pos == pos:
-                symbols.insert(0, "[avatar] @(avatar)")
+                symbols.insert(0, tagged("avatar", "@(avatar)"))
 
             mco_symbol = mco_symbols.get(pos)
             if mco_symbol is not None:
-                mco = next(
-                    (
-                        item
-                        for item in state.board.multi_cell_objects
-                        if pos in item.cells
-                    ),
-                    None,
-                )
-                mco_kind_def = (
-                    game_def.entity_kinds.get(mco.kind)
-                    if mco is not None
-                    else None
-                )
-                if kind_symbol_overrides is not None:
-                    label = "?"
-                else:
-                    label = (
-                        (mco_kind_def.get("uiName") if mco_kind_def else None)
-                        or (
-                            mco.kind.replace("_", " ")
-                            if mco is not None
-                            else "multi-cell object"
-                        )
-                    )
-                mco_layer = (
-                    mco_kind_def.get("layer", "structures")
-                    if mco_kind_def is not None
-                    else "structures"
-                )
-                symbols.append(f"[{mco_layer}] {mco_symbol}({label})")
+                mco = mco_owners[pos]
+                label = "?" if anonymous else game_def.observation_name(mco.kind)
+                symbols.append(tagged("multi-cell", f"{mco_symbol}({label})"))
+                if len(symbols) >= 2:
+                    symbols.extend(ground)
+            else:
+                symbols.extend(ground)
 
             if len(symbols) >= 2:
                 entries_list.append(f"  ({x},{y}): {' + '.join(symbols)}")
@@ -427,124 +423,22 @@ def _build_stacked_block(
     return "Stacked cells (grid shows only top symbol):\n" + "\n".join(entries_list)
 
 
-def _initial_target_cells(
-    level_def: dict,
-    game_def,
-    marker_layer: str,
-    marker_kind: str,
-) -> list[Pos]:
-    board_json = level_def.get("board")
-    if not isinstance(board_json, dict):
-        return []
-    initial_board = Board.from_json(board_json, game_def.layers)
-    layer = initial_board.layers.get(marker_layer)
-    if layer is None:
-        return []
-    cells = [
-        position
-        for position, entity in layer.entries()
-        if entity.kind == marker_kind
-    ]
-    return sorted(cells, key=lambda cell: (cell.y, cell.x))
+def _lazy_initial_board(level_def: dict, game_def):
+    """Zero-argument callable returning the level's authored board, built
+    at most once per render and only if a system asks for it."""
+    cache: list = []
 
+    def initial_board():
+        if not cache:
+            board_json = level_def.get("board")
+            cache.append(
+                Board.from_json(board_json, game_def.layers)
+                if isinstance(board_json, dict)
+                else Board(0, 0, {}, [])
+            )
+        return cache[0]
 
-def _build_elastic_target_status_block(
-    state: GameState,
-    game_def,
-    level_def: dict | None,
-    kind_symbol_overrides: dict[str, str] | None,
-) -> str:
-    if level_def is None or kind_symbol_overrides is not None:
-        return ""
-    system = game_def.get_system_by_type("elastic_block")
-    if system is None or not system.get("enabled", True):
-        return ""
-    config = system.get("config", {})
-    targets = config.get("targets") or []
-    if not targets:
-        return ""
-
-    object_kind = str(config.get("objectKind", "elastic_block"))
-    object_def = game_def.entity_kinds.get(object_kind, {})
-    object_name = object_def.get("uiName") or object_kind.replace("_", " ")
-    block = next(
-        (
-            mco
-            for mco in state.board.multi_cell_objects
-            if mco.kind == object_kind
-        ),
-        None,
-    )
-    block_cells = set(block.cells) if block is not None else set()
-    completed_key = str(
-        config.get("completedTargetIdsVariable", "completedTargetIds")
-    )
-    consumed_key = str(
-        config.get("consumedTargetIdsVariable", "consumedTargetIds")
-    )
-    completed = {
-        str(value) for value in state.variables.get(completed_key, [])
-    }
-    consumed = {
-        str(value) for value in state.variables.get(consumed_key, [])
-    }
-    default_layer = str(config.get("targetLayer", "markers"))
-
-    lines = [f"Target status (exact {object_name} footprint match required):"]
-    for raw in targets:
-        if not isinstance(raw, dict):
-            continue
-        marker_kind = str(raw.get("markerKind", ""))
-        target_id = str(raw.get("id", marker_kind))
-        if not marker_kind or not target_id:
-            continue
-        marker_layer = str(raw.get("markerLayer", default_layer))
-        cells = _initial_target_cells(
-            level_def,
-            game_def,
-            marker_layer,
-            marker_kind,
-        )
-        if not cells:
-            continue
-        marker_def = game_def.entity_kinds.get(marker_kind, {})
-        target_name = marker_def.get("uiName") or marker_kind.replace("_", " ")
-        symbol = marker_def.get("observationSymbol") or marker_def.get("symbol")
-        display_name = f"{target_name} [{symbol}]" if symbol else target_name
-        geometry = " ".join(f"({cell.x},{cell.y})" for cell in cells)
-        overlap = len(block_cells.intersection(cells))
-        mode = str(raw.get("onLeave", "none"))
-
-        if target_id in consumed:
-            if mode == "wall":
-                wall_kind = str(raw.get("wallKind", "wall"))
-                wall_def = game_def.entity_kinds.get(wall_kind, {})
-                wall_name = (
-                    wall_def.get("uiName") or wall_kind.replace("_", " ")
-                )
-                status = (
-                    f"completed and converted to {wall_name} after full vacancy"
-                )
-            elif mode == "void":
-                status = "completed and converted to void after full vacancy"
-            else:
-                status = "completed and removed after full vacancy"
-        elif target_id in completed:
-            suffix = ""
-            if mode == "wall":
-                suffix = (
-                    f"; becomes a wall only after the {object_name} fully vacates it"
-                )
-            elif mode == "void":
-                suffix = (
-                    f"; becomes void only after the {object_name} fully vacates it"
-                )
-            status = f"completed, still occupied by {object_name}{suffix}"
-        else:
-            status = f"unfinished ({overlap}/{len(cells)} cells covered)"
-        lines.append(f"  {display_name}: cells {geometry}; {status}")
-
-    return "\n".join(lines) if len(lines) > 1 else ""
+    return initial_board
 
 
 def _build_numbers_block(
@@ -606,7 +500,7 @@ def _build_entity_state_block(
             if kind_symbol_overrides is not None:
                 name = kind_symbol_overrides.get(entity.kind, "?")
             else:
-                name = kind_def.get("uiName") or entity.kind.replace("_", " ")
+                name = game_def.observation_name(entity.kind)
             rendered = ", ".join(
                 f"{key}={value}" for key, value in sorted(details.items())
             )
@@ -624,18 +518,17 @@ def _build_entity_state_block(
     return "Entity state:\n" + "\n".join(entries)
 
 
-def _build_mco_block(state: GameState, game_def, kind_symbol_overrides) -> str:
+def _build_mco_block(state: GameState, game_def, kind_symbol_overrides, systems) -> str:
     if not state.board.multi_cell_objects:
         return ""
 
     parts: list[str] = ["Multi-cell objects:"]
     public_piece_index = 0
     for mco in state.board.multi_cell_objects:
-        kind_def = game_def.entity_kinds.get(mco.kind)
-        if kind_symbol_overrides:
+        if kind_symbol_overrides is not None:
             label = "?"
         else:
-            label = (kind_def.get("uiName") if kind_def else None) or mco.kind.replace("_", " ")
+            label = game_def.observation_name(mco.kind)
         if game_def.has_tag(mco.kind, "public_piece"):
             public_piece_index += 1
             piece_name = f"Piece {public_piece_index}"
@@ -643,9 +536,14 @@ def _build_mco_block(state: GameState, game_def, kind_symbol_overrides) -> str:
             piece_name = mco.id
         parts.append(f"  {piece_name} [{label}]")
 
-        axis = mco.params.get("axis")
-        if axis is not None:
-            parts.append(f"    axis: {axis}")
+        # Public details owned by the systems that act on this object, in
+        # system declaration order; a line repeated by two systems prints once.
+        detail_lines: list[str] = []
+        for system in systems:
+            for line in system.observation_object_lines(mco, state, game_def):
+                if line not in detail_lines:
+                    detail_lines.append(line)
+        parts.extend(f"    {line}" for line in detail_lines)
 
         exit_list = mco.params.get("exitPosition")
         exit_pos = Pos(int(exit_list[0]), int(exit_list[1])) if exit_list else None

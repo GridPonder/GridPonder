@@ -33,6 +33,32 @@ class GameSystem:
         """
         return []
 
+    # ── Observation hooks (text observations only; never change state) ──────
+
+    def observation_object_lines(self, mco, state: GameState, game: GameDef) -> list[str]:
+        """Public detail lines for one multi-cell object.
+
+        Printed indented under the object in the "Multi-cell objects" block,
+        in both named and anonymous mode, so they must not contain pack
+        vocabulary (kind ids, names, layer ids). Default: none.
+        """
+        return []
+
+    def observation_status_lines(
+        self,
+        state: GameState,
+        game: GameDef,
+        initial_board,
+    ) -> list[str]:
+        """A public status block this system maintains (header line first).
+
+        ``initial_board`` is a zero-argument callable returning the level's
+        authored board (built on first use). The renderer prints the block
+        only in named mode, one block per system in declaration order.
+        Default: none.
+        """
+        return []
+
 
 
 def config_list(config: dict, key: str, default: list) -> list:

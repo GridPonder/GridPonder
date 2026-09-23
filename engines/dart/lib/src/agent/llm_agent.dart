@@ -726,7 +726,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
           if (kindId == null) continue;
           final sym = kindToLabel != null
               ? (kindToLabel[kindId] ?? kindId[0])
-              : (game.entityKinds[kindId]?.symbol ?? kindId[0]);
+              : (game.publicSymbol(kindId) ?? kindId[0]);
           grid[y][x] = sym;
         }
       }
@@ -801,7 +801,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     String _name(String? kindId, String fallback) {
       if (kindId == null) return fallback;
       if (kindToLabel != null) return kindToLabel[kindId] ?? kindId;
-      return game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
+      return game.observationName(kindId);
     }
 
     final markerName = _name(markerKind, 'target');
@@ -851,12 +851,12 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
   static String _resolveEntityName(
       GameDefinition game, String? kindId, String? tag) {
     if (kindId != null) {
-      return game.entityKinds[kindId]?.uiName ?? kindId.replaceAll('_', ' ');
+      return game.observationName(kindId);
     }
     if (tag != null) {
       for (final entry in game.entityKinds.entries) {
         if (entry.value.tags.contains(tag)) {
-          return entry.value.uiName ?? entry.key.replaceAll('_', ' ');
+          return game.observationName(entry.key);
         }
       }
       return tag;

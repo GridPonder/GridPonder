@@ -453,17 +453,22 @@ class AgentRunner {
 
 /// Builds a deterministic entity-kind → single-letter label map.
 /// All kind IDs from [game] are sorted alphabetically and assigned A, B, C, …
-/// Entities whose game-defined symbol is '.' (empty) or ' ' (void) are
+/// Entities whose public symbol is '.' (empty) or ' ' (void) are
 /// excluded — they keep their original symbol so the board stays readable.
+/// Kinds that share a public observation symbol (see
+/// [GameDefinition.observationKind]) share one label, so anonymous mode
+/// conceals exactly what named mode conceals.
 /// Used to anonymise board symbols, legend entries, and goal descriptions.
 Map<String, String> buildAnonKindToLabel(GameDefinition game) {
   final sortedKinds = game.entityKinds.keys.toList()..sort();
   final map = <String, String>{};
+  final groupLabels = <String, String>{};
   int labelIndex = 0;
   for (final kindId in sortedKinds) {
-    final sym = game.entityKinds[kindId]?.symbol ?? '';
+    final sym = game.publicSymbol(kindId) ?? '';
     if (sym == '.' || sym == ' ') continue; // keep original — "empty" stays
-    map[kindId] = _anonIndexToLabel(labelIndex++);
+    map[kindId] = groupLabels.putIfAbsent(game.observationKind(kindId),
+        () => _anonIndexToLabel(labelIndex++));
   }
   return map;
 }
