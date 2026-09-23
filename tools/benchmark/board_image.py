@@ -235,27 +235,15 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
             ):
                 _procedural_ground(draw, ground.kind, x0, y0)
 
-    layer_ids = [layer["id"] for layer in game_def.layers if layer["id"] != "ground"]
-    preferred = ["territory", "structures", "objects", "markers", "actors", "clone"]
-    ordered = [layer for layer in preferred if layer in layer_ids]
-    ordered.extend(layer for layer in layer_ids if layer not in ordered)
-
-    # Territory is a floor overlay. Draw it before a multi-cell object.
-    for layer in [layer for layer in ordered if layer == "territory"]:
-        ent = state.board.get_entity(layer, _Pos(x, y))
-        if ent is None:
-            continue
-        kind_def = game_def.entity_kinds.get(ent.kind, {})
-        if not _paste_sprite(canvas, ent.kind, kind_def, ent.params, x0, y0, pack_dir, base_dir):
-            _procedural_object(canvas, draw, ent.kind, kind_def, ent.params, x0, y0)
-
-    # Non-occluding MCOs keep their existing position between floor overlays
-    # and board objects, so target overlap remains visible in games that need
-    # it.
+    # Background MCOs match the Flutter board: cell layers are then drawn in
+    # the exact bottom-to-top order declared by the pack.
     for mco in cell_mcos:
         paint_mco(mco)
 
-    for layer in [layer for layer in ordered if layer != "territory"]:
+    layer_ids = [
+        layer["id"] for layer in game_def.layers if layer["id"] != "ground"
+    ]
+    for layer in layer_ids:
         ent = state.board.get_entity(layer, _Pos(x, y))
         if ent is None:
             continue
@@ -266,6 +254,7 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
             _procedural_object(
                 canvas, draw, ent.kind, kind_def, ent.params, x0, y0
             )
+
 
 def _paste_sprite(canvas, kind, kind_def, params, x0, y0, pack_dir, base_dir) -> bool:
     """Try to paste a PNG sprite. Returns True on success."""

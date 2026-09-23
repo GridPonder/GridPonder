@@ -28,8 +28,8 @@ def _make_game() -> GameDef:
         "id": "com.gridponder.test_text_renderer",
         "layers": [
             {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
-            {"id": "actors", "occupancy": "zero_or_one"},
             {"id": "territory", "occupancy": "zero_or_one"},
+            {"id": "actors", "occupancy": "zero_or_one"},
         ],
         "entityKinds": {
             "empty": {"layer": "ground", "tags": ["walkable"], "symbol": "."},
@@ -296,7 +296,7 @@ def test_multi_cell_legend_and_overlap_use_public_game_identity() -> None:
     assert "║/═/╬=Bellows body" in rendered
     assert "pipe body" not in rendered
     assert "pipe exit" not in rendered
-    assert "1(Target 1) + ╬(Bellows)" in rendered
+    assert "[markers] 1(Target 1) + [structures] ╬(Bellows)" in rendered
     assert "completed, still occupied by Bellows" in rendered
     assert "becomes a wall only after the Bellows fully vacates it" in rendered
 
@@ -422,6 +422,79 @@ def test_occluding_public_piece_hides_then_reveals_board_contents() -> None:
     assert "owner=yellow" not in collected
 
 
+def test_declared_layer_order_and_stacks_preserve_circuit_state() -> None:
+    game = GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+                {"id": "territory", "occupancy": "zero_or_one"},
+                {"id": "markers", "occupancy": "zero_or_one"},
+                {"id": "objects", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "floor": {"layer": "ground", "symbol": "."},
+                "conduit": {
+                    "layer": "territory",
+                    "symbol": "c",
+                    "uiName": "Powered conduit",
+                },
+                "contact": {
+                    "layer": "markers",
+                    "symbol": "A",
+                    "uiName": "Closed contact",
+                },
+                "core": {
+                    "layer": "markers",
+                    "symbol": "O",
+                    "uiName": "Powered core",
+                },
+                "prism": {
+                    "layer": "objects",
+                    "symbol": "P",
+                    "uiName": "Prism",
+                },
+            },
+        }
+    )
+    level = {
+        "board": {
+            "size": [2, 1],
+            "layers": {
+                "territory": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [0, 0], "kind": "conduit"},
+                        {"position": [1, 0], "kind": "conduit"},
+                    ],
+                },
+                "markers": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [0, 0], "kind": "contact"},
+                        {"position": [1, 0], "kind": "core"},
+                    ],
+                },
+                "objects": {
+                    "format": "sparse",
+                    "entries": [{"position": [0, 0], "kind": "prism"}],
+                },
+            },
+        },
+        "state": {"avatar": {"enabled": False}},
+        "goals": [],
+    }
+
+    rendered = text_renderer.render(TurnEngine(game, level).state, game)
+    assert rendered.splitlines()[0] == "PO"
+    assert (
+        "[objects] P(Prism) + [markers] A(Closed contact) + "
+        "[territory] c(Powered conduit)"
+    ) in rendered
+    assert (
+        "[markers] O(Powered core) + [territory] c(Powered conduit)"
+    ) in rendered
+
+
 def run_all() -> bool:
     tests = [
         test_territory_symbol_shown_on_owned_empty_cell_and_hidden_under_actor,
@@ -431,6 +504,7 @@ def run_all() -> bool:
         test_multi_cell_legend_and_overlap_use_public_game_identity,
         test_consumed_target_reports_original_geometry_and_wall_state,
         test_occluding_public_piece_hides_then_reveals_board_contents,
+        test_declared_layer_order_and_stacks_preserve_circuit_state,
     ]
     passed = 0
     failed = 0

@@ -6,7 +6,6 @@ from __future__ import annotations
 from ._models import Board, GameState, Pos
 
 _AVATAR_SYMBOL = "@"
-_LAYER_ORDER = ["actors", "markers", "objects", "territory", "ground"]
 _VISIBLE_SPACE = "·"
 
 
@@ -54,6 +53,7 @@ def render(
             mco_symbols[cell] = "═" if (h_conn and not v_conn) else "║" if (not h_conn and v_conn) else "╬"
 
     concealed_positions = _observation_concealed_positions(state, effective_game)
+    layer_order = _ordered_layers(state, effective_game)
 
     lines = []
     for y in range(h):
@@ -69,7 +69,7 @@ def render(
             if pos in concealed_positions and mco_symbol is not None:
                 row.append(mco_symbol)
                 continue
-            for layer_id in _ordered_layers(state):
+            for layer_id in layer_order:
                 entity = board.get_entity(layer_id, pos)
                 if entity is None:
                     continue
@@ -93,11 +93,12 @@ def render(
             grid_avatar_pos is not None,
             kind_symbol_overrides,
             concealed_positions,
+            layer_order,
         )
         parts.append(f"Each character is one cell, each line is one row. Legend: {legend}")
 
     numbers_block = _build_numbers_block(
-        state, effective_game, concealed_positions
+        state, effective_game, concealed_positions, layer_order
     )
     if numbers_block:
         parts.append(numbers_block)
@@ -108,6 +109,7 @@ def render(
         kind_symbol_overrides,
         mco_symbols,
         concealed_positions,
+        layer_order,
     )
     if overlay_block:
         parts.append(overlay_block)
@@ -119,12 +121,17 @@ def render(
         kind_symbol_overrides,
         mco_symbols,
         concealed_positions,
+        layer_order,
     )
     if stacked_block:
         parts.append(stacked_block)
 
     entity_state_block = _build_entity_state_block(
-        state, effective_game, kind_symbol_overrides, concealed_positions
+        state,
+        effective_game,
+        kind_symbol_overrides,
+        concealed_positions,
+        layer_order,
     )
     if entity_state_block:
         parts.append(entity_state_block)
@@ -158,21 +165,23 @@ def _get_symbol(entity, kind_def: dict | None, kind_symbol_overrides: dict | Non
     return _VISIBLE_SPACE if symbol.isspace() else symbol
 
 
-def _ordered_layers(state: GameState) -> list[str]:
-    known = [
-        layer
-        for layer in _LAYER_ORDER
-        if layer != "ground" and layer in state.board.layers
+def _ordered_layers(state: GameState, game_def) -> list[str]:
+    """Return board layers from visually topmost to bottommost.
+
+    The DSL declares layers bottom-to-top. Deriving observation priority from
+    that declaration keeps the text grid and stack aligned with the Flutter
+    board instead of imposing game-specific layer names.
+    """
+    declared = [
+        layer["id"]
+        for layer in game_def.layers
+        if layer["id"] in state.board.layers
     ]
+    declared_set = set(declared)
     remaining = [
-        layer for layer in state.board.layers
-        if layer not in _LAYER_ORDER and layer != "ground"
+        layer for layer in state.board.layers if layer not in declared_set
     ]
-    return [
-        *known,
-        *remaining,
-        *(["ground"] if "ground" in state.board.layers else []),
-    ]
+    return list(reversed([*declared, *remaining]))
 
 
 def _observation_concealed_positions(state: GameState, game_def) -> set[Pos]:
@@ -212,12 +221,14 @@ def _build_legend(
     has_avatar: bool,
     kind_symbol_overrides,
     concealed_positions: set[Pos],
+    layer_order: list[str],
 ) -> str:
     seen: dict[str, str] = {}
     if has_avatar:
         seen[_AVATAR_SYMBOL] = "avatar (you)"
 
-    for layer in state.board.layers.values():
+    for layer_id in layer_order:
+        layer = state.board.layers[layer_id]
         for pos, entity in layer.entries():
             if pos in concealed_positions:
                 continue
@@ -283,6 +294,7 @@ def _build_overlay_block(
     kind_symbol_overrides,
     mco_symbols: dict[Pos, str],
     concealed_positions: set[Pos],
+    layer_order: list[str],
 ) -> str:
     """Show the overlay region as a focused mini-view of its cells.
 
@@ -308,7 +320,7 @@ def _build_overlay_block(
                 chars.append(mco_symbols[pos])
                 continue
             sym = "."
-            for layer_id in _ordered_layers(state):
+            for layer_id in layer_order:
                 entity = state.board.get_entity(layer_id, pos)
                 if entity is None:
                     continue
@@ -335,6 +347,7 @@ def _build_stacked_block(
     kind_symbol_overrides,
     mco_symbols: dict[Pos, str],
     concealed_positions: set[Pos],
+    layer_order: list[str],
 ) -> str:
     entries_list: list[str] = []
     for y in range(state.board.height):
@@ -342,7 +355,7 @@ def _build_stacked_block(
             pos = Pos(x, y)
             symbols: list[str] = []
             if pos not in concealed_positions:
-                for layer_id in _ordered_layers(state):
+                for layer_id in layer_order:
                     entity = state.board.get_entity(layer_id, pos)
                     if entity is None:
                         continue
@@ -368,10 +381,10 @@ def _build_stacked_block(
                     original_sym = kind_def["symbol"] if kind_def else sym
                     if sym == "." or original_sym == ".":
                         continue
-                    symbols.append(f"{sym}({label})")
+                    symbols.append(f"[{layer_id}] {sym}({label})")
 
             if avatar_pos == pos:
-                symbols.insert(0, "@(avatar)")
+                symbols.insert(0, "[avatar] @(avatar)")
 
             mco_symbol = mco_symbols.get(pos)
             if mco_symbol is not None:
@@ -383,23 +396,28 @@ def _build_stacked_block(
                     ),
                     None,
                 )
+                mco_kind_def = (
+                    game_def.entity_kinds.get(mco.kind)
+                    if mco is not None
+                    else None
+                )
                 if kind_symbol_overrides is not None:
                     label = "?"
                 else:
-                    kind_def = (
-                        game_def.entity_kinds.get(mco.kind)
-                        if mco is not None
-                        else None
-                    )
                     label = (
-                        (kind_def.get("uiName") if kind_def else None)
+                        (mco_kind_def.get("uiName") if mco_kind_def else None)
                         or (
                             mco.kind.replace("_", " ")
                             if mco is not None
                             else "multi-cell object"
                         )
                     )
-                symbols.append(f"{mco_symbol}({label})")
+                mco_layer = (
+                    mco_kind_def.get("layer", "structures")
+                    if mco_kind_def is not None
+                    else "structures"
+                )
+                symbols.append(f"[{mco_layer}] {mco_symbol}({label})")
 
             if len(symbols) >= 2:
                 entries_list.append(f"  ({x},{y}): {' + '.join(symbols)}")
@@ -530,7 +548,10 @@ def _build_elastic_target_status_block(
 
 
 def _build_numbers_block(
-    state: GameState, game_def, concealed_positions: set[Pos]
+    state: GameState,
+    game_def,
+    concealed_positions: set[Pos],
+    layer_order: list[str],
 ) -> str:
     entries_list: list[str] = []
     for y in range(state.board.height):
@@ -538,7 +559,7 @@ def _build_numbers_block(
             pos = Pos(x, y)
             if pos in concealed_positions:
                 continue
-            for layer_id in _ordered_layers(state):
+            for layer_id in layer_order:
                 entity = state.board.get_entity(layer_id, pos)
                 if entity is None:
                     continue
@@ -560,10 +581,11 @@ def _build_entity_state_block(
     game_def,
     kind_symbol_overrides: dict[str, str] | None,
     concealed_positions: set[Pos],
+    layer_order: list[str],
 ) -> str:
     """Expose per-entity state that cannot be encoded in one grid symbol."""
     entries: list[str] = []
-    for layer_id in _ordered_layers(state):
+    for layer_id in layer_order:
         layer = state.board.layers.get(layer_id)
         if layer is None:
             continue

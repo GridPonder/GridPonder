@@ -8,7 +8,9 @@ import '../models/system_def.dart';
 /// Renders a [LevelState] as a compact text grid using Unicode symbols.
 ///
 /// Each cell shows the "most prominent" entity across all layers.
-/// Priority (highest first): avatar, actors, markers, objects, MCO body, ground.
+/// The avatar is highest; board layers follow the game's declared rendering
+/// order (last layer is topmost), with an MCO body above ground when no board
+/// layer above it supplies a symbol.
 ///
 /// When an overlay is active the avatar is suppressed from the grid (its
 /// position is shown in the Active region block instead) and cell content is
@@ -86,8 +88,7 @@ class TextRenderer {
     }
     final concealedPositions =
         _observationConcealedPositions(state, effectiveGame);
-
-    final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
+    final layerOrder = _orderedLayerIds(state, effectiveGame);
 
     final lines = <String>[];
     for (int y = 0; y < h; y++) {
@@ -101,8 +102,8 @@ class TextRenderer {
           continue;
         }
 
-        // Find the most prominent symbol, with priority:
-        //   avatar > objects/markers/actors > MCO body > ground
+        // Find the most prominent symbol from the declared layer order, with
+        // an MCO body between non-ground layers and ground.
         // MCO is placed above ground so pipe shapes are visible even when
         // the ground layer is void/empty.
         String? objectSymbol; // from actors, markers, or objects layers
@@ -151,22 +152,23 @@ class TextRenderer {
     if (includeLegend) {
       final legend = _buildLegend(state, effectiveGame, gridAvatarPos != null,
           kindSymbolOverrides: kindSymbolOverrides,
-          concealedPositions: concealedPositions);
+          concealedPositions: concealedPositions,
+          layerOrder: layerOrder);
       parts.add(
           'Each character is one cell, each line is one row. Legend: $legend');
     }
 
-    final numbersBlock =
-        _buildNumbersBlock(state, effectiveGame, concealedPositions);
+    final numbersBlock = _buildNumbersBlock(
+        state, effectiveGame, concealedPositions, layerOrder);
     if (numbersBlock.isNotEmpty) parts.add(numbersBlock);
 
     final overlayBlock = _buildOverlayBlock(
-        state, effectiveGame, mcoSymbols, concealedPositions,
+        state, effectiveGame, mcoSymbols, concealedPositions, layerOrder,
         kindSymbolOverrides: kindSymbolOverrides);
     if (overlayBlock.isNotEmpty) parts.add(overlayBlock);
 
-    final stackedBlock = _buildStackedBlock(
-        state, effectiveGame, gridAvatarPos, mcoSymbols, concealedPositions,
+    final stackedBlock = _buildStackedBlock(state, effectiveGame, gridAvatarPos,
+        mcoSymbols, concealedPositions, layerOrder,
         kindSymbolOverrides: kindSymbolOverrides);
     if (stackedBlock.isNotEmpty) parts.add(stackedBlock);
 
@@ -207,14 +209,33 @@ class TextRenderer {
     };
   }
 
+  /// Board layers from visually topmost to bottommost.
+  ///
+  /// The DSL declaration is bottom-to-top, matching the Flutter board. Text
+  /// observations reverse that exact order when choosing a cell's top symbol.
+  static List<String> _orderedLayerIds(LevelState state, GameDefinition game) {
+    final declared = [
+      for (final layer in game.layers)
+        if (state.board.layers.containsKey(layer.id)) layer.id,
+    ];
+    final declaredSet = declared.toSet();
+    final remaining = [
+      for (final layerId in state.board.layers.keys)
+        if (!declaredSet.contains(layerId)) layerId,
+    ];
+    return [...declared, ...remaining].reversed.toList(growable: false);
+  }
+
   static String _buildLegend(
       LevelState state, GameDefinition game, bool hasAvatar,
       {Map<String, String>? kindSymbolOverrides,
-      required Set<Position> concealedPositions}) {
+      required Set<Position> concealedPositions,
+      required List<String> layerOrder}) {
     final seen = <String, String>{}; // symbol -> label
     if (hasAvatar) seen[_avatarSymbol] = 'avatar (you)';
 
-    for (final layer in state.board.layers.values) {
+    for (final layerId in layerOrder) {
+      final layer = state.board.layers[layerId]!;
       for (final entry in layer.entries()) {
         if (concealedPositions.contains(entry.key)) continue;
         final entity = entry.value;
@@ -274,8 +295,12 @@ class TextRenderer {
   /// Show the overlay region as a focused mini-view of its cells. Without this
   /// the model would only see the bounds ("Overlay region: (0,0)–(1,1)") and
   /// have to mentally re-extract the contents from the full grid each turn.
-  static String _buildOverlayBlock(LevelState state, GameDefinition game,
-      Map<Position, String> mcoSymbols, Set<Position> concealedPositions,
+  static String _buildOverlayBlock(
+      LevelState state,
+      GameDefinition game,
+      Map<Position, String> mcoSymbols,
+      Set<Position> concealedPositions,
+      List<String> layerOrder,
       {Map<String, String>? kindSymbolOverrides}) {
     final overlay = state.overlay;
     if (overlay == null) return '';
@@ -285,7 +310,6 @@ class TextRenderer {
     final x2 = overlay.x + overlay.width - 1;
     final y2 = overlay.y + overlay.height - 1;
 
-    const layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
     final rows = <String>[];
     for (int dy = 0; dy < overlay.height; dy++) {
       final buf = StringBuffer();
@@ -333,8 +357,8 @@ class TextRenderer {
       Position? avatarPos,
       Map<Position, String> mcoSymbols,
       Set<Position> concealedPositions,
+      List<String> layerOrder,
       {Map<String, String>? kindSymbolOverrides}) {
-    final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
     final entries = <String>[];
 
     final w = state.board.width;
@@ -380,12 +404,12 @@ class TextRenderer {
                 sym == ' ' ||
                 originalSym == '.' ||
                 originalSym == ' ') continue;
-            symbols.add('$sym($label)');
+            symbols.add('[$layerId] $sym($label)');
           }
         }
 
         // Avatar counts as an extra layer on top (only when shown in grid).
-        if (avatarPos == pos) symbols.insert(0, '@(avatar)');
+        if (avatarPos == pos) symbols.insert(0, '[avatar] @(avatar)');
 
         final mcoSymbol = mcoSymbols[pos];
         if (mcoSymbol != null) {
@@ -402,7 +426,10 @@ class TextRenderer {
                   ? 'multi-cell object'
                   : (game.entityKinds[mco.kind]?.uiName ??
                       mco.kind.replaceAll('_', ' ')));
-          symbols.add('$mcoSymbol($label)');
+          final layer = mco == null
+              ? 'structures'
+              : (game.entityKinds[mco.kind]?.layer ?? 'structures');
+          symbols.add('[$layer] $mcoSymbol($label)');
         }
 
         if (symbols.length >= 2) {
@@ -522,12 +549,11 @@ class TextRenderer {
   /// Lists all number-valued tiles with their exact decimal values.
   /// Appears below the legend so the LLM always knows precise values even when
   /// the grid symbol is compressed (A–F or ?).
-  static String _buildNumbersBlock(
-      LevelState state, GameDefinition game, Set<Position> concealedPositions) {
+  static String _buildNumbersBlock(LevelState state, GameDefinition game,
+      Set<Position> concealedPositions, List<String> layerOrder) {
     final entries = <String>[];
     final w = state.board.width;
     final h = state.board.height;
-    const layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
         final pos = Position(x, y);
