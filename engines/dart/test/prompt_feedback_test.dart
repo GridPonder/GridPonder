@@ -8,6 +8,7 @@
 import 'dart:convert';
 
 import 'package:gridponder_engine/engine.dart';
+import 'package:llm_dart/llm_dart.dart';
 import 'package:test/test.dart';
 
 /// Normalises a Dart literal to the types jsonDecode yields.
@@ -298,6 +299,7 @@ class _Obs {
     String? previousAttempt,
     Map<String, dynamic>? rejectedAction,
     String? rejectionDetail,
+    String? lastActionLabel,
     bool anon = false,
   }) {
     final obs = AgentObservation.build(game, level, engine.state,
@@ -310,7 +312,8 @@ class _Obs {
         anonymize: anon,
         previousAttempt: previousAttempt,
         rejectedAction: rejectedAction,
-        rejectionDetail: rejectionDetail);
+        rejectionDetail: rejectionDetail,
+        lastActionLabel: lastActionLabel);
   }
 }
 
@@ -319,6 +322,24 @@ _Obs _setup(
   final game = _game({..._obsGame, ...?gamePatch});
   final level = _level(game, {..._obsLevel(), ...?levelPatch});
   return _Obs(game, level, TurnEngine(game, level));
+}
+
+/// A provider that always answers [reply].
+class _FixedReply extends ChatCapability {
+  final String reply;
+  _FixedReply(this.reply);
+
+  @override
+  Future<ChatResponse> chatWithTools(
+          List<ChatMessage> messages, List<Tool>? tools,
+          {CancelToken? cancelToken}) =>
+      throw UnimplementedError();
+
+  @override
+  Stream<ChatStreamEvent> chatStream(List<ChatMessage> messages,
+      {List<Tool>? tools, CancelToken? cancelToken}) async* {
+    yield TextDeltaEvent(reply);
+  }
 }
 
 void main() {
@@ -440,6 +461,74 @@ void main() {
       }, anon: true);
       final label = buildAnonKindToLabel(_game(_symbolGame))['pod'];
       expect(text.split('\n')[1], '$label??');
+    });
+  });
+
+  group('C. several goals', () {
+    String multi(List<Map<String, dynamic>> goals, {bool anon = false}) {
+      final game = _game(_symbolGame);
+      final level = _level(game, {
+        'board': {
+          'size': [3, 2],
+          'layers': {},
+        },
+        'goals': goals,
+      });
+      return LlmAgent.describeGoals(level, TurnEngine(game, level).state, game,
+          anonymize: anon,
+          kindToLabel: anon ? buildAnonKindToLabel(game) : const {});
+    }
+
+    final match = {
+      'id': 'm',
+      'type': 'board_match',
+      'config': {
+        'targetLayers': {
+          'objects': [
+            ['pod', null, null],
+            [null, null, null]
+          ]
+        }
+      },
+    };
+    final clear = {
+      'id': 'c',
+      'type': 'all_cleared',
+      'config': {'kind': 'pod'}
+    };
+    final reach = {
+      'id': 'r',
+      'type': 'reach_target',
+      'config': {'targetKind': 'pod'}
+    };
+
+    test('a goal after a target grid starts on its own line', () {
+      for (final anon in [false, true]) {
+        final lines = multi([match, clear], anon: anon).split('\n');
+        expect(lines[3], startsWith('Target legend: '));
+        expect(lines[3], isNot(contains(';')));
+        expect(lines[4], startsWith('Clear all '));
+        expect(lines, hasLength(5));
+      }
+    });
+
+    test('consecutive target grids each end cleanly', () {
+      final lines = multi([match, match, reach]).split('\n');
+      expect(lines[3], isNot(contains(';')));
+      expect(lines[4], startsWith('Arrange'));
+      expect(lines[7], 'Target legend: ?=any (unconstrained), p=Landed Pod');
+      expect(lines[8], 'Reach the Landed Pod');
+    });
+
+    test('single-line goals still join with semicolons', () {
+      expect(multi([reach, clear]),
+          'Reach the Landed Pod; Clear all Landed Pods from the board');
+      expect(
+          multi([reach, match]),
+          startsWith('Reach the Landed Pod; '
+              'Arrange tiles to match the target pattern:\n'));
+      expect(LlmAgent.joinGoalParts([]), '');
+      expect(LlmAgent.joinGoalParts(['a\nb', 'c', 'd']), 'a\nb\nc; d');
     });
   });
 
@@ -720,6 +809,65 @@ void main() {
               'CURRENT BOARD:\n$board\nMoves this attempt: 0 of 11 allowed'));
       expect(prompt, isNot(contains('BOARD BEFORE')));
       expect(prompt, isNot(contains('BOARD AFTER')));
+    });
+
+    test('anonymous last action echoes the submitted label', () {
+      final o = _setup();
+      final before = TextRenderer.render(o.engine.state, o.game,
+          includeLegend: false,
+          kindSymbolOverrides: buildAnonKindToLabel(o.game));
+      o.act('tap_cell', {
+        'position': [0, 0]
+      });
+      const tap = GameAction('tap_cell', {
+        'position': [0, 0]
+      });
+      final prompt = o.prompt(
+          anon: true,
+          lastAction: tap,
+          previousBoardText: before,
+          lastActionLabel: 'a7');
+      expect(prompt, contains('LAST ACTION: {"action": "a7"}\nBOARD BEFORE:'));
+      final named = o.prompt(
+          lastAction: tap, previousBoardText: 'x', lastActionLabel: 'a7');
+      expect(
+          named,
+          contains(
+              'LAST ACTION: {"action": "tap_cell", "position": [0, 0]}\n'));
+    });
+
+    test('an anonymous LlmAgent echoes the label it submitted', () async {
+      final o = _setup();
+      final agent = LlmAgent(
+          provider: _FixedReply('{"action": "a2"}'),
+          displayName: 'fixed',
+          anonymize: true);
+      GameAction? lastAction;
+      AgentObservation obs() =>
+          AgentObservation.build(o.game, o.level, o.engine.state,
+              engine: o.engine,
+              lastAction: lastAction,
+              previousBoardText: lastAction == null ? null : 'x');
+      final first = obs();
+      final chosen = (await agent.act(first).last as AgentActCompleted)
+          .result
+          .actions
+          .single;
+      expect(buildAnonReverseMap(first.validActions)['a2'], chosen);
+      expect(o.engine.executeTurn(chosen).accepted, isTrue);
+      lastAction = chosen;
+      final second = obs();
+      // Re-tapping is no longer offered, so the new labels cannot name it.
+      final now = buildAnonReverseMap(second.validActions)
+          .entries
+          .where((e) =>
+              jsonEncode(e.value.toJson()) == jsonEncode(chosen.toJson()))
+          .map((e) => e.key)
+          .firstOrNull;
+      expect(now, isNot('a2'));
+      await agent.act(second).last;
+      expect(agent.lastPrompt,
+          contains('LAST ACTION: {"action": "a2"}\nBOARD BEFORE:'));
     });
 
     test('board did not change note', () {

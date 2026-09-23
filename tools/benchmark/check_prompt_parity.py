@@ -385,7 +385,10 @@ SCENARIOS = [
         "pack": "pincer", "level": "pc_001", "args": [],
         "items": [("gold", 1), ("gold", 1)],
         "expect": {"named": ["Selected: "]},
-        "absent": {"named": ["The board did not change."]},
+        # The re-tap is gone from the next state, so a last action looked up
+        # among the new labels printed "?"; the submitted label is echoed.
+        "absent": {"named": ["The board did not change."],
+                   "anon": ['LAST ACTION: {\\"action\\": \\"?\\"}']},
     },
     {
         "name": "a held slow train still offers wait",
@@ -403,6 +406,19 @@ SCENARIOS = [
         "expect": {"named": ["REJECTED (move is not legal in this state)",
                              "Selected: Wei at (2,1)"],
                    "anon": ["REJECTED (unknown action label"]},
+        "absent": {"anon": ['LAST ACTION: {\\"action\\": \\"?\\"}']},
+    },
+    {
+        # Schema aliases: a1 = move, p1 = direction, v3 = right. The harness
+        # shows the rejected event's detail to the agent, so it must name the
+        # submitted alias, never the real action id.
+        "name": "anonymous harness rejection names the submitted alias",
+        "pack": "three_kingdoms", "level": "tk_003",
+        "args": ["--observation", "harness"],
+        "items": [("raw", {"action": "a1", "p1": "v3"})],
+        "modes": ["anon"],
+        "expect": {"anon": ['"detail": "a1 is not legal in this state"']},
+        "absent": {"anon": ["move is not legal"]},
     },
     {
         "name": "balance connectivity in the goal line",

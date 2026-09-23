@@ -33,6 +33,7 @@ _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 from engines.python._models import Pos as _Pos
+from engines.python.text_renderer import order_layer_ids
 
 
 CELL_PX = 64
@@ -172,13 +173,12 @@ def _cell_origin(x: int, y: int) -> tuple[int, int]:
     return AXIS_PX + PADDING + x * CELL_PX, AXIS_PX + PADDING + y * CELL_PX
 
 
-def _layer_order(game_def) -> list[str]:
-    """Every declared layer in the pack's own order (ground first), as the
-    app's resolveBoardLayerOrder draws them."""
-    ids = [layer["id"] for layer in game_def.layers]
-    if "ground" in ids:
-        ids.remove("ground")
-    return ["ground", *ids]
+def _layer_order(state) -> list[str]:
+    """The board's layers bottom to top (ground first), in the same order the
+    text grid picks a cell's top item (`order_layer_ids`), so a text+image
+    prompt shows the same item on top in both renderings."""
+    top_to_bottom = order_layer_ids(list(state.board.layers))
+    return ["ground", *[layer for layer in reversed(top_to_bottom) if layer != "ground"]]
 
 
 def _layer_default(game_def, layer_id: str):
@@ -191,12 +191,12 @@ def _layer_default(game_def, layer_id: str):
 def _cell_tile(ctx: _Ctx, x: int, y: int) -> tuple[Image.Image, bool]:
     """Composite one cell bottom to top. Returns (tile, drew_hidden_inset).
 
-    Every declared layer is drawn in the pack's order; multi-cell objects sit
-    just above the floor layers (ground, territory). An item whose visible
-    pixels end up mostly covered by the items above it (e.g. a marker under an
-    opaque piece, a special floor under a territory fill) gets a small inset
-    in the cell's lower-left corner, since the text grid lists it under
-    "Stacked cells" and the image would otherwise drop it.
+    Layers are drawn in the text grid's order (see `_layer_order`); multi-cell
+    objects sit just above the ground, as the text grid ranks them. An item
+    whose visible pixels end up mostly covered by the items above it (e.g. a
+    marker under an opaque piece, a special floor under a territory fill) gets
+    a small inset in the cell's lower-left corner, since the text grid lists
+    it under "Stacked cells" and the image would otherwise drop it.
     """
     game_def, state = ctx.game_def, ctx.state
     pos = _Pos(x, y)
@@ -218,22 +218,13 @@ def _cell_tile(ctx: _Ctx, x: int, y: int) -> tuple[Image.Image, bool]:
             ground_tile = under
         stack.append((ground_tile, ground.kind != _layer_default(game_def, "ground")))
 
-    layers = _layer_order(game_def)[1:]
-    floor_layers = [layer for layer in layers if layer == "territory"]
-    other_layers = [layer for layer in layers if layer not in floor_layers]
-
-    for layer in floor_layers:
-        ent = state.board.get_entity(layer, pos)
-        if ent is not None:
-            stack.append((_layer_tile(ctx, layer, ent), ent.kind != _layer_default(game_def, layer)))
-
     for mco in state.board.multi_cell_objects:
         if not any(cell.x == x and cell.y == y for cell in mco.cells):
             continue
         kind_def = game_def.entity_kinds.get(mco.kind, {})
         stack.append((_entity_tile(ctx, mco.kind, kind_def, mco.params, None), False))
 
-    for layer in other_layers:
+    for layer in _layer_order(state)[1:]:
         ent = state.board.get_entity(layer, pos)
         if ent is not None:
             stack.append((_layer_tile(ctx, layer, ent), ent.kind != _layer_default(game_def, layer)))

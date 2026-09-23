@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT))
 from engines.python._game_def import GameDef
 from engines.python._models import Board, GameState
 from engines.python.anon import build_anon_kind_to_label
-from engines.python.goal_renderer import describe_loss, render_goals
+from engines.python.goal_renderer import describe_loss, join_goal_parts, render_goals
 
 
 def _make_game() -> GameDef:
@@ -409,6 +409,52 @@ def test_target_entry_with_params_renders_its_kind():
                                      [None, None, None]]})
     assert text.splitlines()[1:] == [
         "p??", "???", "Target legend: ?=any (unconstrained), p=Landed Pod"], text
+
+
+# ── several goals ───────────────────────────────────────────────────────
+
+def _multi_goal_text(goals: list[dict], *, anon: bool = False) -> str:
+    game = _symbol_game()
+    board = Board.from_json({"size": [3, 2], "layers": {}}, game.layers)
+    state = GameState.from_json({}, board, game.defaults)
+    labels = build_anon_kind_to_label(game) if anon else None
+    return render_goals({"goals": goals}, state, game, anonymize=anon,
+                        kind_to_label=labels)
+
+
+_MATCH = {"id": "m", "type": "board_match", "config": {
+    "targetLayers": {"objects": [["pod", None, None], [None, None, None]]}}}
+_CLEAR = {"id": "c", "type": "all_cleared", "config": {"kind": "pod"}}
+_REACH = {"id": "r", "type": "reach_target", "config": {"targetKind": "pod"}}
+
+
+def test_a_goal_after_a_target_grid_starts_on_its_own_line():
+    """It used to be appended to the target legend with "; ", so the next
+    goal read as one more legend entry."""
+    for anon in (False, True):
+        lines = _multi_goal_text([_MATCH, _CLEAR], anon=anon).splitlines()
+        assert lines[3].startswith("Target legend: ") and ";" not in lines[3], lines
+        assert lines[4].startswith("Clear all "), lines
+        assert len(lines) == 5, lines
+
+
+def test_consecutive_target_grids_each_end_cleanly():
+    lines = _multi_goal_text([_MATCH, _MATCH, _REACH]).splitlines()
+    assert [i for i, l in enumerate(lines) if l.startswith("Arrange")] == [0, 4], lines
+    assert lines[3].startswith("Target legend: ") and ";" not in lines[3], lines
+    assert lines[7] == "Target legend: ?=any (unconstrained), p=Landed Pod", lines
+    assert lines[8] == "Reach the Landed Pod", lines
+
+
+def test_single_line_goals_still_join_with_semicolons():
+    assert _multi_goal_text([_REACH, _CLEAR]) == (
+        "Reach the Landed Pod; Clear all Landed Pods from the board")
+    # A single-line goal before a grid keeps "; " (the grid follows its own
+    # "match the target pattern:" line).
+    assert _multi_goal_text([_REACH, _MATCH]).startswith(
+        "Reach the Landed Pod; Arrange tiles to match the target pattern:\n")
+    assert join_goal_parts([]) == "" and join_goal_parts(["a"]) == "a"
+    assert join_goal_parts(["a\nb", "c", "d"]) == "a\nb\nc; d"
 
 
 def run_all() -> bool:

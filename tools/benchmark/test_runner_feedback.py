@@ -189,12 +189,55 @@ def test_an_engine_veto_reason_is_the_rejection_detail():
 
 def test_an_anonymous_run_never_shows_the_veto_reason():
     """The reason names kinds; the harness shows the event detail to the agent,
-    so an anonymous run keeps the generic text in the event too."""
+    so an anonymous run keeps the generic text in the event too, naming the
+    action by the submitted label rather than its real id."""
     events = _run([{"action": "a2"}], "--anon", "--observation", "harness",
                   game=_STAMP_GAME, level=_STAMP_LEVEL)
     rejected = [e for e in events if e["event"] == "rejected"]
-    assert rejected and rejected[0]["detail"] == "press is not legal in this state", events
+    assert rejected and rejected[0]["detail"] == "a2 is not legal in this state", events
     assert all("Red plate" not in json.dumps(e) for e in events), events
+    assert all("press" not in json.dumps(e) for e in events), events
+
+
+def test_an_anonymous_rejection_detail_names_the_submitted_label():
+    """Without a veto reason the generic event detail used to name the real
+    action ("move is not legal ..."); the harness shows it to the agent."""
+    move_left = {"action": "a1", "p1": "v2"}  # schema aliases: move, direction=left
+    events = _run([move_left], "--anon", "--observation", "harness")
+    assert events[1] == {"event": "rejected", "action": move_left,
+                         "reason": "illegal",
+                         "detail": "a1 is not legal in this state"}, events[1]
+    assert all("move" not in e.get("detail", "") for e in events), events
+
+
+def test_anonymous_last_action_echoes_the_submitted_label():
+    """Labels are renumbered every turn. Selecting removes the re-tap action,
+    so looking the last action up among the new labels found nothing ("?");
+    the prompt must echo the label the agent actually sent."""
+    events = _run([{"action": "a1"}], "--anon")
+    assert events[0]["valid_actions"][0] == _SELECT
+    prompt = events[-1]["prompt"]
+    assert 'LAST ACTION: {"action": "a1"}\nBOARD BEFORE:' in prompt, prompt
+    assert '"?"' not in prompt, prompt
+    # Moves are now offered as a1..a4 (sorted: down, left, right, up); moving
+    # right echoes a3 whatever the following state numbers it as.
+    events = _run([{"action": "a1"}, {"action": "a3"}], "--anon")
+    prompt = [e for e in events if e["event"] == "state"][-1]["prompt"]
+    assert 'LAST ACTION: {"action": "a3"}\nBOARD BEFORE:' in prompt, prompt
+
+
+def test_anonymous_last_action_label_in_a_fixed_n_batch():
+    """Batch modes echo the submitted label too (the re-tap is gone from the
+    next state, so a lookup there printed "?"), and a batch resolves every
+    label against the one prompt it answers."""
+    level = _level(None)
+    level["loseConditions"][0]["config"]["limit"] = 9
+    events = _run([{"actions": [{"action": "a1"}]},
+                   {"actions": [{"action": "a3"}, {"action": "a2"}]}],
+                  "--anon", "--mode", "fixed-n", "--step-size", "2", level=level)
+    states = [e for e in events if e["event"] == "state"]
+    assert 'LAST ACTION: {"action": "a1"}\nBOARD BEFORE:' in states[1]["prompt"], states[1]
+    assert 'LAST ACTION: {"action": "a2"}\nBOARD BEFORE:' in states[2]["prompt"], states[2]
 
 
 _IMAGE_NOTE = "(See the attached image of the current board."

@@ -14,7 +14,7 @@ def render_goals(
     anonymize: bool = False,
     kind_to_label: dict[str, str] | None = None,
 ) -> str:
-    """Return a semicolon-separated string describing all level goals."""
+    """Return a string describing all level goals (see `join_goal_parts`)."""
     goal_parts: list[str] = []
     overrides = getattr(game_def, "goal_descriptions", {}) or {}
     for goal in level_def.get("goals", []):
@@ -96,7 +96,19 @@ def render_goals(
         else:
             goal_parts.append(goal_type)
 
-    return "; ".join(goal_parts)
+    return join_goal_parts(goal_parts)
+
+
+def join_goal_parts(parts: list[str]) -> str:
+    """Join goal descriptions with "; ", except that a goal following a
+    multi-line one (a target grid ending in its legend) starts on its own
+    line instead of being appended to that goal's last line."""
+    out = ""
+    for i, part in enumerate(parts):
+        if i:
+            out += "\n" if "\n" in parts[i - 1] else "; "
+        out += part
+    return out
 
 
 def _list_names(names: list[str]) -> str:

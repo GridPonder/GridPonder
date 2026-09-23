@@ -141,6 +141,11 @@ class LlmAgent implements GridPonderAgent {
   /// The most recent prompt sent to the LLM. Null before the first call.
   String? lastPrompt;
 
+  /// Anonymous mode: the labels offered in the most recent prompt (encoded
+  /// action → label). The next observation's last action was chosen under
+  /// these labels, so it is echoed with them rather than the new state's.
+  Map<String, String> _lastLabels = const {};
+
   LlmAgent({
     required ChatCapability provider,
     required String displayName,
@@ -168,8 +173,17 @@ class LlmAgent implements GridPonderAgent {
       stepSize: stepSize,
       maxN: maxN,
       anonymize: anonymize,
+      lastActionLabel: anonymize && obs.lastAction != null
+          ? _lastLabels[pyJsonDumps(obs.lastAction!.toJson())]
+          : null,
     );
     lastPrompt = prompt;
+    if (anonymize) {
+      _lastLabels = {
+        for (final e in buildAnonReverseMap(obs.validActions).entries)
+          pyJsonDumps(e.value.toJson()): e.key,
+      };
+    }
 
     final thinkingBuffer = StringBuffer();
     final textBuffer = StringBuffer();
@@ -341,6 +355,9 @@ class LlmAgent implements GridPonderAgent {
   ///
   /// When [anonymize] is true, entity kind names, action IDs, and game
   /// description are replaced with opaque labels (ARC-AGI style).
+  /// [lastActionLabel] is the label the agent submitted for the last action;
+  /// anonymous prompts echo it (falling back to a lookup among the current
+  /// labels, which renumber every turn, when it is absent).
   static String buildPrompt(
     AgentObservation obs, {
     String memory = '',
@@ -351,6 +368,7 @@ class LlmAgent implements GridPonderAgent {
     String? previousAttempt,
     Map<String, dynamic>? rejectedAction,
     String? rejectionDetail,
+    String? lastActionLabel,
   }) {
     // ── Anon maps ────────────────────────────────────────────────────────────
     final kindToLabel =
@@ -421,14 +439,19 @@ class LlmAgent implements GridPonderAgent {
         : '';
 
     // ── Last action section ───────────────────────────────────────────────────
-    final String lastActionLabel;
+    // In anonymous mode, prefer the label the agent submitted: labels are
+    // numbered over the state an action was chosen in, so the new state's
+    // labels can name it differently or not at all.
+    final String lastActionShown;
     if (obs.lastAction != null && anonymize) {
-      final label = actionForward[pyJsonDumps(obs.lastAction!.toJson())] ?? '?';
-      lastActionLabel = '{"action": "$label"}';
+      final label = (lastActionLabel != null && lastActionLabel.isNotEmpty)
+          ? lastActionLabel
+          : actionForward[pyJsonDumps(obs.lastAction!.toJson())] ?? '?';
+      lastActionShown = '{"action": "$label"}';
     } else if (obs.lastAction != null) {
-      lastActionLabel = pyJsonDumps(obs.lastAction!.toJson());
+      lastActionShown = pyJsonDumps(obs.lastAction!.toJson());
     } else {
-      lastActionLabel = '';
+      lastActionShown = '';
     }
 
     final String lastActionSection;
@@ -444,7 +467,7 @@ class LlmAgent implements GridPonderAgent {
     } else if (obs.lastAction != null) {
       final unchangedLine = boardUnchanged ? '\nThe board did not change.' : '';
       lastActionSection = '''
-LAST ACTION: $lastActionLabel
+LAST ACTION: $lastActionShown
 BOARD BEFORE:
 ${obs.previousBoardText}$prevInventoryLine
 
@@ -557,7 +580,7 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     }
   }
 
-  /// A semicolon-separated description of every goal on the level.
+  /// A description of every goal on the level (joined by [joinGoalParts]).
   ///
   /// Mirror of `render_goals` in engines/python/goal_renderer.py. Split out of
   /// [buildPrompt] so the text an agent is given can be tested on its own —
@@ -637,7 +660,20 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
           goalParts.add(g.type);
       }
     }
-    return goalParts.join('; ');
+    return joinGoalParts(goalParts);
+  }
+
+  /// Joins goal descriptions with "; ", except that a goal following a
+  /// multi-line one (a target grid ending in its legend) starts on its own
+  /// line instead of being appended to that goal's last line. Mirror of
+  /// `join_goal_parts` in engines/python/goal_renderer.py.
+  static String joinGoalParts(List<String> parts) {
+    final out = StringBuffer();
+    for (var i = 0; i < parts.length; i++) {
+      if (i > 0) out.write(parts[i - 1].contains('\n') ? '\n' : '; ');
+      out.write(parts[i]);
+    }
+    return out.toString();
   }
 
   /// Limit of the level's first `max_actions` lose condition, if any.

@@ -68,6 +68,7 @@ def build_prompt(
     rejected_action: dict | None = None,
     rejection_detail: str | None = None,
     image_marks: list[str] | None = None,
+    last_action_label: str | None = None,
 ) -> str:
     """Build the full LLM prompt string matching the Dart runner output.
 
@@ -84,6 +85,10 @@ def build_prompt(
     rejected; the prompt says so and shows only the current board.
     image_marks: the marks the attached image carries (as reported by
     board_image.render_board_image); explained next to the image note.
+    last_action_label: in anonymous mode, the label the agent submitted for
+    last_action. Labels are numbered over the state an action was chosen in,
+    so looking last_action up among the new state's labels can find a
+    different label or none at all; runners pass what was submitted.
     previous_status: `status_fingerprint` of the state before last_action.
     "The board did not change." is printed only when the board text, the
     inventory and this fingerprint are all unchanged (None skips the status
@@ -168,13 +173,14 @@ def build_prompt(
     )
 
     # ── Last action label ─────────────────────────────────────────────────────
-    last_action_label = ""
+    last_action_shown = ""
     if last_action is not None:
         if anonymize:
-            label = action_forward.get(json.dumps(last_action, sort_keys=True), "?")
-            last_action_label = '{"action": "' + label + '"}'
+            label = last_action_label or action_forward.get(
+                json.dumps(last_action, sort_keys=True), "?")
+            last_action_shown = '{"action": "' + label + '"}'
         else:
-            last_action_label = json.dumps(last_action, sort_keys=True)
+            last_action_shown = json.dumps(last_action, sort_keys=True)
 
     # ── Last action section ───────────────────────────────────────────────────
     if rejected_action is not None:
@@ -207,7 +213,7 @@ def build_prompt(
             "exactly what your last action did (tiles removed, pushed, merged, etc.).\n"
         )
         last_action_section = (
-            f"LAST ACTION: {last_action_label}\n"
+            f"LAST ACTION: {last_action_shown}\n"
             f"BOARD BEFORE:\n"
             f"{previous_board_text}{prev_inventory_line}\n"
             f"\n"

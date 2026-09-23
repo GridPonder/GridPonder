@@ -277,6 +277,9 @@ def main() -> None:
     repeated_state_count = 0
 
     last_action: dict | None = None
+    # The label the agent submitted for last_action (anonymous runs): labels
+    # are renumbered every turn, so the new state's labels cannot name it.
+    last_action_label: str | None = None
     prev_board_text: str | None = None
     prev_inventory: str | None = None
     prev_status: str | None = None
@@ -354,6 +357,7 @@ def main() -> None:
             rejected_action=last_rejected[0] if last_rejected else None,
             rejection_detail=last_rejected[1] if last_rejected else None,
             image_marks=image_marks,
+            last_action_label=last_action_label if anon else None,
         )
         previous_attempt = None
 
@@ -383,10 +387,11 @@ def main() -> None:
 
     def do_reset(reason: str, loss_reason: str | None = None) -> None:
         nonlocal attempt_number, last_action, prev_board_text, prev_inventory, prev_status, seen_states
-        nonlocal previous_attempt, last_rejected
+        nonlocal previous_attempt, last_rejected, last_action_label
         engine.reset()
         attempt_number += 1
         last_action = None
+        last_action_label = None
         last_rejected = None
         if reason == "lost":
             previous_attempt = f"lost — {loss_reason}"
@@ -480,11 +485,13 @@ def main() -> None:
             "detail": detail,
         })
 
-    def illegal_details(real: dict, result) -> tuple[str, str]:
+    def illegal_details(real: dict, submitted: dict, result) -> tuple[str, str]:
         """(event detail, prompt detail) for an engine rejection. An engine
         reason carried on `action_vetoed` wins over the generic text. The
-        reason names kinds, so an anonymous run keeps the generic text (the
-        harness shows the event detail to the agent too)."""
+        reason names kinds, so an anonymous run keeps the generic text, and
+        its event detail names the action by the label the agent submitted,
+        never the real action id (the harness shows the event detail to the
+        agent too)."""
         veto_reason = next(
             (e.get("reason") for e in result.events
              if e.get("type") == "action_vetoed" and isinstance(e.get("reason"), str)
@@ -493,8 +500,10 @@ def main() -> None:
         )
         if veto_reason is not None and not anon:
             return veto_reason, veto_reason
+        if anon:
+            return f"{submitted.get('action')} is not legal in this state", "not legal in this state"
         detail = f"{real['action']} is not legal in this state"
-        return detail, ("not legal in this state" if anon else detail)
+        return detail, detail
 
     def resolve(action_input: dict) -> tuple[dict | None, str | None, dict | None]:
         """Turn one submitted action into (real_action, schema_error, params).
@@ -579,7 +588,7 @@ def main() -> None:
             result = engine.execute_turn(real["action"], game_params)
 
             if not result.accepted:
-                reject(inp, "illegal", *illegal_details(real, result))
+                reject(inp, "illegal", *illegal_details(real, inp, result))
                 if consecutive_illegal >= _MAX_CONSECUTIVE_ILLEGAL:
                     _out(lost_event(_REASON_ILLEGAL))
                     break
@@ -588,6 +597,7 @@ def main() -> None:
 
             consecutive_schema = consecutive_illegal = 0
             last_action = real
+            last_action_label = action_id
             last_rejected = None
             total_game_actions += 1
             total_now = total_game_actions + give_up_count
@@ -663,7 +673,7 @@ def main() -> None:
             result = engine.execute_turn(real["action"], game_params)
 
             if not result.accepted:
-                reject(action_input, "illegal", *illegal_details(real, result))
+                reject(action_input, "illegal", *illegal_details(real, action_input, result))
                 if consecutive_illegal >= _MAX_CONSECUTIVE_ILLEGAL:
                     _out(lost_event(_REASON_ILLEGAL))
                     outer_break = True
@@ -671,6 +681,7 @@ def main() -> None:
 
             consecutive_schema = consecutive_illegal = 0
             last_action = real
+            last_action_label = action_id
             last_rejected = None
             total_game_actions += 1
             total_now = total_game_actions + give_up_count

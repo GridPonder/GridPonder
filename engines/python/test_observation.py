@@ -190,6 +190,24 @@ def test_rejected_action_section():
     assert "BOARD BEFORE" not in prompt and "BOARD AFTER" not in prompt
 
 
+def test_anonymous_last_action_echoes_the_submitted_label():
+    """Labels renumber every turn; the submitted label is echoed, not a
+    lookup among the new state's labels (which may miss or mislabel it)."""
+    game, level, engine = _setup()
+    before = render(engine.state, game, include_legend=False,
+                    kind_symbol_overrides=build_anon_kind_to_label(game))
+    engine.execute_turn("tap_cell", {"position": [0, 0]})
+    kwargs = dict(anonymize=True, previous_board_text=before,
+                  last_action={"action": "tap_cell", "position": [0, 0]})
+    prompt = build_prompt(game, level, engine.state, last_action_label="a7", **kwargs)
+    assert 'LAST ACTION: {"action": "a7"}\nBOARD BEFORE:' in prompt, prompt
+    # Named prompts ignore it and print the real action.
+    named = build_prompt(game, level, engine.state, last_action_label="a7",
+                         previous_board_text="x",
+                         last_action={"action": "tap_cell", "position": [0, 0]})
+    assert 'LAST ACTION: {"action": "tap_cell", "position": [0, 0]}\n' in named, named
+
+
 def test_board_did_not_change_note():
     game, level, engine = _setup()
     engine.execute_turn("tap_cell", {"position": [0, 1]})

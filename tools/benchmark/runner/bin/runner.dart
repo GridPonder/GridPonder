@@ -196,6 +196,9 @@ Future<void> main(List<String> arguments) async {
   int repeatedStateCount = 0;
 
   GameAction? lastAction;
+  // The label the agent submitted for lastAction (anonymous runs): labels are
+  // renumbered every turn, so the new state's labels cannot name it.
+  String? lastActionLabel;
   String? prevBoardText;
   String? prevInventory;
   String? prevStatus;
@@ -263,6 +266,7 @@ Future<void> main(List<String> arguments) async {
       previousAttempt: previousAttempt,
       rejectedAction: lastRejected?.$1,
       rejectionDetail: lastRejected?.$2,
+      lastActionLabel: anon ? lastActionLabel : null,
     );
     previousAttempt = null;
 
@@ -292,6 +296,7 @@ Future<void> main(List<String> arguments) async {
     engine.reset();
     attemptNumber++;
     lastAction = null;
+    lastActionLabel = null;
     lastRejected = null;
     if (reason == 'lost') {
       previousAttempt = 'lost — $lossReason';
@@ -372,17 +377,25 @@ Future<void> main(List<String> arguments) async {
 
   /// (event detail, prompt detail) for an engine rejection. An engine reason
   /// carried on `action_vetoed` wins over the generic text. The reason names
-  /// kinds, so an anonymous run keeps the generic text (the harness shows the
-  /// event detail to the agent too).
-  (String, String) illegalDetails(GameAction real, TurnResult result) {
+  /// kinds, so an anonymous run keeps the generic text, and its event detail
+  /// names the action by the label the agent submitted, never the real action
+  /// id (the harness shows the event detail to the agent too).
+  (String, String) illegalDetails(
+      GameAction real, Map<String, dynamic> submitted, TurnResult result) {
     for (final e in result.events) {
       final r = e.payload['reason'];
       if (!anon && e.type == 'action_vetoed' && r is String && r.isNotEmpty) {
         return (r, r);
       }
     }
+    if (anon) {
+      return (
+        '${submitted['action']} is not legal in this state',
+        'not legal in this state'
+      );
+    }
     final detail = '${real.actionId} is not legal in this state';
-    return (detail, anon ? 'not legal in this state' : detail);
+    return (detail, detail);
   }
 
   /// Turn one submitted action into (real action, schema error).
@@ -479,7 +492,7 @@ Future<void> main(List<String> arguments) async {
       final result = engine.executeTurn(real!);
 
       if (!result.accepted) {
-        final (detail, promptDetail) = illegalDetails(real, result);
+        final (detail, promptDetail) = illegalDetails(real, input, result);
         reject(input, 'illegal', detail, promptDetail);
         if (consecutiveIllegal >= _maxConsecutiveIllegal) {
           out(lostEvent(_reasonIllegal));
@@ -491,6 +504,7 @@ Future<void> main(List<String> arguments) async {
 
       consecutiveSchema = consecutiveIllegal = 0;
       lastAction = real;
+      lastActionLabel = actionId as String;
       lastRejected = null;
       totalGameActions++;
       final totalNow = totalGameActions + giveUpCount;
@@ -575,7 +589,8 @@ Future<void> main(List<String> arguments) async {
       final result = engine.executeTurn(real!);
 
       if (!result.accepted) {
-        final (detail, promptDetail) = illegalDetails(real, result);
+        final (detail, promptDetail) =
+            illegalDetails(real, actionInput, result);
         reject(actionInput, 'illegal', detail, promptDetail);
         if (consecutiveIllegal >= _maxConsecutiveIllegal) {
           out(lostEvent(_reasonIllegal));
@@ -586,6 +601,7 @@ Future<void> main(List<String> arguments) async {
 
       consecutiveSchema = consecutiveIllegal = 0;
       lastAction = real;
+      lastActionLabel = actionId as String;
       lastRejected = null;
       totalGameActions++;
       final totalNow = totalGameActions + giveUpCount;
