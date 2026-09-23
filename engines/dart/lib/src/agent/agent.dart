@@ -4,6 +4,7 @@ import '../models/game_definition.dart';
 import '../models/game_state.dart';
 import '../models/level_definition.dart';
 import '../models/position.dart';
+import 'llm_agent.dart';
 import 'py_format.dart';
 import 'text_renderer.dart';
 
@@ -74,6 +75,11 @@ class AgentObservation {
   /// Inventory slot contents before [lastAction] was applied (null on first turn or if no avatar).
   final String? previousInventory;
 
+  /// `LlmAgent.statusFingerprint` of the state before [lastAction] (null on
+  /// the first turn). "The board did not change." needs it unchanged too;
+  /// null skips that comparison.
+  final String? previousStatus;
+
   const AgentObservation({
     required this.game,
     required this.level,
@@ -85,6 +91,7 @@ class AgentObservation {
     this.lastAction,
     this.previousBoardText,
     this.previousInventory,
+    this.previousStatus,
   });
 
   factory AgentObservation.build(
@@ -96,6 +103,7 @@ class AgentObservation {
     GameAction? lastAction,
     String? previousBoardText,
     String? previousInventory,
+    String? previousStatus,
     Map<String, String>? kindSymbolOverrides,
     TurnEngine? engine,
   }) {
@@ -111,6 +119,7 @@ class AgentObservation {
       lastAction: lastAction,
       previousBoardText: previousBoardText,
       previousInventory: previousInventory,
+      previousStatus: previousStatus,
     );
   }
 
@@ -161,7 +170,12 @@ class AgentObservation {
     }
     if (engine == null) return actions;
     final beforeKey = stateKey(engine.state, game);
-    return actions.where((a) => _isEffectful(engine, game, a, beforeKey)).toList();
+    // Asked once per state: whether a turn that only advances the counter
+    // still changes what the board will do next.
+    final beatMatters = engine.turnCountMatters();
+    return actions
+        .where((a) => _isEffectful(engine, game, a, beforeKey, beatMatters))
+        .toList();
   }
 
   static void _enumerate(
@@ -191,12 +205,24 @@ class AgentObservation {
     }
   }
 
-  static bool _isEffectful(
-      TurnEngine engine, GameDefinition game, GameAction action, String before) {
+  /// Events that do not by themselves make an action effectful: the
+  /// pipeline's tick, and a selection event that re-selects what is already
+  /// selected (a real selection change also changes the state key).
+  static const _nonEffectEvents = {'turn_ended', 'actor_selected'};
+
+  /// Accepted AND (state key changed OR a meaningful event OR won OR lost OR
+  /// the turn counter advanced while some system's behaviour depends on it).
+  static bool _isEffectful(TurnEngine engine, GameDefinition game,
+      GameAction action, String before, bool beatMatters) {
     final result = engine.previewTurn(action);
     if (!result.accepted) return false;
     if (result.isWon || result.isLost) return true;
-    if (result.events.any((e) => e.type != 'turn_ended')) return true;
+    if (result.events.any((e) => !_nonEffectEvents.contains(e.type))) {
+      return true;
+    }
+    if (beatMatters && result.newState.turnCount != engine.state.turnCount) {
+      return true;
+    }
     return stateKey(result.newState, game) != before;
   }
 
@@ -416,6 +442,7 @@ class AgentRunner {
     GameAction? lastAction;
     String? previousBoardText;
     String? previousInventory;
+    String? previousStatus;
 
     while (!engine.isWon && totalSteps < maxSteps) {
       // Auto-reset when attempt has used too many actions.
@@ -426,6 +453,7 @@ class AgentRunner {
         lastAction = null;
         previousBoardText = null;
         previousInventory = null;
+        previousStatus = null;
         yield AgentStepReset(attempt: attemptNumber, auto: true);
         if (stepDelay > Duration.zero) await Future.delayed(stepDelay);
         continue;
@@ -441,6 +469,7 @@ class AgentRunner {
         lastAction: lastAction,
         previousBoardText: previousBoardText,
         previousInventory: previousInventory,
+        previousStatus: previousStatus,
         kindSymbolOverrides: kindSymbolOverrides,
         engine: engine,
       );
@@ -466,6 +495,8 @@ class AgentRunner {
       final batchPrevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
+      final batchPrevStatus =
+          LlmAgent.statusFingerprint(engine.game, engine.level, engine.state);
 
       // runDone = true exits the outer while loop (win/loss/no-result).
       // skipPrevUpdate = true skips updating previousBoardText (give_up/win/loss).
@@ -485,6 +516,7 @@ class AgentRunner {
           lastAction = null;
           previousBoardText = null;
           previousInventory = null;
+          previousStatus = null;
           yield AgentStepReset(attempt: attemptNumber, auto: false);
           if (stepDelay > Duration.zero) await Future.delayed(stepDelay);
           skipPrevUpdate = true;
@@ -531,6 +563,7 @@ class AgentRunner {
       if (!skipPrevUpdate) {
         previousBoardText = batchPrevBoard;
         previousInventory = batchPrevInventory;
+        previousStatus = batchPrevStatus;
       }
     }
 

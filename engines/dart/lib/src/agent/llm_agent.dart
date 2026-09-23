@@ -397,7 +397,10 @@ class LlmAgent implements GridPonderAgent {
           includeLegend: false,
           kindSymbolOverrides: anonymize ? kindToLabel : null);
       boardUnchanged = currentBare == obs.previousBoardText &&
-          inv == obs.previousInventory;
+          inv == obs.previousInventory &&
+          (obs.previousStatus == null ||
+              obs.previousStatus ==
+                  statusFingerprint(obs.game, obs.level, obs.state));
     }
 
     // ── Inventory / moves ─────────────────────────────────────────────────────
@@ -661,6 +664,19 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
     }
     if (value is String) return value;
     return pyJsonDumps(value, compact: true);
+  }
+
+  /// The status lines that say something about the board, for deciding
+  /// whether an action changed anything: every [statusLines] line except the
+  /// move counter (a spent action alone is not a change). Rendered with real
+  /// names — the anonymous labels are a bijection, so equality is the same.
+  /// Mirrors `status_fingerprint` in engines/python/observation.py.
+  static String statusFingerprint(
+      GameDefinition game, LevelDefinition level, LevelState state) {
+    return statusLines(game, level, state)
+        .split('\n')
+        .where((l) => l.isNotEmpty && !l.startsWith('Moves this attempt:'))
+        .join('\n');
   }
 
   /// Public status lines printed under the board, each prefixed by a newline.

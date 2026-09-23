@@ -308,6 +308,17 @@ class FollowerNpcsSystem(GameSystem):
             out.append(candidate)
         return out
 
+    def depends_on_turn_count(self, state: GameState, game: GameDef) -> bool:
+        """True when an NPC on the board runs a behavior with frequency > 1:
+        its next step depends on the beat, which the state key leaves out."""
+        config = game.system_config(self.id)
+        behaviors = config.get("behaviors", {}) or {}
+        for _pos, entity in self._npc_entries(state, game, config):
+            behavior_def = behaviors.get(str(entity.param("behavior")))
+            if isinstance(behavior_def, dict) and behavior_def.get("frequency", 1) > 1:
+                return True
+        return False
+
     def _npc_entries(
         self, state: GameState, game: GameDef, config: dict,
     ) -> list[tuple[Pos, Entity]]:

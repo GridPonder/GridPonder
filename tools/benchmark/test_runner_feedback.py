@@ -54,13 +54,15 @@ def _level(description: str | None) -> dict:
     }
 
 
-def _run(inputs: list[dict], *args: str, description: str | None = None) -> list[dict]:
+def _run(inputs: list[dict], *args: str, description: str | None = None,
+         game: dict | None = None, level: dict | None = None) -> list[dict]:
     with tempfile.TemporaryDirectory() as tmp:
         pack = Path(tmp) / "fbpack"
         (pack / "levels").mkdir(parents=True)
         (pack / "manifest.json").write_text(json.dumps({"id": "fbpack", "title": "FB"}))
-        (pack / "game.json").write_text(json.dumps(_GAME))
-        (pack / "levels" / "fb_01.json").write_text(json.dumps(_level(description)))
+        (pack / "game.json").write_text(json.dumps(game or _GAME))
+        (pack / "levels" / "fb_01.json").write_text(
+            json.dumps(level or _level(description)))
         proc = subprocess.run(
             [sys.executable, str(RUNNER), "--pack", "fbpack", "--level", "fb_01",
              "--packs-dir", tmp, "--attempt-multiplier", "10",
@@ -117,6 +119,84 @@ def test_board_did_not_change_note_and_allowance():
             "The board did not change.\n") in prompt, prompt
 
 
+def test_a_selection_change_is_not_reported_as_no_change():
+    """Selecting redraws no cell, but the `Selected:` status line changed, so
+    the action did something and the note must not claim otherwise."""
+    events = _run([_SELECT])
+    prompt = [e for e in events if e["event"] == "state"][-1]["prompt"]
+    assert "BOARD BEFORE:\nR.#\n" in prompt, prompt
+    assert "Selected: Red piece at (0,0)\n\nCompare the two boards" in prompt, prompt
+    assert "The board did not change." not in prompt, prompt
+
+
+_STAMP_GAME = {
+    "layers": [
+        {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+        {"id": "paper", "occupancy": "zero_or_one"},
+        {"id": "ink", "occupancy": "zero_or_one"},
+        {"id": "held", "occupancy": "zero_or_one"},
+    ],
+    "entityKinds": {
+        "empty": {"layer": "ground", "tags": [], "symbol": "."},
+        "only_red": {"layer": "paper", "tags": [], "symbol": "4", "uiName": "Red plate"},
+        "ink_red": {"layer": "ink", "tags": [], "symbol": "r"},
+        "ink_blue": {"layer": "ink", "tags": [], "symbol": "b", "uiName": "Blue ink"},
+        "held_red": {"layer": "held", "tags": [], "symbol": "R"},
+        "held_blue": {"layer": "held", "tags": [], "symbol": "B"},
+        "slot_empty": {"layer": "held", "tags": [], "symbol": "o"},
+    },
+    "actions": [
+        {"id": "move", "params": {"direction": {"type": "direction",
+                                                "values": ["left", "right"]}}},
+        {"id": "press", "params": {}},
+    ],
+    "systems": [
+        {"id": "cursor", "type": "overlay_cursor", "config": {
+            "moveAction": "move", "size": [1, 1], "carryLayers": ["held"]}},
+        {"id": "stamp", "type": "region_transform", "config": {"operations": {"press": {
+            "type": "exchange", "action": "press", "layers": ["ink", "held"],
+            "pairs": [["ink_red", "held_red"], ["ink_blue", "held_blue"],
+                      [None, "slot_empty"]],
+            "restrict": {"layer": "paper", "accepts": {"only_red": ["ink_red"]}}}}}},
+    ],
+    "defaults": {"avatar": {"enabled": False}},
+}
+
+_STAMP_LEVEL = {
+    "id": "fb_01",
+    "board": {"size": [2, 1], "layers": {
+        "paper": {"format": "sparse", "entries": [{"position": [0, 0], "kind": "only_red"}]},
+        "held": {"format": "sparse", "entries": [{"position": [0, 0], "kind": "held_blue"},
+                                                  {"position": [1, 0], "kind": "slot_empty"}]},
+    }},
+    "state": {"avatar": {"enabled": False},
+              "overlay": {"position": [0, 0], "size": [1, 1]}},
+    "goals": [{"id": "g", "type": "board_match", "config": {
+        "layer": "ink", "target": [["ink_blue", None]]}}],
+    "solution": {"goldPath": [{"action": "move", "direction": "right"}]},
+}
+
+_REASON = "Red plate at (0,0) refuses Blue ink"
+
+
+def test_an_engine_veto_reason_is_the_rejection_detail():
+    events = _run([{"action": "press"}], game=_STAMP_GAME, level=_STAMP_LEVEL)
+    assert events[1] == {"event": "rejected", "action": {"action": "press"},
+                         "reason": "illegal", "detail": _REASON}, events[1]
+    assert (f'LAST ACTION: {{"action": "press"}} — REJECTED ({_REASON}); '
+            "no action was spent") in events[2]["prompt"], events[2]["prompt"]
+
+
+def test_an_anonymous_run_never_shows_the_veto_reason():
+    """The reason names kinds; the harness shows the event detail to the agent,
+    so an anonymous run keeps the generic text in the event too."""
+    events = _run([{"action": "a2"}], "--anon", "--observation", "harness",
+                  game=_STAMP_GAME, level=_STAMP_LEVEL)
+    rejected = [e for e in events if e["event"] == "rejected"]
+    assert rejected and rejected[0]["detail"] == "press is not legal in this state", events
+    assert all("Red plate" not in json.dumps(e) for e in events), events
+
+
 _IMAGE_NOTE = "(See the attached image of the current board."
 
 
@@ -130,14 +210,15 @@ def test_image_mode_keeps_feedback_and_status_without_the_grid():
     rejected = states[1]["prompt"]
     assert ('REJECTED (move is not legal in this state); no action was spent, the board '
             "is unchanged.\nCURRENT BOARD:\n" + _IMAGE_NOTE) in rejected, rejected
-    # Selecting: the ring is explained, the status lines follow the note, and
-    # the text-board comparison still says the board did not change.
+    # Selecting: the ring is explained and the status lines follow the note;
+    # the selection changed, so there is no "did not change" note.
     selected = states[2]["prompt"]
     assert ("BOARD BEFORE:\n(Not shown: only the current board is attached as an image.)\n"
             ) in selected, selected
     assert ("Image marks: a gold ring marks the selected piece.\n"
-            "Moves this attempt: 0 of 2 allowed\nSelected: Red piece at (0,0)\n"
-            "The board did not change.\n") in selected, selected
+            "Moves this attempt: 0 of 2 allowed\nSelected: Red piece at (0,0)\n\n"
+            ) in selected, selected
+    assert "The board did not change." not in selected
     assert "Compare the two boards" not in selected
     # The edge bump is accepted, costs a move and changes nothing.
     bumped = states[3]["prompt"]
@@ -154,7 +235,7 @@ def test_text_image_mode_keeps_the_grid_and_names_the_image_marks():
     prompt = states[1]["prompt"]
     assert states[1].get("image_b64")
     assert "BOARD BEFORE:\nR.#\n" in prompt, prompt
-    assert ("Selected: Red piece at (0,0)\nThe board did not change.\n\n"
+    assert ("Selected: Red piece at (0,0)\n\n"
             "Compare the two boards") in prompt, prompt
     assert ("The attached image is a sprite rendering of the current board "
             "(same state as the text grid above).\n"

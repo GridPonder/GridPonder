@@ -26,7 +26,8 @@ PAIRS = [
 
 
 def _make_game(pairs=PAIRS, restrict=None, cursor_extra=None,
-               exchange_action="press", exchange_before_cursor=False) -> GameDef:
+               exchange_action="press", exchange_before_cursor=False,
+               ui_names=None) -> GameDef:
     press = {"type": "exchange", "action": exchange_action,
              "layers": ["ink", "held"], "pairs": pairs}
     if restrict is not None:
@@ -65,6 +66,8 @@ def _make_game(pairs=PAIRS, restrict=None, cursor_extra=None,
                     else [cursor_system, exchange_system]),
         "defaults": {"avatar": {"enabled": False}},
     }
+    for kind, ui_name in (ui_names or {}).items():
+        data["entityKinds"][kind]["uiName"] = ui_name
     return GameDef.from_dict(data, id="test_overlay_exchange")
 
 
@@ -330,6 +333,23 @@ class RestrictTests(unittest.TestCase):
         self.assertEqual(blocked[0]["guardKind"], "only_red")
         self.assertEqual(blocked[0]["layer"], "ink")
         self.assertTrue([e for e in result.events if e["type"] == "action_vetoed"])
+
+    def test_the_veto_carries_a_readable_reason(self):
+        engine = self._engine({}, _slots(b="held_blue"), {(1, 0): "only_red"})
+        vetoes = [e for e in _press(engine).events if e["type"] == "action_vetoed"]
+        self.assertEqual(vetoes, [{"type": "action_vetoed",
+                                   "reason": "only red at (1,0) refuses ink blue"}])
+
+    def test_the_reason_uses_display_names_and_lists_every_refusal(self):
+        game = _make_game(restrict=RESTRICT,
+                          ui_names={"only_red": "Red paper", "ink_blue": "Blue ink"})
+        engine = TurnEngine(game, _level(
+            {}, _slots(b="held_blue", d="held_blue"),
+            paper={(1, 0): "only_red", (1, 1): "only_red"}))
+        vetoes = [e for e in _press(engine).events if e["type"] == "action_vetoed"]
+        self.assertEqual(
+            vetoes[0]["reason"],
+            "Red paper at (1,0) refuses Blue ink; Red paper at (1,1) refuses Blue ink")
 
     def test_a_refused_press_costs_nothing(self):
         engine = self._engine({}, _slots(b="held_blue"), {(1, 0): "only_red"})

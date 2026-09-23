@@ -73,6 +73,15 @@ class TurnEngine {
         : TurnResult.rejected(_state, events: result.events);
   }
 
+  /// True when an enabled system's behaviour in the current state reads the
+  /// turn counter, which the state key leaves out (see
+  /// [GameSystem.dependsOnTurnCount]).
+  bool turnCountMatters() {
+    final effectiveGame = game.withSystemOverrides(level.systemOverrides);
+    return SystemRegistry.instantiate(effectiveGame, null)
+        .any((sys) => sys.dependsOnTurnCount(_state, effectiveGame));
+  }
+
   /// Undo the last action.
   bool undo() {
     if (_history.isEmpty) return false;

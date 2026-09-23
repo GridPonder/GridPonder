@@ -152,7 +152,99 @@ Map<String, dynamic> _selectLevel() => {
       'goals': [],
     };
 
+/// One patrolling machine and a bare `wait` action. Mirrors `_machine_game`
+/// in engines/python/test_action_enum.py.
+Map<String, dynamic> _machineGame(int frequency) => {
+      'id': 'machines',
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+        {'id': 'actors', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'empty': {
+          'layer': 'ground',
+          'tags': ['walkable'],
+          'symbol': '.'
+        },
+        'machine': {
+          'layer': 'actors',
+          'tags': ['npc', 'solid'],
+          'symbol': 'M'
+        },
+      },
+      'actions': [
+        {'id': 'wait'},
+      ],
+      'systems': [
+        {
+          'id': 'machines',
+          'type': 'follower_npcs',
+          'config': {
+            'behaviors': {
+              'line': {
+                'type': 'patrol',
+                'solidBlocking': true,
+                'frequency': frequency,
+              },
+            },
+          },
+        },
+      ],
+    };
+
+Map<String, dynamic> _machineLevel(int width) => {
+      'id': 'l',
+      'board': {
+        'size': [width, 1],
+        'layers': {
+          'actors': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [0, 0],
+                'kind': 'machine',
+                'behavior': 'line',
+                'facing': 'right'
+              },
+            ],
+          },
+        },
+      },
+      'state': {
+        'avatar': {'enabled': false},
+      },
+      'goals': [],
+    };
+
 void main() {
+  test('an off-beat wait is offered when a slow machine is on the board', () {
+    // The state key leaves the turn counter out. A frequency-2 machine idles
+    // on the 2nd beat, so that wait changes no key — but it moves the machine
+    // onto its next active beat, so it is still a move worth offering.
+    final engine = _engine(_machineGame(2), _machineLevel(3));
+    expect(engine.turnCountMatters(), isTrue);
+    expect(engine.executeTurn(const GameAction('wait', {})).accepted, isTrue);
+    final key = AgentObservation.stateKey(engine.state, engine.game);
+    expect(
+        _json(AgentObservation.enumerateActions(engine.game, engine.state,
+            engine: engine)),
+        [
+          {'action': 'wait'},
+        ]);
+    expect(engine.executeTurn(const GameAction('wait', {})).accepted, isTrue);
+    expect(AgentObservation.stateKey(engine.state, engine.game), key);
+  });
+
+  test('a wait that changes nothing is not offered without a slow machine',
+      () {
+    final engine = _engine(_machineGame(1), _machineLevel(1));
+    expect(engine.turnCountMatters(), isFalse);
+    expect(
+        AgentObservation.enumerateActions(engine.game, engine.state,
+            engine: engine),
+        isEmpty);
+  });
+
   test('engine probe filters vetoed and no-effect actions', () {
     final engine = _engine(_navGame(), _navLevel());
     final actions = AgentObservation.enumerateActions(engine.game, engine.state,
@@ -221,10 +313,8 @@ void main() {
           {'action': 'move', 'direction': 'down'},
           {'action': 'move', 'direction': 'left'},
           {'action': 'move', 'direction': 'right'},
-          {
-            'action': 'tap_cell',
-            'position': [0, 0]
-          },
+          // Re-tapping the selected piece only re-emits `actor_selected` and
+          // leaves the state key unchanged: not effectful, not offered.
           {
             'action': 'tap_cell',
             'position': [2, 0]

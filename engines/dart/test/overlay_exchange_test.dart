@@ -14,6 +14,7 @@ GameDefinition _makeGame({
   Map<String, dynamic> cursorExtra = const {},
   String exchangeAction = 'press',
   bool exchangeBeforeCursor = false,
+  Map<String, String> uiNames = const {},
 }) {
   Map<String, dynamic> kind(String layer, String symbol,
           [List<String> tags = const []]) =>
@@ -81,6 +82,10 @@ GameDefinition _makeGame({
       'avatar': {'enabled': false},
     },
   };
+  final kinds = data['entityKinds'] as Map<String, dynamic>;
+  for (final e in uiNames.entries) {
+    (kinds[e.key] as Map<String, dynamic>)['uiName'] = e.value;
+  }
   return GameDefinition.fromJson(data, id: 'test_overlay_exchange');
 }
 
@@ -459,6 +464,32 @@ void main() {
       expect(blocked.first.payload['guardKind'], 'only_red');
       expect(blocked.first.payload['layer'], 'ink');
       expect(result.events.any((e) => e.type == 'action_vetoed'), isTrue);
+    });
+
+    test('the veto carries a readable reason', () {
+      final engine =
+          engineFor({}, _slots(b: 'held_blue'), {(1, 0): 'only_red'});
+      final vetoes = _press(engine)
+          .events
+          .where((e) => e.type == 'action_vetoed')
+          .toList();
+      expect(vetoes, hasLength(1));
+      expect(vetoes.first.payload,
+          {'reason': 'only red at (1,0) refuses ink blue'});
+    });
+
+    test('the reason uses display names and lists every refusal', () {
+      final game = _makeGame(
+          restrict: restrict,
+          uiNames: {'only_red': 'Red paper', 'ink_blue': 'Blue ink'});
+      final engine = _engineFor(
+          game,
+          _level({}, _slots(b: 'held_blue', d: 'held_blue'),
+              paper: {(1, 0): 'only_red', (1, 1): 'only_red'}));
+      final veto =
+          _press(engine).events.firstWhere((e) => e.type == 'action_vetoed');
+      expect(veto.payload['reason'],
+          'Red paper at (1,0) refuses Blue ink; Red paper at (1,1) refuses Blue ink');
     });
 
     test('a refused press costs nothing', () {

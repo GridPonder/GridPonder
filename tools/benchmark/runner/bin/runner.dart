@@ -198,6 +198,7 @@ Future<void> main(List<String> arguments) async {
   GameAction? lastAction;
   String? prevBoardText;
   String? prevInventory;
+  String? prevStatus;
   // Anon mode: label (a1, a2, …) → real action, rebuilt on every emitState().
   Map<String, GameAction> currentAnonMap = {};
   // How the previous attempt ended, shown once on the next attempt's first
@@ -222,6 +223,7 @@ Future<void> main(List<String> arguments) async {
       lastAction: lastAction,
       previousBoardText: prevBoardText,
       previousInventory: prevInventory,
+      previousStatus: prevStatus,
       kindSymbolOverrides: kindSymbolOverrides,
       // Probe candidates on the live engine so only effectful actions are
       // offered, exactly as the Python runner does.
@@ -300,6 +302,7 @@ Future<void> main(List<String> arguments) async {
     }
     prevBoardText = null;
     prevInventory = null;
+    prevStatus = null;
     seenStates = {AgentObservation.stateKey(engine.state, gameDef)};
     out({
       'event': 'reset',
@@ -358,6 +361,7 @@ Future<void> main(List<String> arguments) async {
     }
     prevBoardText = null;
     prevInventory = null;
+    prevStatus = null;
     out({
       'event': 'rejected',
       'action': actionInput,
@@ -367,11 +371,13 @@ Future<void> main(List<String> arguments) async {
   }
 
   /// (event detail, prompt detail) for an engine rejection. An engine reason
-  /// carried on `action_vetoed` wins over the generic text.
+  /// carried on `action_vetoed` wins over the generic text. The reason names
+  /// kinds, so an anonymous run keeps the generic text (the harness shows the
+  /// event detail to the agent too).
   (String, String) illegalDetails(GameAction real, TurnResult result) {
     for (final e in result.events) {
       final r = e.payload['reason'];
-      if (e.type == 'action_vetoed' && r is String && r.isNotEmpty) {
+      if (!anon && e.type == 'action_vetoed' && r is String && r.isNotEmpty) {
         return (r, r);
       }
     }
@@ -456,6 +462,7 @@ Future<void> main(List<String> arguments) async {
       prevBoardText = TextRenderer.render(engine.state, gameDef,
           includeLegend: false, kindSymbolOverrides: kindSymbolOverrides);
       prevInventory = currentInventory();
+      prevStatus = LlmAgent.statusFingerprint(gameDef, levelDef, engine.state);
 
       final (real, schemaError) =
           resolve(Map<String, dynamic>.from(input)..remove('memory'));
@@ -552,6 +559,7 @@ Future<void> main(List<String> arguments) async {
       prevBoardText = TextRenderer.render(engine.state, gameDef,
           includeLegend: false, kindSymbolOverrides: kindSymbolOverrides);
       prevInventory = currentInventory();
+      prevStatus = LlmAgent.statusFingerprint(gameDef, levelDef, engine.state);
 
       final (real, schemaError) =
           resolve(Map<String, dynamic>.from(actionInput)..remove('memory'));
