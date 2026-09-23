@@ -100,6 +100,86 @@ TurnEngine _engineFor(GameDefinition game, Map<String, dynamic> levelJson) {
   return TurnEngine(game, level);
 }
 
+GameDefinition _makeElasticGame() => GameDefinition.fromJson({
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'floor'},
+        {'id': 'markers', 'occupancy': 'zero_or_one'},
+        {'id': 'objects', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'floor': {'layer': 'ground', 'symbol': '.'},
+        'target': {
+          'layer': 'markers',
+          'symbol': '1',
+          'uiName': 'Target 1',
+        },
+        'wall': {
+          'layer': 'objects',
+          'symbol': 'X',
+          'uiName': 'Completed target wall',
+        },
+        'elastic_block': {
+          'layer': 'structures',
+          'symbol': 'B',
+          'uiName': 'Bellows',
+        },
+      },
+      'actions': <dynamic>[],
+      'systems': [
+        {
+          'id': 'bellows_motion',
+          'type': 'elastic_block',
+          'config': {
+            'objectKind': 'elastic_block',
+            'targets': [
+              {
+                'id': 'target_1',
+                'markerKind': 'target',
+                'onLeave': 'wall',
+                'wallKind': 'wall',
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+Map<String, dynamic> _makeElasticLevel() => {
+      'id': 'elastic',
+      'board': {
+        'size': [3, 1],
+        'layers': {
+          'markers': {
+            'format': 'sparse',
+            'entries': [
+              {
+                'position': [1, 0],
+                'kind': 'target'
+              },
+            ],
+          },
+        },
+        'multiCellObjects': [
+          {
+            'id': 'bellows',
+            'kind': 'elastic_block',
+            'cells': [
+              [1, 0],
+            ],
+          },
+        ],
+      },
+      'state': {
+        'variables': {
+          'completedTargetIds': ['target_1'],
+          'consumedTargetIds': <dynamic>[],
+          'completedTargetCount': 1,
+        },
+        'avatar': {'enabled': false},
+      },
+      'goals': <dynamic>[],
+    };
+
 void main() {
   test('territory symbol shown on owned empty cell and hidden under actor', () {
     final game = _makeGame();
@@ -111,5 +191,38 @@ void main() {
     final gridLine = rendered.split('\n').first;
 
     expect(gridLine, equals('1W.'), reason: "expected '1W.', got '$gridLine'");
+  });
+
+  test('multi-cell legend and overlap use public game identity', () {
+    final game = _makeElasticGame();
+    final level = LevelDefinition.fromJson(_makeElasticLevel(), game.layers);
+    final engine = TurnEngine(game, level);
+    final rendered = TextRenderer.render(engine.state, game, level: level);
+
+    expect(rendered, contains('║/═/╬=Bellows body'));
+    expect(rendered, isNot(contains('pipe body')));
+    expect(rendered, isNot(contains('pipe exit')));
+    expect(rendered, contains('1(Target 1) + ╬(Bellows)'));
+    expect(rendered, contains('completed, still occupied by Bellows'));
+    expect(rendered,
+        contains('becomes a wall only after the Bellows fully vacates it'));
+  });
+
+  test('consumed target reports original geometry and wall state', () {
+    final game = _makeElasticGame();
+    final level = LevelDefinition.fromJson(_makeElasticLevel(), game.layers);
+    final engine = TurnEngine(game, level);
+    engine.state.board.setEntity('markers', const Position(1, 0), null);
+    engine.state.board.setEntity(
+        'objects', const Position(1, 0), const EntityInstance('wall'));
+    engine.state.board.multiCellObjects.first.cells
+      ..clear()
+      ..add(const Position(2, 0));
+    engine.state.variables['consumedTargetIds'] = ['target_1'];
+
+    final rendered = TextRenderer.render(engine.state, game, level: level);
+    expect(rendered, contains('Target 1 [1]: cells (1,0)'));
+    expect(
+        rendered, contains('completed and converted to Completed target wall'));
   });
 }

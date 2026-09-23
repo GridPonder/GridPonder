@@ -274,7 +274,7 @@ def _validate_state(
     prompt_max: dict[str, dict[str, Any]],
     pack_stats: dict[str, Any],
 ) -> None:
-    board_text = render_board(engine.state, game)
+    board_text = render_board(engine.state, game, level_def=level)
     grid_rows = board_text.splitlines()[: engine.state.board.height]
     widths = {len(row) for row in grid_rows}
     if widths != {engine.state.board.width}:

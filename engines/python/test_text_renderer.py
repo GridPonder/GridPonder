@@ -18,6 +18,7 @@ ROOT = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(ROOT))
 
 from engines.python._game_def import GameDef
+from engines.python._models import Entity, Pos
 from engines.python._turn_engine import TurnEngine
 from engines.python import text_renderer
 
@@ -207,12 +208,122 @@ def test_anonymous_entity_state_preserves_dynamics_without_kind_name() -> None:
     assert "Watcher" not in rendered
 
 
+def _make_elastic_game() -> GameDef:
+    return GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+                {"id": "markers", "occupancy": "zero_or_one"},
+                {"id": "objects", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "floor": {"layer": "ground", "symbol": "."},
+                "target": {
+                    "layer": "markers",
+                    "symbol": "1",
+                    "uiName": "Target 1",
+                },
+                "wall": {
+                    "layer": "objects",
+                    "symbol": "X",
+                    "uiName": "Completed target wall",
+                },
+                "elastic_block": {
+                    "layer": "structures",
+                    "symbol": "B",
+                    "uiName": "Bellows",
+                },
+            },
+            "systems": [
+                {
+                    "id": "bellows_motion",
+                    "type": "elastic_block",
+                    "config": {
+                        "objectKind": "elastic_block",
+                        "targets": [
+                            {
+                                "id": "target_1",
+                                "markerKind": "target",
+                                "onLeave": "wall",
+                                "wallKind": "wall",
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+
+
+def _make_elastic_level() -> dict:
+    return {
+        "id": "elastic",
+        "board": {
+            "size": [3, 1],
+            "layers": {
+                "markers": {
+                    "format": "sparse",
+                    "entries": [{"position": [1, 0], "kind": "target"}],
+                }
+            },
+            "multiCellObjects": [
+                {
+                    "id": "bellows",
+                    "kind": "elastic_block",
+                    "cells": [[1, 0]],
+                }
+            ],
+        },
+        "state": {
+            "variables": {
+                "completedTargetIds": ["target_1"],
+                "consumedTargetIds": [],
+                "completedTargetCount": 1,
+            },
+            "avatar": {"enabled": False},
+        },
+        "goals": [],
+    }
+
+
+def test_multi_cell_legend_and_overlap_use_public_game_identity() -> None:
+    game = _make_elastic_game()
+    level = _make_elastic_level()
+    engine = TurnEngine(game, level)
+    rendered = text_renderer.render(
+        engine.state, game, level_def=level
+    )
+    assert "║/═/╬=Bellows body" in rendered
+    assert "pipe body" not in rendered
+    assert "pipe exit" not in rendered
+    assert "1(Target 1) + ╬(Bellows)" in rendered
+    assert "completed, still occupied by Bellows" in rendered
+    assert "becomes a wall only after the Bellows fully vacates it" in rendered
+
+
+def test_consumed_target_reports_original_geometry_and_wall_state() -> None:
+    game = _make_elastic_game()
+    level = _make_elastic_level()
+    engine = TurnEngine(game, level)
+    engine.state.board.set_entity("markers", Pos(1, 0), None)
+    engine.state.board.set_entity("objects", Pos(1, 0), Entity("wall"))
+    engine.state.board.multi_cell_objects[0].cells = [Pos(2, 0)]
+    engine.state.variables["consumedTargetIds"] = ["target_1"]
+    rendered = text_renderer.render(
+        engine.state, game, level_def=level
+    )
+    assert "Target 1 [1]: cells (1,0)" in rendered
+    assert "completed and converted to Completed target wall" in rendered
+
+
 def run_all() -> bool:
     tests = [
         test_territory_symbol_shown_on_owned_empty_cell_and_hidden_under_actor,
         test_whitespace_symbol_is_rendered_visibly,
         test_entity_state_includes_non_symbol_parameters,
         test_anonymous_entity_state_preserves_dynamics_without_kind_name,
+        test_multi_cell_legend_and_overlap_use_public_game_identity,
+        test_consumed_target_reports_original_geometry_and_wall_state,
     ]
     passed = 0
     failed = 0

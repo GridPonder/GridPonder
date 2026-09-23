@@ -265,7 +265,8 @@ Future<void> main(List<String> arguments) async {
 
       prevBoardText = TextRenderer.render(engine.state, gameDef,
           includeLegend: false,
-          kindSymbolOverrides: anon ? kindSymbolOverrides : null);
+          kindSymbolOverrides: anon ? kindSymbolOverrides : null,
+          level: levelDef);
       prevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
@@ -378,7 +379,8 @@ Future<void> main(List<String> arguments) async {
       // Capture board before execution (used in next state prompt).
       prevBoardText = TextRenderer.render(engine.state, gameDef,
           includeLegend: false,
-          kindSymbolOverrides: anon ? kindSymbolOverrides : null);
+          kindSymbolOverrides: anon ? kindSymbolOverrides : null,
+          level: levelDef);
       prevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;

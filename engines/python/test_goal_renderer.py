@@ -160,6 +160,40 @@ def test_a_pack_that_wrote_its_own_description_still_gets_it():
     assert text == "Split the map three ways."
 
 
+# ── variable-threshold wording and live progress ─────────────────────────
+
+def _variable_threshold_goal() -> dict:
+    return {"goals": [{
+        "id": "complete_targets",
+        "type": "variable_threshold",
+        "config": {
+            "variable": "completedTargetCount",
+            "comparison": "gte",
+            "target": 4,
+        },
+    }]}
+
+
+def test_variable_threshold_is_described_instead_of_exposing_its_type_name():
+    game = _make_game()
+    state = _make_state(game, _PARTIAL)
+    state.variables["completedTargetCount"] = 1
+    text = render_goals(_variable_threshold_goal(), state, game)
+    assert text != "variable_threshold"
+    assert "1" in text and "4" in text
+
+
+def test_variable_threshold_override_keeps_dynamic_progress():
+    game = _make_game()
+    game.goal_descriptions = {
+        "complete_targets": "Cover every required target exactly"
+    }
+    state = _make_state(game, _PARTIAL)
+    state.variables["completedTargetCount"] = 2
+    text = render_goals(_variable_threshold_goal(), state, game)
+    assert text == "Cover every required target exactly (progress: 2/4)"
+
+
 # ── board_match target cells ──────────────────────────────────────────────
 
 def _board_match(cell) -> dict:

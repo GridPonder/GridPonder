@@ -113,7 +113,7 @@ class AgentObservation {
       state: state,
       validActions: _enumerateActions(game, presentKinds),
       boardText: TextRenderer.render(state, game,
-          kindSymbolOverrides: kindSymbolOverrides),
+          kindSymbolOverrides: kindSymbolOverrides, level: level),
       attemptNumber: attemptNumber,
       totalActionsAllAttempts: totalActionsAllAttempts,
       lastAction: lastAction,
@@ -365,7 +365,9 @@ class AgentRunner {
 
       // Capture board state before the batch so the next prompt has before/after.
       final batchPrevBoard = TextRenderer.render(engine.state, engine.game,
-          includeLegend: false, kindSymbolOverrides: kindSymbolOverrides);
+          includeLegend: false,
+          kindSymbolOverrides: kindSymbolOverrides,
+          level: engine.level);
       final batchPrevInventory = engine.state.avatar.enabled
           ? engine.state.avatar.inventory.slot
           : null;
