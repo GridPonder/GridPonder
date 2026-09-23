@@ -32,7 +32,10 @@ const _group = <String, dynamic>{
   'fallVariable': 'fell',
 };
 
-GameDefinition _makeGame({Map<String, dynamic>? group}) {
+GameDefinition _makeGame({
+  Map<String, dynamic>? group,
+  Map<String, dynamic>? npcSystem,
+}) {
   final data = {
     'id': 'com.gridponder.test_balance_regions',
     'layers': [
@@ -102,6 +105,12 @@ GameDefinition _makeGame({Map<String, dynamic>? group}) {
       },
     ],
   };
+  if (npcSystem != null) {
+    // Declared before the balance, as a pack must: machines move, then the
+    // floor settles.
+    data['systems'] = <dynamic>[...(data['systems'] as List)]
+      ..insert(1, npcSystem);
+  }
   return GameDefinition.fromJson(data, id: 'test_balance_regions');
 }
 
@@ -135,6 +144,7 @@ Map<String, dynamic> _makeLevel(
                 {
                   'position': [a[0], a[1]],
                   'kind': a[2],
+                  if (a.length > 3) ...(a[3] as Map<String, dynamic>),
                 }
             ],
           },
@@ -326,6 +336,162 @@ void main() {
       expect(engine.state.variables['fell'], 1);
       final result = engine.executeTurn(GameAction('wait', const {}));
       expect(result.isLost, isTrue);
+    });
+
+    Map<String, dynamic> totalsGroup(Map<String, dynamic> extra) =>
+        {..._group, ...extra};
+
+    List<String> sortedKeys(TurnEngine engine) =>
+        engine.state.variables.keys.toList()..sort();
+
+    test('totals variables are off by default', () {
+      final engine = _engineFor(
+          _makeGame(),
+          _makeLevel([
+            [_w, _w, _n, _e, _e]
+          ], [
+            0,
+            0
+          ], actors: [
+            [4, 0, 'carriage']
+          ]));
+      expect(sortedKeys(engine), ['attitude', 'fell']);
+      engine.executeTurn(_move('right'));
+      expect(sortedKeys(engine), ['attitude', 'fell']);
+    });
+
+    test("totals variables publish each pan's weight", () {
+      final engine = _engineFor(
+          _makeGame(
+              group: totalsGroup({
+            'totalsVariables': {'west': 'west_weight', 'east': 'east_weight'},
+          })),
+          _makeLevel([
+            [_w, _w, _n, _e, _e]
+          ], [
+            1,
+            0
+          ], actors: [
+            [3, 0, 'carriage'],
+            [4, 0, 'carriage'],
+          ]));
+      var v = engine.state.variables;
+      expect([v['west_weight'], v['east_weight'], v['attitude']], [1, 2, 1]);
+      engine.executeTurn(_move('right')); // onto neutral floor
+      v = engine.state.variables;
+      expect([v['west_weight'], v['east_weight'], v['attitude']], [0, 2, 1]);
+    });
+
+    test('totals variables key unnamed pans first and second', () {
+      final engine = _engineFor(
+          _makeGame(
+              group: totalsGroup({
+            'totalsVariables': {'first': 'a_w', 'second': 'b_w'},
+            'pans': [
+              {
+                'groundTags': ['pan_west'],
+              },
+              {
+                'groundTags': ['pan_east'],
+              },
+            ],
+          })),
+          _makeLevel([
+            [_w, _w, _n, _e, _e]
+          ], [
+            0,
+            0
+          ]));
+      expect([engine.state.variables['a_w'], engine.state.variables['b_w']],
+          [1, 0]);
+    });
+
+    test('totals variables ignore malformed entries', () {
+      final level = _makeLevel([
+        [_w, _w, _n, _e, _e]
+      ], [
+        0,
+        0
+      ]);
+      var engine = _engineFor(
+          _makeGame(
+              group: totalsGroup({
+            'totalsVariables': {'west': 7, 'east': '', 'north': 'n_w'},
+          })),
+          level);
+      expect(sortedKeys(engine), ['attitude', 'fell']);
+      engine = _engineFor(
+          _makeGame(
+              group: totalsGroup({
+            'totalsVariables': ['west_weight'],
+          })),
+          level);
+      expect(sortedKeys(engine), ['attitude', 'fell']);
+    });
+
+    test('totals agree with the attitude after a fall', () {
+      final engine = _engineFor(
+          _makeGame(
+              group: totalsGroup({
+            'totalsVariables': {'west': 'west_weight', 'east': 'east_weight'},
+          })),
+          _makeLevel([
+            [_w, _n, _e, _e, 'leaf_plate']
+          ], [
+            1,
+            0
+          ], objects: [
+            [4, 0, 'hinge_west']
+          ], actors: [
+            [2, 0, 'carriage']
+          ]));
+      final v = engine.state.variables;
+      expect([v['west_weight'], v['east_weight'], v['attitude']], [0, 1, 1]);
+    });
+
+    test('shaft status reads seized on the beat the floor drops a member', () {
+      // Derived variables run after the floor settles: a train whose member
+      // the balance destroys reads seized on that very beat.
+      final engine = _engineFor(
+          _makeGame(npcSystem: {
+            'id': 'machines',
+            'type': 'follower_npcs',
+            'config': {
+              'npcTags': ['npc'],
+              'behaviors': {
+                'walker': {'type': 'patrol'},
+              },
+              'shaftSeizeOnLoss': true,
+              'shaftStatusVariablePrefix': 'shaft_status_',
+            },
+          }),
+          _makeLevel([
+            [_w, _n, _e, _e, 'leaf_plate'],
+            [_n, _n, _n, _n, 'void'],
+          ], [
+            0,
+            0
+          ], objects: [
+            [4, 0, 'hinge_west']
+          ], actors: [
+            [
+              4,
+              0,
+              'carriage',
+              {'behavior': 'walker', 'facing': 'up', 'shaft': 'a'},
+            ],
+            [
+              0,
+              1,
+              'carriage',
+              {'behavior': 'walker', 'facing': 'right', 'shaft': 'a'},
+            ],
+          ]));
+      expect(engine.state.variables['shaft_status_a'], 1); // jammed on the leaf
+      engine.executeTurn(_move('right')); // off the pan: the leaf opens
+      expect(
+          engine.state.board.getEntity('actors', const Position(4, 0)), isNull);
+      expect(engine.state.variables['shaft_status_a'], 2);
     });
 
     test('inert without groups', () {

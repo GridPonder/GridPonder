@@ -818,6 +818,108 @@ def test_members_crossing_tracks_never_share_a_cell():
         assert len(live) == 2, f"a member vanished: {live}"
 
 
+def _status_game(**config_extra) -> GameDef:
+    config_extra.setdefault("shaftStatusVariablePrefix", "shaft_status_")
+    return _shaft_game(config_extra=config_extra)
+
+
+def test_shaft_status_is_off_by_default():
+    """No prefix, no new variables: the state key is exactly what it was."""
+    engine = TurnEngine(_seize_game(shaftSeizeOnLoss=True), _shaft_level([
+        (1, 0, "walker", "right", "a"), (1, 2, "walker", "right", "a"),
+    ]))
+    assert sorted(engine.state.variables) == ["shaft_a_size"], engine.state.variables
+    _beat(engine)
+    assert sorted(engine.state.variables) == ["shaft_a_size"], engine.state.variables
+
+
+def test_shaft_status_reads_running_for_a_free_train():
+    engine = TurnEngine(_status_game(), _shaft_level([
+        (1, 0, "walker", "right", "a"), (1, 2, "walker", "right", "a"),
+    ]))
+    assert engine.state.variables["shaft_status_a"] == 0
+    _beat(engine)
+    assert engine.state.variables["shaft_status_a"] == 0
+
+
+def test_shaft_status_reads_held_when_pinned_both_ways():
+    """The frozen train from the freeze test reads held from load onward."""
+    engine = TurnEngine(_status_game(), _shaft_level(
+        [(4, 0, "walker", "right", "a"), (1, 2, "walker", "right", "a")],
+        walls=((5, 0), (3, 0)),
+    ))
+    assert engine.state.variables["shaft_status_a"] == 1
+    _beat(engine)
+    assert _machines(engine) == [(1, 2), (4, 0)]
+    assert engine.state.variables["shaft_status_a"] == 1
+
+
+def test_shaft_status_held_follows_the_avatars_body():
+    """Pinned by the avatar: held while it stands there, running once it
+    steps away — the status describes the board as it stands."""
+    engine = TurnEngine(_status_game(), _shaft_level(
+        [(1, 4, "walker", "left", "a")], walls=((2, 4),),
+    ))
+    assert engine.state.variables["shaft_status_a"] == 1
+    _beat(engine)                                       # still standing on (0,4)
+    assert _machines(engine) == [(1, 4)]
+    assert engine.state.variables["shaft_status_a"] == 1
+    engine.execute_turn("move", {"direction": "up"})    # step off the pin
+    assert _machines(engine) == [(0, 4)]
+    assert engine.state.variables["shaft_status_a"] == 0
+
+
+def test_shaft_status_reads_seized_after_a_loss():
+    engine = TurnEngine(_status_game(shaftSeizeOnLoss=True), _shaft_level([
+        (1, 0, "walker", "right", "a"), (1, 2, "walker", "right", "a"),
+    ]))
+    engine.state.board.set_entity("actors", Pos(1, 0), None)
+    _beat(engine)
+    assert _machines(engine) == [(1, 2)]
+    assert engine.state.variables["shaft_status_a"] == 2
+
+
+def test_shaft_status_without_seizure_keeps_running():
+    engine = TurnEngine(_status_game(), _shaft_level([
+        (1, 0, "walker", "right", "a"), (1, 2, "walker", "right", "a"),
+    ]))
+    engine.state.board.set_entity("actors", Pos(1, 0), None)
+    _beat(engine)
+    assert engine.state.variables["shaft_status_a"] == 0
+
+
+def test_shaft_status_reads_seized_with_no_member_left():
+    engine = TurnEngine(_status_game(), _shaft_level([
+        (1, 0, "walker", "right", "a"), (6, 3, "walker", "up", "b"),
+    ]))
+    engine.state.board.set_entity("actors", Pos(1, 0), None)
+    _beat(engine)
+    v = engine.state.variables
+    assert (v["shaft_status_a"], v["shaft_status_b"]) == (2, 0), v
+    status_keys = [k for k in v if k.startswith("shaft_status_")]
+    assert status_keys == ["shaft_status_a", "shaft_status_b"], status_keys
+
+
+def test_shaft_status_prefix_is_read_strictly():
+    for bad in ("", 3, None):
+        engine = TurnEngine(_status_game(shaftStatusVariablePrefix=bad), _shaft_level([
+            (1, 0, "walker", "right", "a"),
+        ]))
+        assert sorted(engine.state.variables) == ["shaft_a_size"], (bad, engine.state.variables)
+
+
+TESTS_SHAFT_STATUS = [
+    test_shaft_status_is_off_by_default,
+    test_shaft_status_reads_running_for_a_free_train,
+    test_shaft_status_reads_held_when_pinned_both_ways,
+    test_shaft_status_held_follows_the_avatars_body,
+    test_shaft_status_reads_seized_after_a_loss,
+    test_shaft_status_without_seizure_keeps_running,
+    test_shaft_status_reads_seized_with_no_member_left,
+    test_shaft_status_prefix_is_read_strictly,
+]
+
+
 TESTS_SHAFT = [
     test_unshafted_board_is_unchanged_by_the_shaft_feature,
     test_shafted_pair_steps_in_lockstep,
@@ -857,7 +959,7 @@ TESTS = [
     test_rules_receive_npc_events,
     test_lethal_contact_governs_patrol_too,
     test_a_harmless_patrol_bounces_off_the_avatar,
-] + TESTS_SHAFT
+] + TESTS_SHAFT + TESTS_SHAFT_STATUS
 
 
 def run_all() -> bool:

@@ -14,6 +14,9 @@ _CARDINAL_ORDER = ("up", "down", "left", "right")
 # Clockwise rotation order: right -> down -> left -> up -> right
 _CLOCKWISE_ORDER = ("right", "down", "left", "up")
 
+#: Values written by ``shaftStatusVariablePrefix`` (see execute_derive_state).
+SHAFT_STATUS_CODES = {"running": 0, "held": 1, "seized": 2}
+
 _DIR_KEYS = frozenset({
     "up", "down", "left", "right",
     "up_left", "up_right", "down_left", "down_right",
@@ -252,11 +255,40 @@ class FollowerNpcsSystem(GameSystem):
         branch is known to be legal for every active member, so a train that
         freezes resumes its original direction the beat the obstruction leaves.
         """
-        def _legal(pos: Pos, entity: Entity, facing: str,
-                   claimed: set) -> Optional[Pos]:
+        forward = self._probe_train(
+            active, False, behaviors, state, game, occupied_after_move)
+        if forward is not None:
+            return [(pos, e, c) for (pos, e), c in zip(active, forward)]
+
+        reverse = self._probe_train(
+            active, True, behaviors, state, game, occupied_after_move)
+        if reverse is not None:
+            for _, entity in members:  # the WHOLE train turns, not just the active
+                entity.params["facing"] = dir_opposite(self._facing_of(entity))
+            return [(pos, e, c) for (pos, e), c in zip(active, reverse)]
+
+        return []
+
+    def _probe_train(
+        self, active: list[tuple[Pos, Entity]], reversed_: bool,
+        behaviors: dict, state: GameState, game: GameDef, occupied: set,
+    ) -> Optional[list[Pos]]:
+        """Candidate cells for the whole active set, or None if any is stuck.
+
+        Sequential, so each member's claim blocks the next. The train is
+        all-or-nothing, so a collision between two members is simply a failed
+        direction: it falls through to the reverse, then to a freeze. Reads the
+        board only; shared by the beat and by the derived shaft status.
+        """
+        claimed: set = set()
+        out: list[Pos] = []
+        for pos, entity in active:
             behavior_def = behaviors.get(str(entity.param("behavior")))
             if not isinstance(behavior_def, dict):
                 return None
+            facing = self._facing_of(entity)
+            if reversed_:
+                facing = dir_opposite(facing)
             candidate = pos.moved(facing)
             # Two members whose tracks cross can both reach the crossing on the
             # same beat. Without `claimed` they would both be handed the cell,
@@ -265,45 +297,16 @@ class FollowerNpcsSystem(GameSystem):
             # seizure, because the size recorded at load no longer matches.
             if candidate in claimed:
                 return None
-            ok = self._can_move_to(
+            if not self._can_move_to(
                 candidate, state, game,
                 behavior_def.get("solidBlocking", True),
-                occupied_after_move,
+                occupied,
                 block_avatar=not behavior_def.get("lethalContact", False),
-            )
-            return candidate if ok else None
-
-        def _probe(reversed_: bool) -> Optional[list[Pos]]:
-            """Candidate cells for the whole active set, or None if any is stuck.
-
-            Sequential, so each member's claim blocks the next. The train is
-            all-or-nothing, so a collision between two members is simply a
-            failed direction: it falls through to the reverse, then to a freeze.
-            """
-            claimed: set = set()
-            out: list[Pos] = []
-            for pos, entity in active:
-                facing = self._facing_of(entity)
-                if reversed_:
-                    facing = dir_opposite(facing)
-                candidate = _legal(pos, entity, facing, claimed)
-                if candidate is None:
-                    return None
-                claimed.add(candidate)
-                out.append(candidate)
-            return out
-
-        forward = _probe(False)
-        if forward is not None:
-            return [(pos, e, c) for (pos, e), c in zip(active, forward)]
-
-        reverse = _probe(True)
-        if reverse is not None:
-            for _, entity in members:  # the WHOLE train turns, not just the active
-                entity.params["facing"] = dir_opposite(self._facing_of(entity))
-            return [(pos, e, c) for (pos, e), c in zip(active, reverse)]
-
-        return []
+            ):
+                return None
+            claimed.add(candidate)
+            out.append(candidate)
+        return out
 
     def _npc_entries(
         self, state: GameState, game: GameDef, config: dict,
@@ -338,6 +341,55 @@ class FollowerNpcsSystem(GameSystem):
             self._validate_train(shaft_id, members, behaviors)
             state.variables[f"shaft_{shaft_id}_size"] = len(members)
         return []
+
+    def execute_derive_state(self, state: GameState, game: GameDef) -> None:
+        """Publish each shaft's status when ``shaftStatusVariablePrefix`` is set.
+
+        Writes ``<prefix><shaft id>`` for every train sized at load, in shaft-id
+        order: ``0`` running, ``1`` held, ``2`` seized (see
+        ``SHAFT_STATUS_CODES``). Integers rather than words so a numeric
+        readout can show them.
+
+        Derived from the settled board alone — never from what happened this
+        beat — so the value adds nothing to the state key the board does not
+        already determine:
+
+        * **seized** — ``shaftSeizeOnLoss`` is on and the train has fewer
+          living members than its load-time size, or no member is left at
+          all. Read after the floor has settled, so it shows on the very beat a
+          member is lost, although the survivors' own last step was that beat.
+        * **held** — the train is pinned where it stands: with every living
+          member probed (whatever its frequency) and every machine in its
+          current cell, neither the forward nor the reversed direction is open.
+          The avatar blocks exactly as it would on a beat, so a train you are
+          holding reads held, and reads running again once you step away.
+        * **running** — otherwise.
+        """
+        config = game.system_config(self.id)
+        prefix = config.get("shaftStatusVariablePrefix")
+        if not isinstance(prefix, str) or not prefix:
+            return
+        behaviors = config.get("behaviors", {}) or {}
+        entries = self._npc_entries(state, game, config)
+        trains = dict(self._partition_trains(entries))
+        occupied = {pos for pos, _ in entries}
+        shaft_ids = set(trains)
+        for key in state.variables:
+            if (key.startswith("shaft_") and key.endswith("_size")
+                    and len(key) > len("shaft__size")):
+                shaft_ids.add(key[len("shaft_"):-len("_size")])
+        for shaft_id in sorted(shaft_ids):
+            members = trains.get(shaft_id, [])
+            if not members or self._train_seized(shaft_id, members, state, config):
+                code = SHAFT_STATUS_CODES["seized"]
+            elif (self._probe_train(members, False, behaviors, state, game, occupied)
+                  is None and
+                  self._probe_train(members, True, behaviors, state, game, occupied)
+                  is None):
+                code = SHAFT_STATUS_CODES["held"]
+            else:
+                code = SHAFT_STATUS_CODES["running"]
+            state.variables[f"{prefix}{shaft_id}"] = code
 
     def _validate_train(
         self, shaft_id: str, members: list[tuple[Pos, Entity]], behaviors: dict,

@@ -18,6 +18,17 @@ Each system declares which phase(s) it participates in. During a turn, phases ex
 | 6 | `npc_resolution` | Autonomous NPC behavior executes. |
 | 7 | `goal_evaluation` | Win and lose conditions are checked. |
 
+**Derived state.** Between phases 6 and 7 — after every system's NPC resolution
+and the rules pass over NPC events, so once the board has finished changing —
+each enabled system may write *derived variables*: values that are pure
+functions of the settled state, such as a pan's weight or a machine train's
+status, published for `ui.readouts`. The same pass runs once at level load,
+after every system's load settle. A system only reads the board here and emits
+no events; because a derived variable is determined by the rest of the state,
+it adds no distinctions to the state key (solver dedup, undo and preview are
+unaffected). Every such variable is opt-in through the owning system's config,
+so a pack that does not ask for one sees exactly the state it saw before.
+
 ### Events
 
 Systems emit **events** as they modify state. Events accumulate during phases 2–4 and are consumed by rules during phase 5. See [05_rules.md](05_rules.md) for the full event catalog.
@@ -916,6 +927,28 @@ are validated at load and raise.
 | config key | type | default | meaning |
 |---|---|---|---|
 | `shaftSeizeOnLoss` | boolean | `false` | When `true`, a train that loses a member to destruction *seizes*: the survivors never move again. Read strictly — only the boolean `true` enables it. Train sizes are recorded once at load settle, so seizure stays a pure function of the board and adds nothing to the state key. |
+| `shaftStatusVariablePrefix` | string | — | When a non-empty string, every train sized at load publishes a [derived](#execution-phases) status variable `<prefix><shaft id>`: `0` **running**, `1` **held**, `2` **seized**. Omit it and no variable is written. |
+
+**Shaft status.** Integers rather than words so a numeric readout can show them;
+a readout label should carry the legend. The status is read from the settled
+board after every turn (and at load), never from what happened during the beat,
+so it is a pure function of the board:
+
+- **seized** — `shaftSeizeOnLoss` is on and the train has fewer living members
+  than its load-time size, or no member is left at all. Because it is read after
+  the floor settles, it shows on the very turn a member is lost — even though
+  the survivors took their own last step that turn.
+- **held** — the train is pinned where it stands: probing every living member
+  (whatever its `frequency`) against the board as it is, with every machine in
+  its current cell, neither the forward nor the reversed direction is open. The
+  avatar blocks exactly as it does on a beat. It is the answer to "would the
+  train move if nothing else changed?" — a train you are holding reads held, and
+  running again the turn you step away, which is when it next moves.
+- **running** — otherwise.
+
+A status that recorded *this beat's* outcome ("the train froze") would not be a
+function of the board — the same board is reached both by a train that froze in
+place and by one that stepped into that place — and would split solver states.
 
 ```json
 {"position": [3, 2], "kind": "carriage", "behavior": "carriage_line", "facing": "right", "shaft": "a"}
@@ -1879,6 +1912,7 @@ beneath it.
 | `weightLayers` | array | `["actors"]` | Layers searched for weighted bodies. Also the layers a falling leaf empties. |
 | `groundLayer` | string | `"ground"` | Layer holding pan floors and leaves. |
 | `stateVariable` | string | — | Receives the attitude: `-1` first pan down, `0` level, `+1` second pan down. Omit it and the attitude stays internal. |
+| `totalsVariables` | object | — | Pan name → variable receiving that pan's current total weight (an unnamed pan is `"first"` / `"second"`). Written with the attitude on every settle pass, so the totals always describe the same board as the attitude — derived state, adding nothing to the state key. Entries naming no pan or no variable are ignored; omit the field and nothing is written. |
 | `markerLayer` | string | `"objects"` | Layer holding leaf markers. |
 | `leaves` | array | `[]` | Each `{"marker": kind, "solidWhen": [pan name or "level"], "solidKind": kind, "openKind": kind}`. `openKind` defaults to `"void"`. |
 | `fallVariable` | string | `"fell"` | Incremented when the avatar is dropped, so a `variable_threshold` lose condition ends the level the same turn. |
@@ -1913,7 +1947,8 @@ beneath it.
 
 1. Sum the weights of every `weightLayers` body standing on each pan, plus
    `avatarWeight` if the avatar is on one.
-2. Compare the totals; write the attitude to `stateVariable`.
+2. Compare the totals; write the attitude to `stateVariable` and each total to
+   its `totalsVariables` entry.
 3. For each marker on `markerLayer` naming a leaf spec, set the ground beneath
    it to `solidKind` when the attitude is one of `solidWhen`, else `openKind`.
 4. For each leaf that just opened, remove any `weightLayers` body standing on it

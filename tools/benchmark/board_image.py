@@ -25,7 +25,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFont
 
 # Import the engine's Pos so board.get_entity uses the same type.
 import sys
@@ -61,12 +61,29 @@ _AXIS_TEXT = (90, 90, 90)
 _GRID_LINE = (210, 210, 210)
 
 
-def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
+def render_board_png(
+    game_def: Any, state: Any, pack_dir: str | Path, level_def: dict | None = None,
+) -> bytes:
     """Render the board to a PNG byte string. State + game_def come from the
-    Python engine; pack_dir is the pack root (so sprites can be located)."""
+    Python engine; pack_dir is the pack root (so sprites can be located).
+    level_def (optional) applies the level's systemOverrides when deciding
+    whether a selected piece is highlighted."""
+    return render_board_image(game_def, state, pack_dir, level_def)[0]
+
+
+def render_board_image(
+    game_def: Any, state: Any, pack_dir: str | Path, level_def: dict | None = None,
+) -> tuple[bytes, list[str]]:
+    """Render the board and say which non-sprite marks the image carries.
+
+    Returns (png_bytes, marks). `marks` lists, in a fixed order, the image
+    conventions actually drawn on this board — "selected", "overlay",
+    "hidden" — so the prompt can explain exactly the marks the model sees.
+    """
     pack_dir = Path(pack_dir)
     base_dir = pack_dir.parent / "gridponder-base" / "sprites" / "tiles"
     theme = _load_theme(pack_dir)
+    ctx = _Ctx(game_def, state, pack_dir, base_dir, theme)
 
     width_cells = state.board.width
     height_cells = state.board.height
@@ -86,43 +103,339 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
         cy = AXIS_PX + PADDING + y * CELL_PX + CELL_PX // 2
         draw.text((PADDING + AXIS_PX // 2, cy), str(y), fill=_AXIS_TEXT, font=font_axis, anchor="mm")
 
-    # Cells: ground first, then objects/markers/clone on top
+    marks: list[str] = []
+    any_hidden = False
     for y in range(height_cells):
         for x in range(width_cells):
-            x0 = AXIS_PX + PADDING + x * CELL_PX
-            y0 = AXIS_PX + PADDING + y * CELL_PX
-            x1, y1 = x0 + CELL_PX, y0 + CELL_PX
-            _paint_cell(
-                canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir
-            )
-            draw.rectangle((x0, y0, x1, y1), outline=_GRID_LINE, width=1)
+            x0, y0 = _cell_origin(x, y)
+            tile, hidden = _cell_tile(ctx, x, y)
+            canvas.paste(tile, (x0, y0), tile)
+            any_hidden = any_hidden or hidden
+            draw.rectangle((x0, y0, x0 + CELL_PX, y0 + CELL_PX), outline=_GRID_LINE, width=1)
 
     # Region outlines: stroke the perimeter of every contiguous group of
     # cells whose kind has `outline` set in game.json.
     _draw_region_outlines(draw, game_def, state)
 
-    # Avatar overlay (drawn last so always visible).
-    avatar = getattr(state, "avatar", None)
-    if avatar is not None and getattr(avatar, "enabled", False) and avatar.position is not None:
-        ax, ay = avatar.position.x, avatar.position.y
-        x0 = AXIS_PX + PADDING + ax * CELL_PX
-        y0 = AXIS_PX + PADDING + ay * CELL_PX
-        _draw_avatar(
-            canvas,
-            draw,
-            x0,
-            y0,
-            pack_dir,
-            base_dir,
-            _avatar_sprite(theme, avatar.facing),
+    # The piece the player has selected (individual_actors), as the app's
+    # selection ring does.
+    selected = _selected_actor_position(game_def, state, level_def)
+    if selected is not None:
+        sx, sy = _cell_origin(*selected)
+        draw.rounded_rectangle(
+            (sx + 2, sy + 2, sx + CELL_PX - 2, sy + CELL_PX - 2),
+            radius=CELL_PX // 6, outline=_SELECT_RING, width=4,
         )
+        marks.append("selected")
+
+    # The overlay cursor (the region selection-based actions operate on).
+    overlay = getattr(state, "overlay", None)
+    if overlay is not None:
+        ox, oy = _cell_origin(overlay.x, overlay.y)
+        draw.rounded_rectangle(
+            (ox + 1, oy + 1, ox + overlay.width * CELL_PX - 1, oy + overlay.height * CELL_PX - 1),
+            radius=4, outline=_OVERLAY_FRAME, width=4,
+        )
+        marks.append("overlay")
+
+    if any_hidden:
+        marks.append("hidden")
 
     out = io.BytesIO()
     canvas.save(out, format="PNG", optimize=True)
-    return out.getvalue()
+    return out.getvalue(), marks
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────
+
+_SELECT_RING = (255, 212, 90)     # matches the app's selected-actor ring
+_OVERLAY_FRAME = (255, 179, 0)    # amber, as the app's overlay cursor
+_INSET_PX = 24                    # hidden-item inset size
+_HIDDEN_COVER = 0.6               # fraction of an item covered to call it hidden
+
+
+class _Ctx:
+    __slots__ = ("game_def", "state", "pack_dir", "base_dir", "theme", "palette", "raw_kinds")
+
+    def __init__(self, game_def, state, pack_dir, base_dir, theme):
+        self.game_def = game_def
+        self.state = state
+        self.pack_dir = pack_dir
+        self.base_dir = base_dir
+        self.theme = theme
+        palette = theme.get("palette") if isinstance(theme, dict) else None
+        self.palette = palette if isinstance(palette, dict) else {}
+        self.raw_kinds = _load_raw_kinds(pack_dir)
+
+
+def _cell_origin(x: int, y: int) -> tuple[int, int]:
+    return AXIS_PX + PADDING + x * CELL_PX, AXIS_PX + PADDING + y * CELL_PX
+
+
+def _layer_order(game_def) -> list[str]:
+    """Every declared layer in the pack's own order (ground first), as the
+    app's resolveBoardLayerOrder draws them."""
+    ids = [layer["id"] for layer in game_def.layers]
+    if "ground" in ids:
+        ids.remove("ground")
+    return ["ground", *ids]
+
+
+def _layer_default(game_def, layer_id: str):
+    for layer in game_def.layers:
+        if layer["id"] == layer_id:
+            return layer.get("defaultKind", layer.get("default"))
+    return None
+
+
+def _cell_tile(ctx: _Ctx, x: int, y: int) -> tuple[Image.Image, bool]:
+    """Composite one cell bottom to top. Returns (tile, drew_hidden_inset).
+
+    Every declared layer is drawn in the pack's order; multi-cell objects sit
+    just above the floor layers (ground, territory). An item whose visible
+    pixels end up mostly covered by the items above it (e.g. a marker under an
+    opaque piece, a special floor under a territory fill) gets a small inset
+    in the cell's lower-left corner, since the text grid lists it under
+    "Stacked cells" and the image would otherwise drop it.
+    """
+    game_def, state = ctx.game_def, ctx.state
+    pos = _Pos(x, y)
+    tile = Image.new("RGBA", (CELL_PX, CELL_PX), (0, 0, 0, 0))
+
+    # (tile, may_be_hidden) bottom to top
+    stack: list[tuple[Image.Image, bool]] = []
+
+    ground = state.board.get_entity("ground", pos)
+    if ground is None:
+        stack.append((_solid(_EMPTY_FILL), False))
+    else:
+        kind_def = game_def.entity_kinds.get(ground.kind, {})
+        bg = _parse_hex(ctx.theme.get("backgroundColor")) if isinstance(ctx.theme, dict) else None
+        ground_tile = _entity_tile(ctx, ground.kind, kind_def, ground.params, "ground", is_ground=True)
+        if bg is not None and _has_transparency(ground_tile):
+            under = _solid(bg)
+            under.alpha_composite(ground_tile)
+            ground_tile = under
+        stack.append((ground_tile, ground.kind != _layer_default(game_def, "ground")))
+
+    layers = _layer_order(game_def)[1:]
+    floor_layers = [layer for layer in layers if layer == "territory"]
+    other_layers = [layer for layer in layers if layer not in floor_layers]
+
+    for layer in floor_layers:
+        ent = state.board.get_entity(layer, pos)
+        if ent is not None:
+            stack.append((_layer_tile(ctx, layer, ent), ent.kind != _layer_default(game_def, layer)))
+
+    for mco in state.board.multi_cell_objects:
+        if not any(cell.x == x and cell.y == y for cell in mco.cells):
+            continue
+        kind_def = game_def.entity_kinds.get(mco.kind, {})
+        stack.append((_entity_tile(ctx, mco.kind, kind_def, mco.params, None), False))
+
+    for layer in other_layers:
+        ent = state.board.get_entity(layer, pos)
+        if ent is not None:
+            stack.append((_layer_tile(ctx, layer, ent), ent.kind != _layer_default(game_def, layer)))
+
+    avatar = getattr(state, "avatar", None)
+    if (avatar is not None and getattr(avatar, "enabled", False)
+            and avatar.position is not None
+            and avatar.position.x == x and avatar.position.y == y):
+        stack.append((_avatar_tile(ctx, avatar.facing), False))
+
+    for item, _ in stack:
+        tile.alpha_composite(item)
+
+    hidden = [i for i, (item, may_hide) in enumerate(stack)
+              if may_hide and _covered_fraction(item, [t for t, _ in stack[i + 1:]]) >= _HIDDEN_COVER]
+    if hidden:
+        d = ImageDraw.Draw(tile)
+        for n, i in enumerate(hidden[:2]):
+            ix0 = 3 + n * (_INSET_PX + 4)
+            iy0 = CELL_PX - _INSET_PX - 3
+            # The hidden item over what lies beneath it, as it would look
+            # with everything above it lifted off, zoomed to the item.
+            inset = _solid((255, 255, 255))
+            for below, _ in stack[:i + 1]:
+                inset.alpha_composite(below)
+            inset = inset.crop(_square_bbox(stack[i][0]))
+            inset = inset.resize((_INSET_PX, _INSET_PX), Image.LANCZOS)
+            tile.paste(inset, (ix0, iy0))
+            d.rectangle((ix0 - 2, iy0 - 2, ix0 + _INSET_PX + 1, iy0 + _INSET_PX + 1),
+                        outline=(255, 255, 255), width=2)
+            d.rectangle((ix0 - 3, iy0 - 3, ix0 + _INSET_PX + 2, iy0 + _INSET_PX + 2),
+                        outline=(20, 20, 20), width=1)
+    return tile, bool(hidden)
+
+
+def _covered_fraction(item: Image.Image, above: list[Image.Image]) -> float:
+    """Fraction of `item`'s visible pixels hidden under opaque pixels above."""
+    if not above:
+        return 0.0
+    visible = item.getchannel("A").point(lambda a: 255 if a > 32 else 0)
+    total = visible.histogram()[255]
+    if total == 0:
+        return 0.0
+    cover = Image.new("L", item.size, 0)
+    for other in above:
+        cover = ImageChops.lighter(cover, other.getchannel("A").point(lambda a: 255 if a > 160 else 0))
+    both = ImageChops.multiply(visible, cover)
+    return both.histogram()[255] / total
+
+
+def _square_bbox(item: Image.Image) -> tuple[int, int, int, int]:
+    """Smallest square (padded a little) around an item's visible pixels."""
+    bbox = item.getchannel("A").point(lambda a: 255 if a > 32 else 0).getbbox()
+    if bbox is None:
+        return (0, 0, CELL_PX, CELL_PX)
+    x0, y0, x1, y1 = bbox
+    side = min(CELL_PX, max(x1 - x0, y1 - y0) + 6)
+    cx, cy = (x0 + x1) // 2, (y0 + y1) // 2
+    left = max(0, min(CELL_PX - side, cx - side // 2))
+    top = max(0, min(CELL_PX - side, cy - side // 2))
+    return (left, top, left + side, top + side)
+
+
+def _has_transparency(img: Image.Image) -> bool:
+    return img.getchannel("A").getextrema()[0] < 255
+
+
+def _solid(rgb) -> Image.Image:
+    return Image.new("RGBA", (CELL_PX, CELL_PX), (*rgb, 255))
+
+
+def _layer_tile(ctx: _Ctx, layer_id: str, ent) -> Image.Image:
+    kind_def = ctx.game_def.entity_kinds.get(ent.kind, {})
+    item = _entity_tile(ctx, ent.kind, kind_def, ent.params, layer_id)
+    raw = ctx.raw_kinds.get(ent.kind) or {}
+    display = kind_def.get("display") or {}
+    if raw.get("groundBeneath") is True or display.get("groundBeneath") is True:
+        default_kind = _layer_default(ctx.game_def, layer_id)
+        if default_kind and default_kind != ent.kind:
+            under = _entity_tile(ctx, default_kind, ctx.game_def.entity_kinds.get(default_kind, {}), {}, layer_id)
+            under.alpha_composite(item)
+            item = under
+    return item
+
+
+def _entity_tile(ctx: _Ctx, kind, kind_def, params, layer_id, *, is_ground: bool = False) -> Image.Image:
+    """One entity as a transparent CELL_PX tile: its sprite (plus a display
+    overlay when `display.overlay` is true), else its `display` block, else a
+    labelled badge (or a plain floor fill for ground)."""
+    tile = Image.new("RGBA", (CELL_PX, CELL_PX), (0, 0, 0, 0))
+    params = params or {}
+    display = (kind_def or {}).get("display")
+    sprite = _sprite_image(ctx, kind_def or {}, params)
+    draw = ImageDraw.Draw(tile)
+    cx, cy = CELL_PX // 2, CELL_PX // 2
+    if sprite is not None:
+        tile.alpha_composite(sprite)
+        if display and display.get("overlay") is True:
+            _draw_from_display(draw, display, kind, params, 0, 0, cx, cy, ctx)
+        return tile
+    if display and _draw_from_display(draw, display, kind, params, 0, 0, cx, cy, ctx):
+        return tile
+    if is_ground:
+        _procedural_ground(draw, kind, 0, 0)
+        return tile
+    _procedural_object(tile, draw, kind, kind_def, params, 0, 0, ctx)
+    return tile
+
+
+def _sprite_image(ctx: _Ctx, kind_def: dict, params: dict) -> Image.Image | None:
+    """Resolve a kind's sprite as the app does: a direction-aware idle frame
+    from `motion.sprites.idle[<facing>]` when the entity has a facing, else
+    the `sprite` path with `{param}` placeholders filled from the entity."""
+    sprite_path = kind_def.get("sprite")
+    if not sprite_path:
+        return None
+    facing = params.get("facing")
+    motion = kind_def.get("motion") or {}
+    idle = (motion.get("sprites") or {}).get("idle") if isinstance(motion, dict) else None
+    candidates = []
+    if isinstance(facing, str) and isinstance(idle, dict) and isinstance(idle.get(facing), str):
+        candidates.append(idle[facing])
+    resolved = sprite_path
+    ok = True
+    if "{" in resolved and "}" in resolved:
+        for key in re.findall(r"\{(\w+)\}", resolved):
+            val = params.get(key)
+            if val is None:
+                ok = False
+                break
+            resolved = resolved.replace("{" + key + "}", str(val))
+    if ok:
+        candidates.append(resolved)
+    for path in candidates:
+        img = _load_sprite(ctx.pack_dir, ctx.base_dir, path)
+        if img is not None:
+            if img.size != (CELL_PX, CELL_PX):
+                img = img.resize((CELL_PX, CELL_PX), Image.LANCZOS)
+            return img
+    return None
+
+
+def _avatar_tile(ctx: _Ctx, facing) -> Image.Image:
+    tile = Image.new("RGBA", (CELL_PX, CELL_PX), (0, 0, 0, 0))
+    img = _load_sprite(
+        ctx.pack_dir, ctx.base_dir,
+        _avatar_sprite(ctx.theme, facing) or "rabbit_idle_facing_player.png",
+    )
+    if img is not None:
+        if img.size != (CELL_PX, CELL_PX):
+            img = img.resize((CELL_PX, CELL_PX), Image.LANCZOS)
+        tile.alpha_composite(img)
+        return tile
+    # Fallback: blue circle with @
+    draw = ImageDraw.Draw(tile)
+    cx, cy = CELL_PX // 2, CELL_PX // 2
+    draw.ellipse((6, 6, CELL_PX - 6, CELL_PX - 6), fill="#3b82f6", outline="white", width=2)
+    draw.text((cx, cy), "@", fill="white", font=_font(int(CELL_PX * 0.6)), anchor="mm")
+    return tile
+
+
+def _selected_actor_position(game_def, state, level_def) -> tuple[int, int] | None:
+    """Cell of the piece the `individual_actors` selection variables point at,
+    when that cell still holds the selected kind (as the Selected: status line
+    decides). None when the system is off or nothing valid is selected."""
+    effective = game_def
+    if level_def is not None and hasattr(game_def, "with_system_overrides"):
+        effective = game_def.with_system_overrides(level_def.get("systemOverrides"))
+    config = None
+    for system in getattr(effective, "systems", []) or []:
+        if system.get("type") == "individual_actors" and system.get("enabled", True):
+            config = system.get("config") or {}
+            break
+    if config is None:
+        return None
+    variables = getattr(state, "variables", {}) or {}
+    kind = variables.get(config.get("selectedVariable", "selectedActorKind"))
+    raw = variables.get(config.get("selectedPositionVariable", "selectedActorPosition"))
+    if not kind or not isinstance(raw, (list, tuple)) or len(raw) < 2:
+        return None
+    x, y = int(raw[0]), int(raw[1])
+    if not (0 <= x < state.board.width and 0 <= y < state.board.height):
+        return None
+    ent = state.board.get_entity(config.get("actorLayer", "actors"), _Pos(x, y))
+    if ent is None or ent.kind != kind:
+        return None
+    return x, y
+
+
+@lru_cache(maxsize=64)
+def _load_raw_kinds(pack_dir: Path) -> dict:
+    """Raw entityKinds from game.json, for render-only keys the engine's
+    parsed kind drops (e.g. top-level `groundBeneath`)."""
+    try:
+        import json
+
+        data = json.loads((pack_dir / "game.json").read_text())
+        kinds = data.get("entityKinds")
+        return kinds if isinstance(kinds, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
 
 def _draw_region_outlines(draw, game_def, state):
     """Stroke the outer perimeter of every contiguous region of cells whose
@@ -149,8 +462,7 @@ def _draw_region_outlines(draw, game_def, state):
         for pos, ent in layer.entries():
             if ent.kind != kind_id:
                 continue
-            x0 = AXIS_PX + PADDING + pos.x * CELL_PX
-            y0 = AXIS_PX + PADDING + pos.y * CELL_PX
+            x0, y0 = _cell_origin(pos.x, pos.y)
             x1 = x0 + CELL_PX
             y1 = y0 + CELL_PX
             if not in_set(pos.x, pos.y - 1):
@@ -175,86 +487,6 @@ def _parse_hex(hex_str):
         return None
 
 
-def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir):
-    """Paint one cell from bottom to top, including custom layers and MCOs."""
-    # Ground
-    ground = state.board.get_entity("ground", _Pos(x, y))
-    if ground is None:
-        # Default empty
-        draw.rectangle((x0, y0, x0 + CELL_PX, y0 + CELL_PX), fill=_EMPTY_FILL)
-    else:
-        kind_def = game_def.entity_kinds.get(ground.kind, {})
-        if not _paste_sprite(canvas, ground.kind, kind_def, ground.params, x0, y0, pack_dir, base_dir):
-            display = kind_def.get("display")
-            cx, cy = x0 + CELL_PX // 2, y0 + CELL_PX // 2
-            if not display or not _draw_from_display(
-                draw, display, ground.kind, ground.params, x0, y0, cx, cy
-            ):
-                _procedural_ground(draw, ground.kind, x0, y0)
-
-    layer_ids = [layer["id"] for layer in game_def.layers if layer["id"] != "ground"]
-    preferred = ["territory", "structures", "objects", "markers", "actors", "clone"]
-    ordered = [layer for layer in preferred if layer in layer_ids]
-    ordered.extend(layer for layer in layer_ids if layer not in ordered)
-
-    # Territory is a floor overlay. Draw it before a multi-cell object.
-    for layer in [layer for layer in ordered if layer == "territory"]:
-        ent = state.board.get_entity(layer, _Pos(x, y))
-        if ent is None:
-            continue
-        kind_def = game_def.entity_kinds.get(ent.kind, {})
-        if not _paste_sprite(canvas, ent.kind, kind_def, ent.params, x0, y0, pack_dir, base_dir):
-            _procedural_object(canvas, draw, ent.kind, kind_def, ent.params, x0, y0)
-
-    for mco in state.board.multi_cell_objects:
-        if not any(cell.x == x and cell.y == y for cell in mco.cells):
-            continue
-        kind_def = game_def.entity_kinds.get(mco.kind, {})
-        if not _paste_sprite(
-            canvas, mco.kind, kind_def, mco.params, x0, y0, pack_dir, base_dir
-        ):
-            _procedural_object(
-                canvas, draw, mco.kind, kind_def, mco.params, x0, y0
-            )
-
-    for layer in [layer for layer in ordered if layer != "territory"]:
-        ent = state.board.get_entity(layer, _Pos(x, y))
-        if ent is None:
-            continue
-        kind_def = game_def.entity_kinds.get(ent.kind, {})
-        if not _paste_sprite(
-            canvas, ent.kind, kind_def, ent.params, x0, y0, pack_dir, base_dir
-        ):
-            _procedural_object(
-                canvas, draw, ent.kind, kind_def, ent.params, x0, y0
-            )
-
-
-def _paste_sprite(canvas, kind, kind_def, params, x0, y0, pack_dir, base_dir) -> bool:
-    """Try to paste a PNG sprite. Returns True on success."""
-    sprite_path = kind_def.get("sprite")
-    if not sprite_path:
-        return False
-    resolved_path = sprite_path
-    # Templated sprites (e.g. box_{sides}.png on box_fragment).
-    if "{" in resolved_path and "}" in resolved_path:
-        for key in re.findall(r"\{(\w+)\}", resolved_path):
-            val = params.get(key)
-            if val is None:
-                return False
-            resolved_path = resolved_path.replace("{" + key + "}", str(val))
-    img = _load_sprite(pack_dir, base_dir, resolved_path)
-    if img is None:
-        return False
-    if img.size != (CELL_PX, CELL_PX):
-        img = img.resize((CELL_PX, CELL_PX), Image.LANCZOS)
-    if img.mode == "RGBA":
-        canvas.paste(img, (x0, y0), img)
-    else:
-        canvas.paste(img, (x0, y0))
-    return True
-
-
 def _procedural_ground(draw, kind, x0, y0):
     if kind == "void":
         draw.rectangle((x0, y0, x0 + CELL_PX, y0 + CELL_PX), fill=_VOID_FILL)
@@ -262,7 +494,7 @@ def _procedural_ground(draw, kind, x0, y0):
         draw.rectangle((x0, y0, x0 + CELL_PX, y0 + CELL_PX), fill=_EMPTY_FILL)
 
 
-def _procedural_object(canvas, draw, kind, kind_def, params, x0, y0):
+def _procedural_object(canvas, draw, kind, kind_def, params, x0, y0, ctx=None):
     """Procedural fallback for objects/markers without a sprite.
 
     Pack-visible vocabulary: every game-specific rendering choice goes
@@ -272,7 +504,7 @@ def _procedural_object(canvas, draw, kind, kind_def, params, x0, y0):
     cx, cy = x0 + CELL_PX // 2, y0 + CELL_PX // 2
 
     display = (kind_def or {}).get("display")
-    if display and _draw_from_display(draw, display, kind, params, x0, y0, cx, cy):
+    if display and _draw_from_display(draw, display, kind, params, x0, y0, cx, cy, ctx):
         return
 
     # Generic fallback: labelled badge (first letter of kind).
@@ -282,11 +514,15 @@ def _procedural_object(canvas, draw, kind, kind_def, params, x0, y0):
     draw.text((cx, cy), label, fill="white", font=font, anchor="mm")
 
 
-def _draw_from_display(draw, display, kind, params, x0, y0, cx, cy) -> bool:
+def _draw_from_display(draw, display, kind, params, x0, y0, cx, cy, ctx=None) -> bool:
     """Render the entity using its kind's `display` block. Returns True on
-    success, False when the type is unrecognised (caller falls back)."""
+    success, False when the type is unrecognised (caller falls back).
+    Colour names resolve through the pack's theme.json `palette` first, as
+    the app's cellNamedColor does."""
     type_ = display.get("type")
-    color = _resolve_display_color(display.get("color"), kind, params)
+    color = _resolve_display_color(display.get("color"), kind, params, ctx)
+    if type_ == "none":
+        return True
     if type_ == "tile":
         fill = color or "#94a3b8"
         draw.rectangle((x0 + 4, y0 + 4, x0 + CELL_PX - 4, y0 + CELL_PX - 4),
@@ -302,8 +538,38 @@ def _draw_from_display(draw, display, kind, params, x0, y0, cx, cy) -> bool:
         draw.ellipse((x0 + m, y0 + m, x0 + CELL_PX - m, y0 + CELL_PX - m),
                      fill=c, outline=(50, 50, 50))
         return True
+    if type_ == "ring":
+        c = color or "#16a34a"
+        m = CELL_PX // 8
+        draw.ellipse((x0 + m, y0 + m, x0 + CELL_PX - m, y0 + CELL_PX - m),
+                     fill=(20, 20, 20), outline=c, width=max(2, CELL_PX // 10))
+        return True
+    if type_ == "filled_circle":
+        c = color or "#16a34a"
+        if display.get("overlay") is not True:
+            bg = _resolve_display_color(display.get("bgColor"), kind, params, ctx)
+            if bg:
+                draw.rectangle((x0, y0, x0 + CELL_PX, y0 + CELL_PX), fill=bg)
+        m = int(CELL_PX * 0.24)
+        draw.ellipse((x0 + m, y0 + m, x0 + CELL_PX - m, y0 + CELL_PX - m), fill=c)
+        return True
+    if type_ == "circle_label":
+        c = color or "#16a34a"
+        text = _resolve_display_string(display.get("label"), kind, params, ctx) or ""
+        if display.get("overlay") is True:
+            r = int(CELL_PX * 0.23)
+            bx, by = x0 + CELL_PX - r - 3, y0 + CELL_PX - r - 3
+            draw.ellipse((bx - r, by - r, bx + r, by + r), fill=(20, 20, 20), outline=c, width=2)
+            if text:
+                draw.text((bx, by), text, fill="white", font=_font(int(CELL_PX * 0.26)), anchor="mm")
+            return True
+        m = int(CELL_PX * 0.14)
+        draw.ellipse((x0 + m, y0 + m, x0 + CELL_PX - m, y0 + CELL_PX - m), fill=c)
+        if text:
+            draw.text((cx, cy), text, fill="white", font=_font(int(CELL_PX * 0.36)), anchor="mm")
+        return True
     if type_ == "label":
-        text = _resolve_display_string(display.get("label"), kind, params) or "?"
+        text = _resolve_display_string(display.get("label"), kind, params, ctx) or "?"
         fill = color or "#fef3c7"
         draw.rectangle((x0 + 4, y0 + 4, x0 + CELL_PX - 4, y0 + CELL_PX - 4),
                        fill=fill, outline=(60, 30, 0), width=1)
@@ -315,7 +581,15 @@ def _draw_from_display(draw, display, kind, params, x0, y0, cx, cy) -> bool:
     if type_ == "emoji":
         glyph = display.get("value", "?")
         font = _font(int(CELL_PX * 0.6))
-        draw.text((cx, cy), glyph, font=font, anchor="mm")
+        draw.text((cx, cy), glyph, font=font, anchor="mm", fill=(30, 30, 30))
+        return True
+    if type_ == "emoji_label":
+        glyph = display.get("emoji", "")
+        text = _resolve_display_string(display.get("label"), kind, params, ctx) or ""
+        draw.text((cx, cy - CELL_PX // 8), glyph, font=_font(int(CELL_PX * 0.45)), anchor="mm", fill=(30, 30, 30))
+        if text:
+            draw.text((cx, cy + CELL_PX // 4), text, font=_font(int(CELL_PX * 0.23)), anchor="mm",
+                      fill="white", stroke_width=2, stroke_fill=(20, 20, 20))
         return True
     if type_ == "icon":
         # Material icons aren't available to PIL; fall back to a labelled
@@ -330,17 +604,27 @@ def _draw_from_display(draw, display, kind, params, x0, y0, cx, cy) -> bool:
     return False
 
 
-def _resolve_display_color(spec, kind, params):
+def _named_color(name: str, ctx=None) -> str:
+    """Palette name → hex: the pack theme's `palette` first, then the built-in
+    names, then neutral grey."""
+    palette = ctx.palette if ctx is not None else {}
+    value = palette.get(name)
+    if isinstance(value, str) and _parse_hex(value) is not None:
+        return "#" + value.strip().lstrip("#")
+    return _COLOR_HEX.get(name, "#94a3b8")
+
+
+def _resolve_display_color(spec, kind, params, ctx=None):
     """Resolves a `display.color` spec to a hex string. Tokens:
        - `@param:<key>`        — read colour name from instance param
        - `@hue:<source>`       — derive HSL colour from a numeric string
                                  (`<source>` is itself a string spec)
-       - bare string           — palette lookup
+       - bare string           — palette lookup (theme palette first)
     Returns None when the spec can't resolve."""
     if not isinstance(spec, str):
         return None
     if spec.startswith("@hue:"):
-        source = _resolve_display_string(spec[len("@hue:"):], kind, params)
+        source = _resolve_display_string(spec[len("@hue:"):], kind, params, ctx)
         try:
             n = int(source) if source is not None else None
         except (TypeError, ValueError):
@@ -350,13 +634,14 @@ def _resolve_display_color(spec, kind, params):
         v = params.get(spec[len("@param:"):])
         if not isinstance(v, str):
             return None
-        return _COLOR_HEX.get(v, "#94a3b8")
-    return _COLOR_HEX.get(spec, "#94a3b8")
+        return _named_color(v, ctx)
+    return _named_color(spec, ctx)
 
 
-def _resolve_display_string(spec, kind, params):
+def _resolve_display_string(spec, kind, params, ctx=None):
     """Resolves a string spec inside `display` (label text, source of @hue, …).
-    Tokens: `@param:<key>`, `@kind_suffix:<prefix>`, otherwise literal."""
+    Tokens: `@param:<key>`, `@kind_suffix:<prefix>`, `@variable:<key>`,
+    otherwise literal."""
     if not isinstance(spec, str):
         return None
     if spec.startswith("@param:"):
@@ -365,6 +650,10 @@ def _resolve_display_string(spec, kind, params):
     if spec.startswith("@kind_suffix:"):
         prefix = spec[len("@kind_suffix:"):]
         return kind[len(prefix):] if kind.startswith(prefix) else None
+    if spec.startswith("@variable:"):
+        variables = getattr(ctx.state, "variables", {}) if ctx is not None else {}
+        v = variables.get(spec[len("@variable:"):])
+        return None if v is None else str(v)
     return spec
 
 
@@ -375,27 +664,6 @@ def _hue_color(value: int) -> str:
     h = ((value * 37) % 360) / 360.0
     r, g, b = colorsys.hls_to_rgb(h, 0.45, 0.6)
     return "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
-
-
-def _draw_avatar(canvas, draw, x0, y0, pack_dir, base_dir, sprite_path=None):
-    img = _load_sprite(
-        pack_dir,
-        base_dir,
-        sprite_path or "rabbit_idle_facing_player.png",
-    )
-    if img is not None:
-        if img.size != (CELL_PX, CELL_PX):
-            img = img.resize((CELL_PX, CELL_PX), Image.LANCZOS)
-        if img.mode == "RGBA":
-            canvas.paste(img, (x0, y0), img)
-        else:
-            canvas.paste(img, (x0, y0))
-        return
-    # Fallback: blue circle with @
-    cx, cy = x0 + CELL_PX // 2, y0 + CELL_PX // 2
-    draw.ellipse((x0 + 6, y0 + 6, x0 + CELL_PX - 6, y0 + CELL_PX - 6), fill="#3b82f6", outline="white", width=2)
-    font = _font(int(CELL_PX * 0.6))
-    draw.text((cx, cy), "@", fill="white", font=font, anchor="mm")
 
 
 @lru_cache(maxsize=256)

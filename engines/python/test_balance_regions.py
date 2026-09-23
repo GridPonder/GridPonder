@@ -29,7 +29,8 @@ GROUP = {
 }
 
 
-def _make_game(group: dict | None = None) -> GameDef:
+def _make_game(group: dict | None = None,
+               npc_system: dict | None = None) -> GameDef:
     data = {
         "id": "com.gridponder.test_balance_regions",
         "layers": [
@@ -60,6 +61,10 @@ def _make_game(group: dict | None = None) -> GameDef:
              "config": {"groups": {"hall": group if group is not None else GROUP}}},
         ],
     }
+    if npc_system is not None:
+        # Declared before the balance, as a pack must: machines move, then the
+        # floor settles.
+        data["systems"].insert(1, npc_system)
     return GameDef.from_dict(data, id="test_balance_regions")
 
 
@@ -217,6 +222,94 @@ def test_leaf_state_always_agrees_with_the_final_attitude():
     attitude = eng.state.variables["attitude"]
     ground = eng.state.board.get_entity("ground", Pos(4, 0)).kind
     assert (attitude == -1) == (ground == "leaf_plate"), (attitude, ground)
+
+
+def _totals_group(**extra) -> dict:
+    group = dict(GROUP)
+    group.update(extra)
+    return group
+
+
+def test_totals_variables_are_off_by_default():
+    """A group that does not opt in writes exactly what it wrote before."""
+    game = _make_game()
+    level = _level([[_W, _W, _N, _E, _E]], avatar=[0, 0],
+                   actors=[{"position": [4, 0], "kind": "carriage"}])
+    eng = TurnEngine(game, level)
+    assert sorted(eng.state.variables) == ["attitude", "fell"], eng.state.variables
+    eng.execute_turn("move", {"direction": "right"})
+    assert sorted(eng.state.variables) == ["attitude", "fell"], eng.state.variables
+
+
+def test_totals_variables_publish_each_pans_weight():
+    game = _make_game(group=_totals_group(
+        totalsVariables={"west": "west_weight", "east": "east_weight"}))
+    level = _level([[_W, _W, _N, _E, _E]], avatar=[1, 0],
+                   actors=[{"position": [3, 0], "kind": "carriage"},
+                           {"position": [4, 0], "kind": "carriage"}])
+    eng = TurnEngine(game, level)
+    v = eng.state.variables
+    assert (v["west_weight"], v["east_weight"], v["attitude"]) == (1, 2, 1), v
+    eng.execute_turn("move", {"direction": "right"})   # onto neutral floor
+    v = eng.state.variables
+    assert (v["west_weight"], v["east_weight"], v["attitude"]) == (0, 2, 1), v
+
+
+def test_totals_variables_key_unnamed_pans_first_and_second():
+    group = _totals_group(totalsVariables={"first": "a_w", "second": "b_w"})
+    group["pans"] = [{"groundTags": ["pan_west"]}, {"groundTags": ["pan_east"]}]
+    game = _make_game(group=group)
+    level = _level([[_W, _W, _N, _E, _E]], avatar=[0, 0])
+    eng = TurnEngine(game, level)
+    assert (eng.state.variables["a_w"], eng.state.variables["b_w"]) == (1, 0)
+
+
+def test_totals_variables_ignore_malformed_entries():
+    game = _make_game(group=_totals_group(
+        totalsVariables={"west": 7, "east": "", "north": "n_w"}))
+    level = _level([[_W, _W, _N, _E, _E]], avatar=[0, 0])
+    eng = TurnEngine(game, level)
+    assert sorted(eng.state.variables) == ["attitude", "fell"], eng.state.variables
+    game = _make_game(group=_totals_group(totalsVariables=["west_weight"]))
+    eng = TurnEngine(game, level)
+    assert sorted(eng.state.variables) == ["attitude", "fell"], eng.state.variables
+
+
+def test_totals_agree_with_the_attitude_after_a_fall():
+    """Totals are written on the final settle pass, so a body that falls out
+    of the balance is already gone from its pan's total."""
+    game = _make_game(group=_totals_group(
+        totalsVariables={"west": "west_weight", "east": "east_weight"}))
+    level = _level([[_W, _N, _E, _E, "leaf_plate"]], avatar=[1, 0],
+                   objects=[{"position": [4, 0], "kind": "hinge_west"}],
+                   actors=[{"position": [2, 0], "kind": "carriage"}])
+    eng = TurnEngine(game, level)
+    v = eng.state.variables
+    assert (v["west_weight"], v["east_weight"], v["attitude"]) == (0, 1, 1), v
+
+
+def test_shaft_status_reads_seized_on_the_beat_the_floor_drops_a_member():
+    """Derived variables run after the floor settles: a train whose member the
+    balance destroys reads seized on that very beat, not one beat late."""
+    from engines.python._models import Pos
+    game = _make_game(npc_system={
+        "id": "machines", "type": "follower_npcs",
+        "config": {"npcTags": ["npc"],
+                   "behaviors": {"walker": {"type": "patrol"}},
+                   "shaftSeizeOnLoss": True,
+                   "shaftStatusVariablePrefix": "shaft_status_"}})
+    level = _level([[_W, _N, _E, _E, "leaf_plate"], [_N, _N, _N, _N, "void"]],
+                   avatar=[0, 0],
+                   objects=[{"position": [4, 0], "kind": "hinge_west"}],
+                   actors=[{"position": [4, 0], "kind": "carriage",
+                            "behavior": "walker", "facing": "up", "shaft": "a"},
+                           {"position": [0, 1], "kind": "carriage",
+                            "behavior": "walker", "facing": "right", "shaft": "a"}])
+    eng = TurnEngine(game, level)
+    assert eng.state.variables["shaft_status_a"] == 1   # jammed on the leaf
+    eng.execute_turn("move", {"direction": "right"})    # off the pan: leaf opens
+    assert eng.state.board.get_entity("actors", Pos(4, 0)) is None
+    assert eng.state.variables["shaft_status_a"] == 2, eng.state.variables
 
 
 def run_all() -> bool:

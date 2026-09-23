@@ -117,6 +117,57 @@ def test_board_did_not_change_note_and_allowance():
             "The board did not change.\n") in prompt, prompt
 
 
+_IMAGE_NOTE = "(See the attached image of the current board."
+
+
+def test_image_mode_keeps_feedback_and_status_without_the_grid():
+    events = _run([_LEFT, _SELECT, _LEFT, _LEFT], "--input", "image", "--max-attempts", "2")
+    states = [e for e in events if e["event"] == "state"]
+    assert all(s.get("image_b64") for s in states)
+    assert all("Each character is one cell" not in s["prompt"] for s in states)
+    assert all("GOAL: " in s["prompt"] for s in states)
+    # Rejected action: the rejection line, then the image note as the board.
+    rejected = states[1]["prompt"]
+    assert ('REJECTED (move is not legal in this state); no action was spent, the board '
+            "is unchanged.\nCURRENT BOARD:\n" + _IMAGE_NOTE) in rejected, rejected
+    # Selecting: the ring is explained, the status lines follow the note, and
+    # the text-board comparison still says the board did not change.
+    selected = states[2]["prompt"]
+    assert ("BOARD BEFORE:\n(Not shown: only the current board is attached as an image.)\n"
+            ) in selected, selected
+    assert ("Image marks: a gold ring marks the selected piece.\n"
+            "Moves this attempt: 0 of 2 allowed\nSelected: Red piece at (0,0)\n"
+            "The board did not change.\n") in selected, selected
+    assert "Compare the two boards" not in selected
+    # The edge bump is accepted, costs a move and changes nothing.
+    bumped = states[3]["prompt"]
+    assert "Moves this attempt: 1 of 2 allowed\nSelected: Red piece at (0,0)\n" in bumped
+    assert "The board did not change.\n" in bumped
+    # The second attempt opens with the previous attempt's loss.
+    assert ("PREVIOUS ATTEMPT: lost — move limit of 2 reached\n"
+            "CURRENT BOARD (first move of this attempt):\n" + _IMAGE_NOTE) in states[4]["prompt"]
+
+
+def test_text_image_mode_keeps_the_grid_and_names_the_image_marks():
+    events = _run([_SELECT], "--input", "text+image")
+    states = [e for e in events if e["event"] == "state"]
+    prompt = states[1]["prompt"]
+    assert states[1].get("image_b64")
+    assert "BOARD BEFORE:\nR.#\n" in prompt, prompt
+    assert ("Selected: Red piece at (0,0)\nThe board did not change.\n\n"
+            "Compare the two boards") in prompt, prompt
+    assert ("The attached image is a sprite rendering of the current board "
+            "(same state as the text grid above).\n"
+            "Image marks: a gold ring marks the selected piece.\n") in prompt, prompt
+
+
+def test_text_mode_has_no_image_notes():
+    events = _run([_SELECT])
+    prompt = [e for e in events if e["event"] == "state"][-1]["prompt"]
+    assert "image" not in prompt.lower(), prompt
+    assert all("image_b64" not in e for e in events)
+
+
 if __name__ == "__main__":
     failed = 0
     for name, fn in sorted(globals().items()):

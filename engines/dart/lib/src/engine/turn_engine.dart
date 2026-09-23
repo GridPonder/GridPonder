@@ -99,8 +99,14 @@ class TurnEngine {
   /// settle must run regardless.
   void _applySystemLoadSettle() {
     final effectiveGame = game.withSystemOverrides(level.systemOverrides);
-    for (final sys in SystemRegistry.instantiate(effectiveGame, null)) {
+    final systems = SystemRegistry.instantiate(effectiveGame, null);
+    for (final sys in systems) {
       sys.executeLoadSettle(_state, effectiveGame);
+    }
+    // Derived variables read the fully settled opening board, so they run only
+    // once every system has settled.
+    for (final sys in systems) {
+      sys.executeDeriveState(_state, effectiveGame);
     }
   }
 

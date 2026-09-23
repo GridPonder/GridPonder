@@ -22,6 +22,27 @@ _IMAGE_BOARD_NOTE = (
     "coordinates to refer to specific cells.)"
 )
 
+# Image mode attaches only the current board, so the BOARD BEFORE slot says
+# so instead of pointing at an image that is not there.
+_IMAGE_PREVIOUS_NOTE = (
+    "(Not shown: only the current board is attached as an image.)"
+)
+
+# What each non-sprite mark the image renderer can draw means. Keys are the
+# marks board_image.render_board_image reports; only drawn marks are named.
+_IMAGE_MARK_TEXT = {
+    "selected": "a gold ring marks the selected piece",
+    "overlay": "an amber frame marks the overlay region (the cells your "
+               "selection-based actions operate on)",
+    "hidden": "a small boxed inset in a cell's lower-left corner shows an "
+              "item lying underneath what is drawn on top of it",
+}
+
+
+def _image_marks_sentence(marks) -> str:
+    parts = [_IMAGE_MARK_TEXT[m] for m in _IMAGE_MARK_TEXT if m in (marks or ())]
+    return ("Image marks: " + "; ".join(parts) + ".") if parts else ""
+
 
 def build_prompt(
     game_def,
@@ -45,6 +66,7 @@ def build_prompt(
     previous_attempt: str | None = None,
     rejected_action: dict | None = None,
     rejection_detail: str | None = None,
+    image_marks: list[str] | None = None,
 ) -> str:
     """Build the full LLM prompt string matching the Dart runner output.
 
@@ -59,6 +81,8 @@ def build_prompt(
     on an attempt's first prompt (only when last_action is None).
     rejected_action / rejection_detail: the most recently submitted action was
     rejected; the prompt says so and shows only the current board.
+    image_marks: the marks the attached image carries (as reported by
+    board_image.render_board_image); explained next to the image note.
     """
     if valid_actions is None:
         valid_actions = enumerate_actions(game_def, state)
@@ -88,12 +112,15 @@ def build_prompt(
         )
 
     # ── Board text (current) ──────────────────────────────────────────────────
+    marks_sentence = _image_marks_sentence(image_marks) if attach_image else ""
     if text_board:
         board_text = render_board(state, game_def, kind_symbol_overrides=kind_symbol_overrides)
     else:
         board_text = _IMAGE_BOARD_NOTE
+        if marks_sentence:
+            board_text += "\n" + marks_sentence
         if previous_board_text is not None:
-            previous_board_text = _IMAGE_BOARD_NOTE
+            previous_board_text = _IMAGE_PREVIOUS_NOTE
 
     # ── Goals ─────────────────────────────────────────────────────────────────
     goal_descriptions = render_goals(
@@ -164,6 +191,13 @@ def build_prompt(
             "\nThe board did not change."
             if board_unchanged else ""
         )
+        compare_line = (
+            "Compare the two boards to understand exactly what your last action did "
+            "(tiles removed, pushed, merged, etc.).\n"
+            if text_board else
+            "Compare the current board with your notes on the previous one to understand "
+            "exactly what your last action did (tiles removed, pushed, merged, etc.).\n"
+        )
         last_action_section = (
             f"LAST ACTION: {last_action_label}\n"
             f"BOARD BEFORE:\n"
@@ -172,8 +206,7 @@ def build_prompt(
             f"BOARD AFTER (current):\n"
             f"{board_text}{inventory_line}{moves_line}{unchanged_line}\n"
             f"\n"
-            f"Compare the two boards to understand exactly what your last action did "
-            f"(tiles removed, pushed, merged, etc.).\n"
+            f"{compare_line}"
             f"{inv_changed_line}"
             f"Update your memory with any new observations about game mechanics or level layout.\n"
             f"Memory is your only way to retain knowledge across actions."
@@ -211,6 +244,7 @@ def build_prompt(
     image_note = (
         "\nThe attached image is a sprite rendering of the current board "
         "(same state as the text grid above).\n"
+        + (marks_sentence + "\n" if marks_sentence else "")
         if (text_board and attach_image) else ""
     )
 

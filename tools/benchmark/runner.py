@@ -42,13 +42,13 @@ from engines.python.gold_path import gold_path_length
 
 # Image renderer is only imported on demand (Pillow may not be installed
 # on machines that only use text mode).
-_render_board_png = None
+_render_board_image = None
 def _get_renderer():
-    global _render_board_png
-    if _render_board_png is None:
-        from board_image import render_board_png
-        _render_board_png = render_board_png
-    return _render_board_png
+    global _render_board_image
+    if _render_board_image is None:
+        from board_image import render_board_image
+        _render_board_image = render_board_image
+    return _render_board_image
 
 _PACKS_DIR = _REPO_ROOT / "packs"
 # Two guards, because the two rejection kinds mean opposite things. Five
@@ -323,6 +323,13 @@ def main() -> None:
             _out(event)
             return
 
+        # The image is rendered first so the prompt can explain the marks
+        # it carries (selection ring, overlay frame, hidden-item insets).
+        png: bytes | None = None
+        image_marks: list[str] | None = None
+        if include_image:
+            png, image_marks = _get_renderer()(game_def, engine.state, pack_dir, level_def)
+
         prompt = build_prompt(
             game_def,
             level_def,
@@ -344,6 +351,7 @@ def main() -> None:
             previous_attempt=previous_attempt,
             rejected_action=last_rejected[0] if last_rejected else None,
             rejection_detail=last_rejected[1] if last_rejected else None,
+            image_marks=image_marks,
         )
         previous_attempt = None
 
@@ -362,9 +370,8 @@ def main() -> None:
             "inference_mode": mode,
             "input_mode": input_mode,
         }
-        if include_image:
+        if png is not None:
             import base64
-            png = _get_renderer()(game_def, engine.state, pack_dir)
             event["image_b64"] = base64.b64encode(png).decode("ascii")
         if mode == "fixed-n":
             event["step_size"] = step_size
