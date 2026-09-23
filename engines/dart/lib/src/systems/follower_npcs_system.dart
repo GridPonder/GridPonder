@@ -8,6 +8,14 @@ import '../models/direction.dart';
 import '../models/entity.dart';
 import 'sight.dart';
 
+/// Values written by `shaftStatusVariablePrefix` (see
+/// [FollowerNpcsSystem.executeDeriveState]).
+const Map<String, int> shaftStatusCodes = {
+  'running': 0,
+  'held': 1,
+  'seized': 2,
+};
+
 class FollowerNpcsSystem extends GameSystem {
   const FollowerNpcsSystem({required super.id}) : super(type: 'follower_npcs');
 
@@ -278,54 +286,15 @@ class FollowerNpcsSystem extends GameSystem {
     required GameDefinition game,
     required Set<Position> occupiedAfterMove,
   }) {
-    Position? legal(
-      Position pos,
-      EntityInstance entity,
-      Direction facing,
-      Set<Position> claimed,
-    ) {
-      final behaviorDef = behaviorsConfig[entity.param('behavior')?.toString()]
-          as Map<String, dynamic>?;
-      if (behaviorDef == null) return null;
-      final candidate = pos.moved(facing);
-      // Two members whose tracks cross can both reach the crossing on the same
-      // beat. Without `claimed` they would both be handed the cell, the second
-      // write would overwrite the first, and the train would lose a member with
-      // no event to say so — which then reads as a seizure, because the size
-      // recorded at load no longer matches.
-      if (claimed.contains(candidate)) return null;
-      final ok = _canMoveTo(
-        pos: candidate,
-        board: board,
-        game: game,
-        solidBlocking: behaviorDef['solidBlocking'] as bool? ?? true,
-        occupiedAfterMove: occupiedAfterMove,
-        state: state,
-        blockAvatar: !(behaviorDef['lethalContact'] as bool? ?? false),
-      );
-      return ok ? candidate : null;
-    }
-
-    /// Candidate cells for the whole active set, or null if any is stuck.
-    ///
-    /// Sequential, so each member's claim blocks the next. The train is
-    /// all-or-nothing, so a collision between two members is simply a failed
-    /// direction: it falls through to the reverse, then to a freeze.
-    List<Position>? probe({required bool reversed}) {
-      final claimed = <Position>{};
-      final out = <Position>[];
-      for (final m in active) {
-        final own = _facingOf(m.value);
-        final facing = reversed ? _reverseDirection(own) : own;
-        final candidate = legal(m.key, m.value, facing, claimed);
-        if (candidate == null) return null;
-        claimed.add(candidate);
-        out.add(candidate);
-      }
-      return out;
-    }
-
-    final forward = probe(reversed: false);
+    final forward = _probeTrain(
+      active: active,
+      reversed: false,
+      behaviorsConfig: behaviorsConfig,
+      state: state,
+      board: board,
+      game: game,
+      occupied: occupiedAfterMove,
+    );
     if (forward != null) {
       return [
         for (var i = 0; i < active.length; i++)
@@ -333,7 +302,15 @@ class FollowerNpcsSystem extends GameSystem {
       ];
     }
 
-    final reverse = probe(reversed: true);
+    final reverse = _probeTrain(
+      active: active,
+      reversed: true,
+      behaviorsConfig: behaviorsConfig,
+      state: state,
+      board: board,
+      game: game,
+      occupied: occupiedAfterMove,
+    );
     if (reverse != null) {
       for (final m in members) {
         // The WHOLE train turns, not just the active members.
@@ -347,6 +324,52 @@ class FollowerNpcsSystem extends GameSystem {
     }
 
     return const [];
+  }
+
+  /// Candidate cells for the whole active set, or null if any is stuck.
+  ///
+  /// Sequential, so each member's claim blocks the next. The train is
+  /// all-or-nothing, so a collision between two members is simply a failed
+  /// direction: it falls through to the reverse, then to a freeze. Reads the
+  /// board only; shared by the beat and by the derived shaft status.
+  List<Position>? _probeTrain({
+    required List<MapEntry<Position, EntityInstance>> active,
+    required bool reversed,
+    required Map<String, dynamic> behaviorsConfig,
+    required LevelState state,
+    required Board board,
+    required GameDefinition game,
+    required Set<Position> occupied,
+  }) {
+    final claimed = <Position>{};
+    final out = <Position>[];
+    for (final m in active) {
+      final behaviorDef = behaviorsConfig[m.value.param('behavior')?.toString()]
+          as Map<String, dynamic>?;
+      if (behaviorDef == null) return null;
+      final own = _facingOf(m.value);
+      final facing = reversed ? _reverseDirection(own) : own;
+      final candidate = m.key.moved(facing);
+      // Two members whose tracks cross can both reach the crossing on the same
+      // beat. Without `claimed` they would both be handed the cell, the second
+      // write would overwrite the first, and the train would lose a member with
+      // no event to say so — which then reads as a seizure, because the size
+      // recorded at load no longer matches.
+      if (claimed.contains(candidate)) return null;
+      final ok = _canMoveTo(
+        pos: candidate,
+        board: board,
+        game: game,
+        solidBlocking: behaviorDef['solidBlocking'] as bool? ?? true,
+        occupiedAfterMove: occupied,
+        state: state,
+        blockAvatar: !(behaviorDef['lethalContact'] as bool? ?? false),
+      );
+      if (!ok) return null;
+      claimed.add(candidate);
+      out.add(candidate);
+    }
+    return out;
   }
 
   /// Every NPC on the actors layer, in board order.
@@ -382,6 +405,57 @@ class FollowerNpcsSystem extends GameSystem {
       state.variables['shaft_${train.key}_size'] = train.value.length;
     }
     return const [];
+  }
+
+  /// Publish each shaft's status when `shaftStatusVariablePrefix` is set.
+  ///
+  /// Writes `<prefix><shaft id>` for every train sized at load, in shaft-id
+  /// order: `0` running, `1` held, `2` seized (see [shaftStatusCodes]).
+  /// Integers rather than words so a numeric readout can show them. Derived
+  /// from the settled board alone, never from what happened this beat. Mirrors
+  /// `execute_derive_state` in engines/python/_systems/follower_npcs.py, which
+  /// documents the three states.
+  @override
+  void executeDeriveState(LevelState state, GameDefinition game) {
+    final config = game.systemConfig(id, {});
+    final prefix = config['shaftStatusVariablePrefix'];
+    if (prefix is! String || prefix.isEmpty) return;
+    final behaviorsConfig = config['behaviors'] as Map<String, dynamic>? ?? {};
+    final entries = _npcEntries(state, game, config);
+    final trains = Map.fromEntries(_partitionTrains(entries));
+    final occupied = {for (final e in entries) e.key};
+    final shaftIds = <String>{...trains.keys};
+    const head = 'shaft_';
+    const tail = '_size';
+    for (final key in state.variables.keys) {
+      if (key.startsWith(head) &&
+          key.endsWith(tail) &&
+          key.length > head.length + tail.length) {
+        shaftIds.add(key.substring(head.length, key.length - tail.length));
+      }
+    }
+    final sortedIds = shaftIds.toList()..sort();
+    for (final shaftId in sortedIds) {
+      final members = trains[shaftId] ?? const [];
+      int code;
+      if (members.isEmpty || _trainSeized(shaftId, members, state, config)) {
+        code = shaftStatusCodes['seized']!;
+      } else {
+        List<Position>? probe(bool reversed) => _probeTrain(
+              active: members,
+              reversed: reversed,
+              behaviorsConfig: behaviorsConfig,
+              state: state,
+              board: state.board,
+              game: game,
+              occupied: occupied,
+            );
+        code = (probe(false) == null && probe(true) == null)
+            ? shaftStatusCodes['held']!
+            : shaftStatusCodes['running']!;
+      }
+      state.variables['$prefix$shaftId'] = code;
+    }
   }
 
   void _validateTrain(

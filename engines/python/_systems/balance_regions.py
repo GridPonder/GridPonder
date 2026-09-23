@@ -20,7 +20,8 @@ class BalanceRegionsSystem(GameSystem):
     body standing on a pan contributes its weight; the heavier pan is down and
     equal weight is level. The resulting *attitude* is written to
     ``stateVariable`` as ``-1`` (first pan down), ``0`` (level) or ``+1``
-    (second pan down).
+    (second pan down). With ``totalsVariables`` each pan's current weight is
+    published as well (see ``_write_totals``).
 
     *Leaves* are cells marked by an inert marker entity. The ground under a
     marker is set to the leaf's ``solidKind`` while the attitude is one of its
@@ -79,13 +80,44 @@ class BalanceRegionsSystem(GameSystem):
             return []
         events: list[dict] = []
         for _ in range(_MAX_SETTLE_PASSES):
-            attitude, name = self._attitude(group, pans, state, game)
+            attitude, name, totals = self._attitude(group, pans, state, game)
             variable = group.get("stateVariable")
             if isinstance(variable, str) and variable:
                 state.variables[variable] = attitude
+            self._write_totals(group, pans, totals, state)
             if not self._apply_leaves(group, name, state, game, events):
                 break
         return events
+
+    def _write_totals(self, group: dict, pans: list, totals: list[int],
+                      state: GameState) -> None:
+        """Publish each pan's weight when the group opts in.
+
+        ``totalsVariables`` maps a pan's ``name`` to the variable that receives
+        its current total. Written on every settle pass, so the value always
+        belongs to the same board as the attitude beside it — a pure function
+        of that board, adding nothing to the state key the board does not
+        already determine. Entries naming no pan, or not naming a variable, are
+        ignored; a missing or non-dict ``totalsVariables`` writes nothing.
+        """
+        mapping = group.get("totalsVariables")
+        if not isinstance(mapping, dict):
+            return
+        for index, pan in enumerate(pans):
+            variable = mapping.get(self._pan_name(pan, index))
+            if isinstance(variable, str) and variable:
+                state.variables[variable] = totals[index]
+
+    @staticmethod
+    def _pan_name(pan, index: int) -> str:
+        """A pan's ``name``, or ``first``/``second`` when it has no string name.
+
+        Matches Dart's reading, which never stringifies a non-string name.
+        """
+        name = pan.get("name") if isinstance(pan, dict) else None
+        if isinstance(name, str):
+            return name
+        return "first" if index == 0 else "second"
 
     def _pan_index(self, group: dict, pans: list, pos: Pos,
                    state: GameState, game: GameDef) -> Optional[int]:
@@ -102,7 +134,7 @@ class BalanceRegionsSystem(GameSystem):
         return None
 
     def _attitude(self, group: dict, pans: list,
-                  state: GameState, game: GameDef) -> tuple[int, str]:
+                  state: GameState, game: GameDef) -> tuple[int, str, list[int]]:
         weights = group.get("weights")
         weights = weights if isinstance(weights, dict) else {}
         totals = [0, 0]
@@ -127,10 +159,10 @@ class BalanceRegionsSystem(GameSystem):
                 totals[index] += avatar_weight
 
         if totals[0] > totals[1]:
-            return -1, str(pans[0].get("name", "first"))
+            return -1, self._pan_name(pans[0], 0), totals
         if totals[1] > totals[0]:
-            return 1, str(pans[1].get("name", "second"))
-        return 0, "level"
+            return 1, self._pan_name(pans[1], 1), totals
+        return 0, "level", totals
 
     def _leaf_spec(self, leaves: list, marker_kind: str) -> Optional[dict]:
         for spec in leaves:

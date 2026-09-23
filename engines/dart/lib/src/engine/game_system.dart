@@ -34,4 +34,15 @@ abstract class GameSystem {
   /// returned for symmetry with the phases and discarded by the engine.
   List<GameEvent> executeLoadSettle(
       LevelState state, GameDefinition game) => const [];
+
+  /// Write variables that are pure functions of the settled state.
+  ///
+  /// Runs once per accepted turn, after every system's NPC resolution and the
+  /// rules pass over NPC events (so after the board has finished changing),
+  /// and once at level load, after every system's load settle. A system must
+  /// only *read* the board here and write variables derived from it: a derived
+  /// variable adds nothing to the state key that the board does not already
+  /// determine, so solver dedup, undo and preview are unaffected. Emits no
+  /// events.
+  void executeDeriveState(LevelState state, GameDefinition game) {}
 }

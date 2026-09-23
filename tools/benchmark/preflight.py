@@ -23,7 +23,7 @@ from engines.python.loader import load_pack
 from engines.python.observation import build_prompt
 from engines.python.text_renderer import render as render_board
 from bench import all_pack_levels, load_models
-from board_image import render_board_png
+from board_image import render_board_image
 from game_tags import validate_game_tags
 from instructions import audit_instruction_payloads, compile_instruction_map
 from run_manifest import source_snapshot
@@ -288,6 +288,12 @@ def _validate_state(
     if any(row.endswith(" ") for row in grid_rows):
         _issue(issues, "error", scope, "Text grid contains trailing spaces")
 
+    # Render first so image-mode prompts carry the same "Image marks:" line
+    # the runner emits.
+    png, image_marks = (
+        render_board_image(game, engine.state, pack_dir, level)
+        if include_images else (None, None)
+    )
     for inference_mode, anonymous, input_mode in CONFIGURATIONS:
         prompt = build_prompt(
             game,
@@ -299,6 +305,7 @@ def _validate_state(
             text_board=input_mode != "image",
             attach_image=input_mode in ("image", "text+image"),
             valid_actions=legal_actions,
+            image_marks=image_marks,
         )
         key = (
             f"{inference_mode}|{'anon' if anonymous else 'named'}|{input_mode}"
@@ -318,7 +325,6 @@ def _validate_state(
             )
 
     if include_images:
-        png = render_board_png(game, engine.state, pack_dir)
         if not png.startswith(b"\x89PNG\r\n\x1a\n"):
             _issue(issues, "error", scope, "Image renderer returned invalid PNG")
         if len(png) < 200:
@@ -350,6 +356,10 @@ def _write_samples(
 ) -> None:
     target = samples_dir / pack_id
     target.mkdir(parents=True, exist_ok=True)
+    image_marks = (
+        render_board_image(game, engine.state, pack_dir, level)[1]
+        if include_images else None
+    )
     for inference_mode, anonymous, input_mode in CONFIGURATIONS:
         prompt = build_prompt(
             game,
@@ -361,6 +371,7 @@ def _write_samples(
             text_board=input_mode != "image",
             attach_image=input_mode in ("image", "text+image"),
             valid_actions=legal_actions,
+            image_marks=image_marks,
         )
         suffix = (
             f"{input_mode.replace('+', '-')}-{inference_mode}"

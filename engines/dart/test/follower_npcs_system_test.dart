@@ -877,6 +877,135 @@ void main() {
       expect(_machinePositions(engine), [(2, 2)]);
     });
 
+    // -- derived shaft status ------------------------------------------------
+    //
+    // Parity mirror of the shaft-status tests in
+    // engines/python/test_follower_npcs.py.
+
+    GameDefinition statusGame([Map<String, dynamic> extra = const {}]) =>
+        _shaftGame(configExtra: {
+          'shaftStatusVariablePrefix': 'shaft_status_',
+          ...extra,
+        });
+
+    List<String> sortedKeys(TurnEngine engine) =>
+        engine.state.variables.keys.toList()..sort();
+
+    test('shaft status is off by default', () {
+      final engine = _engineFor(
+        _shaftGame(configExtra: {'shaftSeizeOnLoss': true}),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+      );
+      expect(sortedKeys(engine), ['shaft_a_size']);
+      _beat(engine);
+      expect(sortedKeys(engine), ['shaft_a_size']);
+    });
+
+    test('shaft status reads running for a free train', () {
+      final engine = _engineFor(
+        statusGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+      );
+      expect(engine.state.variables['shaft_status_a'], 0);
+      _beat(engine);
+      expect(engine.state.variables['shaft_status_a'], 0);
+    });
+
+    test('shaft status reads held when pinned both ways', () {
+      final engine = _engineFor(
+        statusGame(),
+        _shaftLevelJson([
+          (4, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ], walls: [
+          (5, 0),
+          (3, 0),
+        ]),
+      );
+      expect(engine.state.variables['shaft_status_a'], 1);
+      _beat(engine);
+      expect(_machinePositions(engine), [(1, 2), (4, 0)]);
+      expect(engine.state.variables['shaft_status_a'], 1);
+    });
+
+    test("shaft status held follows the avatar's body", () {
+      final engine = _engineFor(
+        statusGame(),
+        _shaftLevelJson([(1, 4, 'walker', 'left', 'a')], walls: [(2, 4)]),
+      );
+      expect(engine.state.variables['shaft_status_a'], 1);
+      _beat(engine); // still standing on (0,4)
+      expect(_machinePositions(engine), [(1, 4)]);
+      expect(engine.state.variables['shaft_status_a'], 1);
+      engine.executeTurn(_move('up')); // step off the pin
+      expect(_machinePositions(engine), [(0, 4)]);
+      expect(engine.state.variables['shaft_status_a'], 0);
+    });
+
+    test('shaft status reads seized after a loss', () {
+      final engine = _engineFor(
+        statusGame({'shaftSeizeOnLoss': true}),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+      );
+      engine.state.board.setEntity('actors', const Position(1, 0), null);
+      _beat(engine);
+      expect(_machinePositions(engine), [(1, 2)]);
+      expect(engine.state.variables['shaft_status_a'], 2);
+    });
+
+    test('shaft status without seizure keeps running', () {
+      final engine = _engineFor(
+        statusGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (1, 2, 'walker', 'right', 'a'),
+        ]),
+      );
+      engine.state.board.setEntity('actors', const Position(1, 0), null);
+      _beat(engine);
+      expect(engine.state.variables['shaft_status_a'], 0);
+    });
+
+    test('shaft status reads seized with no member left', () {
+      final engine = _engineFor(
+        statusGame(),
+        _shaftLevelJson([
+          (1, 0, 'walker', 'right', 'a'),
+          (6, 3, 'walker', 'up', 'b'),
+        ]),
+      );
+      engine.state.board.setEntity('actors', const Position(1, 0), null);
+      _beat(engine);
+      expect(engine.state.variables['shaft_status_a'], 2);
+      expect(engine.state.variables['shaft_status_b'], 0);
+      expect(
+        [
+          for (final k in engine.state.variables.keys)
+            if (k.startsWith('shaft_status_')) k,
+        ],
+        ['shaft_status_a', 'shaft_status_b'],
+      );
+    });
+
+    test('shaft status prefix is read strictly', () {
+      for (final bad in <Object?>['', 3, null]) {
+        final engine = _engineFor(
+          statusGame({'shaftStatusVariablePrefix': bad}),
+          _shaftLevelJson([(1, 0, 'walker', 'right', 'a')]),
+        );
+        expect(sortedKeys(engine), ['shaft_a_size'], reason: '$bad');
+      }
+    });
+
     // -- ratio shafts (geared trains) -----------------------------------------
     //
     // A train may mix frequencies. Each member runs on its own beat; only the

@@ -16,7 +16,8 @@ const int _maxSettlePasses = 4;
 /// regions identified by ground tags. Every body on a pan contributes its
 /// weight; the heavier pan is down and equal weight is level. The attitude is
 /// written to `stateVariable` as -1 (first pan down), 0 (level) or +1 (second
-/// pan down).
+/// pan down). With `totalsVariables` each pan's current weight is published as
+/// well (see [_writeTotals]).
 ///
 /// *Leaves* are cells carrying an inert marker entity. The ground under a
 /// marker is set to `solidKind` while the attitude is one of the leaf's
@@ -83,9 +84,37 @@ class BalanceRegionsSystem extends GameSystem {
       if (variable is String && variable.isNotEmpty) {
         state.variables[variable] = attitude.value;
       }
+      _writeTotals(group, pans, attitude.totals, state);
       if (!_applyLeaves(group, attitude.name, state, game, events)) break;
     }
     return events;
+  }
+
+  /// Publish each pan's weight when the group opts in.
+  ///
+  /// `totalsVariables` maps a pan's `name` to the variable that receives its
+  /// current total. Written on every settle pass, so the value always belongs
+  /// to the same board as the attitude beside it — a pure function of that
+  /// board, adding nothing to the state key the board does not already
+  /// determine. Entries naming no pan, or not naming a variable, are ignored; a
+  /// missing or non-map `totalsVariables` writes nothing.
+  void _writeTotals(Map<String, dynamic> group, List pans, List<int> totals,
+      LevelState state) {
+    final mapping = group['totalsVariables'];
+    if (mapping is! Map) return;
+    for (var index = 0; index < pans.length; index++) {
+      final variable = mapping[_panName(pans, index)];
+      if (variable is String && variable.isNotEmpty) {
+        state.variables[variable] = totals[index];
+      }
+    }
+  }
+
+  /// A pan's `name`, or `first`/`second` when it has no string name.
+  static String _panName(List pans, int index) {
+    final pan = pans[index];
+    if (pan is Map && pan['name'] is String) return pan['name'] as String;
+    return index == 0 ? 'first' : 'second';
   }
 
   int? _panIndex(Map<String, dynamic> group, List pans, Position pos,
@@ -134,16 +163,9 @@ class BalanceRegionsSystem extends GameSystem {
       if (index != null) totals[index] += avatarWeight;
     }
 
-    String nameOf(int i, String fallback) {
-      final pan = pans[i];
-      return (pan is Map && pan['name'] is String)
-          ? pan['name'] as String
-          : fallback;
-    }
-
-    if (totals[0] > totals[1]) return _Attitude(-1, nameOf(0, 'first'));
-    if (totals[1] > totals[0]) return _Attitude(1, nameOf(1, 'second'));
-    return const _Attitude(0, 'level');
+    if (totals[0] > totals[1]) return _Attitude(-1, _panName(pans, 0), totals);
+    if (totals[1] > totals[0]) return _Attitude(1, _panName(pans, 1), totals);
+    return _Attitude(0, 'level', totals);
   }
 
   Map<String, dynamic>? _leafSpec(List leaves, String markerKind) {
@@ -221,5 +243,8 @@ class BalanceRegionsSystem extends GameSystem {
 class _Attitude {
   final int value;
   final String name;
-  const _Attitude(this.value, this.name);
+
+  /// Weight on each pan, first then second.
+  final List<int> totals;
+  const _Attitude(this.value, this.name, this.totals);
 }

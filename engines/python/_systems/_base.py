@@ -33,6 +33,19 @@ class GameSystem:
         """
         return []
 
+    def execute_derive_state(self, state: GameState, game: GameDef) -> None:
+        """Write variables that are pure functions of the settled state.
+
+        Runs once per accepted turn, after every system's NPC resolution and
+        the rules pass over NPC events (so after the board has finished
+        changing), and once at level load, after every system's load settle.
+        A system must only *read* the board here and write variables derived
+        from it: a derived variable adds nothing to the state key that the
+        board does not already determine, so solver dedup, undo and preview
+        are unaffected. Emits no events.
+        """
+        return None
+
 
 
 def config_list(config: dict, key: str, default: list) -> list:
