@@ -784,6 +784,67 @@ def _pipe_level() -> dict:
     }
 
 
+def _make_background_game() -> GameDef:
+    return GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "empty"},
+                {"id": "ink", "occupancy": "zero_or_one"},
+                {"id": "pocket", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "empty": {"layer": "ground", "symbol": "."},
+                "mark": {"layer": "ground", "symbol": "1", "uiName": "mark"},
+                "ink": {"layer": "ink", "symbol": "r", "uiName": "ink"},
+                "held": {"layer": "pocket", "symbol": "R", "uiName": "held ink"},
+                "slot": {"layer": "pocket", "symbol": "o", "uiName": "empty slot",
+                         "tags": ["observation_background"]},
+            },
+        }
+    )
+
+
+def _background_level() -> dict:
+    # (0,0) slot over ink, (1,0) slot over a mark, (2,0) slot over blank,
+    # (3,0) held ink over ink.
+    return {
+        "id": "bg",
+        "board": {
+            "size": [4, 1],
+            "layers": {
+                "ground": {"format": "sparse",
+                           "entries": [{"position": [1, 0], "kind": "mark"}]},
+                "ink": {"format": "sparse", "entries": [
+                    {"position": [0, 0], "kind": "ink"},
+                    {"position": [3, 0], "kind": "ink"},
+                ]},
+                "pocket": {"format": "sparse", "entries": [
+                    {"position": [0, 0], "kind": "slot"},
+                    {"position": [1, 0], "kind": "slot"},
+                    {"position": [2, 0], "kind": "slot"},
+                    {"position": [3, 0], "kind": "held"},
+                ]},
+            },
+        },
+        "state": {"avatar": {"enabled": False}, "overlay": {"x": 0, "y": 0, "width": 2, "height": 1}},
+        "goals": [],
+    }
+
+
+def test_observation_background_yields_the_cell_to_visible_content() -> None:
+    game = _make_background_game()
+    engine = TurnEngine(game, _background_level())
+    rendered = text_renderer.render(engine.state, game)
+    lines = rendered.splitlines()
+    assert lines[0] == "r1oR", rendered
+    assert "(0,0): [ink] r(ink) + [pocket] o(empty slot)" in rendered
+    assert "(1,0): [ground] 1(mark) + [pocket] o(empty slot)" in rendered
+    assert "(2,0)" not in rendered.split("Stacked cells")[1]
+    assert "(3,0): [pocket] R(held ink) + [ink] r(ink)" in rendered
+    # The overlay mini-view follows the grid.
+    assert "operate on:\nr1" in rendered, rendered
+
+
 def test_pipe_stack_follows_grid_order_without_background_noise() -> None:
     game = _make_pipe_game()
     rendered = text_renderer.render(TurnEngine(game, _pipe_level()).state, game)

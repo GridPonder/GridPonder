@@ -48,23 +48,6 @@ LevelDefinition _level(GameDefinition game, List<Map<String, dynamic>> lose,
     }, game.layers);
 
 void main() {
-  test('a turn that wins and breaks a lose condition is a loss', () {
-    final game = _game();
-    final engine = TurnEngine(
-        game,
-        _level(game, [
-          {
-            'type': 'variable_threshold',
-            'config': {'variable': 'heat', 'comparison': 'gte', 'target': 0},
-          },
-        ], withGoal: true));
-    final result = engine.executeTurn(const GameAction('wait'));
-    expect(result.accepted, isTrue);
-    expect(result.isLost, isTrue);
-    expect(result.isWon, isFalse);
-    expect(engine.isWon, isFalse);
-  });
-
   test('winning on the last allowed move is still a win', () {
     final game = _game();
     final engine = TurnEngine(

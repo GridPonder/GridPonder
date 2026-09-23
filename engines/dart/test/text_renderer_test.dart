@@ -497,6 +497,74 @@ void main() {
     });
   });
 
+  test('observation_background yields the cell to visible content', () {
+    // Mirrors test_observation_background_yields_the_cell_to_visible_content.
+    final game = GameDefinition.fromJson({
+      'id': 'bg',
+      'layers': [
+        {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'empty'},
+        {'id': 'ink', 'occupancy': 'zero_or_one'},
+        {'id': 'pocket', 'occupancy': 'zero_or_one'},
+      ],
+      'entityKinds': {
+        'empty': {'layer': 'ground', 'symbol': '.'},
+        'mark': {'layer': 'ground', 'symbol': '1', 'uiName': 'mark'},
+        'ink': {'layer': 'ink', 'symbol': 'r', 'uiName': 'ink'},
+        'held': {'layer': 'pocket', 'symbol': 'R', 'uiName': 'held ink'},
+        'slot': {
+          'layer': 'pocket',
+          'symbol': 'o',
+          'uiName': 'empty slot',
+          'tags': ['observation_background'],
+        },
+      },
+    }, id: 'bg');
+    final level = LevelDefinition.fromJson({
+      'id': 'bg',
+      'board': {
+        'size': [4, 1],
+        'layers': {
+          'ground': {
+            'format': 'sparse',
+            'entries': [
+              {'position': [1, 0], 'kind': 'mark'},
+            ],
+          },
+          'ink': {
+            'format': 'sparse',
+            'entries': [
+              {'position': [0, 0], 'kind': 'ink'},
+              {'position': [3, 0], 'kind': 'ink'},
+            ],
+          },
+          'pocket': {
+            'format': 'sparse',
+            'entries': [
+              {'position': [0, 0], 'kind': 'slot'},
+              {'position': [1, 0], 'kind': 'slot'},
+              {'position': [2, 0], 'kind': 'slot'},
+              {'position': [3, 0], 'kind': 'held'},
+            ],
+          },
+        },
+      },
+      'state': {
+        'avatar': {'enabled': false},
+        'overlay': {'x': 0, 'y': 0, 'width': 2, 'height': 1},
+      },
+      'goals': [],
+    }, game.layers);
+    final engine = TurnEngine(game, level);
+    final rendered = TextRenderer.render(engine.state, game);
+    expect(rendered.split('\n').first, 'r1oR');
+    expect(rendered, contains('(0,0): [ink] r(ink) + [pocket] o(empty slot)'));
+    expect(
+        rendered, contains('(1,0): [ground] 1(mark) + [pocket] o(empty slot)'));
+    expect(rendered.split('Stacked cells').last, isNot(contains('(2,0)')));
+    expect(rendered, contains('(3,0): [pocket] R(held ink) + [ink] r(ink)'));
+    expect(rendered, contains('operate on:\nr1'));
+  });
+
   test('board-unchanged note survives a system status block', () {
     // Mirrors test_board_unchanged_note_survives_a_system_status_block: the
     // runners render the previous board with the level, so the prompt must

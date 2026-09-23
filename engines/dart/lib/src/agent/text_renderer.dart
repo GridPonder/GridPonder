@@ -162,6 +162,7 @@ class TextRenderer {
         // the ground layer is void/empty.
         String? objectSymbol; // from the first non-ground layer with content
         String? groundSymbol; // from ground layer only
+        String? backgroundSymbol; // first observation_background entity
         final mcoSymbol = mcoSymbols[pos];
         if (concealedPositions.contains(pos) && mcoSymbol != null) {
           sb.write(mcoSymbol);
@@ -174,13 +175,22 @@ class TextRenderer {
               effectiveGame.entityKinds[entity.kind], kindSymbolOverrides);
           if (layerId == 'ground') {
             groundSymbol = sym;
+          } else if (_isBackground(effectiveGame, entity.kind)) {
+            backgroundSymbol ??= sym;
           } else {
             objectSymbol = sym;
             break;
           }
         }
 
-        sb.write(objectSymbol ?? mcoSymbol ?? groundSymbol ?? '.');
+        final visibleGround =
+            groundSymbol != null && groundSymbol != '.' ? groundSymbol : null;
+        sb.write(objectSymbol ??
+            mcoSymbol ??
+            visibleGround ??
+            backgroundSymbol ??
+            groundSymbol ??
+            '.');
       }
       lines.add(sb.toString());
     }
@@ -257,6 +267,13 @@ class TextRenderer {
         if (game.hasTag(mco.kind, 'observation_occluder')) ...mco.cells,
     };
   }
+
+  /// True for a kind tagged `observation_background`: in the text grid and
+  /// the overlay view it yields the cell to every other visible entity
+  /// (ground included) and shows only where the cell would otherwise read as
+  /// empty. Stacked cells still list it, last. Mirrors `_is_background`.
+  static bool _isBackground(GameDefinition game, String kindId) =>
+      game.hasTag(kindId, 'observation_background');
 
   static String _buildLegend(
       LevelState state, GameDefinition game, bool hasAvatar,
@@ -355,15 +372,20 @@ class TextRenderer {
           continue;
         }
         String sym = '.';
+        String? background;
         for (final layerId in layerOrder) {
           final entity = state.board.getEntity(layerId, pos);
           if (entity == null) continue;
           final kindDef = game.entityKinds[entity.kind];
           if (kindDef == null) continue;
+          if (_isBackground(game, entity.kind)) {
+            background ??= _symbolFor(entity, kindDef, kindSymbolOverrides);
+            continue;
+          }
           sym = _symbolFor(entity, kindDef, kindSymbolOverrides);
           break;
         }
-        buf.write(sym);
+        buf.write(sym == '.' && background != null ? background : sym);
       }
       rows.add(buf.toString());
     }
@@ -379,8 +401,10 @@ class TextRenderer {
   /// (declared order reversed), a multi-cell object, then ground. Ground
   /// under a multi-cell object is its background: it never creates a line on
   /// its own (a pipe over void is not a stack), but is listed last when the
-  /// cell has a line anyway. Under an `observation_occluder` object nothing
-  /// below is listed. Named mode
+  /// cell has a line anyway. An `observation_background` kind is listed after
+  /// everything else, since the grid shows it only when nothing else in the
+  /// cell is visible. Under an `observation_occluder` object nothing below is
+  /// listed. Named mode
   /// prefixes each entry with its layer id; anonymous mode omits it, since
   /// layer ids are pack vocabulary. Mirrors Python `_build_stacked_block`.
   static String _buildStackedBlock(
@@ -404,6 +428,7 @@ class TextRenderer {
         final pos = Position(x, y);
         final symbols = <String>[];
         final ground = <String>[];
+        final background = <String>[];
 
         if (!concealedPositions.contains(pos)) {
           for (final layerId in layerOrder) {
@@ -435,7 +460,13 @@ class TextRenderer {
                 kindDef == null ? sym : game.publicSymbol(entity.kind)!;
             if (sym == '.' || originalSym == '.') continue;
             final entry = tagged(layerId, '$sym($label)');
-            (layerId == 'ground' ? ground : symbols).add(entry);
+            if (layerId == 'ground') {
+              ground.add(entry);
+            } else if (_isBackground(game, entity.kind)) {
+              background.add(entry);
+            } else {
+              symbols.add(entry);
+            }
           }
         }
 
@@ -451,6 +482,7 @@ class TextRenderer {
         } else {
           symbols.addAll(ground);
         }
+        symbols.addAll(background);
 
         if (symbols.length >= 2) {
           entries.add('  ($x,$y): ${symbols.join(' + ')}');

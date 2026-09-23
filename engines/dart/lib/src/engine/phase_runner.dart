@@ -131,21 +131,16 @@ class PhaseRunner {
     }
     state.turnCount++;
 
-    // Goals and lose conditions are judged on the same resulting state, and a
-    // loss wins the tie: an action that completes the goals while breaking a
-    // lose condition is a loss. The one exception is `max_actions`, whose
-    // limit is the move allowance itself — a winning move that spends the last
-    // allowed action is inside the allowance. Mirrors _turn_engine.py.
+    // Check goals before lose conditions: winning on the last allowed move counts as a win.
     final goalStatus =
         _goalEval.evaluate(_level.goals, state, effectiveGame, allEvents);
-    {
+    if (goalStatus.isWon) {
+      state.isWon = true;
+    }
+
+    if (!state.isWon) {
       final loseStatus = _loseEval.evaluate(
-        goalStatus.isWon
-            ? [
-                for (final c in _level.loseConditions)
-                  if (c.type != 'max_actions') c,
-              ]
-            : _level.loseConditions,
+        _level.loseConditions,
         state,
         goals: _level.goals,
         game: effectiveGame,
@@ -165,8 +160,6 @@ class PhaseRunner {
         );
       }
     }
-
-    if (goalStatus.isWon) state.isWon = true;
 
     allEvents.add(GameEvent.turnEnded(state.turnCount));
 

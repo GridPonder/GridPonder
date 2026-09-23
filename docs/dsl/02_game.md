@@ -462,6 +462,17 @@ whose `uiName` is "Yellow signal" rather than "Yellow (turns green)".
 Anonymous mode gives the whole group one letter. Kinds with `symbolParam`
 never join a group.
 
+### Background kinds in text observations
+
+A kind tagged `observation_background` is a placeholder that should not hide
+real content in text observations (for example an empty slot that the app
+draws as a small socket above whatever lies beneath). In the text grid and the
+overlay view it yields the cell to every other visible entity, ground included,
+and shows only where the cell would otherwise read as empty (`.`); the stacked
+cell detail still lists it, after everything else. Legend, entity state, goal
+text, the benchmark image and the app are unaffected: they keep the declared
+layer order.
+
 ### Multi-Cell Object Kinds
 
 Multi-cell objects (e.g., pipes) referenced in level `multiCellObjects` arrays should also have an entity kind definition in `entityKinds`. The kind defines tags, sprite, and parameter schema. The `layer` for multi-cell objects is typically `"structures"`.

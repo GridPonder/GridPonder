@@ -71,6 +71,7 @@ def render(
                 continue
             object_symbol: str | None = None
             ground_symbol: str | None = None
+            background_symbol: str | None = None
             mco_symbol = mco_symbols.get(pos)
             if pos in concealed_positions and mco_symbol is not None:
                 row.append(mco_symbol)
@@ -83,10 +84,20 @@ def render(
                 sym = _get_symbol(entity, kind_def, kind_symbol_overrides)
                 if layer_id == "ground":
                     ground_symbol = sym
+                elif _is_background(effective_game, entity.kind):
+                    if background_symbol is None:
+                        background_symbol = sym
                 else:
                     object_symbol = sym
                     break
-            row.append(object_symbol or mco_symbol or ground_symbol or ".")
+            row.append(
+                object_symbol
+                or mco_symbol
+                or (ground_symbol if ground_symbol not in (None, ".") else None)
+                or background_symbol
+                or ground_symbol
+                or "."
+            )
         lines.append("".join(row))
 
     grid_str = "\n".join(lines)
@@ -212,6 +223,14 @@ def observation_concealed_positions(state: GameState, game_def) -> set[Pos]:
     }
 
 
+def _is_background(game_def, kind_id: str) -> bool:
+    """True for a kind tagged ``observation_background``: in the text grid
+    and the overlay view it yields the cell to every other visible entity
+    (ground included) and shows only where the cell would otherwise read as
+    empty. Stacked cells still list it, last."""
+    return game_def.has_tag(kind_id, "observation_background")
+
+
 def _is_legend_redundant(sym: str, label: str) -> bool:
     """True when the legend entry adds no information beyond the symbol itself.
 
@@ -326,6 +345,7 @@ def _build_overlay_block(
                 chars.append(mco_symbols[pos])
                 continue
             sym = "."
+            background: str | None = None
             for layer_id in layer_order:
                 entity = state.board.get_entity(layer_id, pos)
                 if entity is None:
@@ -333,9 +353,13 @@ def _build_overlay_block(
                 kind_def = game_def.entity_kinds.get(entity.kind)
                 if kind_def is None:
                     continue
+                if _is_background(game_def, entity.kind):
+                    if background is None:
+                        background = _get_symbol(entity, kind_def, kind_symbol_overrides)
+                    continue
                 sym = _get_symbol(entity, kind_def, kind_symbol_overrides)
                 break
-            chars.append(sym)
+            chars.append(background if sym == "." and background is not None else sym)
         rows.append("".join(chars))
     contents = "\n".join(rows)
 
@@ -362,7 +386,9 @@ def _build_stacked_block(
     (declared order reversed), a multi-cell object, then ground. Ground under
     a multi-cell object is its background: it never creates a line on its
     own (a pipe over void is not a stack), but is listed last when the cell
-    has a line anyway. Under an ``observation_occluder`` object nothing below
+    has a line anyway. An ``observation_background`` kind is listed after
+    everything else, since the grid shows it only when nothing else in the
+    cell is visible. Under an ``observation_occluder`` object nothing below
     is listed. Named mode
     prefixes each entry with its layer id; anonymous mode omits it, since
     layer ids are pack vocabulary.
@@ -378,6 +404,7 @@ def _build_stacked_block(
             pos = Pos(x, y)
             symbols: list[str] = []
             ground: list[str] = []
+            background: list[str] = []
             if pos not in concealed_positions:
                 for layer_id in layer_order:
                     entity = state.board.get_entity(layer_id, pos)
@@ -406,7 +433,12 @@ def _build_stacked_block(
                     if sym == "." or original_sym == ".":
                         continue
                     entry = tagged(layer_id, f"{sym}({label})")
-                    (ground if layer_id == "ground" else symbols).append(entry)
+                    if layer_id == "ground":
+                        ground.append(entry)
+                    elif _is_background(game_def, entity.kind):
+                        background.append(entry)
+                    else:
+                        symbols.append(entry)
 
             if avatar_pos == pos:
                 symbols.insert(0, tagged("avatar", "@(avatar)"))
@@ -420,6 +452,7 @@ def _build_stacked_block(
                     symbols.extend(ground)
             else:
                 symbols.extend(ground)
+            symbols.extend(background)
 
             if len(symbols) >= 2:
                 entries_list.append(f"  ({x},{y}): {' + '.join(symbols)}")

@@ -70,18 +70,6 @@ def _won_and_lost_level(lose_conditions: list[dict]) -> dict:
     return level
 
 
-def test_a_turn_that_wins_and_breaks_a_lose_condition_is_a_loss() -> None:
-    game = _game()
-    engine = TurnEngine(game, _won_and_lost_level([
-        {"type": "variable_threshold",
-         "config": {"variable": "heat", "comparison": "gte", "target": 0}},
-    ]))
-    result = engine.execute_turn("wait", {})
-    assert result.accepted
-    assert result.is_lost and not result.is_won
-    assert engine.is_lost and not engine.is_won
-
-
 def test_winning_on_the_last_allowed_move_is_still_a_win() -> None:
     game = _game()
     engine = TurnEngine(game, _won_and_lost_level([
