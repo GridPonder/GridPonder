@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:llm_dart/llm_dart.dart';
 
@@ -383,9 +384,22 @@ class LlmAgent implements GridPonderAgent {
     final inv = obs.state.avatar.inventory.slot;
     final inventoryLine = inv != null ? '\nInventory: $inv' : '';
 
-    final movesLine = obs.level.loseConditions.isNotEmpty
-        ? '\nMoves this attempt: ${obs.state.actionCount}'
-        : '';
+    final maxActionLimit = obs.level.loseConditions
+        .where((condition) => condition.type == 'max_actions')
+        .map((condition) => condition.config['limit'])
+        .whereType<num>()
+        .firstOrNull;
+    final String movesLine;
+    if (maxActionLimit != null) {
+      final limit = maxActionLimit.toInt();
+      final remaining = max(0, limit - obs.state.actionCount);
+      movesLine = '\nMoves this attempt: ${obs.state.actionCount} | '
+          'Actions remaining: $remaining of $limit';
+    } else if (obs.level.loseConditions.isNotEmpty) {
+      movesLine = '\nMoves this attempt: ${obs.state.actionCount}';
+    } else {
+      movesLine = '';
+    }
 
     final memorySection =
         memory.isNotEmpty ? '\nMEMORY FROM PREVIOUS ACTION:\n$memory\n' : '';

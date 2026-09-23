@@ -29,7 +29,8 @@ void main() {
   });
 
   group('anonymous mode', () {
-    test('buildAnonKindToLabel assigns unique letters in alphabetical order', () {
+    test('buildAnonKindToLabel assigns unique letters in alphabetical order',
+        () {
       final map = buildAnonKindToLabel(gameDef);
 
       // Labels are unique.
@@ -70,7 +71,8 @@ void main() {
       // Deterministic: rebuilt map equals original.
       final reverseMap2 = buildAnonReverseMap(obs.validActions);
       for (final label in reverseMap.keys) {
-        expect(reverseMap[label]!.actionId, equals(reverseMap2[label]!.actionId));
+        expect(
+            reverseMap[label]!.actionId, equals(reverseMap2[label]!.actionId));
       }
     });
 
@@ -83,11 +85,23 @@ void main() {
       );
     });
 
+    test('buildPrompt shows the remaining max-actions allowance', () {
+      final engine = TurnEngine(gameDef, levelDef);
+      final obs = AgentObservation.build(gameDef, levelDef, engine.state);
+
+      expect(
+        LlmAgent.buildPrompt(obs),
+        contains('Moves this attempt: 0 | Actions remaining: 5 of 5'),
+      );
+    });
+
     test('buildPrompt anonymize=true hides game title and entity names', () {
       final engine = TurnEngine(gameDef, levelDef);
       final kindMap = buildAnonKindToLabel(gameDef);
       final obs = AgentObservation.build(
-        gameDef, levelDef, engine.state,
+        gameDef,
+        levelDef,
+        engine.state,
         kindSymbolOverrides: kindMap,
       );
 
@@ -108,7 +122,8 @@ void main() {
           reason: 'real action IDs must not appear in actions section');
     });
 
-    test('board rendered with kindSymbolOverrides uses only letter symbols', () {
+    test('board rendered with kindSymbolOverrides uses only letter symbols',
+        () {
       final engine = TurnEngine(gameDef, levelDef);
       final kindMap = buildAnonKindToLabel(gameDef);
       final obs = AgentObservation.build(
@@ -123,8 +138,7 @@ void main() {
       for (final ch in gridBlock.split('').where((c) => c != '\n')) {
         // Letters (A-Z), empty '.', avatar '@', number 'N', and void ' ' are OK.
         final ok = RegExp(r'^[A-Z.@ N]$').hasMatch(ch);
-        expect(ok, isTrue,
-            reason: 'Unexpected board character: "$ch"');
+        expect(ok, isTrue, reason: 'Unexpected board character: "$ch"');
       }
 
       // Legend should use '?' for anonymised entity descriptions.

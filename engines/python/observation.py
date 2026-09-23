@@ -97,8 +97,26 @@ def build_prompt(
     inv = state.avatar.item if state.avatar.enabled else None
     inventory_line = f"\nInventory: {inv}" if inv is not None else ""
 
-    has_lose_conditions = bool(level_def.get("loseConditions"))
-    moves_line = f"\nMoves this attempt: {state.action_count}" if has_lose_conditions else ""
+    lose_conditions = level_def.get("loseConditions") or []
+    max_action_limit = next(
+        (
+            condition.get("config", {}).get("limit")
+            for condition in lose_conditions
+            if condition.get("type") == "max_actions"
+            and isinstance(condition.get("config", {}).get("limit"), (int, float))
+        ),
+        None,
+    )
+    if max_action_limit is not None:
+        remaining = max(0, int(max_action_limit) - state.action_count)
+        moves_line = (
+            f"\nMoves this attempt: {state.action_count} | "
+            f"Actions remaining: {remaining} of {int(max_action_limit)}"
+        )
+    elif lose_conditions:
+        moves_line = f"\nMoves this attempt: {state.action_count}"
+    else:
+        moves_line = ""
 
     memory_section = (
         f"\nMEMORY FROM PREVIOUS ACTION:\n{memory}\n" if memory else ""
