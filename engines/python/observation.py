@@ -13,6 +13,7 @@ from .goal_renderer import render_goals
 from .action_enum import enumerate_actions
 from .anon import build_anon_kind_to_label, build_anon_reverse_map
 from .gold_path import gold_path_length
+from ._models import Pos
 
 
 _IMAGE_BOARD_NOTE = (
@@ -41,6 +42,9 @@ def build_prompt(
     text_board: bool = True,
     attach_image: bool = False,
     valid_actions: list[dict[str, Any]] | None = None,
+    previous_attempt: str | None = None,
+    rejected_action: dict | None = None,
+    rejection_detail: str | None = None,
 ) -> str:
     """Build the full LLM prompt string matching the Dart runner output.
 
@@ -50,6 +54,11 @@ def build_prompt(
     Combined with text_board=True (text+image mode) it adds an explicit
     "the image is the same current board" note so the model doesn't waste
     reasoning on what the image is or whether it matches the text grid.
+    previous_attempt: how the previous attempt ended (e.g. "lost — move limit
+    of 6 reached"); shown as `PREVIOUS ATTEMPT: ...` before `CURRENT BOARD`
+    on an attempt's first prompt (only when last_action is None).
+    rejected_action / rejection_detail: the most recently submitted action was
+    rejected; the prompt says so and shows only the current board.
     """
     if valid_actions is None:
         valid_actions = enumerate_actions(game_def, state)
@@ -65,6 +74,18 @@ def build_prompt(
             json.dumps(a, sort_keys=True): f"a{i + 1}"
             for i, a in enumerate(sorted_actions)
         }
+
+    # ── Board unchanged? (compared before any image-mode substitution) ────────
+    board_unchanged = False
+    if last_action is not None and rejected_action is None and previous_board_text is not None:
+        current_bare = render_board(
+            state, game_def, include_legend=False,
+            kind_symbol_overrides=kind_symbol_overrides,
+        )
+        current_inv = state.avatar.item if state.avatar.enabled else None
+        board_unchanged = (
+            current_bare == previous_board_text and current_inv == previous_inventory
+        )
 
     # ── Board text (current) ──────────────────────────────────────────────────
     if text_board:
@@ -90,17 +111,25 @@ def build_prompt(
 
     # ── Inventory / moves ─────────────────────────────────────────────────────
     inv = state.avatar.item if state.avatar.enabled else None
-    inventory_line = f"\nInventory: {inv}" if inv is not None else ""
+    # The inventory holds a kind id; an anonymous prompt shows its alias, as
+    # the board and legend do, so the raw kind name never leaks.
+    def _shown_item(item):
+        return kind_to_label.get(item, item) if anonymize else item
 
-    has_lose_conditions = bool(level_def.get("loseConditions"))
-    moves_line = f"\nMoves this attempt: {state.action_count}" if has_lose_conditions else ""
+    inventory_line = f"\nInventory: {_shown_item(inv)}" if inv is not None else ""
+
+    moves_line = status_lines(
+        game_def, level_def, state,
+        anonymize=anonymize, kind_to_label=kind_to_label,
+    )
 
     memory_section = (
         f"\nMEMORY FROM PREVIOUS ACTION:\n{memory}\n" if memory else ""
     )
 
     prev_inventory_line = (
-        f"\nInventory: {previous_inventory}" if previous_inventory is not None else ""
+        f"\nInventory: {_shown_item(previous_inventory)}"
+        if previous_inventory is not None else ""
     )
 
     # ── Last action label ─────────────────────────────────────────────────────
@@ -113,11 +142,27 @@ def build_prompt(
             last_action_label = json.dumps(last_action, sort_keys=True)
 
     # ── Last action section ───────────────────────────────────────────────────
-    if last_action is not None:
+    if rejected_action is not None:
+        # The action exactly as submitted (an anonymous label in anon mode).
+        rejected_label = json.dumps(
+            {k: v for k, v in rejected_action.items() if k != "memory"},
+            sort_keys=True,
+        )
+        last_action_section = (
+            f"LAST ACTION: {rejected_label} — REJECTED ({rejection_detail or 'not legal in this state'}); "
+            f"no action was spent, the board is unchanged.\n"
+            f"CURRENT BOARD:\n"
+            f"{board_text}{inventory_line}{moves_line}"
+        )
+    elif last_action is not None:
         inv_changed_line = (
             "If your inventory changed, note what was gained or lost.\n"
             if (inv is not None or previous_inventory is not None)
             else ""
+        )
+        unchanged_line = (
+            "\nThe board did not change."
+            if board_unchanged else ""
         )
         last_action_section = (
             f"LAST ACTION: {last_action_label}\n"
@@ -125,7 +170,7 @@ def build_prompt(
             f"{previous_board_text}{prev_inventory_line}\n"
             f"\n"
             f"BOARD AFTER (current):\n"
-            f"{board_text}{inventory_line}{moves_line}\n"
+            f"{board_text}{inventory_line}{moves_line}{unchanged_line}\n"
             f"\n"
             f"Compare the two boards to understand exactly what your last action did "
             f"(tiles removed, pushed, merged, etc.).\n"
@@ -134,7 +179,11 @@ def build_prompt(
             f"Memory is your only way to retain knowledge across actions."
         )
     else:
+        previous_attempt_line = (
+            f"PREVIOUS ATTEMPT: {previous_attempt}\n" if previous_attempt else ""
+        )
         last_action_section = (
+            f"{previous_attempt_line}"
             f"CURRENT BOARD (first move of this attempt):\n"
             f"{board_text}{inventory_line}{moves_line}"
         )
@@ -190,6 +239,118 @@ def build_prompt(
     tail = _prompt_tail(inference_mode, step_size, max_n, ex1=ex1, ex2=ex2)
 
     return f"{header}\n\n{tail}"
+
+
+def _max_actions_limit(level_def: dict) -> int | None:
+    """Limit of the level's first `max_actions` lose condition, if any."""
+    for condition in level_def.get("loseConditions") or []:
+        if condition.get("type") != "max_actions":
+            continue
+        limit = (condition.get("config") or {}).get("limit")
+        if isinstance(limit, int) and not isinstance(limit, bool):
+            return limit
+    return None
+
+
+def _format_value(value) -> str:
+    """Render a state variable for the status block. Integral floats print as
+    integers so the text matches however the number was stored."""
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else repr(value)
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, separators=(",", ":"), sort_keys=True)
+
+
+def _individual_actors_config(game_def, level_def: dict) -> dict | None:
+    effective = game_def.with_system_overrides(level_def.get("systemOverrides"))
+    for system in effective.systems:
+        if system.get("type") == "individual_actors" and system.get("enabled", True):
+            return system.get("config") or {}
+    return None
+
+
+def status_lines(
+    game_def,
+    level_def: dict,
+    state,
+    *,
+    anonymize: bool = False,
+    kind_to_label: dict[str, str] | None = None,
+) -> str:
+    """Public status lines printed under the board, each prefixed by a newline.
+
+    In order: the move counter (`k of N allowed` when the level has a
+    `max_actions` lose condition; the bare count when it has other lose
+    conditions only; nothing otherwise), the `individual_actors` selection and
+    per-actor budgets when that system is enabled for the level, then every
+    `ui.readouts` entry the pack declares. No other variable is printed.
+    """
+    kind_to_label = kind_to_label or {}
+
+    def name_of(kind: str) -> str:
+        if anonymize:
+            return kind_to_label.get(kind, kind)
+        kind_def = game_def.entity_kinds.get(kind)
+        return (kind_def.get("uiName") if kind_def else None) or kind.replace("_", " ")
+
+    lines: list[str] = []
+    limit = _max_actions_limit(level_def)
+    if limit is not None:
+        lines.append(f"Moves this attempt: {state.action_count} of {limit} allowed")
+    elif level_def.get("loseConditions"):
+        lines.append(f"Moves this attempt: {state.action_count}")
+
+    config = _individual_actors_config(game_def, level_def)
+    if config is not None:
+        selected_kind = state.variables.get(
+            config.get("selectedVariable", "selectedActorKind"))
+        raw_pos = state.variables.get(
+            config.get("selectedPositionVariable", "selectedActorPosition"))
+        if not selected_kind:
+            lines.append("Selected: none")
+        elif isinstance(raw_pos, (list, tuple)) and len(raw_pos) >= 2:
+            x, y = int(raw_pos[0]), int(raw_pos[1])
+            entity = state.board.get_entity(config.get("actorLayer", "actors"), Pos(x, y))
+            if entity is not None and entity.kind == selected_kind:
+                lines.append(f"Selected: {name_of(str(selected_kind))} at ({x},{y})")
+            else:
+                lines.append(
+                    f"Selected: none (the piece selected at ({x},{y}) is gone or changed)")
+        else:
+            lines.append(f"Selected: {name_of(str(selected_kind))}")
+
+        budgets = config.get("budgets")
+        if isinstance(budgets, dict) and budgets:
+            remaining = state.variables.get(
+                config.get("budgetVariable", "actorMovesRemaining"))
+            if not isinstance(remaining, dict):
+                remaining = {}
+            parts = []
+            for kind, initial in budgets.items():
+                value = remaining.get(kind, initial)
+                parts.append(f"{name_of(str(kind))} {_format_value(value)}")
+            lines.append("Moves left: " + ", ".join(parts))
+
+    for i, readout in enumerate(getattr(game_def, "ui_readouts", []) or [], start=1):
+        variable = readout["variable"]
+        if variable not in state.variables:
+            continue
+        value = state.variables[variable]
+        blank = readout.get("blankWhen")
+        if (blank is not None and not isinstance(value, bool)
+                and isinstance(value, (int, float)) and value == blank):
+            shown = "-"
+        else:
+            shown = _format_value(value)
+        label = f"Readout {i}" if anonymize else readout.get("label", "")
+        lines.append(f"{label}: {shown}")
+
+    return "".join(f"\n{line}" for line in lines)
 
 
 def _prompt_tail(

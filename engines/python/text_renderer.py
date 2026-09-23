@@ -118,19 +118,26 @@ def _get_symbol(entity, kind_def: dict | None, kind_symbol_overrides: dict | Non
 
 
 def _ordered_layers(state: GameState) -> list[str]:
+    return order_layer_ids(list(state.board.layers))
+
+
+def order_layer_ids(layer_ids: list[str]) -> list[str]:
+    """Top-to-bottom drawing order for layers given in board order: the known
+    non-ground layers in `_LAYER_ORDER` order, then every other layer in the
+    order given, then ground."""
     known = [
         layer
         for layer in _LAYER_ORDER
-        if layer != "ground" and layer in state.board.layers
+        if layer != "ground" and layer in layer_ids
     ]
     remaining = [
-        layer for layer in state.board.layers
+        layer for layer in layer_ids
         if layer not in _LAYER_ORDER and layer != "ground"
     ]
     return [
         *known,
         *remaining,
-        *(["ground"] if "ground" in state.board.layers else []),
+        *(["ground"] if "ground" in layer_ids else []),
     ]
 
 

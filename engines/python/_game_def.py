@@ -114,6 +114,37 @@ class GameDef:
         # plots from the board"). Empty dict by default.
         self.goal_descriptions: dict[str, str] = data.get("goalDescriptions", {}) or {}
 
+        # `ui.readouts`: live `state.variables` values the pack surfaces during
+        # play, in declaration order. Mirrors Dart's GameUiConfig.readouts —
+        # non-object entries and entries without a variable are dropped.
+        self.ui_readouts: list[dict] = self._parse_readouts(data.get("ui"))
+
+    @staticmethod
+    def _parse_readouts(raw_ui) -> list[dict]:
+        if not isinstance(raw_ui, dict):
+            return []
+        raw = raw_ui.get("readouts")
+        if not isinstance(raw, list):
+            return []
+        readouts: list[dict] = []
+        for entry in raw:
+            if not isinstance(entry, dict):
+                continue
+            variable = entry.get("variable")
+            if not isinstance(variable, str) or not variable:
+                continue
+            label = entry.get("label")
+            blank = entry.get("blankWhen")
+            if isinstance(blank, bool) or not isinstance(blank, (int, float)):
+                blank = None
+            readouts.append({
+                "variable": variable,
+                "label": label if isinstance(label, str) else "",
+                "color": entry.get("color") if isinstance(entry.get("color"), str) else None,
+                "blankWhen": int(blank) if blank is not None else None,
+            })
+        return readouts
+
     @staticmethod
     def _parse_kind(kind_id: str, j: dict) -> dict:
         return {
