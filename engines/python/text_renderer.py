@@ -53,6 +53,8 @@ def render(
             )
             mco_symbols[cell] = "═" if (h_conn and not v_conn) else "║" if (not h_conn and v_conn) else "╬"
 
+    concealed_positions = _observation_concealed_positions(state, effective_game)
+
     lines = []
     for y in range(h):
         row = []
@@ -64,6 +66,9 @@ def render(
             object_symbol: str | None = None
             ground_symbol: str | None = None
             mco_symbol = mco_symbols.get(pos)
+            if pos in concealed_positions and mco_symbol is not None:
+                row.append(mco_symbol)
+                continue
             for layer_id in _ordered_layers(state):
                 entity = board.get_entity(layer_id, pos)
                 if entity is None:
@@ -87,15 +92,22 @@ def render(
             effective_game,
             grid_avatar_pos is not None,
             kind_symbol_overrides,
+            concealed_positions,
         )
         parts.append(f"Each character is one cell, each line is one row. Legend: {legend}")
 
-    numbers_block = _build_numbers_block(state, effective_game)
+    numbers_block = _build_numbers_block(
+        state, effective_game, concealed_positions
+    )
     if numbers_block:
         parts.append(numbers_block)
 
     overlay_block = _build_overlay_block(
-        state, effective_game, kind_symbol_overrides
+        state,
+        effective_game,
+        kind_symbol_overrides,
+        mco_symbols,
+        concealed_positions,
     )
     if overlay_block:
         parts.append(overlay_block)
@@ -106,12 +118,13 @@ def render(
         grid_avatar_pos,
         kind_symbol_overrides,
         mco_symbols,
+        concealed_positions,
     )
     if stacked_block:
         parts.append(stacked_block)
 
     entity_state_block = _build_entity_state_block(
-        state, effective_game, kind_symbol_overrides
+        state, effective_game, kind_symbol_overrides, concealed_positions
     )
     if entity_state_block:
         parts.append(entity_state_block)
@@ -162,6 +175,22 @@ def _ordered_layers(state: GameState) -> list[str]:
     ]
 
 
+def _observation_concealed_positions(state: GameState, game_def) -> set[Pos]:
+    """Cells whose board-layer contents are hidden by an authored piece.
+
+    The contract is opt-in through the multi-cell kind's
+    ``observation_occluder`` tag. This keeps games such as Bellows free to
+    expose target overlap while sliding-block packs can match their visual
+    presentation and conceal keys, doors, or terrain below an opaque piece.
+    """
+    return {
+        cell
+        for mco in state.board.multi_cell_objects
+        if game_def.has_tag(mco.kind, "observation_occluder")
+        for cell in mco.cells
+    }
+
+
 def _is_legend_redundant(sym: str, label: str) -> bool:
     """True when the legend entry adds no information beyond the symbol itself.
 
@@ -177,13 +206,21 @@ def _is_legend_redundant(sym: str, label: str) -> bool:
     return False
 
 
-def _build_legend(state: GameState, game_def, has_avatar: bool, kind_symbol_overrides) -> str:
+def _build_legend(
+    state: GameState,
+    game_def,
+    has_avatar: bool,
+    kind_symbol_overrides,
+    concealed_positions: set[Pos],
+) -> str:
     seen: dict[str, str] = {}
     if has_avatar:
         seen[_AVATAR_SYMBOL] = "avatar (you)"
 
     for layer in state.board.layers.values():
-        for _pos, entity in layer.entries():
+        for pos, entity in layer.entries():
+            if pos in concealed_positions:
+                continue
             kind_def = game_def.entity_kinds.get(entity.kind)
             if kind_def is None:
                 continue
@@ -240,7 +277,13 @@ def _build_legend(state: GameState, game_def, has_avatar: bool, kind_symbol_over
     return "  ".join(f"{k}={v}" for k, v in seen.items())
 
 
-def _build_overlay_block(state: GameState, game_def, kind_symbol_overrides) -> str:
+def _build_overlay_block(
+    state: GameState,
+    game_def,
+    kind_symbol_overrides,
+    mco_symbols: dict[Pos, str],
+    concealed_positions: set[Pos],
+) -> str:
     """Show the overlay region as a focused mini-view of its cells.
 
     Without this the model only sees coordinates ("Overlay region: (0,0)–(1,1)")
@@ -260,9 +303,13 @@ def _build_overlay_block(state: GameState, game_def, kind_symbol_overrides) -> s
         chars = []
         for dx in range(overlay.width):
             x, y = x1 + dx, y1 + dy
+            pos = Pos(x, y)
+            if pos in concealed_positions and pos in mco_symbols:
+                chars.append(mco_symbols[pos])
+                continue
             sym = "."
             for layer_id in _ordered_layers(state):
-                entity = state.board.get_entity(layer_id, Pos(x, y))
+                entity = state.board.get_entity(layer_id, pos)
                 if entity is None:
                     continue
                 kind_def = game_def.entity_kinds.get(entity.kind)
@@ -287,39 +334,41 @@ def _build_stacked_block(
     avatar_pos: Pos | None,
     kind_symbol_overrides,
     mco_symbols: dict[Pos, str],
+    concealed_positions: set[Pos],
 ) -> str:
     entries_list: list[str] = []
     for y in range(state.board.height):
         for x in range(state.board.width):
             pos = Pos(x, y)
             symbols: list[str] = []
-            for layer_id in _ordered_layers(state):
-                entity = state.board.get_entity(layer_id, pos)
-                if entity is None:
-                    continue
-                kind_def = game_def.entity_kinds.get(entity.kind)
-                if kind_def is None:
-                    sym = entity.kind[0].upper()
-                    label = "?" if kind_symbol_overrides else entity.kind.replace("_", " ")
-                elif kind_def.get("symbolParam") is not None:
-                    param_val = entity.params.get(kind_def["symbolParam"])
-                    sym = "N" if param_val is not None else kind_def["symbol"]
-                    label = "?" if kind_symbol_overrides else (
-                        kind_def.get("uiName") or entity.kind.replace("_", " ")
-                    )
-                elif kind_symbol_overrides and entity.kind in kind_symbol_overrides:
-                    sym = kind_symbol_overrides[entity.kind]
-                    label = "?"
-                else:
-                    sym = kind_def["symbol"]
-                    if sym.isspace():
-                        sym = _VISIBLE_SPACE
-                    label = kind_def.get("uiName") or entity.kind.replace("_", " ")
+            if pos not in concealed_positions:
+                for layer_id in _ordered_layers(state):
+                    entity = state.board.get_entity(layer_id, pos)
+                    if entity is None:
+                        continue
+                    kind_def = game_def.entity_kinds.get(entity.kind)
+                    if kind_def is None:
+                        sym = entity.kind[0].upper()
+                        label = "?" if kind_symbol_overrides else entity.kind.replace("_", " ")
+                    elif kind_def.get("symbolParam") is not None:
+                        param_val = entity.params.get(kind_def["symbolParam"])
+                        sym = "N" if param_val is not None else kind_def["symbol"]
+                        label = "?" if kind_symbol_overrides else (
+                            kind_def.get("uiName") or entity.kind.replace("_", " ")
+                        )
+                    elif kind_symbol_overrides and entity.kind in kind_symbol_overrides:
+                        sym = kind_symbol_overrides[entity.kind]
+                        label = "?"
+                    else:
+                        sym = kind_def["symbol"]
+                        if sym.isspace():
+                            sym = _VISIBLE_SPACE
+                        label = kind_def.get("uiName") or entity.kind.replace("_", " ")
 
-                original_sym = kind_def["symbol"] if kind_def else sym
-                if sym == "." or original_sym == ".":
-                    continue
-                symbols.append(f"{sym}({label})")
+                    original_sym = kind_def["symbol"] if kind_def else sym
+                    if sym == "." or original_sym == ".":
+                        continue
+                    symbols.append(f"{sym}({label})")
 
             if avatar_pos == pos:
                 symbols.insert(0, "@(avatar)")
@@ -480,11 +529,15 @@ def _build_elastic_target_status_block(
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
-def _build_numbers_block(state: GameState, game_def) -> str:
+def _build_numbers_block(
+    state: GameState, game_def, concealed_positions: set[Pos]
+) -> str:
     entries_list: list[str] = []
     for y in range(state.board.height):
         for x in range(state.board.width):
             pos = Pos(x, y)
+            if pos in concealed_positions:
+                continue
             for layer_id in _ordered_layers(state):
                 entity = state.board.get_entity(layer_id, pos)
                 if entity is None:
@@ -506,6 +559,7 @@ def _build_entity_state_block(
     state: GameState,
     game_def,
     kind_symbol_overrides: dict[str, str] | None,
+    concealed_positions: set[Pos],
 ) -> str:
     """Expose per-entity state that cannot be encoded in one grid symbol."""
     entries: list[str] = []
@@ -514,6 +568,8 @@ def _build_entity_state_block(
         if layer is None:
             continue
         for pos, entity in layer.entries():
+            if pos in concealed_positions:
+                continue
             if not entity.params:
                 continue
             kind_def = game_def.entity_kinds.get(entity.kind, {})
@@ -551,13 +607,23 @@ def _build_mco_block(state: GameState, game_def, kind_symbol_overrides) -> str:
         return ""
 
     parts: list[str] = ["Multi-cell objects:"]
+    public_piece_index = 0
     for mco in state.board.multi_cell_objects:
         kind_def = game_def.entity_kinds.get(mco.kind)
         if kind_symbol_overrides:
             label = "?"
         else:
             label = (kind_def.get("uiName") if kind_def else None) or mco.kind.replace("_", " ")
-        parts.append(f"  {mco.id} [{label}]")
+        if game_def.has_tag(mco.kind, "public_piece"):
+            public_piece_index += 1
+            piece_name = f"Piece {public_piece_index}"
+        else:
+            piece_name = mco.id
+        parts.append(f"  {piece_name} [{label}]")
+
+        axis = mco.params.get("axis")
+        if axis is not None:
+            parts.append(f"    axis: {axis}")
 
         exit_list = mco.params.get("exitPosition")
         exit_pos = Pos(int(exit_list[0]), int(exit_list[1])) if exit_list else None
@@ -568,7 +634,12 @@ def _build_mco_block(state: GameState, game_def, kind_symbol_overrides) -> str:
         for p in mco.cells:
             tag = exit_tag if p == exit_pos else ""
             cell_strs.append(f"({p.x},{p.y}){tag}")
-        parts.append(f"    cells: {' '.join(cell_strs)}")
+        footprint_label = (
+            "footprint"
+            if game_def.has_tag(mco.kind, "public_piece")
+            else "cells"
+        )
+        parts.append(f"    {footprint_label}: {' '.join(cell_strs)}")
 
         spawn_pos: Pos | None = None
         if exit_pos and exit_dir:

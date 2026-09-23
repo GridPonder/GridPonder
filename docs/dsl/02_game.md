@@ -437,6 +437,16 @@ Standard tags for v0.5:
 
 Games may define custom tags beyond these.
 
+Two optional tags define player-facing multi-cell observation behavior:
+
+| Tag | Meaning |
+|-----|---------|
+| `observation_occluder` | Treat the multi-cell object as opaque: ordinary board-layer contents below its footprint are omitted from the text grid, legend, stack/state details, and benchmark image until uncovered. |
+| `public_piece` | Identify the object as a numbered piece instead of exposing its authoring `id`; text observations include its public kind, axis (when present), and current footprint. |
+
+These tags affect observation rendering only. They do not change collision,
+movement, collection, or goal semantics.
+
 ### Multi-Cell Object Kinds
 
 Multi-cell objects (e.g., pipes) referenced in level `multiCellObjects` arrays should also have an entity kind definition in `entityKinds`. The kind defines tags, sprite, and parameter schema. The `layer` for multi-cell objects is typically `"structures"`.

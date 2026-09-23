@@ -316,6 +316,112 @@ def test_consumed_target_reports_original_geometry_and_wall_state() -> None:
     assert "completed and converted to Completed target wall" in rendered
 
 
+def _make_occlusion_game() -> GameDef:
+    return GameDef.from_dict(
+        {
+            "layers": [
+                {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
+                {"id": "objects", "occupancy": "zero_or_one"},
+            ],
+            "entityKinds": {
+                "floor": {"layer": "ground", "symbol": ".", "uiName": "Open floor"},
+                "parking": {
+                    "layer": "ground",
+                    "symbol": ":",
+                    "uiName": "Hidden parking floor",
+                },
+                "key": {
+                    "layer": "objects",
+                    "symbol": "K",
+                    "uiName": "Yellow key",
+                },
+                "door": {
+                    "layer": "objects",
+                    "symbol": "L",
+                    "uiName": "Locked door",
+                },
+                "slab": {
+                    "layer": "structures",
+                    "tags": ["observation_occluder", "public_piece"],
+                    "symbol": "B",
+                    "uiName": "Blue slab",
+                },
+            },
+        }
+    )
+
+
+def _make_occlusion_level() -> dict:
+    return {
+        "board": {
+            "size": [4, 1],
+            "layers": {
+                "ground": {
+                    "format": "sparse",
+                    "entries": [
+                        {"position": [0, 0], "kind": "parking"},
+                        {"position": [1, 0], "kind": "parking"},
+                    ],
+                },
+                "objects": {
+                    "format": "sparse",
+                    "entries": [
+                        {
+                            "position": [0, 0],
+                            "kind": "key",
+                            "owner": "yellow",
+                        },
+                        {"position": [1, 0], "kind": "door"},
+                    ],
+                },
+            },
+            "multiCellObjects": [
+                {
+                    "id": "slab_f_yellow_key",
+                    "kind": "slab",
+                    "cells": [[0, 0], [1, 0]],
+                    "params": {"axis": "horizontal"},
+                }
+            ],
+        },
+        "state": {"avatar": {"enabled": False}},
+        "goals": [],
+    }
+
+
+def test_occluding_public_piece_hides_then_reveals_board_contents() -> None:
+    game = _make_occlusion_game()
+    engine = TurnEngine(game, _make_occlusion_level())
+
+    concealed = text_renderer.render(engine.state, game)
+    assert concealed.splitlines()[0] == "══.."
+    for leaked in (
+        "Yellow key",
+        "Locked door",
+        "Hidden parking floor",
+        "owner=yellow",
+        "slab_f_yellow_key",
+    ):
+        assert leaked not in concealed, f"concealed observation leaked {leaked!r}"
+    assert "Piece 1 [Blue slab]" in concealed
+    assert "axis: horizontal" in concealed
+    assert "footprint: (0,0) (1,0)" in concealed
+
+    engine.state.board.multi_cell_objects[0].cells = [Pos(2, 0), Pos(3, 0)]
+    revealed = text_renderer.render(engine.state, game)
+    assert revealed.splitlines()[0] == "KL══"
+    assert "Yellow key" in revealed
+    assert "Locked door" in revealed
+    assert "Hidden parking floor" in revealed
+    assert "owner=yellow" in revealed
+
+    engine.state.board.set_entity("objects", Pos(0, 0), None)
+    collected = text_renderer.render(engine.state, game)
+    assert collected.splitlines()[0] == ":L══"
+    assert "Yellow key" not in collected
+    assert "owner=yellow" not in collected
+
+
 def run_all() -> bool:
     tests = [
         test_territory_symbol_shown_on_owned_empty_cell_and_hidden_under_actor,
@@ -324,6 +430,7 @@ def run_all() -> bool:
         test_anonymous_entity_state_preserves_dynamics_without_kind_name,
         test_multi_cell_legend_and_overlap_use_public_game_identity,
         test_consumed_target_reports_original_geometry_and_wall_state,
+        test_occluding_public_piece_hides_then_reveals_board_contents,
     ]
     passed = 0
     failed = 0

@@ -84,6 +84,8 @@ class TextRenderer {
                 : '╬';
       }
     }
+    final concealedPositions =
+        _observationConcealedPositions(state, effectiveGame);
 
     final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
 
@@ -106,6 +108,10 @@ class TextRenderer {
         String? objectSymbol; // from actors, markers, or objects layers
         String? groundSymbol; // from ground layer only
         final mcoSymbol = mcoSymbols[pos];
+        if (concealedPositions.contains(pos) && mcoSymbol != null) {
+          sb.write(mcoSymbol);
+          continue;
+        }
         for (final layerId in layerOrder) {
           final entity = board.getEntity(layerId, pos);
           if (entity == null) continue;
@@ -144,20 +150,23 @@ class TextRenderer {
 
     if (includeLegend) {
       final legend = _buildLegend(state, effectiveGame, gridAvatarPos != null,
-          kindSymbolOverrides: kindSymbolOverrides);
+          kindSymbolOverrides: kindSymbolOverrides,
+          concealedPositions: concealedPositions);
       parts.add(
           'Each character is one cell, each line is one row. Legend: $legend');
     }
 
-    final numbersBlock = _buildNumbersBlock(state, effectiveGame);
+    final numbersBlock =
+        _buildNumbersBlock(state, effectiveGame, concealedPositions);
     if (numbersBlock.isNotEmpty) parts.add(numbersBlock);
 
-    final overlayBlock = _buildOverlayBlock(state, effectiveGame,
+    final overlayBlock = _buildOverlayBlock(
+        state, effectiveGame, mcoSymbols, concealedPositions,
         kindSymbolOverrides: kindSymbolOverrides);
     if (overlayBlock.isNotEmpty) parts.add(overlayBlock);
 
     final stackedBlock = _buildStackedBlock(
-        state, effectiveGame, gridAvatarPos, mcoSymbols,
+        state, effectiveGame, gridAvatarPos, mcoSymbols, concealedPositions,
         kindSymbolOverrides: kindSymbolOverrides);
     if (stackedBlock.isNotEmpty) parts.add(stackedBlock);
 
@@ -186,14 +195,28 @@ class TextRenderer {
     return l == s || l == 'num $s';
   }
 
+  /// Board-layer contents hidden by an opaque authored multi-cell piece.
+  ///
+  /// This is opt-in so games that intentionally expose overlap (for example,
+  /// a body covering a target) keep their existing observation contract.
+  static Set<Position> _observationConcealedPositions(
+      LevelState state, GameDefinition game) {
+    return {
+      for (final mco in state.board.multiCellObjects)
+        if (game.hasTag(mco.kind, 'observation_occluder')) ...mco.cells,
+    };
+  }
+
   static String _buildLegend(
       LevelState state, GameDefinition game, bool hasAvatar,
-      {Map<String, String>? kindSymbolOverrides}) {
+      {Map<String, String>? kindSymbolOverrides,
+      required Set<Position> concealedPositions}) {
     final seen = <String, String>{}; // symbol -> label
     if (hasAvatar) seen[_avatarSymbol] = 'avatar (you)';
 
     for (final layer in state.board.layers.values) {
       for (final entry in layer.entries()) {
+        if (concealedPositions.contains(entry.key)) continue;
         final entity = entry.value;
         final kindDef = game.entityKinds[entity.kind];
         if (kindDef == null) continue;
@@ -252,6 +275,7 @@ class TextRenderer {
   /// the model would only see the bounds ("Overlay region: (0,0)–(1,1)") and
   /// have to mentally re-extract the contents from the full grid each turn.
   static String _buildOverlayBlock(LevelState state, GameDefinition game,
+      Map<Position, String> mcoSymbols, Set<Position> concealedPositions,
       {Map<String, String>? kindSymbolOverrides}) {
     final overlay = state.overlay;
     if (overlay == null) return '';
@@ -267,9 +291,14 @@ class TextRenderer {
       final buf = StringBuffer();
       for (int dx = 0; dx < overlay.width; dx++) {
         final x = x1 + dx, y = y1 + dy;
+        final pos = Position(x, y);
+        if (concealedPositions.contains(pos) && mcoSymbols.containsKey(pos)) {
+          buf.write(mcoSymbols[pos]);
+          continue;
+        }
         String sym = '.';
         for (final layerId in layerOrder) {
-          final entity = state.board.getEntity(layerId, Position(x, y));
+          final entity = state.board.getEntity(layerId, pos);
           if (entity == null) continue;
           final kindDef = game.entityKinds[entity.kind];
           if (kindDef == null) continue;
@@ -298,8 +327,12 @@ class TextRenderer {
 
   /// Reports cells where more than one layer has a visible entity, so the LLM
   /// knows the grid symbol hides additional content beneath it.
-  static String _buildStackedBlock(LevelState state, GameDefinition game,
-      Position? avatarPos, Map<Position, String> mcoSymbols,
+  static String _buildStackedBlock(
+      LevelState state,
+      GameDefinition game,
+      Position? avatarPos,
+      Map<Position, String> mcoSymbols,
+      Set<Position> concealedPositions,
       {Map<String, String>? kindSymbolOverrides}) {
     final layerOrder = ['actors', 'markers', 'objects', 'territory', 'ground'];
     final entries = <String>[];
@@ -311,41 +344,44 @@ class TextRenderer {
         final pos = Position(x, y);
         final symbols = <String>[];
 
-        for (final layerId in layerOrder) {
-          final entity = state.board.getEntity(layerId, pos);
-          if (entity == null) continue;
-          final kindDef = game.entityKinds[entity.kind];
-          String sym;
-          String label;
-          if (kindDef == null) {
-            sym = entity.kind[0].toUpperCase();
-            label = kindSymbolOverrides != null
-                ? '?'
-                : entity.kind.replaceAll('_', ' ');
-          } else if (kindDef.symbolParam != null) {
-            final paramVal = entity.param(kindDef.symbolParam!);
-            sym = paramVal != null
-                ? _valueToChar(paramVal as int)
-                : kindDef.symbol;
-            label = kindSymbolOverrides != null
-                ? '?'
-                : (kindDef.uiName ?? kindDef.id.replaceAll('_', ' '));
-          } else if (kindSymbolOverrides != null &&
-              kindSymbolOverrides.containsKey(entity.kind)) {
-            sym = kindSymbolOverrides[entity.kind]!;
-            label = '?';
-          } else {
-            sym = kindDef.symbol;
-            label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
+        if (!concealedPositions.contains(pos)) {
+          for (final layerId in layerOrder) {
+            final entity = state.board.getEntity(layerId, pos);
+            if (entity == null) continue;
+            final kindDef = game.entityKinds[entity.kind];
+            String sym;
+            String label;
+            if (kindDef == null) {
+              sym = entity.kind[0].toUpperCase();
+              label = kindSymbolOverrides != null
+                  ? '?'
+                  : entity.kind.replaceAll('_', ' ');
+            } else if (kindDef.symbolParam != null) {
+              final paramVal = entity.param(kindDef.symbolParam!);
+              sym = paramVal != null
+                  ? _valueToChar(paramVal as int)
+                  : kindDef.symbol;
+              label = kindSymbolOverrides != null
+                  ? '?'
+                  : (kindDef.uiName ?? kindDef.id.replaceAll('_', ' '));
+            } else if (kindSymbolOverrides != null &&
+                kindSymbolOverrides.containsKey(entity.kind)) {
+              sym = kindSymbolOverrides[entity.kind]!;
+              label = '?';
+            } else {
+              sym = kindDef.symbol;
+              label = kindDef.uiName ?? kindDef.id.replaceAll('_', ' ');
+            }
+            // Skip void/empty cells. In anon mode the symbol may be
+            // overridden, so check both the display symbol and the original
+            // game symbol.
+            final originalSym = kindDef?.symbol ?? sym;
+            if (sym == '.' ||
+                sym == ' ' ||
+                originalSym == '.' ||
+                originalSym == ' ') continue;
+            symbols.add('$sym($label)');
           }
-          // Skip void/empty cells. In anon mode the symbol may be overridden,
-          // so check both the display symbol and the original game symbol.
-          final originalSym = kindDef?.symbol ?? sym;
-          if (sym == '.' ||
-              sym == ' ' ||
-              originalSym == '.' ||
-              originalSym == ' ') continue;
-          symbols.add('$sym($label)');
         }
 
         // Avatar counts as an extra layer on top (only when shown in grid).
@@ -486,7 +522,8 @@ class TextRenderer {
   /// Lists all number-valued tiles with their exact decimal values.
   /// Appears below the legend so the LLM always knows precise values even when
   /// the grid symbol is compressed (A–F or ?).
-  static String _buildNumbersBlock(LevelState state, GameDefinition game) {
+  static String _buildNumbersBlock(
+      LevelState state, GameDefinition game, Set<Position> concealedPositions) {
     final entries = <String>[];
     final w = state.board.width;
     final h = state.board.height;
@@ -494,6 +531,7 @@ class TextRenderer {
     for (int y = 0; y < h; y++) {
       for (int x = 0; x < w; x++) {
         final pos = Position(x, y);
+        if (concealedPositions.contains(pos)) continue;
         for (final layerId in layerOrder) {
           final entity = state.board.getEntity(layerId, pos);
           if (entity == null) continue;
@@ -518,12 +556,20 @@ class TextRenderer {
     final sb = StringBuffer();
     sb.writeln('Multi-cell objects:');
 
+    var publicPieceIndex = 0;
     for (final mco in state.board.multiCellObjects) {
       final kindDef = game.entityKinds[mco.kind];
       final label = kindSymbolOverrides != null
           ? '?'
           : (kindDef?.uiName ?? mco.kind.replaceAll('_', ' '));
-      sb.writeln('  ${mco.id} [$label]');
+      final isPublicPiece = game.hasTag(mco.kind, 'public_piece');
+      final pieceName = isPublicPiece ? 'Piece ${++publicPieceIndex}' : mco.id;
+      sb.writeln('  $pieceName [$label]');
+
+      final axis = mco.params['axis']?.toString();
+      if (axis != null && axis.isNotEmpty) {
+        sb.writeln('    axis: $axis');
+      }
 
       // Cells with exit marker including direction.
       final exitList = mco.params['exitPosition'] as List?;
@@ -536,7 +582,7 @@ class TextRenderer {
         final tag = p == exitPos ? exitTag : '';
         return '(${p.x},${p.y})$tag';
       }).join(' ');
-      sb.writeln('    cells: $cellStr');
+      sb.writeln('    ${isPublicPiece ? 'footprint' : 'cells'}: $cellStr');
 
       // Compute spawn position: one step from exit in exitDirection.
       Position? spawnPos;

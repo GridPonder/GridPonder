@@ -67,6 +67,7 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
     pack_dir = Path(pack_dir)
     base_dir = pack_dir.parent / "gridponder-base" / "sprites" / "tiles"
     theme = _load_theme(pack_dir)
+    concealed_positions = _observation_concealed_positions(game_def, state)
 
     width_cells = state.board.width
     height_cells = state.board.height
@@ -99,7 +100,7 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
 
     # Region outlines: stroke the perimeter of every contiguous group of
     # cells whose kind has `outline` set in game.json.
-    _draw_region_outlines(draw, game_def, state)
+    _draw_region_outlines(draw, game_def, state, concealed_positions)
 
     # Avatar overlay (drawn last so always visible).
     avatar = getattr(state, "avatar", None)
@@ -124,7 +125,17 @@ def render_board_png(game_def: Any, state: Any, pack_dir: str | Path) -> bytes:
 
 # ── Internal helpers ─────────────────────────────────────────────────────
 
-def _draw_region_outlines(draw, game_def, state):
+def _observation_concealed_positions(game_def, state):
+    """Cells whose board-layer contents are hidden by an opaque MCO."""
+    return {
+        _Pos(cell.x, cell.y)
+        for mco in state.board.multi_cell_objects
+        if game_def.has_tag(mco.kind, "observation_occluder")
+        for cell in mco.cells
+    }
+
+
+def _draw_region_outlines(draw, game_def, state, concealed_positions):
     """Stroke the outer perimeter of every contiguous region of cells whose
     kind has `outline` set. For each cell in such a region we draw a line on
     each side whose neighbour is NOT in the region; stitched together this
@@ -143,11 +154,13 @@ def _draw_region_outlines(draw, game_def, state):
         def in_set(x, y):
             if x < 0 or y < 0:
                 return False
+            if _Pos(x, y) in concealed_positions:
+                return False
             e = layer.get(_Pos(x, y))
             return e is not None and e.kind == kind_id
 
         for pos, ent in layer.entries():
-            if ent.kind != kind_id:
+            if ent.kind != kind_id or pos in concealed_positions:
                 continue
             x0 = AXIS_PX + PADDING + pos.x * CELL_PX
             y0 = AXIS_PX + PADDING + pos.y * CELL_PX
@@ -177,6 +190,36 @@ def _parse_hex(hex_str):
 
 def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir):
     """Paint one cell from bottom to top, including custom layers and MCOs."""
+    cell_mcos = [
+        mco
+        for mco in state.board.multi_cell_objects
+        if any(cell.x == x and cell.y == y for cell in mco.cells)
+    ]
+
+    def paint_mco(mco):
+        kind_def = game_def.entity_kinds.get(mco.kind, {})
+        if not _paste_sprite(
+            canvas, mco.kind, kind_def, mco.params, x0, y0, pack_dir, base_dir
+        ):
+            _procedural_object(
+                canvas, draw, mco.kind, kind_def, mco.params, x0, y0
+            )
+
+    occluding_mcos = [
+        mco
+        for mco in cell_mcos
+        if game_def.has_tag(mco.kind, "observation_occluder")
+    ]
+    if occluding_mcos:
+        # Do not paint concealed entities at all: a partially transparent
+        # piece sprite must not reveal a key, door, outline, or terrain below.
+        draw.rectangle(
+            (x0, y0, x0 + CELL_PX, y0 + CELL_PX), fill=_EMPTY_FILL
+        )
+        for mco in occluding_mcos:
+            paint_mco(mco)
+        return
+
     # Ground
     ground = state.board.get_entity("ground", _Pos(x, y))
     if ground is None:
@@ -206,16 +249,11 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
         if not _paste_sprite(canvas, ent.kind, kind_def, ent.params, x0, y0, pack_dir, base_dir):
             _procedural_object(canvas, draw, ent.kind, kind_def, ent.params, x0, y0)
 
-    for mco in state.board.multi_cell_objects:
-        if not any(cell.x == x and cell.y == y for cell in mco.cells):
-            continue
-        kind_def = game_def.entity_kinds.get(mco.kind, {})
-        if not _paste_sprite(
-            canvas, mco.kind, kind_def, mco.params, x0, y0, pack_dir, base_dir
-        ):
-            _procedural_object(
-                canvas, draw, mco.kind, kind_def, mco.params, x0, y0
-            )
+    # Non-occluding MCOs keep their existing position between floor overlays
+    # and board objects, so target overlap remains visible in games that need
+    # it.
+    for mco in cell_mcos:
+        paint_mco(mco)
 
     for layer in [layer for layer in ordered if layer != "territory"]:
         ent = state.board.get_entity(layer, _Pos(x, y))
@@ -228,7 +266,6 @@ def _paint_cell(canvas, draw, game_def, state, x, y, x0, y0, pack_dir, base_dir)
             _procedural_object(
                 canvas, draw, ent.kind, kind_def, ent.params, x0, y0
             )
-
 
 def _paste_sprite(canvas, kind, kind_def, params, x0, y0, pack_dir, base_dir) -> bool:
     """Try to paste a PNG sprite. Returns True on success."""
