@@ -20,6 +20,20 @@ def gold_path_length(level_def: dict) -> int:
     return len(level_def.get("solution", {}).get("goldPath", []))
 
 
+def benchmark_budget_length(level_def: dict) -> int:
+    """Reference length used for action budgets, independent of rescoring.
+
+    A shorter validated solution must not retroactively reduce the allowance
+    of an existing benchmark. Legacy levels default to their gold-path length.
+    """
+    value = level_def.get("solution", {}).get("benchmarkBudgetLength")
+    if value is None:
+        return gold_path_length(level_def)
+    if type(value) is not int or value <= 0:
+        raise ValueError("solution.benchmarkBudgetLength must be a positive integer")
+    return value
+
+
 def gold_path_actions(level_def: dict) -> list[tuple[str, dict]]:
     """Parse the gold path into ``(action_id, params)`` tuples."""
     actions: list[tuple[str, dict]] = []

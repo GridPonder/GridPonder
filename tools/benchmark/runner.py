@@ -38,7 +38,7 @@ from engines.python.anon import (
     resolve_anon_action,
 )
 from engines.python.action_enum import enumerate_actions
-from engines.python.gold_path import gold_path_length
+from engines.python.gold_path import benchmark_budget_length, gold_path_length
 
 # Image renderer is only imported on demand (Pillow may not be installed
 # on machines that only use text mode).
@@ -226,12 +226,13 @@ def main() -> None:
 
     level_def = levels[level_id]
     gold_path_len = gold_path_length(level_def)
+    budget_len = benchmark_budget_length(level_def)
 
     limit_per_attempt = (
-        attempt_mul * gold_path_len if gold_path_len > 0 else max(10, min(attempt_mul * 10, 60))
+        attempt_mul * budget_len if budget_len > 0 else max(10, min(attempt_mul * 10, 60))
     )
     limit_total = (
-        total_mul * gold_path_len if gold_path_len > 0 else max(10, min(total_mul * 10, 100))
+        total_mul * budget_len if budget_len > 0 else max(10, min(total_mul * 10, 100))
     )
     if args.full_attempts:
         limit_per_attempt = _level_action_cap(level_def) or limit_per_attempt

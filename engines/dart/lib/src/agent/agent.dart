@@ -433,9 +433,9 @@ class AgentRunner {
     int autoResetMultiplier = 3,
     bool anonymize = false,
   }) async* {
-    final goldPathLen = engine.level.solution.goldPath.length;
-    final autoResetThreshold = goldPathLen > 0
-        ? autoResetMultiplier * goldPathLen
+    final budgetPathLen = engine.level.solution.budgetPathLength;
+    final autoResetThreshold = budgetPathLen > 0
+        ? autoResetMultiplier * budgetPathLen
         : (autoResetMultiplier * 10).clamp(10, 60);
 
     // Anon mode: build kind→label map once (stable for the whole run).

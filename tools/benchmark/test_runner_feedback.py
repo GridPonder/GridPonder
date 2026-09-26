@@ -78,6 +78,25 @@ _SELECT = {"action": "tap_cell", "position": [0, 0]}
 _LEFT = {"action": "move", "direction": "left"}  # blocked by the edge: accepted, no change
 
 
+def test_revised_reference_preserves_original_benchmark_caps():
+    level = _level(None)
+    level["solution"]["benchmarkBudgetLength"] = 11
+    initial = _run([], "--attempt-multiplier", "2", "--total-multiplier", "3",
+                   level=level)[0]
+    assert initial["gold_path_length"] == 1
+    assert initial["action_limit_per_attempt"] == 22
+    assert initial["action_limit"] == 33
+
+
+def test_full_attempt_native_cap_still_takes_precedence():
+    level = _level(None)
+    level["solution"]["benchmarkBudgetLength"] = 11
+    initial = _run([], "--full-attempts", "--max-attempts", "3", level=level)[0]
+    assert initial["gold_path_length"] == 1
+    assert initial["action_limit_per_attempt"] == 2
+    assert initial["action_limit"] == 6
+
+
 def test_loss_reason_generic_and_description():
     events = _run([_SELECT, _LEFT, _LEFT])
     assert events[-1]["event"] == "lost"

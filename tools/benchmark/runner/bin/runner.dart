@@ -159,16 +159,17 @@ Future<void> main(List<String> arguments) async {
   final gameDef = pack.game;
   final levelDef = pack.levels[levelId]!;
   final goldPathLen = levelDef.solution.goldPath.length;
+  final budgetPathLen = levelDef.solution.budgetPathLength;
 
   // Anon mode: kind→label map (stable for the whole run).
   final Map<String, String>? kindSymbolOverrides =
       anon ? buildAnonKindToLabel(gameDef) : null;
 
-  var limitPerAttempt = goldPathLen > 0
-      ? attemptMul * goldPathLen
+  var limitPerAttempt = budgetPathLen > 0
+      ? attemptMul * budgetPathLen
       : (attemptMul * 10).clamp(10, 60);
   var limitTotal =
-      goldPathLen > 0 ? totalMul * goldPathLen : (totalMul * 10).clamp(10, 100);
+      budgetPathLen > 0 ? totalMul * budgetPathLen : (totalMul * 10).clamp(10, 100);
   if (fullAttempts) {
     limitPerAttempt = _levelActionCap(levelDef) ?? limitPerAttempt;
     limitTotal = limitPerAttempt * maxAttempts;

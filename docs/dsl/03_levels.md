@@ -484,6 +484,20 @@ The gold path and hint system.
 |-------|------|----------|-------------|
 | `goldPath` | array | **yes** | Sequence of actions forming the intended solution. |
 | `hintStops` | array of integers | no | Action counts for each hint level. Strictly increasing. Max: 3 in v0.5. |
+| `benchmarkBudgetLength` | positive integer | no | Frozen reference length used to derive benchmark action allowances. Defaults to `goldPath.length`. Scoring and hints still use `goldPath`. |
+
+When replacing a reference with a shorter validated path in an existing study,
+set `benchmarkBudgetLength` to the previous budget reference length and update
+`hintStops` to valid prefixes of the new path. Preserve an already-set budget
+length across subsequent improvements. This separates path quality from the
+allowance given to a model: a better reference changes efficiency, without
+shrinking the study's per-attempt or total action budgets. Full-attempt mode
+continues to prefer a level's native action cap when one exists.
+
+`goldPath` is a validated best-known solution unless shortest-path optimality
+has been independently established. Efficiency above 100% therefore identifies
+a candidate reference improvement; validate it and rescore all models against
+the same reference version rather than clipping the value.
 
 ### Gold Path Entry
 
