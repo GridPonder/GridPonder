@@ -270,6 +270,15 @@ class ThemeDef {
   /// doesn't set this — it changes rendering timing only, never engine logic.
   final bool npcsAnimateBeforeAvatar;
 
+  /// Presentation-only opt-in: when a turn moves both the avatar and an
+  /// `actors`-layer NPC one cell each, play the NPC's movement in the very
+  /// same motion as the avatar's step (same start, same finish), so the two
+  /// read as moving at once — e.g. a hazard stepping off a cell exactly as the
+  /// avatar steps onto it never appears to overlap it. Ignored when
+  /// [npcsAnimateBeforeAvatar] is set. Rendering timing only, never engine
+  /// logic.
+  final bool npcsAnimateWithAvatar;
+
   const ThemeDef({
     this.controls,
     this.coverImage,
@@ -280,6 +289,7 @@ class ThemeDef {
     this.palette = const {},
     this.effects = const {},
     this.npcsAnimateBeforeAvatar = false,
+    this.npcsAnimateWithAvatar = false,
   });
 
   factory ThemeDef.fromJson(Map<String, dynamic> j) => ThemeDef(
@@ -312,5 +322,6 @@ class ThemeDef {
         ),
         npcsAnimateBeforeAvatar:
             (j['npcsAnimateBeforeAvatar'] as bool?) ?? false,
+        npcsAnimateWithAvatar: (j['npcsAnimateWithAvatar'] as bool?) ?? false,
       );
 }

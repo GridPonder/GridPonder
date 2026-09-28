@@ -225,12 +225,19 @@ class TurnEngine:
         lose_conditions = self._level.get("loseConditions", []) or []
 
         is_won, goal_progress, goal_satisfied = evaluate_goals(goals, state, effective_game, all_events)
-        if is_won:
+
+        # Lose conditions marked `overridesWin` (e.g. a crash) beat a goal
+        # reached on the same turn; every other lose condition is checked
+        # only when the turn did not win.
+        overriding = [c for c in lose_conditions if c.get("overridesWin")]
+        is_lost, lose_reason = evaluate_lose(
+            overriding, state, goals, effective_game, goal_satisfied) if overriding else (False, None)
+        if is_lost:
+            state.is_lost = True
+        elif is_won:
             state.is_won = True
 
-        is_lost = False
-        lose_reason = None
-        if not state.is_won:
+        if not state.is_won and not is_lost:
             is_lost, lose_reason = evaluate_lose(
                 lose_conditions, state, goals, effective_game, goal_satisfied)
             if is_lost:

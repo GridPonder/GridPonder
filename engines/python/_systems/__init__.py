@@ -18,6 +18,7 @@ from .balance_regions import BalanceRegionsSystem
 from .beam import BeamSystem
 from .cell_rotation import CellRotationSystem
 from .coupled_actors import CoupledActorsSystem
+from .directional_pusher import DirectionalPusherSystem
 from .elastic_block import ElasticBlockSystem
 from .flank_capture import FlankCaptureSystem
 from .flood_fill import FloodFillSystem
@@ -70,6 +71,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "terrain_edit": lambda sys_id, _: TerrainEditSystem(sys_id),
     "follower_npcs": lambda sys_id, _: FollowerNpcsSystem(sys_id),
     "coupled_actors": lambda sys_id, _: CoupledActorsSystem(sys_id),
+    "directional_pusher": lambda sys_id, _: DirectionalPusherSystem(sys_id),
     "elastic_block": lambda sys_id, config: ElasticBlockSystem(sys_id, config),
     "individual_actors": lambda sys_id, _: IndividualActorsSystem(sys_id),
     "terrain_skip": lambda sys_id, _: TerrainSkipSystem(sys_id),

@@ -7,6 +7,7 @@ import 'package:integration_test/integration_test.dart';
 import 'package:gridponder_app/main.dart' as app;
 import 'package:gridponder_app/src/screens/library_screen.dart';
 import 'package:gridponder_app/src/screens/play_screen.dart';
+import 'package:gridponder_app/src/services/pack_registry.dart';
 import 'package:gridponder_app/src/services/pack_service.dart';
 import 'package:gridponder_app/src/services/settings_service.dart';
 
@@ -14,16 +15,15 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
 const String kPackId = 'hitch';
-const String kLevelId = 'ht_012';
+const String kLevelId = 'ht_016';
 // Gold-path moves: a direction string or button label.
 //   Swipes:  'right' | 'left' | 'up' | 'down'
 //   Buttons: 'clone'
 const List<String> kMoves = [
-  'up', 'up', 'up', 'up', 'up', 'up', 'right', 'right', 'right', 'right',
-  'right', 'right', 'down', 'down', 'down', 'down', 'right', 'down', 'left',
-  'left', 'left', 'left', 'left', 'up', 'left', 'down', 'right', 'right',
-  'right', 'up', 'right', 'right', 'down', 'left', 'left', 'left', 'left',
-  'left', 'left',
+  'up', 'up', 'up', 'right', 'down', 'right', 'right', 'right', 'right', 'right',
+  'down', 'down', 'left', 'left', 'left', 'up', 'left', 'left', 'down', 'right',
+  'right', 'right', 'right', 'up', 'left', 'left', 'left', 'left', 'left', 'up',
+  'left', 'down',
 ];
 // ---------------------------------------------------------------------------
 
@@ -77,7 +77,12 @@ void main() {
     // Navigate directly to the target level
     final ctx = tester.element(find.byType(LibraryScreen));
     final settings = await SettingsService.create();
-    final packService = await PackService.load(kPackId);
+    // Resolved through the registry so private packs (assets/packs-private)
+    // load as well as public ones.
+    final registry = await PackRegistry.create();
+    final entry =
+        (await registry.listAll()).firstWhere((e) => e.id == kPackId);
+    final packService = await PackService.loadFromEntry(entry);
 
     Navigator.of(ctx).push(
       MaterialPageRoute(

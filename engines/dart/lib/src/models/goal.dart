@@ -25,11 +25,21 @@ class LoseConditionDef {
   final String type;
   final Map<String, dynamic> config;
 
-  const LoseConditionDef({required this.type, required this.config});
+  /// When true, this condition beats a goal reached on the same turn (e.g. a
+  /// crash on the winning move is a loss). Otherwise it is only checked on a
+  /// turn that did not win.
+  final bool overridesWin;
+
+  const LoseConditionDef({
+    required this.type,
+    required this.config,
+    this.overridesWin = false,
+  });
 
   factory LoseConditionDef.fromJson(Map<String, dynamic> j) =>
       LoseConditionDef(
         type: j['type'] as String,
         config: Map<String, dynamic>.from(j['config'] as Map? ?? {}),
+        overridesWin: j['overridesWin'] as bool? ?? false,
       );
 }

@@ -131,6 +131,34 @@ class PhaseRunner {
     // Check goals before lose conditions: winning on the last allowed move counts as a win.
     final goalStatus =
         _goalEval.evaluate(_level.goals, state, effectiveGame, allEvents);
+
+    // Lose conditions marked `overridesWin` (e.g. a crash) beat a goal reached
+    // on the same turn; every other lose condition is checked only when the
+    // turn did not win.
+    final overriding =
+        _level.loseConditions.where((c) => c.overridesWin).toList();
+    final overridingLoss = overriding.isEmpty
+        ? null
+        : _loseEval.evaluate(
+            overriding,
+            state,
+            goals: _level.goals,
+            game: effectiveGame,
+            goalSatisfied: goalStatus.satisfied,
+          );
+    if (overridingLoss != null && overridingLoss.isLost) {
+      state.isLost = true;
+      return TurnResult(
+        accepted: true,
+        newState: state,
+        events: allEvents,
+        animations: animations,
+        goalProgress: goalStatus.progress,
+        isWon: false,
+        isLost: true,
+        loseReason: overridingLoss.reason,
+      );
+    }
     if (goalStatus.isWon) {
       state.isWon = true;
     }

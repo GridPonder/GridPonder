@@ -198,8 +198,24 @@ bool _npcIsVacating(
   LevelState state,
   GameDefinition game,
 ) {
+  final nextPos = predictNpcStep(npcEntity, npcPos, state, game);
+  return nextPos != null && nextPos != npcPos;
+}
+
+/// Where a `patrol`/`clockwise` follower_npcs NPC at [npcPos] will be after
+/// this turn's NPC resolution — [npcPos] itself when it stays put — or `null`
+/// when its step can't be predicted (chasing behaviors, shaft members, no
+/// matching behavior). Same scope and staleness caveats as [_npcIsVacating],
+/// which is built on it; `directional_pusher` also uses it to judge whether a
+/// slide meets a hazard where it will be, not where it was.
+Position? predictNpcStep(
+  EntityInstance npcEntity,
+  Position npcPos,
+  LevelState state,
+  GameDefinition game,
+) {
   final behaviorName = npcEntity.param('behavior')?.toString();
-  if (behaviorName == null) return false;
+  if (behaviorName == null) return null;
 
   Map<String, dynamic>? behaviorDef;
   List<String> npcTags = const [];
@@ -216,12 +232,12 @@ bool _npcIsVacating(
     }
   }
 
-  if (behaviorDef == null) return false;
+  if (behaviorDef == null) return null;
   final behaviorType = behaviorDef['type'] as String?;
   if (behaviorType == null || !_predictableBehaviorTypes.contains(behaviorType)) {
-    return false;
+    return null;
   }
-  if (npcEntity.param('shaft') != null) return false;
+  if (npcEntity.param('shaft') != null) return null;
 
   final facing = facingOf(npcEntity);
   final solidBlocking = behaviorDef['solidBlocking'] as bool? ?? true;
@@ -256,5 +272,5 @@ bool _npcIsVacating(
     occupiedAfterMove: occupiedAfterMove,
     blockAvatar: blockAvatar,
   );
-  return nextPos != null && nextPos != npcPos;
+  return nextPos ?? npcPos;
 }

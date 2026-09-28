@@ -6,6 +6,7 @@ import 'balance_regions_system.dart';
 import 'beam_system.dart';
 import 'cell_rotation_system.dart';
 import 'coupled_actors_system.dart';
+import 'directional_pusher_system.dart';
 import 'elastic_block_system.dart';
 import 'flank_capture_system.dart';
 import 'flood_fill_system.dart';
@@ -42,6 +43,7 @@ class SystemRegistry {
     'beam': (id, config) => BeamSystem(id: id, config: config),
     'cell_rotation': (id, _) => CellRotationSystem(id: id),
     'coupled_actors': (id, _) => CoupledActorsSystem(id: id),
+    'directional_pusher': (id, _) => DirectionalPusherSystem(id: id),
     'elastic_block': (id, config) => ElasticBlockSystem(id: id, config: config),
     'individual_actors': (id, _) => IndividualActorsSystem(id: id),
     'push_objects': (id, _) => PushObjectsSystem(id: id),

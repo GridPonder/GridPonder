@@ -522,11 +522,33 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
               .toList()
         : const <AnimationStep>[];
 
-    final postAvatarSteps = preAvatarSteps.isEmpty && trailSteps.isEmpty
+    // Presentation-only opt-in (`theme.json`'s `npcsAnimateWithAvatar`):
+    // `actors`-layer NPCs that stepped this turn glide in the same motion as
+    // the avatar's step, like the trailing body above, so an NPC stepping
+    // off a cell exactly as the avatar steps onto it never shows the two
+    // overlapping. Same one-cell-step scope; `npcsAnimateBeforeAvatar` wins
+    // if a pack sets both.
+    final npcsWithAvatar =
+        !hasSlide &&
+        avatarMoves.length == 1 &&
+        !npcsBeforeAvatar &&
+        (widget.packService.theme?.npcsAnimateWithAvatar ?? false);
+    final withAvatarSteps = [
+      ...trailSteps,
+      if (npcsWithAvatar)
+        ...remaining.where(
+          (s) =>
+              s.type == 'entity_move' &&
+              (s.extra['layer'] as String? ?? 'objects') == 'actors',
+        ),
+    ];
+
+    final postAvatarSteps = preAvatarSteps.isEmpty && withAvatarSteps.isEmpty
         ? remaining
         : remaining
               .where(
-                (s) => !preAvatarSteps.contains(s) && !trailSteps.contains(s),
+                (s) =>
+                    !preAvatarSteps.contains(s) && !withAvatarSteps.contains(s),
               )
               .toList();
 
@@ -541,21 +563,28 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     }
 
     // An ordinary one-cell step: walk it. (An ice slide is several avatar_move
-    // steps and has its own path below.) A trailing body's segments, if any
-    // moved this turn, walk in the exact same motion — same start, same
-    // finish — rather than waiting for the avatar to land first.
+    // steps and has its own path below.) A trailing body's segments, and
+    // NPCs opted in via `npcsAnimateWithAvatar`, if any moved this turn, walk
+    // in the exact same motion — same start, same finish — rather than
+    // waiting for the avatar to land first.
     if (!hasSlide && avatarMoves.length == 1) {
-      if (trailSteps.isEmpty) {
+      if (withAvatarSteps.isEmpty) {
         await _playAvatarStep(avatarMoves.single);
       } else {
         final inFlight = [
-          for (final step in trailSteps)
+          for (final step in withAvatarSteps)
             if (travellers[step] case final t?) t,
         ];
         unplayed.removeWhere(inFlight.contains);
         await Future.wait([
           _playAvatarStep(avatarMoves.single),
-          _playSlideMotion(trailSteps, inFlight: inFlight, stillPending: unplayed),
+          _playSlideMotion(
+            withAvatarSteps,
+            inFlight: inFlight,
+            stillPending: unplayed,
+            curve: _avatarStepCurve,
+            durationMs: _avatarStepMs(avatarMoves.single),
+          ),
         ]);
       }
       if (!mounted) return;
@@ -794,6 +823,14 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
   /// Walks the avatar from one cell to the next, interpolated, so a step reads
   /// as travel rather than a jump between cells.
+  /// Easing of the avatar's one-cell step, shared by everything that moves in
+  /// the same motion (its trailing body, NPCs opted in via
+  /// `npcsAnimateWithAvatar`).
+  static const Curve _avatarStepCurve = Curves.easeInOut;
+
+  static int _avatarStepMs(AnimationStep step) =>
+      step.durationMs > 0 ? step.durationMs.clamp(40, 400) : 130;
+
   Future<void> _playAvatarStep(AnimationStep step) async {
     final fromRaw = step.extra['from'];
     if (fromRaw is! List) return;
@@ -803,13 +840,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
 
     final controller = AnimationController(
       vsync: this,
-      duration: Duration(
-        milliseconds: step.durationMs > 0
-            ? step.durationMs.clamp(40, 400)
-            : 130,
-      ),
+      duration: Duration(milliseconds: _avatarStepMs(step)),
     );
-    final walk = CurvedAnimation(parent: controller, curve: Curves.easeInOut);
+    final walk = CurvedAnimation(parent: controller, curve: _avatarStepCurve);
     void emit() {
       final t = walk.value;
       _avatarMotion.value = (
@@ -1499,6 +1532,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     List<AnimationStep> moves, {
     required List<TravellingEntity> inFlight,
     required List<TravellingEntity> stillPending,
+    Curve? curve,
+    int? durationMs,
   }) async {
     if (moves.isEmpty) return;
 
@@ -1524,7 +1559,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
         direction: _directionBetween(from, to),
         distance: (dx.abs() > dy.abs() ? dx.abs() : dy.abs()).toDouble(),
         // Straight down and nothing else is a fall; anything else is carried.
-        falling: dx == 0 && dy > 0,
+        // A mover pinned to another motion (the avatar's step) travels with
+        // it, never under gravity, whatever its direction.
+        falling: durationMs == null && dx == 0 && dy > 0,
       ));
     }
     if (movers.isEmpty) return;
@@ -1537,9 +1574,13 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     final perCellMs = moves.first.durationMs > 0
         ? moves.first.durationMs.clamp(40, 400)
         : 130;
-    final travelMs = falls
-        ? (_fallCellMs * sqrt(span)).round()
-        : (perCellMs * span).round();
+    // [durationMs] pins the whole motion to another animation's length (the
+    // avatar's step), so movers sharing that motion start and finish with it.
+    final travelMs =
+        durationMs ??
+        (falls
+            ? (_fallCellMs * sqrt(span)).round()
+            : (perCellMs * span).round());
     final totalMs = travelMs + (falls ? _impactMs : 0);
 
     // Hold the finished board with these movers lifted out of it: for the
@@ -1555,7 +1596,10 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       duration: Duration(milliseconds: totalMs),
     );
     void emit() {
-      final elapsedMs = controller.value * totalMs;
+      // [curve] lets movers that play alongside the avatar's step share its
+      // easing, so the two stay in lockstep instead of drifting apart.
+      final progress = curve?.transform(controller.value) ?? controller.value;
+      final elapsedMs = progress * totalMs;
       _movingSprites.value = [
         for (final m in movers) _spriteInFlight(m, elapsedMs, travelMs, span),
       ];
@@ -1861,6 +1905,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     // Depth before the undo: "was n moves in, stepped back". Undoing out of a
     // loss re-arms the fail event — dying again is a fresh fact.
     final depthBefore = _engine.undoDepth;
+    // Effects decorate the turn being undone (a crash's wreck outlives its
+    // turn on purpose), so they go with it; bumping the generation also stops
+    // one that is still playing from publishing again.
+    _effectGeneration++;
+    _cellEffects.value = const [];
     setState(() {
       if (_engine.undo()) {
         // Facing is app-side, so the engine's undo cannot restore it.

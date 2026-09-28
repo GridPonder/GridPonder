@@ -97,6 +97,17 @@ Avatar left a cell.
 |---------|------|-------------|
 | `position` | `[x, y]` | Cell the avatar left. |
 
+### `avatar_pushed`
+A [`directional_pusher`](04_systems.md#227-directional_pusher) shoved the avatar. Emitted once, after the per-cell `avatar_exited`/`avatar_entered` pairs of the slide.
+
+| Payload | Type | Description |
+|---------|------|-------------|
+| `position` | `[x, y]` | Cell the slide ended on. |
+| `fromPosition` | `[x, y]` | Trigger cell the slide started from. |
+| `pusherPosition` | `[x, y]` | Cell of the pusher that fired. |
+| `direction` | string | Pusher direction. |
+| `distance` | int | Cells travelled. |
+
 ### `move_blocked`
 Avatar attempted to move but was blocked by a solid entity (when `avatar_navigation.solidHandling` is `"delegate"`).
 

@@ -166,9 +166,24 @@ def _npc_is_vacating(
     `objects` layer (or a configured `movementBlockingLayers` layer) near the
     yielding NPC's path.
     """
+    next_pos = predict_npc_step(npc_entity, npc_pos, state, game)
+    return next_pos is not None and next_pos != npc_pos
+
+
+def predict_npc_step(
+    npc_entity: Entity, npc_pos: Pos, state: GameState, game: GameDef,
+) -> Optional[Pos]:
+    """Where a `patrol`/`clockwise` follower_npcs NPC at [npc_pos] will be
+    after this turn's `npc_resolution` — [npc_pos] itself when it stays put —
+    or `None` when its step can't be predicted (chasing behaviors, shaft
+    members, no matching behavior). Same scope and staleness caveats as
+    `_npc_is_vacating`, which is built on it; `directional_pusher` also uses
+    it to judge whether a slide meets a hazard where it will be, not where it
+    was.
+    """
     behavior_name = npc_entity.param("behavior")
     if behavior_name is None:
-        return False
+        return None
 
     behavior_def: Optional[dict] = None
     npc_tags: list[str] = []
@@ -184,12 +199,12 @@ def _npc_is_vacating(
             break
 
     if behavior_def is None:
-        return False
+        return None
     behavior_type = behavior_def.get("type")
     if behavior_type not in _PREDICTABLE_BEHAVIOR_TYPES:
-        return False
+        return None
     if npc_entity.param("shaft") is not None:
-        return False
+        return None
 
     facing = facing_of(npc_entity)
     solid_blocking = behavior_def.get("solidBlocking", True)
@@ -213,5 +228,5 @@ def _npc_is_vacating(
         behavior_type, npc_pos, facing, state, game, solid_blocking,
         occupied_after_move, block_avatar, movement_blocking_layers,
     )
-    return next_pos is not None and next_pos != npc_pos
+    return npc_pos if next_pos is None else next_pos
 

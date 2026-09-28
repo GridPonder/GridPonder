@@ -2071,6 +2071,94 @@ anything themed around towing.
 
 ---
 
+### 2.27 `directional_pusher`
+
+**Purpose:** Fixed-direction pusher tiles. A pusher is a board entity that
+carries its own direction (up, down, left or right). When the avatar
+arrives on the one cell the pusher points at — the first cell in the
+pusher's direction, and no other — the avatar is shoved on in that
+direction for free, travelling as far as the open corridor allows and
+stopping one cell short of whatever blocks it. The push distance comes from
+the level geometry, not from the tile.
+
+**Phase:** `movement_resolution` (after the avatar's own step)
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `pusherLayer` | string | `"objects"` | Layer the pusher entities live on. |
+| `pusherTag` | string | `"pusher"` | Tag identifying pusher entities. |
+| `directionParam` | string | `"direction"` | Entity param holding the pusher's direction (`up`/`down`/`left`/`right`). |
+| `stopLayers` | array of strings | `["objects"]` | Any entity on these layers stops the slide one cell before it. |
+| `groundLayer` | string | `"ground"` | Layer checked against `validGroundTags`. |
+| `validGroundTags` | array of strings | `["walkable"]` | The slide only continues onto ground carrying one of these tags. `[]` disables the check. |
+| `crashLayers` | array of strings | `[]` | Moving hazards (e.g. `follower_npcs` actors). They never stop the slide short; instead the slide is judged against where each one *will be* after this turn's NPC resolution (see below). |
+| `crashVariable` | string | `"caught"` | Variable incremented on a collision, for a `variable_threshold` lose condition. |
+| `condition` | condition | none | Optional [rule condition](05_rules.md) gating the push. Evaluated against the `avatar_entered` event of the step onto the trigger cell, so it can use `variable`, `position_has_tag` and every other rule condition. |
+
+**Algorithm:**
+
+1. If the avatar did not change cell this turn, do nothing — standing on a
+   trigger cell never fires a pusher; only arriving on it does.
+2. Look for a pusher whose front cell is the avatar's cell: a pusher facing
+   `d` must sit exactly one cell behind the avatar (at `position - d`).
+   Neighbours are probed in the fixed order up, down, left, right; the
+   first match wins. A pusher facing any other way — including one whose
+   *back* is to the avatar — is ignored, as is every cell further down the
+   pusher's line.
+3. If `condition` is set and false, do nothing.
+4. Step the avatar in `d` while the next cell is in bounds, non-void, has
+   valid ground and holds no entity on any `stopLayers` layer. Each cell
+   crossed emits `avatar_exited` + `avatar_entered` (with `direction`), the
+   same per-cell shape `ice_slide` uses, so the renderer animates the slide
+   cell by cell.
+   Hazards on `crashLayers` move in the same turn as the slide, so each is
+   met where it will be: its next cell is predicted with the same
+   `patrol`/`clockwise` step prediction `avatar_navigation`'s
+   `yieldingLayers` uses (an unpredictable hazard is assumed to stay put).
+   Entering a cell the hazard is **leaving** is safe. The slide ends on a
+   cell in a collision when a hazard **arrives on it, stays on it, or
+   crosses head-on through it** (moves into the cell the avatar just
+   left). The hazard's own system reports the arriving case when it moves;
+   the pusher increments `crashVariable` for the other two, so a crash is
+   never counted twice.
+5. If the avatar moved, set its facing to `d` and emit `avatar_pushed`;
+   after a collision, also emit `avatar_caught` (the same event
+   `follower_npcs` emits for lethal contact, so crash effects and lose
+   conditions keyed on it apply unchanged).
+
+**Events emitted:** `avatar_exited`, `avatar_entered` (one pair per cell
+crossed), `avatar_pushed` (`position` = final cell, `fromPosition` = trigger
+cell, `pusherPosition`, `direction`, `distance`), `avatar_caught`
+(`position`, `npcKind`, `npcId`) on a collision.
+
+**Costs one action:** the push resolves inside the same turn as the step
+that triggered it, so it never consumes extra budget however far it goes.
+
+**No chaining:** the system runs once per turn in `movement_resolution`, so a
+slide that ends on (or passes) another pusher's front cell does not fire it.
+The player has to step onto that cell deliberately on a later turn.
+
+**Pushers are not walkable by themselves:** tag the pusher kind `solid` and
+list its layer in [`avatar_navigation`](#21-avatar_navigation)'s
+`solidLayers` if the avatar must not drive onto the pusher tile.
+
+**Interaction with `trailing_body`:** list `directional_pusher` *before*
+`trailing_body` in `systems`, so the body system sees the avatar's final
+position within the same phase. The body system does not know how to drag
+a multi-cell body across a slide, so pair the two with a `condition` that
+only allows pushes while the body is empty (as Hitch does with
+`cargoCount == 0`). Do not place a growth pickup on a pusher's front cell:
+the pickup's length increment only lands in the cascade phase, after the
+push has already been decided.
+
+**Reuse:** conveyor-style launch pads, air vents, one-way shoves, "no
+control" traversal segments — anything where stepping next to a directed
+tile throws the mover down a corridor.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -2102,6 +2190,7 @@ anything themed around towing.
 | Routed Motion | `routed_motion` | `npc_resolution` | (automatic once per accepted turn) |
 | Turn Cycle | `turn_cycle` | `action_resolution` + `npc_resolution` | configured accepted actions |
 | Trailing Body | `trailing_body` | `movement_resolution` | (automatic on mover movement) |
+| Directional Pusher | `directional_pusher` | `movement_resolution` | (automatic when the avatar arrives in front of a pusher) |
 
 **Demoted to rule recipes** (see [05_rules.md §9](05_rules.md)): single-slot inventory, consumable interactions, liquid transitions. These use the standard event–condition–effect primitives and no longer require dedicated engine systems.
 
