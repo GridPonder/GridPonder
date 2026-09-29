@@ -16,6 +16,7 @@ from .anchor_point import AnchorPointSystem
 from .avatar_navigation import AvatarNavigationSystem
 from .balance_regions import BalanceRegionsSystem
 from .beam import BeamSystem
+from .cargo_gate import CargoGateSystem
 from .cell_rotation import CellRotationSystem
 from .coupled_actors import CoupledActorsSystem
 from .directional_pusher import DirectionalPusherSystem
@@ -51,6 +52,7 @@ _REGISTRY: dict[str, SystemFactory] = {
     "avatar_navigation": lambda sys_id, _: AvatarNavigationSystem(sys_id),
     "balance_regions": lambda sys_id, _: BalanceRegionsSystem(sys_id),
     "beam": lambda sys_id, config: BeamSystem(sys_id, config),
+    "cargo_gate": lambda sys_id, _: CargoGateSystem(sys_id),
     "cell_rotation": lambda sys_id, _: CellRotationSystem(sys_id),
     "push_objects": lambda sys_id, _: PushObjectsSystem(sys_id),
     "portals": lambda sys_id, _: PortalsSystem(sys_id),

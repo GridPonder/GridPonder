@@ -15,15 +15,20 @@ import 'package:gridponder_app/src/services/settings_service.dart';
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
 const String kPackId = 'hitch';
-const String kLevelId = 'ht_016';
+const String kLevelId = 'ht_020';
 // Gold-path moves: a direction string or button label.
 //   Swipes:  'right' | 'left' | 'up' | 'down'
 //   Buttons: 'clone'
 const List<String> kMoves = [
-  'up', 'up', 'up', 'right', 'down', 'right', 'right', 'right', 'right', 'right',
-  'down', 'down', 'left', 'left', 'left', 'up', 'left', 'left', 'down', 'right',
-  'right', 'right', 'right', 'up', 'left', 'left', 'left', 'left', 'left', 'up',
-  'left', 'down',
+  'up', 'up', 'down', 'down', 'left', 'down', 'left', 'left', 'up', 'right',
+  'up', 'right', 'up', 'left', 'left', 'left', 'down', 'down', 'down', 'down',
+  'right', 'down', 'down', 'right', 'right', 'right', 'right', 'right', 'right', 'up',
+  'up', 'up', 'up', 'up', 'left', 'left', 'down', 'right', 'right', 'down',
+  'down', 'down', 'down', 'left', 'left', 'down', 'down', 'right', 'up', 'up',
+  'left', 'left', 'left', 'left', 'up', 'up', 'left', 'left', 'up', 'up',
+  'up', 'right', 'up', 'right', 'right', 'right', 'down', 'down', 'right', 'up',
+  'up', 'left', 'left', 'left', 'down', 'left', 'down', 'left', 'down', 'down',
+  'down', 'down',
 ];
 // ---------------------------------------------------------------------------
 

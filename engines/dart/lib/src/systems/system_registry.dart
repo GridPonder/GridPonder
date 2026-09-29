@@ -4,6 +4,7 @@ import 'anchor_point_system.dart';
 import 'avatar_navigation_system.dart';
 import 'balance_regions_system.dart';
 import 'beam_system.dart';
+import 'cargo_gate_system.dart';
 import 'cell_rotation_system.dart';
 import 'coupled_actors_system.dart';
 import 'directional_pusher_system.dart';
@@ -41,6 +42,7 @@ class SystemRegistry {
     'avatar_navigation': (id, _) => AvatarNavigationSystem(id: id),
     'balance_regions': (id, _) => BalanceRegionsSystem(id: id),
     'beam': (id, config) => BeamSystem(id: id, config: config),
+    'cargo_gate': (id, _) => CargoGateSystem(id: id),
     'cell_rotation': (id, _) => CellRotationSystem(id: id),
     'coupled_actors': (id, _) => CoupledActorsSystem(id: id),
     'directional_pusher': (id, _) => DirectionalPusherSystem(id: id),
