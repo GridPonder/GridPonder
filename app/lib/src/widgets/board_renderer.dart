@@ -104,6 +104,12 @@ class MovingMultiCellObject {
   final double height;
   final bool selected;
 
+  /// When set, [object] is drawn exactly as it sits on the board (every cell
+  /// with its own sprite) shifted by this many cells, instead of being stretched
+  /// to the [left]/[top]/[width]/[height] rectangle the elastic block uses.
+  /// Rigid blocks and falling objects use this.
+  final Offset? cellOffset;
+
   const MovingMultiCellObject({
     required this.object,
     required this.left,
@@ -111,6 +117,7 @@ class MovingMultiCellObject {
     required this.width,
     required this.height,
     this.selected = false,
+    this.cellOffset,
   });
 }
 
@@ -628,6 +635,21 @@ class BoardRenderer extends StatelessWidget {
     MovingMultiCellObject motion,
     double cellSize,
   ) {
+    final offset = motion.cellOffset;
+    if (offset != null) {
+      return Positioned.fill(
+        child: Transform.translate(
+          offset: Offset(offset.dx * cellSize, offset.dy * cellSize),
+          child: Stack(
+            children: _buildMcoCells(
+              motion.object,
+              cellSize,
+              selected: motion.selected,
+            ),
+          ),
+        ),
+      );
+    }
     final background =
         _mcoDisplay(motion.object, cellSize) ??
         ColoredBox(
@@ -1621,7 +1643,9 @@ class _Cell extends StatelessWidget {
     // reverse, picking a `_up`/`_down`/`_left`/`_right` variant of the same
     // static head art so it connects flush to the first body segment.
     final spritePath =
-        (pos != null ? connectedBodySpritePath(kindDef, pos, bodyPaths) : null) ??
+        (pos != null
+            ? connectedBodySpritePath(kindDef, pos, bodyPaths)
+            : null) ??
         (pos != null
             ? connectedHeadSpritePath(kindDef, entity, pos, bodyPaths)
             : null) ??
@@ -1792,7 +1816,9 @@ class _Cell extends StatelessWidget {
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                       fontSize: cellSize * 0.26,
-                      shadows: const [Shadow(color: Colors.black, blurRadius: 2)],
+                      shadows: const [
+                        Shadow(color: Colors.black, blurRadius: 2),
+                      ],
                     ),
                   ),
                 ),
@@ -1823,9 +1849,7 @@ class _Cell extends StatelessWidget {
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
                   fontSize: cellSize * 0.36,
-                  shadows: const [
-                    Shadow(color: Colors.black87, blurRadius: 3),
-                  ],
+                  shadows: const [Shadow(color: Colors.black87, blurRadius: 3)],
                 ),
               ),
           ],
@@ -1861,7 +1885,8 @@ class _Cell extends StatelessWidget {
         final isOverlay = display['overlay'] == true;
         final bgColor = isOverlay
             ? Colors.transparent
-            : (_resolveDisplayColor(display['bgColor'], entity) ?? Colors.transparent);
+            : (_resolveDisplayColor(display['bgColor'], entity) ??
+                  Colors.transparent);
         return Stack(
           alignment: Alignment.center,
           children: [
@@ -1874,7 +1899,11 @@ class _Cell extends StatelessWidget {
                   shape: BoxShape.circle,
                   color: isOverlay ? c.withOpacity(0.72) : c,
                   boxShadow: [
-                    BoxShadow(color: c.withOpacity(0.6), blurRadius: 6, spreadRadius: 2),
+                    BoxShadow(
+                      color: c.withOpacity(0.6),
+                      blurRadius: 6,
+                      spreadRadius: 2,
+                    ),
                   ],
                 ),
               ),
@@ -1905,7 +1934,8 @@ class _Cell extends StatelessWidget {
       // The emoji provides the visual object; the label shows the value.
       case 'emoji_label':
         final emojiGlyph = display['emoji'] as String? ?? '';
-        final emojiLabel = _resolveDisplayString(display['label'], entity) ?? '';
+        final emojiLabel =
+            _resolveDisplayString(display['label'], entity) ?? '';
         return Column(
           mainAxisAlignment: MainAxisAlignment.center,
           mainAxisSize: MainAxisSize.max,

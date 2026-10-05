@@ -540,6 +540,8 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     }
     if (!elasticMotionPlayed && elasticMotionEvent != null) {
       await _playElasticBlockMotion(preState, elasticMotionEvent);
+    } else if (elasticMotionEvent == null) {
+      await _playBlockMotion(preState, result.events);
     }
 
     // Clear slide overrides: _playObjectSlide already cleared _preAnimState and
@@ -926,8 +928,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     LevelState preState,
     List<GameEvent> events,
   ) async {
-    final reveals =
-        events.where((e) => e.type == 'beam_cell_revealed').toList();
+    final reveals = events
+        .where((e) => e.type == 'beam_cell_revealed')
+        .toList();
     if (reveals.isEmpty) return;
 
     final finalState = _engine.state;
@@ -1333,6 +1336,187 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     }
     setState(() => _preAnimState = null);
     _movingMultiCellObjects.value = const [];
+  }
+
+  /// Plays rigid multi-cell objects (sliding blocks, objects that fall, hunters
+  /// that run) as continuous motion.
+  ///
+  /// The engine reports every move as a `multi_cell_object_moved` event, and a
+  /// fall as one event per cell, in the order the cascade produced them. Events
+  /// are grouped into *ticks* — consecutive events in which no object appears
+  /// twice, which is exactly one cascade pass — and the ticks are laid end to
+  /// end on one timeline driven by a single controller, so an object that falls
+  /// several cells moves at constant speed with no pause between cells. Objects
+  /// that move in the same tick move together.
+  ///
+  /// Opt-in per pack: only runs when some moving kind declares
+  /// `motion.moveDurationMs` (milliseconds per cell). The board is held at its
+  /// pre-turn state, minus the moving objects, for the whole timeline; the final
+  /// state (an object eaten, a tile changed) appears when it ends.
+  Future<void> _playBlockMotion(
+    LevelState preState,
+    List<GameEvent> events,
+  ) async {
+    final game = widget.packService.game;
+    int? msPerCell(String? kind) {
+      final value = game.entityKinds[kind]?.motion?['moveDurationMs'];
+      return value is num ? value.toInt() : null;
+    }
+
+    List<Position> cellsOf(dynamic raw) => [
+      if (raw is List)
+        for (final item in raw)
+          if (item is Position)
+            item
+          else if (item is List)
+            Position.fromJson(item),
+    ];
+
+    final moves = [
+      for (final e in events)
+        if (e.type == 'multi_cell_object_moved' && e.payload['id'] is String) e,
+    ];
+    if (moves.isEmpty) return;
+    if (!moves.any((e) => msPerCell(e.payload['kind'] as String?) != null)) {
+      return;
+    }
+
+    // Ticks: a new tick starts as soon as an object would move twice.
+    final ticks = <List<GameEvent>>[];
+    var current = <GameEvent>[];
+    var seen = <String>{};
+    for (final e in moves) {
+      final id = e.payload['id'] as String;
+      if (seen.contains(id)) {
+        ticks.add(current);
+        current = [];
+        seen = {};
+      }
+      current.add(e);
+      seen.add(id);
+    }
+    if (current.isNotEmpty) ticks.add(current);
+
+    // One segment per event: how far the object's first cell travels, and when.
+    final segments = <_BlockSegment>[];
+    final segmentOfEvent = <GameEvent, _BlockSegment>{};
+    var clock = 0.0;
+    for (final tick in ticks) {
+      var tickMs = 0.0;
+      final tickSegments = <_BlockSegment>[];
+      for (final e in tick) {
+        final from = cellsOf(e.payload['fromCells']);
+        final to = cellsOf(e.payload['toCells']);
+        if (from.isEmpty || to.isEmpty) continue;
+        final dx = (to.first.x - from.first.x).toDouble();
+        final dy = (to.first.y - from.first.y).toDouble();
+        final ms =
+            (msPerCell(e.payload['kind'] as String?) ?? 100).toDouble() *
+            max(dx.abs(), dy.abs());
+        tickMs = max(tickMs, ms);
+        final segment = _BlockSegment(
+          e.payload['id'] as String,
+          dx,
+          dy,
+          clock,
+          0,
+        );
+        tickSegments.add(segment);
+        segmentOfEvent[e] = segment;
+      }
+      for (final segment in tickSegments) {
+        segment.durationMs = tickMs;
+      }
+      segments.addAll(tickSegments);
+      clock += tickMs;
+    }
+    if (clock <= 0) return;
+
+    // Prey that gets caught is drawn first, so the hunter lands on top of it,
+    // and disappears the moment the move that caught it arrives.
+    final capturedAt = <String, double>{};
+    _BlockSegment? lastMove;
+    for (final e in events) {
+      if (e.type == 'multi_cell_object_moved') {
+        lastMove = segmentOfEvent[e] ?? lastMove;
+      } else if (e.type == 'multi_cell_object_captured' && lastMove != null) {
+        capturedAt[e.payload['id'] as String] =
+            lastMove.startMs + lastMove.durationMs;
+      }
+    }
+    final capturedIds = capturedAt.keys.toSet();
+    final ids =
+        <String>[
+          ...{for (final s in segments) s.id},
+        ]..sort(
+          (a, b) =>
+              (capturedIds.contains(b) ? 1 : 0) -
+              (capturedIds.contains(a) ? 1 : 0),
+        );
+    final objects = <String, MultiCellObjectInstance>{
+      for (final id in ids)
+        if (preState.board.getMultiCellObject(id) case final o?) id: o,
+    };
+    if (objects.isEmpty) return;
+
+    final animState = preState.copy();
+    animState.board.multiCellObjects.removeWhere(
+      (object) => objects.containsKey(object.id),
+    );
+    if (!mounted) return;
+    setState(() {
+      _preAnimState = animState;
+      _animOverlays = null;
+    });
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: Duration(milliseconds: clock.round()),
+    );
+    void emit() {
+      final t = controller.value * clock;
+      _movingMultiCellObjects.value = [
+        for (final entry in objects.entries)
+          if (t < (capturedAt[entry.key] ?? double.infinity))
+            MovingMultiCellObject(
+              object: entry.value.copy(),
+              left: 0,
+              top: 0,
+              width: 0,
+              height: 0,
+              cellOffset: _blockOffsetAt(segments, entry.key, t),
+            ),
+      ];
+    }
+
+    controller.addListener(emit);
+    emit();
+    try {
+      await controller.forward();
+    } finally {
+      controller.dispose();
+    }
+    if (!mounted) {
+      _movingMultiCellObjects.value = const [];
+      return;
+    }
+    setState(() => _preAnimState = null);
+    _movingMultiCellObjects.value = const [];
+  }
+
+  /// Where [id] is, relative to its pre-turn cells, [t] ms into the timeline.
+  Offset _blockOffsetAt(List<_BlockSegment> segments, String id, double t) {
+    var dx = 0.0;
+    var dy = 0.0;
+    for (final s in segments) {
+      if (s.id != id || t <= s.startMs) continue;
+      final f = s.durationMs <= 0
+          ? 1.0
+          : ((t - s.startMs) / s.durationMs).clamp(0.0, 1.0);
+      dx += s.dx * f;
+      dy += s.dy * f;
+    }
+    return Offset(dx, dy);
   }
 
   /// Animates `entity_move` steps as real motion: each entity is lifted out of
@@ -3188,7 +3372,11 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       alignment: WrapAlignment.center,
       children: [
         for (final r in readouts)
-          _buildReadoutChip(r, state.variables[r.variable], sprites[r.variable]),
+          _buildReadoutChip(
+            r,
+            state.variables[r.variable],
+            sprites[r.variable],
+          ),
       ],
     );
   }
@@ -3224,7 +3412,12 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           ),
           const SizedBox(width: 8),
           labelSprite != null
-              ? Image(image: labelSprite, width: 16, height: 16, fit: BoxFit.contain)
+              ? Image(
+                  image: labelSprite,
+                  width: 16,
+                  height: 16,
+                  fit: BoxFit.contain,
+                )
               : Text(
                   readout.label,
                   style: TextStyle(
@@ -3942,8 +4135,9 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
             Text(
               _movesLabel(state),
               style: TextStyle(
-                color:
-                    state.isLost ? Colors.red.shade600 : Colors.grey.shade600,
+                color: state.isLost
+                    ? Colors.red.shade600
+                    : Colors.grey.shade600,
                 fontSize: 13,
                 fontWeight: state.isLost ? FontWeight.bold : FontWeight.normal,
               ),
@@ -4267,4 +4461,15 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       ),
     );
   }
+}
+
+/// One multi-cell object's move on the block-motion timeline.
+class _BlockSegment {
+  final String id;
+  final double dx;
+  final double dy;
+  final double startMs;
+  double durationMs;
+
+  _BlockSegment(this.id, this.dx, this.dy, this.startMs, this.durationMs);
 }
