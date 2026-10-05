@@ -22,11 +22,13 @@ from .elastic_block import ElasticBlockSystem
 from .flank_capture import FlankCaptureSystem
 from .flood_fill import FloodFillSystem
 from .follower_npcs import FollowerNpcsSystem
+from .gravity import GravitySystem
 from .ice_slide import IceSlideSystem
 from .individual_actors import IndividualActorsSystem
 from .line_of_sight import LineOfSightSystem
 from .overlay_cursor import OverlayCursorSystem
 from .portals import PortalsSystem
+from .pounce import PounceSystem
 from .push_objects import PushObjectsSystem
 from .queued_emitters import QueuedEmittersSystem
 from .region_transform import RegionTransformSystem
@@ -50,6 +52,8 @@ _REGISTRY: dict[str, SystemFactory] = {
     "balance_regions": lambda sys_id, _: BalanceRegionsSystem(sys_id),
     "beam": lambda sys_id, config: BeamSystem(sys_id, config),
     "cell_rotation": lambda sys_id, _: CellRotationSystem(sys_id),
+    "gravity": lambda sys_id, config: GravitySystem(sys_id, config),
+    "pounce": lambda sys_id, config: PounceSystem(sys_id, config),
     "push_objects": lambda sys_id, _: PushObjectsSystem(sys_id),
     "portals": lambda sys_id, _: PortalsSystem(sys_id),
     "ice_slide": lambda sys_id, _: IceSlideSystem(sys_id),

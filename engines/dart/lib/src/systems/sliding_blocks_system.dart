@@ -16,8 +16,8 @@ class SlidingBlocksSystem extends GameSystem {
 
   /// Expose a block's movement axis, which gates its moves.
   @override
-  List<String> observationObjectLines(MultiCellObjectInstance mco,
-      LevelState state, GameDefinition game) {
+  List<String> observationObjectLines(
+      MultiCellObjectInstance mco, LevelState state, GameDefinition game) {
     final axis = mco.params['axis'];
     return axis is String && axis.isNotEmpty ? ['axis: $axis'] : const [];
   }
@@ -85,6 +85,31 @@ class SlidingBlocksSystem extends GameSystem {
       return events;
     }
 
+    // Objects in the way whose role is pushable (and only in a pushable
+    // direction) are shoved one cell along with the block instead of
+    // blocking it. A pushed object never pushes another one.
+    final pushed =
+        _pushedObjects(block, newCells, directionName, state, effectiveConfig);
+    final pushedIds = pushed.map((p) => p.id).toSet();
+    final pushedMoves = <MultiCellObjectInstance, List<Position>>{};
+    for (final other in pushed) {
+      final otherNew = other.cells.map((p) => p + offset).toList();
+      for (final cell in otherNew) {
+        if (!_isValidDestination(
+          cell,
+          other,
+          other.cells.toSet(),
+          state,
+          game,
+          effectiveConfig,
+          isPushed: true,
+        )) {
+          return [GameEvent.actionVetoed()];
+        }
+      }
+      pushedMoves[other] = otherNew;
+    }
+
     for (final cell in newCells) {
       if (!_isValidDestination(
         cell,
@@ -93,6 +118,7 @@ class SlidingBlocksSystem extends GameSystem {
         state,
         game,
         effectiveConfig,
+        ignoreIds: pushedIds,
       )) {
         return [GameEvent.actionVetoed()];
       }
@@ -108,7 +134,50 @@ class SlidingBlocksSystem extends GameSystem {
         'direction': directionName,
       }),
     );
+    for (final entry in pushedMoves.entries) {
+      final other = entry.key;
+      final from = other.cells.toList();
+      _moveBlockCells(other, from, entry.value);
+      events.add(
+        GameEvent('multi_cell_object_moved', {
+          'id': other.id,
+          'kind': other.kind,
+          'fromCells': from,
+          'toCells': entry.value,
+          'direction': directionName,
+        }),
+      );
+    }
     return events;
+  }
+
+  /// Other objects overlapped by [newCells] that this move may push.
+  List<MultiCellObjectInstance> _pushedObjects(
+    MultiCellObjectInstance block,
+    List<Position> newCells,
+    String direction,
+    LevelState state,
+    Map<String, dynamic> config,
+  ) {
+    final pushableRoles = (config['pushableRoles'] as List? ?? const [])
+        .map((v) => v.toString())
+        .toSet();
+    if (pushableRoles.isEmpty) return const [];
+    final pushDirections =
+        (config['pushDirections'] as List? ?? _cardinalDirections.toList())
+            .map((v) => v.toString())
+            .toSet();
+    if (!pushDirections.contains(direction)) return const [];
+    if (pushableRoles.contains(block.params['role']?.toString())) {
+      return const [];
+    }
+    return [
+      for (final other in state.board.multiCellObjects)
+        if (other.id != block.id &&
+            pushableRoles.contains(other.params['role']?.toString()) &&
+            other.cells.any(newCells.contains))
+          other,
+    ];
   }
 
   MultiCellObjectInstance? _blockAt(LevelState state, Position pos) {
@@ -142,8 +211,10 @@ class SlidingBlocksSystem extends GameSystem {
     Set<Position> currentCells,
     LevelState state,
     GameDefinition game,
-    Map<String, dynamic> config,
-  ) {
+    Map<String, dynamic> config, {
+    Set<String> ignoreIds = const {},
+    bool isPushed = false,
+  }) {
     if (!state.board.isInBounds(pos)) return false;
     if (state.board.isVoid(pos)) return false;
 
@@ -157,8 +228,19 @@ class SlidingBlocksSystem extends GameSystem {
       return false;
     }
 
+    // Ground that only pushed objects may enter (a goal tile no block may
+    // cover). Pushed objects are exempt.
+    if (!isPushed) {
+      final blockedGroundTags =
+          (config['blockedGroundTags'] as List? ?? const [])
+              .map((v) => v.toString());
+      if (blockedGroundTags.any((tag) => game.hasTag(ground.kind, tag))) {
+        return false;
+      }
+    }
+
     for (final other in state.board.multiCellObjects) {
-      if (other.id == movingBlock.id) continue;
+      if (other.id == movingBlock.id || ignoreIds.contains(other.id)) continue;
       if (other.cells.contains(pos)) return false;
     }
 

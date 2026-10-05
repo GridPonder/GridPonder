@@ -66,6 +66,20 @@ class SlidingBlocksSystem(GameSystem):
                 ev.variable_changed(variable, old_value, new_value),
             ]
 
+        pushed = _pushed_objects(block, new_cells, direction, state, config)
+        pushed_ids = {obj.id for obj in pushed}
+        pushed_moves = []
+        for other in pushed:
+            other_new = [Pos(pos.x + dx, pos.y + dy) for pos in other.cells]
+            if any(
+                not _is_valid_destination(
+                    pos, other, set(other.cells), state, game, config, is_pushed=True
+                )
+                for pos in other_new
+            ):
+                return [ev.action_vetoed()]
+            pushed_moves.append((other, other_new))
+
         if any(
             not _is_valid_destination(
                 pos,
@@ -74,13 +88,14 @@ class SlidingBlocksSystem(GameSystem):
                 state,
                 game,
                 config,
+                ignore_ids=pushed_ids,
             )
             for pos in new_cells
         ):
             return [ev.action_vetoed()]
 
         block.cells = new_cells
-        return [
+        events = [
             {
                 "type": "multi_cell_object_moved",
                 "id": block.id,
@@ -90,6 +105,44 @@ class SlidingBlocksSystem(GameSystem):
                 "direction": direction,
             }
         ]
+        for other, other_new in pushed_moves:
+            from_cells = list(other.cells)
+            other.cells = other_new
+            events.append(
+                {
+                    "type": "multi_cell_object_moved",
+                    "id": other.id,
+                    "kind": other.kind,
+                    "fromCells": from_cells,
+                    "toCells": other_new,
+                    "direction": direction,
+                }
+            )
+        return events
+
+
+def _pushed_objects(block, new_cells, direction, state, config) -> list:
+    """Other objects overlapped by ``new_cells`` that this move may push."""
+    roles = {str(r) for r in config_list(config, "pushableRoles", [])}
+    if not roles:
+        return []
+    directions = {
+        str(d)
+        for d in config_list(config, "pushDirections", ["up", "down", "left", "right"])
+    }
+    if direction not in directions:
+        return []
+    if block.params.get("role") is not None and str(block.params["role"]) in roles:
+        return []
+    cell_set = set(new_cells)
+    return [
+        other
+        for other in state.board.multi_cell_objects
+        if other.id != block.id
+        and other.params.get("role") is not None
+        and str(other.params["role"]) in roles
+        and any(cell in cell_set for cell in other.cells)
+    ]
 
 
 def _parse_pos(raw) -> Pos | None:
@@ -122,6 +175,8 @@ def _is_valid_destination(
     state: GameState,
     game: GameDef,
     config: dict,
+    ignore_ids: frozenset | set = frozenset(),
+    is_pushed: bool = False,
 ) -> bool:
     if not state.board.is_in_bounds(pos) or state.board.is_void(pos):
         return False
@@ -136,8 +191,17 @@ def _is_valid_destination(
     ):
         return False
 
+    # Ground that only pushed objects may enter (a goal tile no block may
+    # cover). Pushed objects are exempt.
+    if not is_pushed:
+        blocked_tags = [
+            str(tag) for tag in config_list(config, "blockedGroundTags", [])
+        ]
+        if any(game.has_tag(ground.kind, tag) for tag in blocked_tags):
+            return False
+
     for other in state.board.multi_cell_objects:
-        if other.id == moving_block.id:
+        if other.id == moving_block.id or other.id in ignore_ids:
             continue
         if pos in other.cells:
             return False

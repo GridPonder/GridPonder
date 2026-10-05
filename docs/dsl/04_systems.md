@@ -157,6 +157,9 @@ Levels may override specific config fields per system via `systemOverrides`. Ove
 | `escapeRoles` | array of strings | `[]` | Multi-cell object roles allowed to leave the board through an exit edge. |
 | `exitTags` | array of strings | `["exit"]` | Ground tags that permit a configured escape role to leave the board. |
 | `escapedVariable` | string | `"escapedCount"` | Variable incremented when a multi-cell object exits. |
+| `pushableRoles` | array of strings | `[]` | Object roles that a moving block shoves instead of being blocked by. A pushed object moves one cell in the block's direction and never pushes another object. Empty disables pushing. |
+| `pushDirections` | array of strings | all four | Directions in which `pushableRoles` objects may be shoved. A move in any other direction treats them as ordinary obstacles. Use `["left", "right"]` with [`gravity`](#226-gravity) for objects that are only ever pushed sideways. |
+| `blockedGroundTags` | array of strings | `[]` | Ground tags that ordinary moving blocks may not enter — a goal tile nothing may cover. Objects shoved via `pushableRoles` are exempt, so a pushed object can still be pushed onto it. |
 
 **Multi-cell object params:**
 
@@ -176,6 +179,7 @@ params above.
 2. Reject the action if no block is found or if the block's `axis` does not allow the requested `direction`.
 3. Compute the block's translated cells one step in that direction.
 4. Reject the action if any translated cell collides with another multi-cell object, a new blocking entity, void, out-of-bounds space, or invalid ground. Rejected actions leave the board, variables, counters, and undo history unchanged. A block may continue to overlap a blocking entity that was already under one of its old cells. It may enter a blocking entity tagged by `coverableTags` only when its role is not listed in `coverableBlockedRoles`.
+4a. If a translated cell lands on an object whose `role` is in `pushableRoles` (and the direction is in `pushDirections`, and the moving block's own role is not pushable), that object is shoved one cell in the same direction. Each shoved object's translated cells must be valid destinations by the same rules as step 4 — and may not overlap any other object, including another shoved object — or the whole action is rejected. Events: `multi_cell_object_moved` for the block, then one per shoved object.
 5. If the translated cells leave the board, allow the move only when the block's `role` is listed in `escapeRoles` and its leading edge is currently on a ground cell tagged by `exitTags`. Remove the object, increment `escapedVariable`, and emit `multi_cell_object_exited`.
 6. Otherwise, replace the block's cell list with the translated cell list and preserve each cell's optional sprite mapping.
 
@@ -2009,6 +2013,85 @@ weight whatever entities it likes; nothing here knows about a particular game.
 
 ---
 
+### 2.26 `gravity`
+
+**Purpose:** Rigid multi-cell objects with a configured role fall until they
+rest. Companion to [`sliding_blocks`](#23-sliding_blocks): ordinary blocks
+never fall, but objects of a falling role are pulled down after every move, so
+a block slid out from under one drops it, and a block shoved sideways into one
+(`pushableRoles`) can carry it off a ledge. For single-cell entities use the
+[`apply_gravity`](05_rules.md) effect instead.
+
+**Phase:** `cascade_resolution` (also settles once at level load)
+
+**Events emitted:** `multi_cell_object_moved` (one per object that fell, covering its whole drop); with `absorb`: `multi_cell_object_absorbed`, `cell_transformed`, `object_removed` (animated), `variable_changed`
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `fallRoles` | array of strings | `[]` | Object `role`s that fall. Empty makes the system inert. |
+| `direction` | string | `"down"` | Direction of fall. |
+| `triggerEvents` | array of strings | `["multi_cell_object_moved"]` | Events that make the system settle. It always settles at level load. |
+| `stepsPerPass` | integer | `0` | `0` settles everything in one cascade pass. A positive value makes objects fall at most that many cells **per cascade pass**, so other cascade systems (notably [`pounce`](#227-pounce)) see every intermediate board — an object falling past a hunter's row is seen *in* that row, not only where it lands. `absorb` then waits until an object has stopped moving. Each pass uses one level of `defaults.maxCascadeDepth`, so set it above the tallest possible drop plus 2, or a long fall is cut short. Level load always settles fully. |
+| `groundLayer` | string | `"ground"` | Layer checked for valid ground. |
+| `validGroundTags` | array of strings | `["walkable"]` | Ground tags every occupied cell needs. Void and out-of-bounds always stop a fall. |
+| `blockingLayers` | array of strings | `["objects"]` | Ordinary layers whose entities can stop a fall. |
+| `blockingTags` | array of strings | `["solid"]` | Tags that stop a fall on `blockingLayers`. Empty means any entity blocks. |
+| `groundTagVariables` | array | `[]` | Derived readouts. Each entry `{ "role", "groundTag", "variable" }` writes, once per turn, the number of objects of that `role` with at least one cell on ground carrying `groundTag`. Feed it to a `variable_threshold` goal or lose condition ("the object reached the target zone / the danger row"). Derived state: it adds nothing to the state key. |
+| `absorb` | array | `[]` | Ground that consumes objects. Each entry `{ "role", "groundTag", "toGroundKind", "animation", "variable" }`: once everything has come to rest, an object of that `role` with a cell on `groundTag` ground is **removed**; the ground cell becomes `toGroundKind` (optional); `animation` (optional) names an animation on the *old* ground kind, played over that cell (see [Animations](02_game.md#animations)); `variable` (optional) is incremented. Use it for "the thing lands in the hole / is eaten / is collected" — a `variable_threshold` goal on `variable` then wins the level. |
+
+**Behavior:**
+1. Collect objects whose `role` is in `fallRoles`, ordered front-most first (furthest along `direction`), id as tiebreak.
+2. Repeat: for each in order, if every cell translated one step is a valid destination — in bounds, not void, ground carries a `validGroundTags` tag, no other multi-cell object there, no blocking entity — move it. Stop when a full pass moves nothing. Because front-most objects move first, a stack settles bottom-up.
+3. Emit one `multi_cell_object_moved` per object whose cells changed, with `fromCells` the start of the drop and `toCells` where it came to rest.
+4. Apply `absorb`, in config order, once every object is at rest. Per absorption emit `multi_cell_object_absorbed` (`id`, `kind`, `position`), then `cell_transformed` if the ground changed, `object_removed` carrying the `animation` if set, and `variable_changed` if a `variable` is set. An object that never rests on `groundTag` ground is untouched. Keep the absorbing ground's tags on `toGroundKind` only if later logic still needs them.
+
+An object's shape never changes while falling. Objects of other roles never fall — they are held where the level or the player put them.
+
+---
+
+### 2.27 `pounce`
+
+**Purpose:** Hunters run down a clear line to prey and capture it. Pairs with
+[`gravity`](#226-gravity): once everything has come to rest, any hunter that can
+"see" prey along its row — nothing standing between them — runs to it and eats
+it. Sliding a blocker out of the row, or sliding a hunter into the row, can
+therefore lose the level.
+
+**Phase:** `cascade_resolution`. Declare it **after** `gravity` to let objects
+settle completely before hunters look (only resting positions count). Declare it
+**before** `gravity`, with `gravity.stepsPerPass: 1`, to make hunters look at
+*every* cell an object falls through: each pass checks the board, then gravity
+moves one step, so a hunter that has a clear line to the cheese at any moment —
+including the cell it was pushed into before it started to fall, and the cell it
+lands in — captures it before the cheese can come to rest (or be absorbed).
+
+**Events emitted:** `multi_cell_object_moved` (the hunter), `multi_cell_object_captured` (`id`, `kind`, `hunterId`, `position`), `variable_changed` (when `variable` is set)
+
+**Config:**
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `hunterRoles` | array of strings | `[]` | Object `role`s that hunt. Empty makes the system inert. |
+| `preyRoles` | array of strings | `[]` | Object `role`s that can be captured. Empty makes the system inert. |
+| `directions` | array of strings | `["left", "right"]` | Directions a hunter looks along. Only `left` and `right` are supported (rows). |
+| `triggerEvents` | array of strings | `["multi_cell_object_moved"]` | Events that make hunters look. Not run at level load. |
+| `blockingLayers` | array of strings | `["objects"]` | Ordinary layers whose entities end a line of sight. |
+| `blockingTags` | array of strings | `["solid"]` | Tags that block on `blockingLayers`. Empty means any entity blocks. |
+| `variable` | string | — | Counter incremented once per capture. Feed it to a `variable_threshold` lose condition. |
+
+**Behavior:**
+1. For each hunter (by id), scan outward from its first cell along each allowed direction, one cell at a time, until a cell is out of bounds, void, occupied by any other multi-cell object, or holds a blocking entity. If the object that ends the scan has a prey role, it is a candidate; the nearest candidate wins. Distance is unlimited.
+2. The hunter is translated horizontally so its first cell lands on the prey's first cell; the prey is removed. Emit `multi_cell_object_moved`, `multi_cell_object_captured`, then `variable_changed`.
+3. Re-scan from the start (the board changed, so a hunter may now see further prey, and gravity-driven rows are not re-run inside this system) until no hunter can capture.
+
+The hunter travels regardless of what is underneath it — support is not checked while it runs. Gravity settles it on the next cascade pass.
+
+**Reuse:** Game-agnostic. Hunters, prey and the counter are all named in config.
+
+---
+
 ## 3. System Summary Table
 
 | System | Type | Phase | Primary Action |
@@ -2024,6 +2107,7 @@ weight whatever entities it likes; nothing here knows about a particular game.
 | Slide Merge | `slide_merge` | `action_resolution` | `move` |
 | Queued Emitters | `queued_emitters` | `cascade_resolution` | (event-triggered) |
 | Gravity | `gravity` | `cascade_resolution` | (automatic after state changes) |
+| Pounce | `pounce` | `cascade_resolution` | (automatic after state changes; declare after `gravity`) |
 | Overlay Cursor | `overlay_cursor` | `action_resolution` | `move` |
 | Region Transform | `region_transform` | `action_resolution` | `rotate`, `flip`, `diagonal_swap` |
 | Flood Fill | `flood_fill` | `action_resolution` | `flood` |
