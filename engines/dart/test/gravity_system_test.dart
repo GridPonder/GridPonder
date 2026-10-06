@@ -683,7 +683,7 @@ void main() {
       expect(engine.state.variables['stolen'], 0);
     });
 
-    test('step mode catches the cheese in transit', () {
+    test('step mode catches the prey in transit', () {
       final engine = dropPastHunter(step: true, wall: false);
       expect(
           engine.state.board.multiCellObjects.any((o) => o.id == 'g'), isFalse);
@@ -691,7 +691,7 @@ void main() {
       expect(_cells(engine, 'r').first.y, 3); // ran to row 2, then fell
     });
 
-    test('a block in the row lets the cheese fall safely', () {
+    test('a block in the row lets the prey fall safely', () {
       final engine = dropPastHunter(step: true, wall: true);
       expect(_cells(engine, 'g'), [const Position(1, 3)]);
       expect(engine.state.variables['stolen'], 0);

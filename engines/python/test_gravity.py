@@ -433,7 +433,7 @@ class StepFallTest(unittest.TestCase):
         if wall:
             objects.append(_box("wall", "block", [[3, 2]], None, "both"))
         engine = _engine(objects, game)
-        # Slide the support out from under the cheese; it then falls past row 2.
+        # Slide the support out from under the prey; it then falls past row 2.
         result = engine.execute_turn("move", {"position": [1, 1], "direction": "right"})
         self.assertTrue(result.accepted)
         return engine
@@ -443,13 +443,13 @@ class StepFallTest(unittest.TestCase):
         self.assertEqual(_cells(engine, "g"), [Pos(1, 3)])
         self.assertEqual(engine.state.variables["stolen"], 0)
 
-    def test_step_mode_catches_the_cheese_in_transit(self) -> None:
+    def test_step_mode_catches_the_prey_in_transit(self) -> None:
         engine = self._drop_past_hunter(_step_game(), wall=False)
         self.assertIsNone(engine.state.board.get_multi_cell_object("g"))
         self.assertEqual(engine.state.variables["stolen"], 1)
         self.assertEqual(_cells(engine, "r")[0].y, 3)  # ran to row 2, then fell
 
-    def test_a_block_in_the_row_lets_the_cheese_fall_safely(self) -> None:
+    def test_a_block_in_the_row_lets_the_prey_fall_safely(self) -> None:
         engine = self._drop_past_hunter(_step_game(), wall=True)
         self.assertEqual(_cells(engine, "g"), [Pos(1, 3)])
         self.assertEqual(engine.state.variables["stolen"], 0)

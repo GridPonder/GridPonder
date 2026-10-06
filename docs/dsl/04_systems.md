@@ -2063,9 +2063,9 @@ therefore lose the level.
 settle completely before hunters look (only resting positions count). Declare it
 **before** `gravity`, with `gravity.stepsPerPass: 1`, to make hunters look at
 *every* cell an object falls through: each pass checks the board, then gravity
-moves one step, so a hunter that has a clear line to the cheese at any moment —
+moves one step, so a hunter that has a clear line to the prey at any moment —
 including the cell it was pushed into before it started to fall, and the cell it
-lands in — captures it before the cheese can come to rest (or be absorbed).
+lands in — captures it before the prey can come to rest (or be absorbed).
 
 **Events emitted:** `multi_cell_object_moved` (the hunter), `multi_cell_object_captured` (`id`, `kind`, `hunterId`, `position`), `variable_changed` (when `variable` is set)
 
