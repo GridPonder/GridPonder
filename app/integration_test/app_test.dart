@@ -9,14 +9,19 @@ import 'package:gridponder_app/src/screens/library_screen.dart';
 import 'package:gridponder_app/src/screens/play_screen.dart';
 import 'package:gridponder_app/src/services/pack_service.dart';
 import 'package:gridponder_app/src/services/settings_service.dart';
+import 'package:gridponder_app/src/widgets/board_renderer.dart';
 
 // ---------------------------------------------------------------------------
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
 const String kPackId = 'twinseed';
 const String kLevelId = 'tw_005';
+// Board width in cells; only used by cell-targeted moves ('x,y,direction').
+const int kBoardCols = 5;
 // Gold-path moves: a direction string or button label.
-//   Swipes:  'right' | 'left' | 'up' | 'down'
+//   Swipes:  'right' | 'left' | 'up' | 'down'   (from the screen centre)
+//   Cell swipes: '<x>,<y>,<direction>'          (from the centre of that cell,
+//                                                for position+direction games)
 //   Buttons: 'clone'
 const List<String> kMoves = [
   'up', 'up', 'left', 'clone', 'right', 'right', 'right', 'right', 'up', 'left',
@@ -50,6 +55,25 @@ Future<void> _executeMove(WidgetTester tester, String move, Offset center) async
       // Tap the second "Swap" button (↙ down_left diagonal)
       await tester.tap(find.text('Swap').last);
     default:
+      if (move.contains(',')) {
+        final parts = move.split(',');
+        final grid = tester.getRect(find
+            .descendant(
+                of: find.byType(BoardRenderer), matching: find.byType(Stack))
+            .first);
+        final cell = grid.width / kBoardCols;
+        final start = grid.topLeft +
+            Offset((int.parse(parts[0]) + 0.5) * cell,
+                (int.parse(parts[1]) + 0.5) * cell);
+        final delta = switch (parts[2]) {
+          'right' => const Offset(100, 0),
+          'left' => const Offset(-100, 0),
+          'down' => const Offset(0, 100),
+          _ => const Offset(0, -100),
+        };
+        await tester.dragFrom(start, delta);
+        return;
+      }
       // Button tap: find by capitalised label
       final label = move[0].toUpperCase() + move.substring(1);
       await tester.tap(find.text(label));
@@ -86,7 +110,11 @@ void main() {
         ),
       ),
     );
-    await tester.pumpAndSettle(const Duration(seconds: 2));
+    // Bounded pumps instead of pumpAndSettle: a looping animation on the play
+    // screen (hint pulse) can keep pumpAndSettle from ever returning.
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
 
     final screenshotDir = screenshotDir0;
     final screenSize = tester.view.physicalSize / tester.view.devicePixelRatio;
