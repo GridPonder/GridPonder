@@ -7,6 +7,8 @@ import 'package:integration_test/integration_test.dart';
 import 'package:gridponder_app/main.dart' as app;
 import 'package:gridponder_app/src/screens/library_screen.dart';
 import 'package:gridponder_app/src/screens/play_screen.dart';
+import 'package:gridponder_app/src/services/pack_file_reader.dart';
+import 'package:gridponder_app/src/services/pack_registry.dart';
 import 'package:gridponder_app/src/services/pack_service.dart';
 import 'package:gridponder_app/src/services/settings_service.dart';
 import 'package:gridponder_app/src/widgets/board_renderer.dart';
@@ -15,6 +17,8 @@ import 'package:gridponder_app/src/widgets/board_renderer.dart';
 // TEST CONFIGURATION — change these to run different levels
 // ---------------------------------------------------------------------------
 const String kPackId = 'twinseed';
+// Where the pack is bundled: 'assets/packs' (public) or 'assets/packs-private'.
+const String kPackRoot = 'assets/packs';
 const String kLevelId = 'tw_005';
 // Board width in cells; only used by cell-targeted moves ('x,y,direction').
 const int kBoardCols = 5;
@@ -99,7 +103,11 @@ void main() {
     // Navigate directly to the target level
     final ctx = tester.element(find.byType(LibraryScreen));
     final settings = await SettingsService.create();
-    final packService = await PackService.load(kPackId);
+    final packService = await PackService.loadFromEntry(PackEntry(
+      id: kPackId,
+      isInstalled: false,
+      reader: BundledPackFileReader(kPackId, assetRoot: kPackRoot),
+    ));
 
     Navigator.of(ctx).push(
       MaterialPageRoute(
