@@ -133,6 +133,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
   Map<Position, String>? _animOverlays;
   List<LineOfSightFeedback> _lineOfSightFeedbacks = const [];
   Map<Position, CascadeCellFeedback> _cascadeFeedbacks = const {};
+  List<CascadeTransferFeedback> _cascadeTransfers = const [];
   int _cascadePulseId = 0;
   bool _animating = false;
   bool _resetRequested = false;
@@ -647,15 +648,14 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     for (final step in steps) {
       if (!mounted) return;
       final feedbacks = <Position, CascadeCellFeedback>{};
+      final transfers = <CascadeTransferFeedback>[];
+      final transferKeys = <String>{};
       final pulseId = ++_cascadePulseId;
       for (final change in step.changes) {
         final entity = animState.board.getEntity(change.layer, change.position);
         if (entity == null) continue;
-        final symbolParam =
-            widget.packService.game.entityKinds[entity.kind]?.symbolParam ??
-            'charge';
         final params = Map<String, dynamic>.from(entity.params)
-          ..[symbolParam] = change.afterCharge;
+          ..[change.param] = change.afterCharge;
         animState.board.setEntity(
           change.layer,
           change.position,
@@ -666,10 +666,23 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
           delta: change.delta.abs(),
           pulseId: pulseId,
         );
+        for (final source in change.sourcePositions) {
+          final key =
+              '${source.x},${source.y}:${change.position.x},${change.position.y}';
+          if (!transferKeys.add(key)) continue;
+          transfers.add(
+            CascadeTransferFeedback(
+              source: source,
+              destination: change.position,
+              pulseId: pulseId,
+            ),
+          );
+        }
       }
       setState(() {
         _preAnimState = animState;
         _cascadeFeedbacks = feedbacks;
+        _cascadeTransfers = transfers;
       });
       await Future.delayed(
         step.kind == CascadePlaybackKind.explosion
@@ -682,6 +695,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     setState(() {
       _preAnimState = null;
       _cascadeFeedbacks = const {};
+      _cascadeTransfers = const [];
     });
   }
 
@@ -1819,6 +1833,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
     _cellEffects.value = const [];
     _lineOfSightFeedbacks = const [];
     _cascadeFeedbacks = const {};
+    _cascadeTransfers = const [];
     _actorFacingAt = {};
     _actorFacingHistory.clear();
     _hiddenTransforms = const [];
@@ -1845,6 +1860,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
       _selectedCellPosition = null;
       _lineOfSightFeedbacks = const [];
       _cascadeFeedbacks = const {};
+      _cascadeTransfers = const [];
       _actorFacingAt = {};
     });
   }
@@ -2949,6 +2965,7 @@ class _PlayScreenState extends State<PlayScreen> with TickerProviderStateMixin {
                         lineOfSightFeedbacks: _lineOfSightFeedbacks,
                         cellEffects: _cellEffects,
                         cascadeFeedbacks: _cascadeFeedbacks,
+                        cascadeTransfers: _cascadeTransfers,
                         floodedColorOverride: _lastFloodColor,
                         avatarPositionOverride: _avatarSlidePos,
                         avatarMotion: _avatarMotion,

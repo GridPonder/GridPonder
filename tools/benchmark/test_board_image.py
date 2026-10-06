@@ -12,7 +12,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 BENCH_DIR = Path(__file__).resolve().parent
 REPO_ROOT = BENCH_DIR.parent.parent
@@ -20,7 +20,15 @@ for p in (str(REPO_ROOT), str(BENCH_DIR)):
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from board_image import AXIS_PX, CELL_PX, PADDING, render_board_image, render_board_png  # noqa: E402
+from board_image import (  # noqa: E402
+    AXIS_PX,
+    CELL_PX,
+    PADDING,
+    _draw_from_display,
+    _resolve_display_color,
+    render_board_image,
+    render_board_png,
+)
 from engines.python._game_def import GameDef  # noqa: E402
 from engines.python._models import OverlayCursor, Pos  # noqa: E402
 from engines.python._turn_engine import TurnEngine  # noqa: E402
@@ -126,6 +134,59 @@ def _hex(value: str):
 def test_display_colours_resolve_through_the_theme_palette():
     img, _ = _render()
     assert _px(img, 0, 0) == _hex(_PALETTE["team_tint"])
+
+
+def test_circle_label_size_and_connections_are_data_driven():
+    display = {
+        "type": "circle_label",
+        "color": "blue",
+        "label": "@param:charge",
+        "connections": "@param:kernel",
+        "connectionMap": {"h": [[-1, 0], [1, 0]]},
+        "size": "@param:threshold",
+        "sizeMap": {"4": 0.6, "5": 0.7},
+    }
+
+    def render(threshold):
+        image = Image.new("RGBA", (CELL_PX, CELL_PX), (0, 0, 0, 0))
+        drawn = _draw_from_display(
+            ImageDraw.Draw(image),
+            display,
+            "cell",
+            {"charge": 2, "kernel": "h", "threshold": threshold},
+            0,
+            0,
+            CELL_PX // 2,
+            CELL_PX // 2,
+        )
+        assert drawn
+        return image
+
+    standard = render(4)
+    large = render(5)
+    core_color = _hex("#2563eb")
+
+    # The arm remains contained inside its cell, while the larger configured
+    # core covers more of that same arm without changing its charge label.
+    assert standard.getpixel((CELL_PX - 2, CELL_PX // 2))[3] == 0
+    assert standard.getpixel((CELL_PX - 9, CELL_PX // 2))[3] == 255
+    assert standard.getpixel((CELL_PX - 11, CELL_PX // 2))[:3] != core_color
+    assert large.getpixel((CELL_PX - 11, CELL_PX // 2))[:3] == core_color
+
+
+def test_display_colour_can_map_a_numeric_parameter_through_the_palette():
+    class PaletteContext:
+        palette = {"4": "#7899D4", "5": "#426BB7"}
+
+    assert (
+        _resolve_display_color(
+            "@param:threshold",
+            "cell",
+            {"threshold": 5},
+            PaletteContext(),
+        )
+        == "#426BB7"
+    )
 
 
 def test_layers_draw_in_the_text_grid_order():

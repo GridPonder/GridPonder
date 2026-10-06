@@ -23,6 +23,10 @@ def _cell(charge: int, *, threshold: int = 4, kernel: str = "plus") -> dict:
 
 
 def _game(config=None) -> GameDef:
+    config = config or {}
+    charge_param = config.get("chargeParam", "charge")
+    threshold_param = config.get("thresholdParam", "threshold")
+    kernel_param = config.get("kernelParam", "kernel")
     data = {
         "layers": [
             {"id": "ground", "occupancy": "exactly_one", "default": "floor"},
@@ -34,11 +38,11 @@ def _game(config=None) -> GameDef:
                 "layer": "objects",
                 "tags": ["cascade_cell"],
                 "symbol": "C",
-                "symbolParam": "charge",
+                "symbolParam": charge_param,
                 "params": {
-                    "charge": {"type": "integer", "required": True},
-                    "threshold": {"type": "integer", "required": True},
-                    "kernel": {"type": "string", "required": True},
+                    charge_param: {"type": "integer", "required": True},
+                    threshold_param: {"type": "integer", "required": True},
+                    kernel_param: {"type": "string", "required": True},
                 },
             },
         },
@@ -46,7 +50,7 @@ def _game(config=None) -> GameDef:
             {"id": "tap_cell", "params": {"position": {"type": "position"}}}
         ],
         "systems": [
-            {"id": "cascade", "type": "cascade_cells", "config": config or {}}
+            {"id": "cascade", "type": "cascade_cells", "config": config}
         ],
         "defaults": {"avatar": {"enabled": False}},
     }
@@ -123,6 +127,15 @@ class CascadeCellsTests(unittest.TestCase):
                 engine = TurnEngine(_game(), _level(board))
                 result = engine.execute_turn("tap_cell", {"position": [2, 2]})
                 self.assertTrue(result.accepted)
+                incoming_events = [
+                    event
+                    for event in result.events
+                    if event["type"] == "cell_charged"
+                    and event["source"] == "cascade"
+                ]
+                self.assertEqual(len(incoming_events), len(destinations))
+                for event in incoming_events:
+                    self.assertEqual(event["sourcePositions"], [Pos(2, 2)])
                 for y in range(5):
                     for x in range(5):
                         expected_charge = 1 if (x, y) in destinations else 0
@@ -158,6 +171,65 @@ class CascadeCellsTests(unittest.TestCase):
         self.assertEqual(
             exploded,
             [(Pos(0, 0), 1), (Pos(1, 0), 2), (Pos(1, 0), 3)],
+        )
+
+    def test_aggregated_charge_records_every_source_in_deterministic_order(self):
+        engine = TurnEngine(
+            _game(),
+            _level([[
+                _cell(3, kernel="h"),
+                _cell(3, kernel="plus"),
+                _cell(3, kernel="h"),
+            ]]),
+        )
+
+        result = engine.execute_turn("tap_cell", {"position": [1, 0]})
+
+        center_incoming = next(
+            event
+            for event in result.events
+            if event["type"] == "cell_charged"
+            and event["wave"] == 2
+            and event["position"] == Pos(1, 0)
+        )
+        self.assertEqual(center_incoming["delta"], 2)
+        self.assertEqual(
+            center_incoming["sourcePositions"],
+            [Pos(0, 0), Pos(2, 0)],
+        )
+
+    def test_configured_parameter_names_flow_through_state_and_events(self):
+        config = {
+            "chargeParam": "energy",
+            "thresholdParam": "capacity",
+            "kernelParam": "pattern",
+        }
+        engine = TurnEngine(
+            _game(config),
+            _level([[
+                {
+                    "kind": "cascade_cell",
+                    "energy": 3,
+                    "capacity": 4,
+                    "pattern": "h",
+                }
+            ]]),
+        )
+
+        result = engine.execute_turn("tap_cell", {"position": [0, 0]})
+
+        self.assertTrue(result.accepted)
+        self.assertEqual(
+            engine.state.board.get_entity("objects", Pos(0, 0)).param("energy"),
+            0,
+        )
+        self.assertEqual(
+            {
+                event["param"]
+                for event in result.events
+                if event["type"] in ("cell_charged", "cell_exploded")
+            },
+            {"energy"},
         )
 
     def test_invalid_click_is_vetoed_without_counting(self):

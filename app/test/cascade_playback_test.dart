@@ -35,6 +35,7 @@ void main() {
         wave: 1,
         source: 'cascade',
         layer: 'objects',
+        sourcePositions: const [center],
       ),
       GameEvent.cellCharged(
         left,
@@ -44,6 +45,7 @@ void main() {
         wave: 1,
         source: 'cascade',
         layer: 'objects',
+        sourcePositions: const [center],
       ),
     ];
 
@@ -60,6 +62,7 @@ void main() {
       top,
       left,
     ]);
+    expect(steps[2].changes.first.sourcePositions, const [center]);
   });
 
   test('keeps newly unstable cells in the following wave', () {
@@ -83,6 +86,7 @@ void main() {
         wave: 1,
         source: 'cascade',
         layer: 'objects',
+        sourcePositions: const [center],
       ),
       GameEvent.cellExploded(
         top,
@@ -99,5 +103,22 @@ void main() {
 
     expect(steps.map((step) => step.wave).toList(), [1, 1, 2]);
     expect(steps.last.kind, CascadePlaybackKind.explosion);
+  });
+
+  test('preserves the configured value parameter for visual replay', () {
+    final steps = cascadePlaybackSteps([
+      GameEvent.cellCharged(
+        const Position(0, 0),
+        beforeCharge: 2,
+        afterCharge: 3,
+        delta: 1,
+        wave: 0,
+        source: 'click',
+        layer: 'signals',
+        param: 'energy',
+      ),
+    ]);
+
+    expect(steps.single.changes.single.param, 'energy');
   });
 }

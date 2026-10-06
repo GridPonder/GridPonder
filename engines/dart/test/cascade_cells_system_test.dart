@@ -11,6 +11,9 @@ Map<String, dynamic> _cell(int charge,
     };
 
 GameDefinition _game([Map<String, dynamic> config = const {}]) {
+  final chargeParam = config['chargeParam'] as String? ?? 'charge';
+  final thresholdParam = config['thresholdParam'] as String? ?? 'threshold';
+  final kernelParam = config['kernelParam'] as String? ?? 'kernel';
   return GameDefinition.fromJson({
     'layers': [
       {'id': 'ground', 'occupancy': 'exactly_one', 'default': 'floor'},
@@ -26,11 +29,11 @@ GameDefinition _game([Map<String, dynamic> config = const {}]) {
         'layer': 'objects',
         'tags': ['cascade_cell'],
         'symbol': 'C',
-        'symbolParam': 'charge',
+        'symbolParam': chargeParam,
         'params': {
-          'charge': {'type': 'integer', 'required': true},
-          'threshold': {'type': 'integer', 'required': true},
-          'kernel': {'type': 'string', 'required': true},
+          chargeParam: {'type': 'integer', 'required': true},
+          thresholdParam: {'type': 'integer', 'required': true},
+          kernelParam: {'type': 'string', 'required': true},
         },
       },
     },
@@ -170,6 +173,21 @@ void main() {
       }));
 
       expect(result.accepted, isTrue, reason: entry.key);
+      final incomingEvents = result.events
+          .where(
+            (event) =>
+                event.type == 'cell_charged' &&
+                event.payload['source'] == 'cascade',
+          )
+          .toList();
+      expect(incomingEvents, hasLength(entry.value.length), reason: entry.key);
+      for (final event in incomingEvents) {
+        expect(
+          event.payload['sourcePositions'],
+          const [Position(2, 2)],
+          reason: '${entry.key} source for ${event.position}',
+        );
+      }
       for (var y = 0; y < 5; y++) {
         for (var x = 0; x < 5; x++) {
           final position = Position(x, y);
@@ -221,6 +239,79 @@ void main() {
         [const Position(1, 0), 2],
         [const Position(1, 0), 3],
       ],
+    );
+  });
+
+  test('aggregated charge records every source in deterministic order', () {
+    final game = _game();
+    final engine = TurnEngine(
+      game,
+      _level(game, [
+        [
+          _cell(3, kernel: 'h'),
+          _cell(3, kernel: 'plus'),
+          _cell(3, kernel: 'h'),
+        ],
+      ]),
+    );
+
+    final result = engine.executeTurn(const GameAction('tap_cell', {
+      'position': [1, 0],
+    }));
+
+    final centerIncoming = result.events.singleWhere(
+      (event) =>
+          event.type == 'cell_charged' &&
+          event.payload['wave'] == 2 &&
+          event.position == const Position(1, 0),
+    );
+    expect(centerIncoming.payload['delta'], 2);
+    expect(centerIncoming.payload['sourcePositions'], const [
+      Position(0, 0),
+      Position(2, 0),
+    ]);
+  });
+
+  test('configured parameter names flow through state and events', () {
+    final game = _game({
+      'chargeParam': 'energy',
+      'thresholdParam': 'capacity',
+      'kernelParam': 'pattern',
+    });
+    final engine = TurnEngine(
+      game,
+      _level(game, [
+        [
+          {
+            'kind': 'cascade_cell',
+            'energy': 3,
+            'capacity': 4,
+            'pattern': 'h',
+          },
+        ],
+      ]),
+    );
+
+    final result = engine.executeTurn(const GameAction('tap_cell', {
+      'position': [0, 0],
+    }));
+
+    expect(result.accepted, isTrue);
+    expect(
+      engine.state.board
+          .getEntity('objects', const Position(0, 0))!
+          .param('energy'),
+      0,
+    );
+    expect(
+      result.events
+          .where(
+            (event) =>
+                event.type == 'cell_charged' || event.type == 'cell_exploded',
+          )
+          .map((event) => event.payload['param'])
+          .toSet(),
+      {'energy'},
     );
   });
 

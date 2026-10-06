@@ -187,7 +187,7 @@ void main() {
     ]);
   });
 
-  test('resolves param-driven display connections to cell-edge vectors', () {
+  test('resolves param-driven display connections to emitter vectors', () {
     final display = <String, dynamic>{
       'connections': '@param:kernel',
       'connectionMap': {
@@ -218,6 +218,20 @@ void main() {
     );
   });
 
+  test('stringifies numeric parameters for display-map keys', () {
+    expect(
+      resolveDisplayMapKey(
+        '@param:threshold',
+        const EntityInstance('cell', {'threshold': 5}),
+      ),
+      '5',
+    );
+    expect(
+      resolveDisplayMapKey('fixed', const EntityInstance('cell')),
+      'fixed',
+    );
+  });
+
   test('ignores malformed or missing display connections', () {
     final display = <String, dynamic>{
       'connections': '@param:kernel',
@@ -243,6 +257,38 @@ void main() {
         const EntityInstance('cell', {'kernel': 'missing'}),
       ),
       isEmpty,
+    );
+  });
+
+  test('resolves param-driven procedural display sizes', () {
+    final display = <String, dynamic>{
+      'size': '@param:threshold',
+      'sizeMap': {'4': 0.6, '5': 0.7},
+    };
+
+    expect(
+      resolveDisplaySizeFactor(
+        display,
+        const EntityInstance('cell', {'threshold': 4}),
+        fallback: 0.5,
+      ),
+      0.6,
+    );
+    expect(
+      resolveDisplaySizeFactor(
+        display,
+        const EntityInstance('cell', {'threshold': 5}),
+        fallback: 0.5,
+      ),
+      0.7,
+    );
+    expect(
+      resolveDisplaySizeFactor(
+        display,
+        const EntityInstance('cell', {'threshold': 6}),
+        fallback: 0.5,
+      ),
+      0.5,
     );
   });
 

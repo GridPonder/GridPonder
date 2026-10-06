@@ -40,10 +40,36 @@ Color? _parsePaletteHex(String hex) {
   return v == null ? null : Color(v);
 }
 
-/// Resolves optional edge-to-edge connection vectors declared by an entity's
+Color _themeEffectColor(
+  ThemeDef? theme,
+  String paletteKey,
+  Color fallback, {
+  bool usePrimaryFallback = false,
+}) {
+  final paletteColor = _parsePaletteHex(theme?.palette[paletteKey] ?? '');
+  if (paletteColor != null) return paletteColor;
+  if (usePrimaryFallback) {
+    final primaryColor = _parsePaletteHex(theme?.primaryColor ?? '');
+    if (primaryColor != null) return primaryColor;
+  }
+  return fallback;
+}
+
+/// Resolves a literal display-map key or stringifies an entity parameter.
+/// Shared by colour, connection, and size mappings so numeric authored
+/// parameters behave consistently across procedural display properties.
+String? resolveDisplayMapKey(dynamic spec, EntityInstance entity) {
+  if (spec is! String) return null;
+  if (spec.startsWith('@param:')) {
+    return entity.param(spec.substring(7))?.toString();
+  }
+  return spec;
+}
+
+/// Resolves optional outgoing-direction vectors declared by an entity's
 /// display block. The display chooses a key (usually from an entity param),
 /// then maps that key to integer `[dx, dy]` vectors. Vectors are normalized so
-/// the painter always reaches the cell boundary, including diagonals.
+/// the painter can draw equally long in-cell emitter arms, including diagonals.
 ///
 /// Example:
 /// ```json
@@ -54,15 +80,7 @@ List<Offset> resolveDisplayConnectionVectors(
   Map<String, dynamic> display,
   EntityInstance entity,
 ) {
-  final spec = display['connections'];
-  if (spec is! String) return const [];
-
-  final String? key;
-  if (spec.startsWith('@param:')) {
-    key = entity.param(spec.substring(7))?.toString();
-  } else {
-    key = spec;
-  }
+  final key = resolveDisplayMapKey(display['connections'], entity);
   if (key == null) return const [];
 
   final connectionMap = display['connectionMap'];
@@ -75,12 +93,38 @@ List<Offset> resolveDisplayConnectionVectors(
     if (raw is! List || raw.length != 2) continue;
     final dx = raw[0];
     final dy = raw[1];
-    if (dx is! num || dy is! num || (dx == 0 && dy == 0)) continue;
+    if (dx is! num ||
+        dy is! num ||
+        !dx.isFinite ||
+        !dy.isFinite ||
+        (dx == 0 && dy == 0)) {
+      continue;
+    }
     final scale = max(dx.abs(), dy.abs()).toDouble();
     final vector = Offset(dx / scale, dy / scale);
     if (!result.contains(vector)) result.add(vector);
   }
   return result;
+}
+
+/// Resolves an optional diameter factor for procedural displays. A numeric
+/// `size` applies directly; a param reference can select a value from
+/// `sizeMap`, allowing packs to encode stable visual capacity without the
+/// renderer knowing the meaning of that parameter.
+double resolveDisplaySizeFactor(
+  Map<String, dynamic> display,
+  EntityInstance entity, {
+  required double fallback,
+}) {
+  final spec = display['size'];
+  dynamic raw = spec;
+  if (spec is String && spec.startsWith('@param:')) {
+    final key = resolveDisplayMapKey(spec, entity);
+    final sizeMap = display['sizeMap'];
+    raw = key != null && sizeMap is Map ? sizeMap[key] : null;
+  }
+  if (raw is! num || !raw.isFinite) return fallback;
+  return raw.toDouble().clamp(0.2, 0.9).toDouble();
 }
 
 class LineOfSightFeedback {
@@ -582,6 +626,10 @@ class BoardRenderer extends StatelessWidget {
   /// this overlay makes the cause of that change visible to the player.
   final Map<Position, CascadeCellFeedback> cascadeFeedbacks;
 
+  /// Energy pulses travelling from exploding cells to receiving nodes during
+  /// the incoming-charge phase of cascade playback.
+  final List<CascadeTransferFeedback> cascadeTransfers;
+
   const BoardRenderer({
     super.key,
     required this.state,
@@ -599,6 +647,7 @@ class BoardRenderer extends StatelessWidget {
     this.lineOfSightFeedbacks = const [],
     this.cellEffects,
     this.cascadeFeedbacks = const {},
+    this.cascadeTransfers = const [],
     this.onCellHover,
     this.actionPreviews = const {},
     this.hoveredPreviewTarget,
@@ -866,6 +915,31 @@ class BoardRenderer extends StatelessWidget {
                   _buildAnimOverlay(entry.key, entry.value, cellSize),
               if (selectedCellPosition case final selectedPos?)
                 _buildSelectionRing(selectedPos, cellSize, 'selected-cell'),
+              if (cascadeTransfers.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: TweenAnimationBuilder<double>(
+                      key: ValueKey(
+                        'cascade-transfers-${cascadeTransfers.first.pulseId}',
+                      ),
+                      tween: Tween(begin: 0, end: 1),
+                      duration: cascadePulseDuration,
+                      builder: (context, progress, _) => CustomPaint(
+                        painter: _CascadeTransferPainter(
+                          cascadeTransfers,
+                          cellSize,
+                          progress,
+                          _themeEffectColor(
+                            packService.theme,
+                            'cascade_transfer',
+                            const Color(0xFF78A7E8),
+                            usePrimaryFallback: true,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               for (final entry in cascadeFeedbacks.entries)
                 _buildCascadeFeedback(entry.key, entry.value, cellSize),
               if (state.overlay != null)
@@ -1222,14 +1296,29 @@ class BoardRenderer extends StatelessWidget {
   ) {
     final (color, label) = switch (feedback.kind) {
       CascadePlaybackKind.clickCharge => (
-        const Color(0xFF64D8FF),
+        _themeEffectColor(
+          packService.theme,
+          'cascade_click',
+          const Color(0xFF64D8FF),
+        ),
         '+${feedback.delta}',
       ),
       CascadePlaybackKind.incomingCharge => (
-        const Color(0xFF83F28F),
+        _themeEffectColor(
+          packService.theme,
+          'cascade_incoming',
+          const Color(0xFF83F28F),
+        ),
         '+${feedback.delta}',
       ),
-      CascadePlaybackKind.explosion => (const Color(0xFFFFA726), '✶'),
+      CascadePlaybackKind.explosion => (
+        _themeEffectColor(
+          packService.theme,
+          'cascade_explosion',
+          const Color(0xFFFFA726),
+        ),
+        '✶',
+      ),
     };
     return Positioned(
       key: ValueKey('cascade-${feedback.pulseId}-${pos.x}-${pos.y}'),
@@ -1955,7 +2044,9 @@ class _Cell extends StatelessWidget {
                       color: Colors.white,
                       fontWeight: FontWeight.bold,
                       fontSize: cellSize * 0.26,
-                      shadows: const [Shadow(color: Colors.black, blurRadius: 2)],
+                      shadows: const [
+                        Shadow(color: Colors.black, blurRadius: 2),
+                      ],
                     ),
                   ),
                 ),
@@ -1963,6 +2054,11 @@ class _Cell extends StatelessWidget {
             ),
           );
         }
+        final diameterFactor = resolveDisplaySizeFactor(
+          display,
+          entity,
+          fallback: connectionVectors.isEmpty ? 0.72 : 0.6,
+        );
         return Stack(
           alignment: Alignment.center,
           children: [
@@ -1970,7 +2066,7 @@ class _Cell extends StatelessWidget {
               Positioned.fill(
                 child: ClipRect(
                   child: CustomPaint(
-                    painter: _ConnectionRoadPainter(
+                    painter: _EmitterArmPainter(
                       color: c,
                       vectors: connectionVectors,
                     ),
@@ -1979,8 +2075,8 @@ class _Cell extends StatelessWidget {
               ),
             Center(
               child: Container(
-                width: cellSize * (connectionVectors.isEmpty ? 0.72 : 0.6),
-                height: cellSize * (connectionVectors.isEmpty ? 0.72 : 0.6),
+                width: cellSize * diameterFactor,
+                height: cellSize * diameterFactor,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: c,
@@ -2159,7 +2255,7 @@ class _Cell extends StatelessWidget {
 
   /// Resolves a `display.color` spec. Accepts `null`, a palette name
   /// (`"red"`), or one of the substitution tokens:
-  ///   - `@param:<key>`        — read a colour name from an instance param
+  ///   - `@param:<key>`        — stringify a param as a palette key
   ///   - `@hue:<source>`       — derive an HSL colour from a numeric
   ///                             string. `<source>` is itself a string spec
   ///                             (literal int, or a nested `@param:` /
@@ -2172,9 +2268,8 @@ class _Cell extends StatelessWidget {
       return n == null ? null : _numberColor(n);
     }
     if (spec.startsWith('@param:')) {
-      final v = entity.param(spec.substring(7));
-      if (v is! String) return null;
-      return _namedColor(v);
+      final key = resolveDisplayMapKey(spec, entity);
+      return key == null ? null : _namedColor(key);
     }
     return _namedColor(spec);
   }
@@ -2214,20 +2309,20 @@ class _Cell extends StatelessWidget {
   };
 }
 
-class _ConnectionRoadPainter extends CustomPainter {
+class _EmitterArmPainter extends CustomPainter {
   final Color color;
   final List<Offset> vectors;
 
-  const _ConnectionRoadPainter({required this.color, required this.vectors});
+  const _EmitterArmPainter({required this.color, required this.vectors});
 
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
     final shortestSide = min(size.width, size.height);
-    final laneWidth = shortestSide * 0.24;
+    final laneWidth = shortestSide * 0.16;
     final glowPaint = Paint()
       ..color = color.withValues(alpha: 0.16)
-      ..strokeWidth = laneWidth * 1.55
+      ..strokeWidth = laneWidth * 1.35
       ..strokeCap = StrokeCap.round
       ..maskFilter = MaskFilter.blur(BlurStyle.normal, shortestSide * 0.045);
     final surfacePaint = Paint()
@@ -2241,8 +2336,8 @@ class _ConnectionRoadPainter extends CustomPainter {
 
     for (final vector in vectors) {
       final endpoint = Offset(
-        center.dx + vector.dx * size.width / 2,
-        center.dy + vector.dy * size.height / 2,
+        center.dx + vector.dx * size.width * 0.38,
+        center.dy + vector.dy * size.height * 0.38,
       );
       canvas.drawLine(center, endpoint, glowPaint);
       canvas.drawLine(center, endpoint, surfacePaint);
@@ -2251,8 +2346,62 @@ class _ConnectionRoadPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _ConnectionRoadPainter oldDelegate) =>
+  bool shouldRepaint(covariant _EmitterArmPainter oldDelegate) =>
       oldDelegate.color != color || !listEquals(oldDelegate.vectors, vectors);
+}
+
+class _CascadeTransferPainter extends CustomPainter {
+  final List<CascadeTransferFeedback> transfers;
+  final double cellSize;
+  final double progress;
+  final Color color;
+
+  const _CascadeTransferPainter(
+    this.transfers,
+    this.cellSize,
+    this.progress,
+    this.color,
+  );
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final eased = Curves.easeInOut.transform(progress);
+    final pathPaint = Paint()
+      ..color = color.withValues(alpha: 0.22)
+      ..strokeWidth = max(2.0, cellSize * 0.065)
+      ..strokeCap = StrokeCap.round;
+    final trailPaint = Paint()
+      ..color = color.withValues(alpha: 0.68)
+      ..strokeWidth = max(3.0, cellSize * 0.11)
+      ..strokeCap = StrokeCap.round
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.055);
+    final pulsePaint = Paint()
+      ..color = Color.lerp(color, Colors.white, 0.58)!
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, cellSize * 0.035);
+
+    for (final transfer in transfers) {
+      final start = Offset(
+        (transfer.source.x + 0.5) * cellSize,
+        (transfer.source.y + 0.5) * cellSize,
+      );
+      final end = Offset(
+        (transfer.destination.x + 0.5) * cellSize,
+        (transfer.destination.y + 0.5) * cellSize,
+      );
+      final pulse = Offset.lerp(start, end, eased)!;
+      final trailStart = Offset.lerp(start, end, max(0.0, eased - 0.22))!;
+      canvas.drawLine(start, end, pathPaint);
+      canvas.drawLine(trailStart, pulse, trailPaint);
+      canvas.drawCircle(pulse, max(4.0, cellSize * 0.085), pulsePaint);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CascadeTransferPainter oldDelegate) =>
+      oldDelegate.progress != progress ||
+      oldDelegate.cellSize != cellSize ||
+      oldDelegate.color != color ||
+      !listEquals(oldDelegate.transfers, transfers);
 }
 
 // ---------------------------------------------------------------------------

@@ -114,8 +114,10 @@ def cell_charged(
     wave: int,
     source: str,
     layer: str,
+    param: str = "charge",
+    source_positions: list[Pos] | None = None,
 ) -> dict:
-    return {
+    event = {
         "type": "cell_charged",
         "position": pos,
         "beforeCharge": before_charge,
@@ -125,6 +127,11 @@ def cell_charged(
         "source": source,
         "layer": layer,
     }
+    if param != "charge":
+        event["param"] = param
+    if source_positions:
+        event["sourcePositions"] = source_positions
+    return event
 
 
 def cascade_wave_started(wave: int, positions: list[Pos]) -> dict:
@@ -143,8 +150,9 @@ def cell_exploded(
     kernel: str,
     wave: int,
     layer: str,
+    param: str = "charge",
 ) -> dict:
-    return {
+    event = {
         "type": "cell_exploded",
         "position": pos,
         "beforeCharge": before_charge,
@@ -154,6 +162,9 @@ def cell_exploded(
         "wave": wave,
         "layer": layer,
     }
+    if param != "charge":
+        event["param"] = param
+    return event
 
 
 def cascade_wave_completed(wave: int, positions: list[Pos]) -> dict:

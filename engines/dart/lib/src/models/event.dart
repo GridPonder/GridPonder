@@ -87,6 +87,8 @@ class GameEvent {
     required int wave,
     required String source,
     required String layer,
+    String param = 'charge',
+    List<Position> sourcePositions = const [],
   }) =>
       GameEvent('cell_charged', {
         'position': pos,
@@ -96,6 +98,8 @@ class GameEvent {
         'wave': wave,
         'source': source,
         'layer': layer,
+        if (param != 'charge') 'param': param,
+        if (sourcePositions.isNotEmpty) 'sourcePositions': sourcePositions,
       });
 
   static GameEvent cascadeWaveStarted(int wave, List<Position> positions) =>
@@ -112,6 +116,7 @@ class GameEvent {
     required String kernel,
     required int wave,
     required String layer,
+    String param = 'charge',
   }) =>
       GameEvent('cell_exploded', {
         'position': pos,
@@ -121,6 +126,7 @@ class GameEvent {
         'kernel': kernel,
         'wave': wave,
         'layer': layer,
+        if (param != 'charge') 'param': param,
       });
 
   static GameEvent cascadeWaveCompleted(int wave, List<Position> positions) =>

@@ -72,25 +72,14 @@ class CascadeCellsSystem(GameSystem):
         if layer is None:
             return [ev.action_vetoed()]
 
-        cells: dict[Pos, tuple[Entity, int, int, str]] = {}
-        for position, entity in layer.entries():
-            if not game.has_tag(entity.kind, cell_tag):
-                continue
-            charge = entity.param(charge_param)
-            threshold = entity.param(threshold_param)
-            kernel = entity.param(kernel_param)
-            if (
-                not _is_int(charge)
-                or charge < 0
-                or not _is_int(threshold)
-                or threshold <= 0
-                or not isinstance(kernel, str)
-                or kernel not in kernels
-            ):
-                return [ev.action_vetoed()]
-            cells[position] = (entity, charge, threshold, kernel)
+        initial = _snapshot_cells(
+            state, layer_id, cell_tag, charge_param, threshold_param,
+            kernel_param, kernels, game,
+        )
+        if initial is None:
+            return [ev.action_vetoed()]
 
-        clicked_data = cells.get(clicked)
+        clicked_data = initial.get(clicked)
         if clicked_data is None:
             return [ev.action_vetoed()]
 
@@ -109,6 +98,7 @@ class CascadeCellsSystem(GameSystem):
                 wave=0,
                 source="click",
                 layer=layer_id,
+                param=charge_param,
             )
         )
 
@@ -139,7 +129,7 @@ class CascadeCellsSystem(GameSystem):
             # All outgoing contributions are computed from one immutable
             # pre-wave snapshot.  Writes happen only after every source has
             # contributed, so iteration order cannot affect the result.
-            incoming: dict[Pos, int] = {}
+            incoming_sources: dict[Pos, list[Pos]] = {}
             after_subtraction: dict[Pos, int] = {
                 position: charge
                 for position, (_, charge, _, _) in snapshot.items()
@@ -157,17 +147,19 @@ class CascadeCellsSystem(GameSystem):
                         kernel=kernel,
                         wave=wave,
                         layer=layer_id,
+                        param=charge_param,
                     )
                 )
                 for dx, dy in kernels[kernel]:
                     destination = Pos(position.x + dx, position.y + dy)
                     if destination in snapshot:
-                        incoming[destination] = incoming.get(destination, 0) + 1
+                        incoming_sources.setdefault(destination, []).append(position)
 
             for position in sorted(snapshot, key=lambda p: (p.y, p.x)):
                 entity, _charge, _threshold, _kernel = snapshot[position]
                 base = after_subtraction[position]
-                delta = incoming.get(position, 0)
+                sources = incoming_sources.get(position, [])
+                delta = len(sources)
                 after = base + delta
                 _set_charge(state, layer_id, position, entity, charge_param, after)
                 if delta:
@@ -180,6 +172,8 @@ class CascadeCellsSystem(GameSystem):
                             wave=wave,
                             source="cascade",
                             layer=layer_id,
+                            param=charge_param,
+                            source_positions=sources,
                         )
                     )
 

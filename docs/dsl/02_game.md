@@ -380,10 +380,18 @@ A `display` block on an entity kind tells the renderer how to draw the entity pr
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type`  | string | One of `tile` (rounded shadowed coloured tile), `fill` (flat colour rectangle), `circle` (filled circle with glow), `label` (coloured tile with a centred text label), `emoji` (centred glyph), `icon` (Material-style icon by name). |
-| `color` | string | Optional. A palette name (`"red"`), `@param:<key>` (read colour name from instance param), or `@hue:<source>` (derive an HSL colour from a numeric string — useful for value-coloured tiles). See *substitution tokens* below. |
+| `type`  | string | One of `tile` (rounded shadowed coloured tile), `fill` (flat colour rectangle), `circle` (filled circle with glow), `label` (coloured tile with a centred text label), `circle_label` (filled circle with a centred label), `emoji` (centred glyph), `icon` (Material-style icon by name). |
+| `color` | string | Optional. A palette name (`"red"`), `@param:<key>` (stringify an instance parameter and use it as a palette key), or `@hue:<source>` (derive an HSL colour from a numeric string — useful for value-coloured tiles). See *substitution tokens* below. |
 | `value` | string | Optional. The glyph (for `emoji`) or icon name (for `icon`). |
 | `label` | string | Optional. Text shown by the `label` type. May use the substitution tokens below. |
+| `connections` | string | Optional for `circle_label`. A literal key or `@param:<key>` selecting one entry from `connectionMap`. |
+| `connectionMap` | object | Optional for `circle_label`. Maps connection keys to finite `[dx,dy]` vector lists. The renderer normalizes each non-zero vector and draws a short outgoing arm inside the cell. |
+| `size` | number or string | Optional for `circle_label`. A direct diameter factor, or `@param:<key>` selecting a factor from `sizeMap`. Values are clamped to `0.2`–`0.9`; missing or malformed values use the renderer default. |
+| `sizeMap` | object | Optional for a parameter-driven `size`. Maps the selected parameter value, stringified, to a numeric diameter factor. |
+
+`connections` and `size` are purely visual and entity-agnostic. Their map keys
+come from authored data; the renderer does not interpret names such as a kernel
+or capacity, so other games can reuse the same display without engine changes.
 
 #### Substitution tokens
 

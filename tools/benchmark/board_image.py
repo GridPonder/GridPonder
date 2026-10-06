@@ -20,12 +20,13 @@ pack_dir (../gridponder-base/sprites/tiles).
 from __future__ import annotations
 
 import io
+import math
 import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from PIL import Image, ImageChops, ImageDraw, ImageFont
+from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageFont
 
 # Import the engine's Pos so board.get_entity uses the same type.
 import sys
@@ -587,8 +588,36 @@ def _draw_from_display(draw, display, kind, params, x0, y0, cx, cy, ctx=None) ->
             if text:
                 draw.text((bx, by), text, fill="white", font=_font(int(CELL_PX * 0.26)), anchor="mm")
             return True
-        m = int(CELL_PX * 0.14)
-        draw.ellipse((x0 + m, y0 + m, x0 + CELL_PX - m, y0 + CELL_PX - m), fill=c)
+        vectors = _display_connection_vectors(display, params)
+        if vectors:
+            arm_color = _mix_with_white(c, 0.55)
+            arm_width = max(2, int(CELL_PX * 0.16))
+            endpoint_radius = arm_width / 2
+            for dx, dy in vectors:
+                endpoint = (
+                    cx + dx * CELL_PX * 0.38,
+                    cy + dy * CELL_PX * 0.38,
+                )
+                draw.line((cx, cy, *endpoint), fill=arm_color, width=arm_width)
+                draw.ellipse(
+                    (
+                        endpoint[0] - endpoint_radius,
+                        endpoint[1] - endpoint_radius,
+                        endpoint[0] + endpoint_radius,
+                        endpoint[1] + endpoint_radius,
+                    ),
+                    fill=arm_color,
+                )
+        diameter = _display_size_factor(
+            display,
+            params,
+            fallback=0.6 if vectors else 0.72,
+        )
+        radius = CELL_PX * diameter / 2
+        draw.ellipse(
+            (cx - radius, cy - radius, cx + radius, cy + radius),
+            fill=c,
+        )
         if text:
             draw.text((cx, cy), text, fill="white", font=_font(int(CELL_PX * 0.36)), anchor="mm")
         return True
@@ -628,6 +657,64 @@ def _draw_from_display(draw, display, kind, params, x0, y0, cx, cy, ctx=None) ->
     return False
 
 
+def _display_connection_vectors(display: dict, params: dict) -> list[tuple[float, float]]:
+    key = _display_map_key(display.get("connections"), params)
+    mapping = display.get("connectionMap")
+    raw_vectors = mapping.get(key) if key is not None and isinstance(mapping, dict) else None
+    if not isinstance(raw_vectors, list):
+        return []
+    vectors: list[tuple[float, float]] = []
+    for raw in raw_vectors:
+        if (
+            not isinstance(raw, (list, tuple))
+            or len(raw) != 2
+            or not all(
+                isinstance(value, (int, float)) and not isinstance(value, bool)
+                for value in raw
+            )
+            or not all(math.isfinite(value) for value in raw)
+            or (raw[0] == 0 and raw[1] == 0)
+        ):
+            continue
+        scale = float(max(abs(raw[0]), abs(raw[1])))
+        vector = (raw[0] / scale, raw[1] / scale)
+        if vector not in vectors:
+            vectors.append(vector)
+    return vectors
+
+
+def _display_size_factor(display: dict, params: dict, *, fallback: float) -> float:
+    spec = display.get("size")
+    raw = spec
+    if isinstance(spec, str) and spec.startswith("@param:"):
+        key = _display_map_key(spec, params)
+        mapping = display.get("sizeMap")
+        raw = mapping.get(key) if key is not None and isinstance(mapping, dict) else None
+    if (
+        not isinstance(raw, (int, float))
+        or isinstance(raw, bool)
+        or not math.isfinite(raw)
+    ):
+        return fallback
+    return min(0.9, max(0.2, float(raw)))
+
+
+def _mix_with_white(color: str, amount: float) -> tuple[int, int, int]:
+    red, green, blue = ImageColor.getrgb(color)
+    return tuple(round(channel + (255 - channel) * amount) for channel in (red, green, blue))
+
+
+def _display_map_key(spec, params: dict) -> str | None:
+    if not isinstance(spec, str):
+        return None
+    if not spec.startswith("@param:"):
+        return spec
+    value = params.get(spec[len("@param:"):])
+    if value is None or isinstance(value, (dict, list, tuple)):
+        return None
+    return str(value)
+
+
 def _named_color(name: str, ctx=None) -> str:
     """Palette name → hex: the pack theme's `palette` first, then the built-in
     names, then neutral grey."""
@@ -655,10 +742,8 @@ def _resolve_display_color(spec, kind, params, ctx=None):
             n = None
         return _hue_color(n) if n is not None else None
     if spec.startswith("@param:"):
-        v = params.get(spec[len("@param:"):])
-        if not isinstance(v, str):
-            return None
-        return _named_color(v, ctx)
+        key = _display_map_key(spec, params)
+        return None if key is None else _named_color(key, ctx)
     return _named_color(spec, ctx)
 
 

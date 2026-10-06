@@ -2028,6 +2028,10 @@ whole turn rather than accept a partially settled board.
 update, `cascade_wave_started`, `cell_exploded`,
 `cascade_wave_completed`, and `cascade_settled`. Same-wave positions are sorted
 row-major only for deterministic logs; that order has no gameplay meaning.
+`cell_charged` includes the row-major `sourcePositions` that contributed to an
+aggregated cascade update. Charge and explosion events include `param` when a
+non-default `chargeParam` is configured, allowing renderers to replay the
+transition without assuming that the mutable field is named `charge`.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

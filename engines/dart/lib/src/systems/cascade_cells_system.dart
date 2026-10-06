@@ -125,6 +125,7 @@ class CascadeCellsSystem extends GameSystem {
       wave: 0,
       source: 'click',
       layer: layerId,
+      param: chargeParam,
     ));
 
     var completedWaves = 0;
@@ -157,7 +158,7 @@ class CascadeCellsSystem extends GameSystem {
       final wave = completedWaves + 1;
       events.add(GameEvent.cascadeWaveStarted(wave, unstable));
 
-      final incoming = <Position, int>{};
+      final incomingSources = <Position, List<Position>>{};
       final afterSubtraction = <Position, int>{
         for (final entry in snapshot.entries) entry.key: entry.value.charge,
       };
@@ -174,12 +175,15 @@ class CascadeCellsSystem extends GameSystem {
           kernel: data.kernel,
           wave: wave,
           layer: layerId,
+          param: chargeParam,
         ));
         for (final offset in kernels[data.kernel]!) {
           final destination =
               Position(position.x + offset.x, position.y + offset.y);
           if (snapshot.containsKey(destination)) {
-            incoming[destination] = (incoming[destination] ?? 0) + 1;
+            incomingSources
+                .putIfAbsent(destination, () => <Position>[])
+                .add(position);
           }
         }
       }
@@ -188,7 +192,8 @@ class CascadeCellsSystem extends GameSystem {
       for (final position in positions) {
         final data = snapshot[position]!;
         final base = afterSubtraction[position]!;
-        final delta = incoming[position] ?? 0;
+        final sources = incomingSources[position] ?? const <Position>[];
+        final delta = sources.length;
         final after = base + delta;
         _setCharge(
           state,
@@ -207,6 +212,8 @@ class CascadeCellsSystem extends GameSystem {
             wave: wave,
             source: 'cascade',
             layer: layerId,
+            param: chargeParam,
+            sourcePositions: sources,
           ));
         }
       }

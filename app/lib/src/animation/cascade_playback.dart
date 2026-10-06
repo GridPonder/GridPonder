@@ -16,16 +16,20 @@ enum CascadePlaybackKind { clickCharge, explosion, incomingCharge }
 class CascadePlaybackChange {
   final Position position;
   final String layer;
+  final String param;
   final int beforeCharge;
   final int afterCharge;
   final int delta;
+  final List<Position> sourcePositions;
 
   const CascadePlaybackChange({
     required this.position,
     required this.layer,
+    required this.param,
     required this.beforeCharge,
     required this.afterCharge,
     required this.delta,
+    this.sourcePositions = const [],
   });
 }
 
@@ -54,7 +58,9 @@ List<CascadePlaybackStep> cascadePlaybackSteps(List<GameEvent> events) {
     final after = event.payload['afterCharge'];
     if (before is! int || after is! int) continue;
     final layer = event.payload['layer'] as String? ?? 'objects';
+    final param = event.payload['param'] as String? ?? 'charge';
     final wave = event.payload['wave'] as int? ?? 0;
+    final sourcePositions = _positions(event.payload['sourcePositions']);
 
     if (event.type == 'cell_exploded') {
       explosions
@@ -63,6 +69,7 @@ List<CascadePlaybackStep> cascadePlaybackSteps(List<GameEvent> events) {
             CascadePlaybackChange(
               position: pos,
               layer: layer,
+              param: param,
               beforeCharge: before,
               afterCharge: after,
               delta: after - before,
@@ -75,9 +82,11 @@ List<CascadePlaybackStep> cascadePlaybackSteps(List<GameEvent> events) {
     final change = CascadePlaybackChange(
       position: pos,
       layer: layer,
+      param: param,
       beforeCharge: before,
       afterCharge: after,
       delta: event.payload['delta'] as int? ?? after - before,
+      sourcePositions: sourcePositions,
     );
     if (event.payload['source'] == 'click' || wave == 0) {
       clickChanges.add(change);
@@ -123,6 +132,22 @@ List<CascadePlaybackStep> cascadePlaybackSteps(List<GameEvent> events) {
   return steps;
 }
 
+List<Position> _positions(dynamic raw) {
+  if (raw is! List) return const [];
+  final positions = <Position>[];
+  for (final value in raw) {
+    if (value is Position) {
+      positions.add(value);
+    } else if (value is List &&
+        value.length >= 2 &&
+        value[0] is int &&
+        value[1] is int) {
+      positions.add(Position(value[0] as int, value[1] as int));
+    }
+  }
+  return positions;
+}
+
 /// One short-lived pulse drawn over a cell while a playback step is visible.
 class CascadeCellFeedback {
   final CascadePlaybackKind kind;
@@ -132,6 +157,19 @@ class CascadeCellFeedback {
   const CascadeCellFeedback({
     required this.kind,
     required this.delta,
+    required this.pulseId,
+  });
+}
+
+/// One visible energy pulse from an exploding source to a receiving cell.
+class CascadeTransferFeedback {
+  final Position source;
+  final Position destination;
+  final int pulseId;
+
+  const CascadeTransferFeedback({
+    required this.source,
+    required this.destination,
     required this.pulseId,
   });
 }

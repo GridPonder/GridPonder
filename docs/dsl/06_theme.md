@@ -41,6 +41,13 @@ A game pack includes one `theme.json` alongside `game.json`. If omitted, the eng
 | `avatar` | object | no | Avatar appearance settings. |
 | `palette` | object | no | Named-colour palette (`{"red": "#E53935", …}`) used by the renderer when an entity or action references a colour by name. Names not declared here fall back to the renderer's built-in defaults; packs only declare what they want to override or add. |
 
+The reference app also reads four optional palette keys for
+`cascade_cells` playback: `cascade_click`, `cascade_incoming`,
+`cascade_explosion`, and `cascade_transfer`. Omitting them preserves the
+standard effect colours; `cascade_transfer` falls back to `primaryColor`
+before the standard default. These keys affect animation only, never engine
+state.
+
 ---
 
 ## Controls
