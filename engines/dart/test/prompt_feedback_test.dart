@@ -565,27 +565,27 @@ void main() {
           'Shu territory 2/2, Wu territory 0/0 — 5 of 9 claimed)');
     });
 
-    test('override on a goal without progress is unchanged', () {
-      expect(
-          _goalText(
-              _balanceGame(overrides: {'match_goal': 'Put Wei in the middle.'}),
-              [
-                {
-                  'id': 'match_goal',
-                  'type': 'board_match',
-                  'config': {
-                    'targetLayers': {
-                      'territory': [
-                        [null, null, null],
-                        [null, 'terr_wei', null],
-                        [null, null, null]
-                      ]
-                    }
-                  }
+    test('board_match override keeps target grid', () {
+      final text = _goalText(
+          _balanceGame(overrides: {'match_goal': 'Put Wei in the middle.'}),
+          [
+            {
+              'id': 'match_goal',
+              'type': 'board_match',
+              'config': {
+                'targetLayers': {
+                  'territory': [
+                    [null, null, null],
+                    [null, 'terr_wei', null],
+                    [null, null, null]
+                  ]
                 }
-              ],
-              _connected),
-          'Put Wei in the middle.');
+              }
+            }
+          ],
+          _connected);
+      expect(text, startsWith('Put Wei in the middle.\n'));
+      expect(text, contains('Target legend:'));
     });
 
     test('override on sequence_match appends done count', () {

@@ -274,6 +274,11 @@ def _validate_state(
     prompt_max: dict[str, dict[str, Any]],
     pack_stats: dict[str, Any],
 ) -> None:
+    has_board_match_target = any(
+        goal.get("type") == "board_match"
+        and goal.get("config", {}).get("targetLayers")
+        for goal in level.get("goals", [])
+    )
     board_text = render_board(engine.state, game, level_def=level)
     grid_rows = board_text.splitlines()[: engine.state.board.height]
     widths = {len(row) for row in grid_rows}
@@ -310,6 +315,13 @@ def _validate_state(
         key = (
             f"{inference_mode}|{'anon' if anonymous else 'named'}|{input_mode}"
         )
+        if has_board_match_target and "Target legend:" not in prompt:
+            _issue(
+                issues,
+                "error",
+                scope,
+                f"{key} omits the board_match target grid",
+            )
         current = prompt_max.get(key)
         if current is None or len(prompt) > current["chars"]:
             prompt_max[key] = {"chars": len(prompt), "scope": scope}

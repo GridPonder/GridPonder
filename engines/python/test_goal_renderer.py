@@ -371,11 +371,13 @@ def test_override_keeps_connected_progress():
                     "Shu territory 2/2, Wu territory 0/0 — 5 of 9 claimed)"), text
 
 
-def test_override_on_a_goal_without_progress_is_unchanged():
+def test_board_match_override_keeps_target_grid():
     game = _make_game()
     game.goal_descriptions = {"match_goal": "Put Wei in the middle."}
     state = _make_state(game, _PARTIAL)
-    assert render_goals(_board_match("terr_wei"), state, game) == "Put Wei in the middle."
+    text = render_goals(_board_match("terr_wei"), state, game)
+    assert text.startswith("Put Wei in the middle.\n"), text
+    assert "Target legend:" in text, text
 
 
 def test_override_on_sequence_match_appends_done_count():
@@ -532,6 +534,11 @@ def test_board_match_renders_selected_symbol_param_value():
 
     text = render_goals(level, state, game)
     assert "?3?" in text.splitlines(), text
+
+    game.goal_descriptions = {"match_goal": "Match charge exactly."}
+    overridden = render_goals(level, state, game)
+    assert overridden.startswith("Match charge exactly.\n"), overridden
+    assert "?3?" in overridden.splitlines(), overridden
 
 
 def run_all() -> bool:

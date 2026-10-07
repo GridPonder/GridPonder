@@ -332,5 +332,10 @@ void main() {
 
     final text = LlmAgent.describeGoals(level, state, game);
     expect(text.split('\n'), contains('?3?'));
+
+    game.goalDescriptions['target'] = 'Match charge exactly.';
+    final overridden = LlmAgent.describeGoals(level, state, game);
+    expect(overridden, startsWith('Match charge exactly.\n'));
+    expect(overridden.split('\n'), contains('?3?'));
   });
 }

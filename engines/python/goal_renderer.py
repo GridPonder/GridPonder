@@ -24,9 +24,16 @@ def render_goals(
 
         # Per-game goal-text override (set in game.json `goalDescriptions`).
         # Skipped in anonymise mode since the override may name entities.
-        # Goal types with live progress keep it after the override text, so a
-        # hand-written description never hides how close the board is.
+        # Overrides add wording but must not hide board_match's exact target
+        # or the live progress of other goal types.
         if not anonymize and goal_id in overrides:
+            if goal_type == "board_match":
+                target_grid = _render_target_grid(game_def, config)
+                goal_parts.append(
+                    f"{overrides[goal_id]}\n{target_grid}"
+                    if target_grid else overrides[goal_id]
+                )
+                continue
             progress = _goal_progress(goal_type, goal_id, config, state, game_def)
             if progress is not None:
                 goal_parts.append(f"{overrides[goal_id]} (now: {progress})")

@@ -602,6 +602,12 @@ Choose the action most likely to reach the goal in fewest total actions (summed 
       if (!anonymize) {
         final override = game.goalDescriptions[g.id];
         if (override != null) {
+          if (g.type == 'board_match') {
+            final targetGrid = _renderTargetGrid(game, g.config);
+            goalParts
+                .add(targetGrid != null ? '$override\n$targetGrid' : override);
+            continue;
+          }
           final progress = _goalProgress(g.type, g.id, g.config, state, game);
           goalParts
               .add(progress != null ? '$override (now: $progress)' : override);
